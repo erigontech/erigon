@@ -20,9 +20,7 @@ import (
 
 func TestSendRawTransaction(t *testing.T) {
 	t.Skip("Flaky test")
-	db, err := createTestKV()
-	require.NoError(t, err)
-	defer db.Close()
+	db := createTestKV(t)
 	conn := createTestGrpcConn()
 	defer conn.Close()
 	txPool := txpool.NewTxpoolClient(conn)
@@ -34,7 +32,7 @@ func TestSendRawTransaction(t *testing.T) {
 	expect := uint64(40)
 	txn := transaction(expect, 1000000, testKey)
 	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
+	err := txn.MarshalBinary(buf)
 	require.NoError(t, err)
 
 	txsCh := make(chan []types.Transaction, 1)
@@ -57,6 +55,6 @@ func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Tra
 }
 
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {
-	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt().SetUint64(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
+	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
 	return tx
 }

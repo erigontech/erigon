@@ -19,6 +19,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
   + [JSON-RPC daemon](#json-rpc-daemon)
   + [Run all components by docker-compose](#run-all-components-by-docker-compose)
   + [Grafana dashboard](#grafana-dashboard)
+- [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
   + [Erigon Discord Server](#erigon-discord-server)
   + [Reporting security issues/concerns](#reporting-security-issues-concerns)
@@ -222,6 +223,17 @@ XDG_DATA_HOME=/preferred/data/folder docker-compose up
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
+FAQ
+================
+
+### How much RAM do I need
+
+- Baseline (ext4 SSD): 16Gb RAM sync takes 5 days, 32Gb - 4 days, 64Gb - 3 days
+- +1 day on "zfs compression=off". +2 days on "zfs compression=on" (2x compression ratio). +3 days on btrfs.
+- -1 day on NVMe 
+
+Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
+
 Getting in touch
 ================
 
@@ -301,3 +313,7 @@ If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
 
 Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel non-batched way.
+
+### rpcdaemon "Dual-Mode" does not work with Docker Container
+
+Running rpcdaemon in "Dual-Mode" (including the `--datadir` flag) generally results in better performance for RPC calls, however, this does not work when running erigon and rpcdaemon in separate containers. For the absolute best performance bare metal is recommended at this time.

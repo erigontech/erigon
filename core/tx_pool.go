@@ -255,7 +255,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb ethdb.Database, senderCacher *TxSenderCacher) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb ethdb.RwKV) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -276,7 +276,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 		reorgShutdownCh: make(chan struct{}, 1),
 		gasPrice:        new(uint256.Int).SetUint64(config.PriceLimit),
 		stopCh:          make(chan struct{}),
-		chaindb:         chaindb,
+		chaindb:         ethdb.NewObjectDatabase(chaindb),
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {
@@ -566,6 +566,13 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 	// Ensure the transaction doesn't exceed the current block limit gas.
 	if pool.currentMaxGas < tx.GetGas() {
 		return ErrGasLimit
+	}
+	// Sanity check for extremely large numbers
+	if tx.GetFeeCap().BitLen() > 256 {
+		return ErrFeeCapVeryHigh
+	}
+	if tx.GetTip().BitLen() > 256 {
+		return ErrTipVeryHigh
 	}
 	// Make sure the transaction is signed properly.
 	from, err := tx.Sender(*pool.signer)

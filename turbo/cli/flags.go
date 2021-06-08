@@ -112,11 +112,6 @@ var (
 		Usage: "Specify certificate authority",
 		Value: "",
 	}
-	SilkwormFlag = cli.StringFlag{
-		Name:  "silkworm",
-		Usage: "File path of libsilkworm_erigon_api dynamic library (default = do not use Silkworm)",
-		Value: "",
-	}
 	StateStreamFlag = cli.BoolFlag{
 		Name:  "state.stream",
 		Usage: "Enable streaming of state changes from core to RPC daemon",

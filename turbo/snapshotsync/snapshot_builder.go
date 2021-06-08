@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"io/ioutil"
 	"os"
@@ -24,9 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
-
-//maxReorgDepth max reorg depth. We should create snapshot after it
-const maxReorgDepth = 90000
 
 func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte, useMdbx bool) *SnapshotMigrator {
 	return &SnapshotMigrator{
@@ -269,26 +267,36 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 
 //CalculateEpoch - returns latest available snapshot block that possible to create.
 func CalculateEpoch(block, epochSize uint64) uint64 {
-	return block - (block+maxReorgDepth)%epochSize
+	return block - (block+params.FullImmutabilityThreshold)%epochSize
 }
 
 func SnapshotName(baseDir, name string, blockNum uint64) string {
 	return path.Join(baseDir, name) + strconv.FormatUint(blockNum, 10)
 }
 
-func GetSnapshotInfo(db ethdb.Database) (uint64, []byte, error) {
-	v, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
 		return 0, nil, err
 	}
-
+	defer tx.Rollback()
+	v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+	if err != nil {
+		return 0, nil, err
+	}
+	if v == nil {
+		return 0, nil, err
+	}
 	var snapshotBlock uint64
 	if len(v) == 8 {
 		snapshotBlock = binary.BigEndian.Uint64(v)
 	}
 
-	infohash, err := db.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+	infohash, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	if err != nil {
+		return 0, nil, err
+	}
+	if infohash == nil {
 		return 0, nil, err
 	}
 	return snapshotBlock, infohash, nil
@@ -309,6 +317,7 @@ func OpenHeadersSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
 		}).Readonly().Path(dbPath).Open()
 	}
 }
+
 func OpenBodiesSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
 	if useMdbx {
 		return ethdb.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {

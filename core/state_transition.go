@@ -19,7 +19,6 @@ package core
 import (
 	"fmt"
 	"math"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -192,17 +191,24 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), st.gasPrice.ToBig())
-	gasCost, overflow := uint256.FromBig(mgval)
-	if have, want := st.state.GetBalance(st.msg.From()), mgval; overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
+	mgval := uint256.NewInt(st.msg.Gas())
+	mgval = mgval.Mul(mgval, st.gasPrice)
+	balanceCheck := mgval
+	if st.feeCap != nil {
+		balanceCheck = uint256.NewInt(st.msg.Gas())
+		balanceCheck = balanceCheck.Mul(balanceCheck, st.feeCap)
+	}
+	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		if !gasBailout {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 	} else {
-		st.state.SubBalance(st.msg.From(), gasCost)
+		st.state.SubBalance(st.msg.From(), mgval)
 	}
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
-		return err
+		if !gasBailout {
+			return err
+		}
 	}
 	st.gas += st.msg.Gas()
 
@@ -225,6 +231,18 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 	// Make sure the transaction feeCap is greater than the block's baseFee.
 	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
+		if l := st.feeCap.BitLen(); l > 256 {
+			return fmt.Errorf("%w: address %v, feeCap bit length: %d", ErrFeeCapVeryHigh,
+				st.msg.From().Hex(), l)
+		}
+		if l := st.tip.BitLen(); l > 256 {
+			return fmt.Errorf("%w: address %v, tip bit length: %d", ErrTipVeryHigh,
+				st.msg.From().Hex(), l)
+		}
+		if st.feeCap.Cmp(st.tip) < 0 {
+			return fmt.Errorf("%w: address %v, tip: %s, feeCap: %s", ErrTipAboveFeeCap,
+				st.msg.From().Hex(), st.feeCap, st.tip)
+		}
 		if st.feeCap.Cmp(st.evm.Context.BaseFee) < 0 {
 			return fmt.Errorf("%w: address %v, feeCap: %d baseFee: %d", ErrFeeCapTooLow,
 				st.msg.From().Hex(), st.feeCap.Uint64(), st.evm.Context.BaseFee.Uint64())

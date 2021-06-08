@@ -173,7 +173,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(ethdb.NewObjectDatabase(db), tx)
+	err = st.Run(db, tx)
 	if err != nil {
 		return err
 	}
@@ -213,7 +213,10 @@ func StageLoopStep(
 	}
 	rotx.Rollback()
 	headTd256 := new(uint256.Int)
-	headTd256.SetFromBig(headTd)
+	overflow := headTd256.SetFromBig(headTd)
+	if overflow {
+		return fmt.Errorf("headTds higher than 2^256-1")
+	}
 	updateHead(ctx, head, headHash, headTd256)
 
 	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifier, db)
@@ -320,7 +323,6 @@ func NewStagedSync2(
 			nil,
 			nil,
 			nil,
-			nil,
 			controlServer.ChainConfig,
 			controlServer.Engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
@@ -341,7 +343,7 @@ func NewStagedSync2(
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			for _, s := range txPoolServer.Sentries {
-				go txpool.RecvTxMessage(ctx, s, txPoolServer.HandleInboundMessage, nil)
+				go txpool.RecvTxMessageLoop(ctx, s, controlServer, txPoolServer.HandleInboundMessage, nil)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),

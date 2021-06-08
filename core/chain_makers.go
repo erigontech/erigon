@@ -93,6 +93,9 @@ func (b *BlockGen) SetDifficulty(diff *big.Int) {
 func (b *BlockGen) AddTx(tx types.Transaction) {
 	b.AddTxWithChain(nil, nil, tx)
 }
+func (b *BlockGen) AddFailedTx(tx types.Transaction) {
+	b.AddFailedTxWithChain(nil, nil, tx)
+}
 
 // AddTxWithChain adds a transaction to the generated block. If no coinbase has
 // been set, the block's coinbase is set to the zero address.
@@ -112,6 +115,18 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if err != nil {
 		panic(err)
 	}
+	b.txs = append(b.txs, tx)
+	b.receipts = append(b.receipts, receipt)
+}
+
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+	if b.gasPool == nil {
+		b.SetCoinbase(common.Address{})
+	}
+	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
+	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
+	receipt, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, checkTEVM)
+	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
 }
@@ -271,10 +286,16 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 
 			if err := tx.ClearBucket(dbutils.HashedAccountsBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+				return nil, nil, fmt.Errorf("clear HashedAccountsBucket bucket: %w", err)
 			}
 			if err := tx.ClearBucket(dbutils.HashedStorageBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+				return nil, nil, fmt.Errorf("clear HashedStorageBucket bucket: %w", err)
+			}
+			if err := tx.ClearBucket(dbutils.TrieOfAccountsBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfAccountsBucket bucket: %w", err)
+			}
+			if err := tx.ClearBucket(dbutils.TrieOfStorageBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfStorageBucket bucket: %w", err)
 			}
 			c, err := tx.Cursor(dbutils.PlainStateBucket)
 			if err != nil {
@@ -316,8 +337,15 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			c.Close()
 			if GenerateTrace {
-				fmt.Printf("State after %d================\n", i)
+				fmt.Printf("State after %d================\n", b.header.Number)
 				if err := tx.ForEach(dbutils.HashedAccountsBucket, nil, func(k, v []byte) error {
+					fmt.Printf("%x: %x\n", k, v)
+					return nil
+				}); err != nil {
+					return nil, nil, fmt.Errorf("print state: %w", err)
+				}
+				fmt.Printf("..................\n")
+				if err := tx.ForEach(dbutils.HashedStorageBucket, nil, func(k, v []byte) error {
 					fmt.Printf("%x: %x\n", k, v)
 					return nil
 				}); err != nil {
@@ -340,7 +368,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	for i := 0; i < n; i++ {
 		stateReader := state.NewPlainStateReader(tx)
-		plainStateWriter := state.NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), nil, parent.Number().Uint64()+uint64(i)+1)
+		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.Number().Uint64()+uint64(i)+1)
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {
@@ -385,6 +413,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
 		header.Eip1559 = true
 	}
+	//header.WithSeal = debug.HeadersSeal()
 
 	return header
 }

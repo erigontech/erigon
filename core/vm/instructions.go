@@ -361,7 +361,7 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, callContext *call
 	}
 	// we can reuse dataOffset now (aliasing it for clarity)
 	end := dataOffset
-	overflow = end.AddOverflow(&dataOffset, &length)
+	_, overflow = end.AddOverflow(&dataOffset, &length)
 	if overflow {
 		return nil, ErrReturnDataOutOfBounds
 	}
@@ -455,7 +455,10 @@ func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx
 }
 
 func opGasprice(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	v, _ := uint256.FromBig(interpreter.evm.GasPrice)
+	v, overflow := uint256.FromBig(interpreter.evm.GasPrice)
+	if overflow {
+		return nil, fmt.Errorf("interpreter.evm.GasPrice higher than 2^256-1")
+	}
 	callContext.stack.Push(v)
 	return nil, nil
 }
@@ -500,7 +503,10 @@ func opNumber(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 }
 
 func opDifficulty(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	v, _ := uint256.FromBig(interpreter.evm.Context.Difficulty)
+	v, overflow := uint256.FromBig(interpreter.evm.Context.Difficulty)
+	if overflow {
+		return nil, fmt.Errorf("interpreter.evm.Context.Difficulty higher than 2^256-1")
+	}
 	callContext.stack.Push(v)
 	return nil, nil
 }

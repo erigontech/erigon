@@ -194,7 +194,7 @@ func TestStorageRangeAt(t *testing.T) {
 	tds.StartNewBuffer()
 
 	for _, entry := range storage {
-		val := uint256.NewInt().SetBytes(entry.Value.Bytes())
+		val := uint256.NewInt(0).SetBytes(entry.Value.Bytes())
 		statedb.SetState(addr, entry.Key, *val)
 	}
 	//we are working with contract, so it need codehash&incarnation

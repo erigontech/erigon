@@ -28,7 +28,6 @@ import (
 	"os"
 	"path"
 	"reflect"
-	"runtime"
 	"sync"
 	"time"
 
@@ -78,8 +77,7 @@ type Ethereum struct {
 	txPool *core.TxPool
 
 	// DB interfaces
-	chainDB    ethdb.Database // Same as chainDb, but different interface
-	chainKV    ethdb.RwKV     // Same as chainDb, but different interface
+	chainKV    ethdb.RwKV
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -130,7 +128,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	// Assemble the Ethereum object
 	var chainDb ethdb.Database
 	var err error
-	chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", stack.Config().DataDir)
+	chainDb, err = stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +162,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.SetupGenesisBlock(chainDb, config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainDb.RwKV(), config.Genesis, config.StorageMode.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -172,7 +170,6 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 
 	backend := &Ethereum{
 		config:               config,
-		chainDB:              chainDb,
 		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
@@ -199,42 +196,43 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-		return ethdb.SetStorageModeIfNotExist(tx, config.StorageMode)
+		if err := ethdb.SetStorageModeIfNotExist(tx, config.StorageMode); err != nil {
+			return err
+		}
+
+		if err = stagedsync.UpdateMetrics(tx); err != nil {
+			return err
+		}
+
+		sm, err := ethdb.GetStorageModeFromDB(tx)
+		if err != nil {
+			return err
+		}
+		if config.StorageMode.Initialised {
+			// If storage mode is not explicitly specified, we take whatever is in the database
+			if !reflect.DeepEqual(sm, config.StorageMode) {
+				return errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+			}
+		} else {
+			config.StorageMode = sm
+		}
+
+		return nil
 	}); err != nil {
 		return nil, err
 	}
-
-	sm, err := ethdb.GetStorageModeFromDB(chainDb)
-	if err != nil {
-		return nil, err
-	}
-	if config.StorageMode.Initialised {
-		// If storage mode is not explicitly specified, we take whatever is in the database
-		if !reflect.DeepEqual(sm, config.StorageMode) {
-			return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
-		}
-	} else {
-		config.StorageMode = sm
-	}
-	log.Info("Effective", "storage mode", config.StorageMode)
-
-	if err = stagedsync.UpdateMetrics(chainDb); err != nil {
-		return nil, err
-	}
-
-	txCacher := core.NewTxSenderCacher(runtime.NumCPU())
 
 	if config.TxPool.Journal != "" {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb, txCacher)
+	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb.RwKV())
 
 	// setting notifier to support streaming events to rpc daemon
 	backend.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
 	if config.SnapshotLayout {
-		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb)
+		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb.RwKV())
 		if err != nil {
 			return nil, err
 		}
@@ -349,28 +347,29 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return res
 		}
 
-		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
-		}
-
 		d66, err := setupDiscovery(backend.config.EthDiscoveryURLs)
 		if err != nil {
 			return nil, err
 		}
 
-		server65 := download.NewSentryServer(backend.downloadV2Ctx,
+		server66 := download.NewSentryServer(backend.downloadV2Ctx,
 			path.Join(stack.Config().DataDir, "erigon", "nodekey"),
 			path.Join(stack.Config().DataDir, "nodes", "eth66"),
 			stack.Config().P2P.ListenAddr, d66, readNodeInfo, eth.ETH66)
-		server66 := download.NewSentryServer(backend.downloadV2Ctx,
-			path.Join(stack.Config().DataDir, "erigon", "nodekey"),
-			path.Join(stack.Config().DataDir, "nodes", "eth65"),
-			":30304", d65, readNodeInfo, eth.ETH65)
-		backend.sentryServers = append(backend.sentryServers, server65, server66)
-		backend.sentries = []remote.SentryClient{
-			remote.NewSentryClientDirect(eth.ETH66, server65),
-			remote.NewSentryClientDirect(eth.ETH65, server66)}
+		backend.sentryServers = append(backend.sentryServers, server66)
+		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
+		if stack.Config().P2P.Eth65Enabled {
+			d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+			if err != nil {
+				return nil, err
+			}
+			server65 := download.NewSentryServer(backend.downloadV2Ctx,
+				path.Join(stack.Config().DataDir, "erigon", "nodekey"),
+				path.Join(stack.Config().DataDir, "nodes", "eth65"),
+				stack.Config().P2P.ListenAddr65, d65, readNodeInfo, eth.ETH65)
+			backend.sentryServers = append(backend.sentryServers, server65)
+			backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
+		}
 	}
 	blockDownloaderWindow := 65536
 	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
@@ -393,7 +392,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	backend.stagedSync2, err = stages2.NewStagedSync2(
 		backend.downloadV2Ctx,
 		backend.chainKV,
-		sm,
+		config.StorageMode,
 		config.BatchSize,
 		bodyDownloadTimeoutSeconds,
 		backend.downloadServer,
@@ -624,9 +623,10 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 func (s *Ethereum) Start() error {
 	for i := range s.sentries {
 		go download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+		go download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
 	}
-	go download.RecvUploadMessage(s.downloadV2Ctx, s.sentries[0], s.downloadServer.HandleInboundMessage, nil)
-	go Loop(s.downloadV2Ctx, s.chainDB.RwKV(), s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
+
+	go Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	return nil
 }
 

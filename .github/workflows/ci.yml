@@ -2,15 +2,15 @@ name: Continuous integration
 on:
   push:
     branches:
-      - master
+      - devel
   pull_request:
     branches:
-      - master
+      - devel
 jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-16.04, ubuntu-20.04, macos-10.15] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-16.04, ubuntu-20.04, macos-10.15 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -31,12 +31,19 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
       - run: make all
+      - name: Reproducible build test
+        run: |
+          shasum -a256 ./build/bin/erigon > erigon1.sha256
+          make erigon
+          shasum -a256 ./build/bin/erigon > erigon2.sha256
+          if ! cmp -s erigon1.sha256 erigon2.sha256; then
+            echo >&2 "Reproducible build broken"; exit 1
+          fi
       - name: Lint
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.38
-          args: "--build-tags=mdbx"
+          version: v1.40
           skip-go-installation: true
           skip-pkg-cache: true
           skip-build-cache: true
@@ -45,7 +52,7 @@ jobs:
   win:
     strategy:
       matrix:
-        os: [  windows-2019 ]
+        os: [ windows-2019 ]
     runs-on: ${{ matrix.os }}
 
     steps:

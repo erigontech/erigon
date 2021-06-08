@@ -239,17 +239,17 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		TrackerId: trackerID,
 	}
 
-	err = t.db.Walk(dbutils.SnapshotInfoBucket, append(req.InfoHash, make([]byte, 20)...), 20*8, func(k, v []byte) (bool, error) {
+	err = t.db.ForPrefix(dbutils.SnapshotInfoBucket, append(req.InfoHash, make([]byte, 20)...), func(k, v []byte) error {
 		a := AnnounceReqWithTime{}
 		err = json.Unmarshal(v, &a)
 		if err != nil {
 			log.Error("Fail to unmarshall", "k", common.Bytes2Hex(k), "err", err)
 			//skip failed
-			return true, nil
+			return nil
 		}
 		if time.Since(a.UpdatedAt) > 5*DisconnectInterval {
 			log.Debug("Skipped requset", "peer", common.Bytes2Hex(a.PeerID), "last updated", a.UpdatedAt, "now", time.Now())
-			return true, nil
+			return nil
 		}
 		if a.Left == 0 {
 			resp.Complete++
@@ -261,7 +261,7 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"peer id": a.PeerID,
 			"port":    a.Port,
 		})
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		log.Error("Walk", "err", err)

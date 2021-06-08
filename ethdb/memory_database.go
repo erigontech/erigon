@@ -47,17 +47,32 @@ func NewMemKV() RwKV {
 
 func NewTestKV(t testing.TB) RwKV {
 	kv := NewMemKV()
-	t.Cleanup(kv.Close)
+	switch tt := t.(type) {
+	case *testing.T:
+		if tt != nil {
+			tt.Cleanup(kv.Close)
+		}
+	}
 	return kv
 }
 
 func NewTestTx(t testing.TB) (RwKV, RwTx) {
 	kv := NewMemKV()
-	t.Cleanup(kv.Close)
+	switch tt := t.(type) {
+	case *testing.T:
+		if tt != nil {
+			tt.Cleanup(kv.Close)
+		}
+	}
 	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(tx.Rollback)
+	switch tt := t.(type) {
+	case *testing.T:
+		if tt != nil {
+			tt.Cleanup(tx.Rollback)
+		}
+	}
 	return kv, tx
 }

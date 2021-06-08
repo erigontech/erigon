@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -117,7 +115,7 @@ var cmdSnapshotCheck = &cobra.Command{
 }
 
 func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string) (err error) {
-	sm, engine, chainConfig, vmConfig, _, st, _, _, _ := newSync(db)
+	_, engine, chainConfig, vmConfig, _, sync, _, _, _ := newSync(ctx, db)
 
 	var snapshotBlock uint64 = 11_000_000
 	var lastBlockHeaderNumber, blockNum uint64
@@ -206,12 +204,6 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 	}
 	defer tx.Rollback()
 
-	tmpdir := path.Join(datadir, etl.TmpDirName)
-	sync, err := st.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil, nil)
-	if err != nil {
-		return nil
-	}
-
 	sync.DisableStages(stages.Headers,
 		stages.BlockHashes,
 		stages.Bodies,
@@ -265,8 +257,8 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 		stage4.BlockNumber = blockNumber - 1
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, blockNumber, ch,
-			stagedsync.StageExecuteBlocksCfg(db, false, false, false, 0, batchSize, nil, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir), nil,
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, sync, tx, blockNumber, ch,
+			stagedsync.StageExecuteBlocksCfg(db, false, false, false, 0, batchSize, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir), nil,
 		)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)

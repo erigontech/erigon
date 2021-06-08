@@ -66,7 +66,7 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.SnapshotBuilder, world.btClient, world.QuitCh)
+						return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.InitialCycle, world.SnapshotBuilder, world.btClient, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						useExternalTx := tx != nil
@@ -100,7 +100,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Bodies,
 					Description: "Download block bodies",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return BodiesForward(s, ctx, tx, bodies)
+						return BodiesForward(s, u, ctx, tx, bodies, test)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindBodiesStage(u, s, tx, bodies)
@@ -151,7 +151,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Senders,
 					Description: "Recover senders from tx signatures",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnRecoverSendersStage(senders, s, tx, 0, ctx.Done())
+						return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx.Done())
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindSendersStage(u, s, tx, senders)
@@ -166,7 +166,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnExecuteBlocksStage(s, tx, 0, ctx.Done(), exec, world.Accumulator)
+						return SpawnExecuteBlocksStage(s, u, tx, 0, ctx.Done(), exec, world.Accumulator)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec, world.Accumulator)

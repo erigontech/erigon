@@ -55,7 +55,7 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 			if trace {
 				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
 			}
-			balance := uint256.NewInt()
+			balance := uint256.NewInt(0)
 			balance.SetBytes(op.Balance.Bytes())
 			nonce := op.Nonce
 

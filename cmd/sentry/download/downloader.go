@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -40,7 +41,8 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (*remote.SentryCli
 	var dialOpts []grpc.DialOption
 
 	backoffCfg := backoff.DefaultConfig
-	backoffCfg.MaxDelay = 30 * time.Second
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
@@ -55,21 +57,65 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (*remote.SentryCli
 	return remote.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
 }
 
+func RecvUploadMessageLoop(ctx context.Context,
+	sentry remote.SentryClient,
+	cs *ControlServerImpl,
+	wg *sync.WaitGroup,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		SentryHandshake(ctx, sentry, cs)
+		RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg)
+	}
+}
+
 func RecvUploadMessage(ctx context.Context,
 	sentry remote.SentryClient,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) {
+	// avoid crash because Erigon's core does many things
+	defer func() {
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				log.Error("[RecvUploadMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			default:
+				log.Error("[RecvUploadMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			}
+		}
+	}()
+
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveUploadClient, err3 := sentry.ReceiveUploadMessages(streamCtx, &empty.Empty{}, grpc.WaitForReady(true))
-	if err3 != nil {
-		log.Error("Receive upload messages failed", "error", err3)
+	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH65][eth.GetBlockHeadersMsg],
+		eth.ToProto[eth.ETH65][eth.GetBlockBodiesMsg],
+		eth.ToProto[eth.ETH65][eth.GetReceiptsMsg],
+
+		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
+		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
+		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
+	}}, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		log.Error("Receive upload messages failed", "error", err)
 		return
 	}
-
-	for req, err := receiveUploadClient.Recv(); ; req, err = receiveUploadClient.Recv() {
+	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
@@ -83,7 +129,6 @@ func RecvUploadMessage(ctx context.Context,
 		if req == nil {
 			return
 		}
-
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
 		}
@@ -120,17 +165,46 @@ func RecvMessage(
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) {
+	// avoid crash because Erigon's core does many things -
+	defer func() {
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				log.Error("[RecvMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			default:
+				log.Error("[RecvMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			}
+		}
+	}()
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
-	receiveClient, err2 := sentry.ReceiveMessages(streamCtx, &empty.Empty{}, grpc.WaitForReady(true))
-	if err2 != nil {
-		log.Error("Receive messages failed", "error", err2)
+	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH65][eth.BlockHeadersMsg],
+		eth.ToProto[eth.ETH65][eth.BlockBodiesMsg],
+		eth.ToProto[eth.ETH65][eth.NewBlockHashesMsg],
+		eth.ToProto[eth.ETH65][eth.NewBlockMsg],
+
+		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
+		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
+		eth.ToProto[eth.ETH66][eth.NewBlockHashesMsg],
+		eth.ToProto[eth.ETH66][eth.NewBlockMsg],
+	}}, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		log.Error("Receive messages failed", "error", err)
 		return
 	}
 
-	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
+	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
@@ -148,54 +222,20 @@ func RecvMessage(
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			log.Error("RecvMessage: Handling incoming message", "error", err)
 		}
+
 		if wg != nil {
 			wg.Done()
 		}
-
 	}
 }
 
 func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlServer *ControlServerImpl) {
 	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
 	if err != nil {
-		log.Error("sentry not ready yet", "err", err)
-	}
-}
-
-// SentriesHandshake - doesn't block - starting process of basic metadata exchange
-// use WaitForOneSentryReady before use sentries
-func SentriesHandshake(ctx context.Context, sentries []remote.SentryClient, controlServer *ControlServerImpl) {
-	for i := range sentries {
-		go SentryHandshake(ctx, sentries[i], controlServer)
-	}
-}
-
-// WaitForOneSentryReady - blocks until at least one sentry.Ready() returns true
-func WaitForOneSentryReady(ctx context.Context, logPrefix string, sentries []remote.SentryClient) {
-	log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	count := 0
-	for {
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] %s", logPrefix, "wait for availability of at least one Sentry"))
-		case <-ctx.Done():
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 			return
-		default:
 		}
-
-		for i := range sentries {
-			if sentries[i].Ready() {
-				if count > 0 {
-					log.Info(fmt.Sprintf("[%s] %s", logPrefix, "sentry ready"))
-				}
-				return
-			}
-		}
-		count++
-		time.Sleep(500 * time.Millisecond)
+		log.Error("sentry not ready yet", "err", err)
 	}
 }
 

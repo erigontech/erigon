@@ -40,9 +40,19 @@ var (
 	gcLeafMetric     = metrics.GetOrRegisterGauge("db/gc/leaf", metrics.DefaultRegistry)     //nolint
 	gcOverflowMetric = metrics.GetOrRegisterGauge("db/gc/overflow", metrics.DefaultRegistry) //nolint
 	gcPagesMetric    = metrics.GetOrRegisterGauge("db/gc/pages", metrics.DefaultRegistry)    //nolint
+
+	stateLeafMetric     = metrics.GetOrRegisterGauge("db/state/leaf", metrics.DefaultRegistry)   //nolint
+	stateBranchesMetric = metrics.GetOrRegisterGauge("db/state/branch", metrics.DefaultRegistry) //nolint
 )
 
 type DBVerbosityLvl int8
+type Label uint8
+
+const (
+	Chain  Label = 0
+	TxPool Label = 1
+	Sentry Label = 2
+)
 
 type Has interface {
 	// Has indicates whether a key exists in the database.
@@ -53,6 +63,15 @@ type KVGetter interface {
 	Has
 
 	GetOne(bucket string, key []byte) (val []byte, err error)
+
+	// ForEach iterates over entries with keys greater or equal to fromPrefix.
+	// walker is called for each eligible entry.
+	// If walker returns an error:
+	//   - implementations of local db - stop
+	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
+	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
 // Putter wraps the database write operations.
@@ -146,6 +165,8 @@ type StatelessWriteTx interface {
 	Deleter
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
+	Append(bucket string, k, v []byte) error
+	AppendDup(bucket string, k, v []byte) error
 }
 
 type StatelessRwTx interface {
@@ -167,6 +188,7 @@ type Tx interface {
 
 	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
 	Comparator(bucket string) dbutils.CmpFunc
 

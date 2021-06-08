@@ -71,7 +71,7 @@ func OpenKV(path string, readOnly bool) (RwKV, error) {
 	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
 		kv, err = NewMDBX().Path(path).Open()
 	default:
-		opts := NewLMDB().Path(path)
+		opts := NewMDBX().Path(path)
 		if readOnly {
 			opts = opts.Flags(func(flags uint) uint { return flags | lmdb.Readonly })
 		}
@@ -216,6 +216,23 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 		return Walk(c, startkey, fixedbits, walker)
 	})
 	return err
+}
+
+func (db *ObjectDatabase) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForEach(bucket, fromPrefix, walker)
+	})
+}
+func (db *ObjectDatabase) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForAmount(bucket, fromPrefix, amount, walker)
+	})
+}
+
+func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForPrefix(bucket, prefix, walker)
+	})
 }
 
 // Delete deletes the key from the queue and database

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"runtime/debug"
+	"strings"
 	"sync"
 
-	"github.com/golang/protobuf/ptypes/empty"
+	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -243,6 +245,24 @@ func (tp *P2PServer) HandleInboundMessage(ctx context.Context, inreq *proto_sent
 	}
 }
 
+func RecvTxMessageLoop(ctx context.Context,
+	sentry remote.SentryClient,
+	cs *download.ControlServerImpl,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		download.SentryHandshake(ctx, sentry, cs)
+		RecvTxMessage(ctx, sentry, handleInboundMessage, wg)
+	}
+}
+
 // RecvTxMessage
 // wg is used only in tests to avoid time.Sleep. For non-test code wg == nil
 func RecvTxMessage(ctx context.Context,
@@ -250,16 +270,45 @@ func RecvTxMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) {
+	// avoid crash because Erigon's core does many things
+	defer func() {
+		if r := recover(); r != nil { // just log is enough
+			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
+			stack := panicReplacer.Replace(string(debug.Stack()))
+			switch typed := r.(type) {
+			case error:
+				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			default:
+				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
+			}
+		}
+	}()
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	receiveClient, err2 := sentry.ReceiveTxMessages(streamCtx, &empty.Empty{}, &grpc.EmptyCallOption{})
-	if err2 != nil {
-		log.Error("ReceiveTx messages failed", "error", err2)
+	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH65][eth.NewPooledTransactionHashesMsg],
+		eth.ToProto[eth.ETH65][eth.GetPooledTransactionsMsg],
+		eth.ToProto[eth.ETH65][eth.TransactionsMsg],
+		eth.ToProto[eth.ETH65][eth.PooledTransactionsMsg],
+
+		eth.ToProto[eth.ETH66][eth.NewPooledTransactionHashesMsg],
+		eth.ToProto[eth.ETH66][eth.GetPooledTransactionsMsg],
+		eth.ToProto[eth.ETH66][eth.TransactionsMsg],
+		eth.ToProto[eth.ETH66][eth.PooledTransactionsMsg],
+	}}, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		log.Error("ReceiveTx messages failed", "error", err)
 		return
 	}
 
-	for req, err := receiveClient.Recv(); ; req, err = receiveClient.Recv() {
+	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return

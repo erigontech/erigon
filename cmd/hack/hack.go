@@ -11,10 +11,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
-	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -22,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
-	"github.com/valyala/fastjson"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -34,19 +32,15 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
@@ -1365,7 +1359,7 @@ func supply(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	count := 0
-	supply := uint256.NewInt()
+	supply := uint256.NewInt(0)
 	var a accounts.Account
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.PlainStateBucket)
@@ -1698,61 +1692,6 @@ func extractBodies(chaindata string, block uint64) error {
 	return nil
 }
 
-func applyBlock(chaindata string, hash common.Hash) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	f, err := os.Open("out.txt")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	s := bufio.NewScanner(r)
-	s.Buffer(nil, 20000000)
-	count := 0
-	var body *types.Body
-	var header *types.Header
-	for s.Scan() {
-		fields := strings.Split(s.Text(), " ")
-		h := common.HexToHash(fields[2][:64])
-		if h != hash {
-			continue
-		}
-		switch fields[0] {
-		case "Body":
-			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &body); err != nil {
-				return nil
-			}
-		case "Header":
-			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &header); err != nil {
-				return nil
-			}
-		}
-		count++
-	}
-	if s.Err() != nil {
-		return s.Err()
-	}
-	fmt.Printf("Lines: %d\n", count)
-	if body == nil {
-		fmt.Printf("block body with given hash %x not found\n", hash)
-		return nil
-	}
-	if header == nil {
-		fmt.Printf("header with given hash not found\n")
-		return nil
-	}
-	block := types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
-	fmt.Printf("Formed block %d %x\n", block.NumberU64(), block.Hash())
-	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, ethash.NewFaker(), block, true /* checkRoot */); err != nil {
-		return err
-	}
-	if err = rawdb.WriteCanonicalHash(db, hash, block.NumberU64()); err != nil {
-		return err
-	}
-	return nil
-}
-
 func fixUnwind(chaindata string) error {
 	contractAddr := common.HexToAddress("0x577a32aa9c40cf4266e49fc1e44c749c356309bd")
 	db := ethdb.MustOpen(chaindata)
@@ -1823,188 +1762,47 @@ func snapSizes(chaindata string) error {
 	return nil
 }
 
-func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, error) {
-	fmt.Printf("Request=%s\n", request)
-	log.Info("Getting", "url", url, "request", request)
-	start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
-	if err != nil {
-		return nil, nil, err
-	}
-	defer r.Body.Close()
-	if r.StatusCode != 200 {
-		return nil, nil, fmt.Errorf("status %s", r.Status)
-	}
-	var buf bytes.Buffer
-	if _, err = buf.ReadFrom(r.Body); err != nil {
-		return nil, nil, fmt.Errorf("reading http response: %w", err)
-	}
-	var p fastjson.Parser
-	response := buf.Bytes()
-	v, err := p.ParseBytes(response)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parsing http response: %w", err)
-	}
-	log.Info("Got in", "time", time.Since(start).Seconds())
-	return response, v, nil
-}
-
-func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
-	var vType fastjson.Type = fastjson.TypeNull
-	var vgType fastjson.Type = fastjson.TypeNull
-	if v != nil {
-		vType = v.Type()
-	}
-	if vg != nil {
-		vgType = vg.Type()
-	}
-	if vType != vgType {
-		return fmt.Errorf("different types for prefix %s: %s / %s", prefix, vType.String(), vgType.String())
-	}
-	switch vType {
-	case fastjson.TypeNull:
-		// Nothing to do
-	case fastjson.TypeObject:
-		obj, err := v.Object()
-		if err != nil {
-			return fmt.Errorf("convering Erigon val to object at prefix %s: %w", prefix, err)
-		}
-		objg, errg := vg.Object()
-		if errg != nil {
-			return fmt.Errorf("convering g val to object at prefix %s: %w", prefix, errg)
-		}
-		objg.Visit(func(key []byte, vg1 *fastjson.Value) {
-			if err != nil {
-				return
-			}
-			v1 := obj.Get(string(key))
-			if v1 == nil && vg1.Type() != fastjson.TypeNull {
-				err = fmt.Errorf("erigon missing value at prefix: %s", prefix+"."+string(key))
-				return
-			}
-			if e := compareJsonValues(prefix+"."+string(key), v1, vg1); e != nil {
-				err = e
-			}
-		})
-		if err != nil {
-			return err
-		}
-		// Finding keys that are present in Erigon but missing in G
-		obj.Visit(func(key []byte, v1 *fastjson.Value) {
-			if err != nil {
-				return
-			}
-			if objg.Get(string(key)) == nil && v1.Type() != fastjson.TypeNull {
-				err = fmt.Errorf("g missing value at prefix: %s", prefix+"."+string(key))
-				return
-			}
-		})
-		if err != nil {
-			return err
-		}
-	case fastjson.TypeArray:
-		arr, err := v.Array()
-		if err != nil {
-			return fmt.Errorf("converting Erigon val to array at prefix %s: %w", prefix, err)
-		}
-		arrg, errg := vg.Array()
-		if errg != nil {
-			return fmt.Errorf("converting g val to array at prefix %s: %w", prefix, errg)
-		}
-		if len(arr) != len(arrg) {
-			return fmt.Errorf("arrays have different length at prefix %s: %d / %d", prefix, len(arr), len(arrg))
-		}
-		for i, item := range arr {
-			itemg := arrg[i]
-			if e := compareJsonValues(fmt.Sprintf("%s[%d]", prefix, i), item, itemg); e != nil {
-				return e
-			}
-		}
-	case fastjson.TypeString:
-		if v.String() != vg.String() {
-			return fmt.Errorf("different string values at prefix %s: %s / %s", prefix, v.String(), vg.String())
-		}
-	case fastjson.TypeNumber:
-		i, err := v.Int()
-		if err != nil {
-			return fmt.Errorf("converting Erigon val to int at prefix %s: %w", prefix, err)
-		}
-		ig, errg := vg.Int()
-		if errg != nil {
-			return fmt.Errorf("converting g val to int at prefix %s: %w", prefix, errg)
-		}
-		if i != ig {
-			return fmt.Errorf("different int values at prefix %s: %d / %d", prefix, i, ig)
-		}
-	}
-	return nil
-}
-
-func wrongReceipts() error {
-	dirname := "/Users/alexeysharp/Downloads/txtraces"
-	dir, err := os.Open(dirname)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	var names []string
-	if names, err = dir.Readdirnames(0); err != nil {
-		return err
-	}
-	var client = &http.Client{
-		Timeout: time.Second * 600,
-	}
-	url := "http://192.168.1.126:8545"
-	fmt.Printf("Read %d names\n", len(names))
-	for i, name := range names {
-		txhash := common.FromHex(name[len("txtrace_") : len(name)-len(".txt")])
-		fmt.Printf("%x\n", txhash)
-		request := fmt.Sprintf(`{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x%x"],"id":%d}`, txhash, i)
-		response, v1, err1 := post2(client, url, request)
-		if err1 != nil {
-			return err
-		}
-		fmt.Printf("Response len = %d\n", len(response))
-		r := v1.Get("result").Get("structLogs")
-		file, err2 := ioutil.ReadFile(path.Join(dirname, name))
-		if err2 != nil {
-			return err2
-		}
-		v2, err3 := fastjson.ParseBytes(file)
-		if err3 != nil {
-			return err3
-		}
-		err = compareJsonValues("", r, v2)
-		if err != nil {
-			fmt.Printf("%v\n", err)
-		}
-	}
-	return nil
-}
-
-func advance5(chaindata string) error {
-	db := ethdb.MustOpenKV(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
+func readCallTraces(chaindata string, block uint64) error {
+	kv := ethdb.MustOpenKV(chaindata)
+	defer kv.Close()
+	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	stage5, err := stages.GetStageProgress(tx, stages.Execution)
+	traceCursor, err1 := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	if err1 != nil {
+		return err1
+	}
+	defer traceCursor.Close()
+	var k []byte
+	var v []byte
+	count := 0
+	for k, v, err = traceCursor.First(); k != nil && err == nil; k, v, err = traceCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum == block {
+			fmt.Printf("%x\n", v)
+		}
+		count++
+	}
 	if err != nil {
 		return err
 	}
-	log.Info("Stage 5", "progress", stage5)
-	if err = stages.SaveStageProgress(tx, stages.Execution, stage5+1); err != nil {
-		return err
+	fmt.Printf("Found %d records\n", count)
+	idxCursor, err2 := tx.Cursor(dbutils.CallToIndex)
+	if err2 != nil {
+		return err2
 	}
-	stage5, err = stages.GetStageProgress(tx, stages.Execution)
+	var acc common.Address = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
+	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
+		bm := roaring64.New()
+		_, err = bm.ReadFrom(bytes.NewReader(v))
+		if err != nil {
+			return err
+		}
+		//fmt.Printf("%x: %d\n", k, bm.ToArray())
+	}
 	if err != nil {
-		return err
-	}
-	log.Info("Stage 5", "changed to", stage5)
-	if err = tx.Commit(); err != nil {
 		return err
 	}
 	return nil
@@ -2113,9 +1911,6 @@ func main() {
 	case "extractBodies":
 		err = extractBodies(*chaindata, uint64(*block))
 
-	case "applyBlock":
-		err = applyBlock(*chaindata, common.HexToHash(*hash))
-
 	case "fixUnwind":
 		err = fixUnwind(*chaindata)
 
@@ -2149,11 +1944,8 @@ func main() {
 	case "dumpAddresses":
 		err = dumpAddresses(*chaindata)
 
-	case "wrongReceipts":
-		err = wrongReceipts()
-
-	case "advance5":
-		err = advance5(*chaindata)
+	case "readCallTraces":
+		err = readCallTraces(*chaindata, uint64(*block))
 	}
 
 	if err != nil {

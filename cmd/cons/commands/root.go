@@ -63,9 +63,8 @@ func withConfig(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&config, "config", "", "`file:<path>` to specify config file in file system, `embed:<path>` to use embedded file, `test` to register test interface and receive config from test driver")
 }
 
-func openDatabase(path string) *ethdb.ObjectDatabase {
-	db := ethdb.NewObjectDatabase(openKV(path, false))
-	return db
+func openDatabase(path string) ethdb.RwKV {
+	return openKV(path, false)
 }
 
 func openKV(path string, exclusive bool) ethdb.RwKV {

@@ -35,16 +35,12 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceTransaction(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
+	db := createTestKV(t)
 	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		err = api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
+		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
@@ -68,17 +64,13 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
+	db := createTestKV(t)
 	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
 		var norefunds = true
-		err = api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
+		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}

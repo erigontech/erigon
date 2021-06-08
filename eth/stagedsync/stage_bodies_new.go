@@ -9,7 +9,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -49,9 +48,12 @@ func StageBodiesCfg(
 // BodiesForward progresses Bodies stage in the forward direction
 func BodiesForward(
 	s *StageState,
+	u Unwinder,
 	ctx context.Context,
 	tx ethdb.RwTx,
-	cfg BodiesCfg) error {
+	cfg BodiesCfg,
+	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+) error {
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
 
@@ -74,9 +76,10 @@ func BodiesForward(
 	if err != nil {
 		return err
 	}
-	bodyProgress, err = stages.GetStageProgress(tx, stages.Bodies)
-	if err != nil {
-		return err
+	bodyProgress = s.BlockNumber
+	if bodyProgress == headerProgress {
+		s.Done()
+		return nil
 	}
 	logPrefix := s.LogPrefix()
 	if headerProgress <= bodyProgress+16 {
@@ -95,7 +98,7 @@ func BodiesForward(
 	var req *bodydownload.BodyRequest
 	var peer []byte
 	stopped := false
-	var headHash common.Hash
+Loop:
 	for !stopped {
 		// TODO: this is incorrect use
 		if req == nil {
@@ -140,30 +143,24 @@ func BodiesForward(
 			}
 		}
 		start := time.Now()
-		// can't use same transaction from another goroutine
-		var verifyUncles = func(peerID string, header *types.Header, uncles []*types.Header) error {
-			/* TODO: it always fail now, because parent block is not in db yet
-			cr := ChainReader{Cfg: cfg.chanConfig, Db: batch}
-			penalty, err := cfg.bd.VerifyUncles(header, uncles, cr)
-			if err != nil {
-				if penalty != headerdownload.NoPenalty {
-					log.Debug("penalize", "peer", peerID, "reason", err)
-					cfg.penalise(ctx, []headerdownload.PenaltyItem{{PeerID: peerID, Penalty: penalty}})
-				}
-				return err
-			}
-			*/
-			return nil
-		}
-		headers, rawBodies, err := cfg.bd.GetDeliveries(verifyUncles)
+		headers, rawBodies, err := cfg.bd.GetDeliveries()
 		if err != nil {
 			return err
 		}
 		d4 += time.Since(start)
 		start = time.Now()
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: ethdb.WrapIntoTxDB(tx)}
 		for i, header := range headers {
 			rawBody := rawBodies[i]
 			blockHeight := header.Number.Uint64()
+			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
+			if err != nil {
+				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "error", err)
+				if unwindErr := u.UnwindTo(blockHeight-1, tx, header.Hash()); unwindErr != nil {
+					return unwindErr
+				}
+				break Loop
+			}
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
 				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
 			}
@@ -172,13 +169,15 @@ func BodiesForward(
 				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
 					return fmt.Errorf("[%s] saving Bodies progress: %w", logPrefix, err)
 				}
-				headHash = header.Hash()
-				rawdb.WriteHeadBlockHash(tx, headHash)
 			}
 		}
 		d5 += time.Since(start)
 		start = time.Now()
 		if bodyProgress == headerProgress {
+			break
+		}
+		if test {
+			stopped = true
 			break
 		}
 		timer.Stop()
@@ -208,6 +207,9 @@ func BodiesForward(
 			return err
 		}
 	}
+	if stopped {
+		return common.ErrStopped
+	}
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
 	return nil
 }
@@ -236,7 +238,6 @@ func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesC
 		}
 		defer tx.Rollback()
 	}
-
 	err := u.Done(tx)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {

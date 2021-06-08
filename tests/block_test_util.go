@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -34,11 +35,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // A BlockTest checks handling of entire blocks.
@@ -86,6 +86,7 @@ type btHeader struct {
 	GasLimit         uint64
 	GasUsed          uint64
 	Timestamp        uint64
+	BaseFee          *big.Int
 }
 
 type btHeaderMarshaling struct {
@@ -95,26 +96,13 @@ type btHeaderMarshaling struct {
 	GasLimit   math.HexOrDecimal64
 	GasUsed    math.HexOrDecimal64
 	Timestamp  math.HexOrDecimal64
+	BaseFee    *math.HexOrDecimal256
 }
 
-func (t *BlockTest) Run(_ bool) error {
+func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	config, ok := Forks[t.json.Network]
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
-	}
-
-	// import pre accounts & construct test genesis block & state root
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	gblock, _, err := t.genesis(config).Commit(db, false /* history */)
-	if err != nil {
-		return err
-	}
-	if gblock.Hash() != t.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", gblock.Hash().Bytes()[:6], t.json.Genesis.Hash[:6])
-	}
-	if gblock.Root() != t.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", gblock.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
 	}
 	var engine consensus.Engine
 	if t.json.SealEngine == "NoProof" {
@@ -122,27 +110,30 @@ func (t *BlockTest) Run(_ bool) error {
 	} else {
 		engine = ethash.NewShared()
 	}
+	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
-	/*
-		fmt.Printf("INSERTED CHAIN\n")
-		for _, b := range t.json.Blocks {
-			cb, _ := b.decode()
-			fmt.Printf("%d: %x\n", cb.NumberU64(), cb.Hash())
-		}
-	*/
-	validBlocks, err := t.insertBlocks(db, config, engine)
+	// import pre accounts & construct test genesis block & state root
+	if m.Genesis.Hash() != t.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], t.json.Genesis.Hash[:6])
+	}
+	if m.Genesis.Root() != t.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
+	}
+
+	validBlocks, err := t.insertBlocks(m)
 	if err != nil {
 		return err
 	}
 
-	tx, err1 := db.Begin(context.Background(), ethdb.RO)
+	tx, err1 := m.DB.BeginRo(context.Background())
 	if err1 != nil {
 		return fmt.Errorf("blockTest create tx: %v", err1)
 	}
 	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
 	if common.Hash(t.json.BestBlock) != cmlast {
-		fmt.Printf("hash mismatch: wanted %x, got %x\n", t.json.BestBlock, cmlast)
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
 	newDB := state.New(state.NewPlainStateReader(tx))
@@ -165,6 +156,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
 		Mixhash:    t.json.Genesis.MixHash,
 		Coinbase:   t.json.Genesis.Coinbase,
 		Alloc:      t.json.Pre,
+		BaseFee:    t.json.Genesis.BaseFee,
 	}
 }
 
@@ -180,7 +172,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
    expected we are expected to ignore it and continue processing and then validate the
    post state.
 */
-func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, engine consensus.Engine) ([]btBlock, error) {
+func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for _, b := range t.json.Blocks {
@@ -193,14 +185,21 @@ func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, 
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
-		if newCanonical, err1 := stagedsync.InsertBlockInStages(db, config, &vm.Config{}, engine, cb, true /* checkRoot */); err1 != nil {
+		chain := &core.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, Length: 1}
+		if err1 := m.InsertChain(chain); err1 != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
 			}
-		} else if newCanonical && b.BlockHeader == nil {
-			return nil, fmt.Errorf("block insertion should have failed")
+		} else if b.BlockHeader == nil {
+			canonical, cErr := rawdb.ReadCanonicalHash(ethdb.NewObjectDatabase(m.DB), cb.NumberU64())
+			if cErr != nil {
+				return nil, cErr
+			}
+			if canonical == cb.Hash() {
+				return nil, fmt.Errorf("block insertion should have failed")
+			}
 		}
 		if b.BlockHeader == nil {
 			continue
@@ -215,6 +214,12 @@ func (t *BlockTest) insertBlocks(db ethdb.Database, config *params.ChainConfig, 
 }
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
+	if h == nil {
+		return fmt.Errorf("validateHeader: h == nil")
+	}
+	if h2 == nil {
+		return fmt.Errorf("validateHeader: h2 == nil")
+	}
 	if h.Bloom != h2.Bloom {
 		return fmt.Errorf("bloom: want: %x have: %x", h.Bloom, h2.Bloom)
 	}
@@ -283,7 +288,7 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (t *BlockTest) validateImportedHeaders(db ethdb.Database, validBlocks []btBlock) error {
+func (t *BlockTest) validateImportedHeaders(tx ethdb.Tx, validBlocks []btBlock) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(t.json.Blocks))
 	for _, b := range validBlocks {
@@ -294,11 +299,11 @@ func (t *BlockTest) validateImportedHeaders(db ethdb.Database, validBlocks []btB
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
-	for b := rawdb.ReadCurrentHeader(db); b != nil && b.Number.Uint64() != 0; {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b); err != nil {
+	for b := rawdb.ReadCurrentBlock(tx); b != nil && b.NumberU64() != 0; {
+		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %v", err)
 		}
-		b, _ = rawdb.ReadHeaderByHash(db, b.ParentHash)
+		b, _ = rawdb.ReadBlockByHash(tx, b.Header().ParentHash)
 	}
 	return nil
 }

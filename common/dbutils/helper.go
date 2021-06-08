@@ -30,13 +30,6 @@ func DecodeTimestamp(suffix []byte) (uint64, []byte) {
 	return timestamp, suffix[bytecount:]
 }
 
-func ChangeSetByIndexBucket(storage bool) string {
-	if storage {
-		return StorageChangeSetBucket
-	}
-	return AccountChangeSetBucket
-}
-
 // NextSubtree does []byte++. Returns false if overflow.
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))

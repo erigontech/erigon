@@ -522,7 +522,13 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
 	for !interrupt {
-		block, _ := rawdb.ReadBlockByNumberDeprecated(chainDb, blockNum)
+		var block *types.Block
+		if err := chainDb.RwKV().View(context.Background(), func(tx ethdb.Tx) (err error) {
+			block, err = rawdb.ReadBlockByNumber(tx, blockNum)
+			return err
+		}); err != nil {
+			panic(err)
+		}
 		if block == nil {
 			break
 		}

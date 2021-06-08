@@ -369,6 +369,366 @@ func TestSnapshotMigratorStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
+		t.Fatal("snapshot exsists")
+	} else {
+		//just not to confuse defer
+		err = nil
+	}
+}
+
+func TestSnapshotMigratorStageSyncMode1(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	var err error
+	dir := t.TempDir()
+
+	defer func() {
+		if err != nil {
+			t.Log(err, dir)
+		}
+		err = os.RemoveAll(dir)
+		if err != nil {
+			t.Log(err)
+		}
+
+	}()
+	snapshotsDir := path.Join(dir, "snapshots")
+	err = os.Mkdir(snapshotsDir, os.ModePerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	btCli, err := New(snapshotsDir, true, "12345123451234512345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	btCli.trackers = [][]string{}
+
+	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	quit := make(chan struct{})
+	defer func() {
+		close(quit)
+	}()
+
+	sb := &SnapshotMigrator{
+		snapshotsDir: snapshotsDir,
+		replaceChan:  make(chan struct{}),
+		useMdbx:      true,
+	}
+
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		t.Error(err)
+		panic(err)
+	}
+	defer tx.Rollback()
+	err = GenerateHeaderData(tx, 0, 11)
+	if err != nil {
+		t.Error(err)
+		panic(err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		t.Error(err)
+		panic(err)
+	}
+
+	writeStep := func(currentSnapshotBlock uint64) {
+		writeTX, writeErr := db.BeginRw(context.Background())
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		defer writeTX.Rollback()
+		writeErr = sb.SyncStages(currentSnapshotBlock, db, writeTX)
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+
+		writeErr = writeTX.Commit()
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+
+	StageSyncStep := func(currentSnapshotBlock uint64) {
+		t.Helper()
+		rotx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Error(err)
+			panic(err)
+		}
+		defer rotx.Rollback()
+
+		err = sb.AsyncStages(currentSnapshotBlock, db, rotx, btCli, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rotx.Rollback()
+	}
+	StageSyncStep(10)
+	for !sb.Replaced() {
+		//wait until all txs of old snapshot closed
+	}
+	writeStep(10)
+
+	for atomic.LoadUint64(&sb.started) > 0 {
+		roTx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = sb.Final(roTx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roTx.Rollback()
+		time.Sleep(time.Millisecond * 100)
+	}
+
+	//note. We need here only main database.
+	rotx, err := db.WriteDB().BeginRo(context.Background())
+	require.NoError(t, err)
+	defer rotx.Rollback()
+	roc, err := rotx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
+	var headerNumber uint64
+	headerNumber = 11
+
+	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
+		require.Equal(t, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)}), k)
+		headerNumber++
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headerNumber != 12 {
+		t.Fatal(headerNumber)
+	}
+	rotx.Rollback()
+
+	snokv := db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)
+	snRoTx, err := snokv.BeginRo(context.Background())
+	require.NoError(t, err)
+	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
+	headerNumber = 0
+	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	snRoTx.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headerNumber != 11 {
+		t.Fatal(headerNumber)
+	}
+
+	headerNumber = 0
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		headersC, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
+		}
+		defer headersC.Close()
+
+		return ethdb.ForEach(headersC, func(k, v []byte) (bool, error) {
+			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+				t.Fatal(k)
+			}
+			headerNumber++
+			return true, nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if headerNumber != 12 {
+		t.Fatal(headerNumber)
+	}
+
+	trnts := btCli.Torrents()
+	if len(trnts) != 1 {
+		t.Fatal("incorrect len", trnts)
+	}
+
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(v, trnts[0].Bytes()) {
+			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
+		}
+
+		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if binary.BigEndian.Uint64(v) != 10 {
+			t.Fatal("incorrect snapshot")
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err = db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	err = GenerateHeaderData(tx, 12, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	rollbacked := false
+	go func() {
+		c := time.After(time.Second * 3)
+
+		roTX, err := db.BeginRo(context.Background())
+		if err != nil {
+			wg.Done()
+
+			t.Error(err)
+		}
+		//just start snapshot transaction
+		// it can't be empty slice but shouldn't be in main db
+		_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{1})
+		if err != nil {
+			wg.Done()
+			t.Error(err)
+		}
+		wg.Done()
+		<-c
+		rollbacked = true
+		roTX.Rollback()
+	}()
+	//wait until read tx start
+	wg.Wait()
+
+	StageSyncStep(20)
+	for !sb.Replaced() {
+		//wait until all txs of old snapshot closed
+	}
+	writeStep(20)
+
+	for atomic.LoadUint64(&sb.started) > 0 {
+		roTx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = sb.Final(roTx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roTx.Rollback()
+		time.Sleep(time.Millisecond * 1000)
+	}
+
+	if !rollbacked {
+		t.Log("it's not possible to close db without rollback. something went wrong")
+	}
+
+	rotx, err = db.WriteDB().BeginRo(context.Background())
+	require.NoError(t, err)
+	defer rotx.Rollback()
+	roc, err = rotx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
+
+	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
+		t.Fatal("main db must be empty here", k)
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotx.Rollback()
+	headerNumber = 0
+	snRoTx, err = db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV).BeginRo(context.Background())
+	require.NoError(t, err)
+	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
+	require.NoError(t, err)
+	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+			t.Fatal(k)
+		}
+		headerNumber++
+
+		return true, nil
+	})
+	snRoTx.Rollback()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if headerNumber != 21 {
+		t.Fatal(headerNumber)
+	}
+	headerNumber = 0
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		c, err := tx.Cursor(dbutils.HeadersBucket)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+				t.Fatal(k)
+			}
+			headerNumber++
+
+			return true, nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headerNumber != 21 {
+		t.Fatal(headerNumber)
+	}
+
+	trnts = btCli.Torrents()
+	if len(trnts) != 1 {
+		t.Fatal("incorrect len", trnts)
+	}
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(v, trnts[0].Bytes()) {
+			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
+		}
+
+		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if binary.BigEndian.Uint64(v) != 20 {
+			t.Fatal("incorrect snapshot")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(SnapshotName(snapshotsDir, "headers", 10)); os.IsExist(err) {
 		t.Fatal("snapshot exist")
 	} else {
 		//just not to confuse defer
@@ -787,7 +1147,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 			}
 
 			genTx := func(a common.Address) ([]byte, error) {
-				return rlp.EncodeToBytes(types.NewTransaction(1, a, uint256.NewInt(), 1, uint256.NewInt(), nil))
+				return rlp.EncodeToBytes(types.NewTransaction(1, a, uint256.NewInt(1), 1, uint256.NewInt(1), nil))
 			}
 			txBytes, err := genTx(common.Address{uint8(i), uint8(blockNum), 1})
 			if err != nil {
@@ -896,6 +1256,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 		if err != nil {
 			t.Fatal(err, v)
 		}
+		fmt.Println(k,  bfs.BaseTxId, bfs.TxAmount)
 		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
 			t.Fatal(err)

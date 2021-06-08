@@ -3,6 +3,7 @@ package common
 import "errors"
 
 var ErrStopped = errors.New("stopped")
+var ErrUnwind = errors.New("unwound")
 
 func Stopped(ch <-chan struct{}) error {
 	if ch == nil {

@@ -25,14 +25,12 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/bloombits"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type Backend interface {
-	ChainDb() ethdb.Database
 	HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error)
 	HeaderByHash(ctx context.Context, blockHash common.Hash) (*types.Header, error)
 	GetReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, error)
@@ -52,7 +50,6 @@ type Backend interface {
 type Filter struct {
 	backend Backend
 
-	db        ethdb.Database
 	addresses []common.Address
 	topics    [][]common.Hash
 
@@ -112,7 +109,6 @@ func newFilter(backend Backend, addresses []common.Address, topics [][]common.Ha
 		backend:   backend,
 		addresses: addresses,
 		topics:    topics,
-		db:        backend.ChainDb(),
 	}
 }
 

@@ -232,7 +232,7 @@ func TestValidateSignatureValues(t *testing.T) {
 			t.Errorf("mismatch for v: %d r: %d s: %d want: %v", v, r, s, expected)
 		}
 	}
-	minusOne := uint256.NewInt().SetAllOne()
+	minusOne := uint256.NewInt(0).SetAllOne()
 	one := u256.Num1
 	zero := u256.Num0
 	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, u256.Num1)

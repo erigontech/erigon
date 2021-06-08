@@ -82,7 +82,7 @@ func AnswerGetBlockHeadersQuery(db ethdb.KVGetter, query *GetBlockHeadersPacket)
 		lookups int
 	)
 	for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit &&
-		len(headers) < maxHeadersServe && lookups < 2*maxHeadersServe {
+		len(headers) < MaxHeadersServe && lookups < 2*MaxHeadersServe {
 		lookups++
 		// Retrieve the next header satisfying the query
 		var origin *types.Header
@@ -198,8 +198,8 @@ func AnswerGetBlockBodiesQuery(db ethdb.Tx, query GetBlockBodiesPacket) []rlp.Ra
 		bodies []rlp.RawValue
 	)
 	for lookups, hash := range query {
-		if bytes >= softResponseLimit || len(bodies) >= maxBodiesServe ||
-			lookups >= 2*maxBodiesServe {
+		if bytes >= softResponseLimit || len(bodies) >= MaxBodiesServe ||
+			lookups >= 2*MaxBodiesServe {
 			break
 		}
 		number := rawdb.ReadHeaderNumber(db, hash)
@@ -290,7 +290,10 @@ func AnswerGetReceiptsQuery(db ethdb.Tx, query GetReceiptsPacket) ([]rlp.RawValu
 			break
 		}
 		// Retrieve the requested block's receipts
-		results := rawdb.ReadReceiptsByHash(ethdb.NewRoTxDb(db), hash)
+		results, err := rawdb.ReadReceiptsByHash(db, hash)
+		if err != nil {
+			return nil, err
+		}
 		if results == nil {
 			header, err := rawdb.ReadHeaderByHash(db, hash)
 			if err != nil {

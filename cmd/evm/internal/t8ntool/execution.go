@@ -127,7 +127,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	// If currentBaseFee is defined, add it to the vmContext.
 	if pre.Env.BaseFee != nil {
 		vmContext.BaseFee = new(uint256.Int)
-		vmContext.BaseFee.SetFromBig(pre.Env.BaseFee)
+		overflow := vmContext.BaseFee.SetFromBig(pre.Env.BaseFee)
+		if overflow {
+			return nil, nil, fmt.Errorf("pre.Env.BaseFee higher than 2^256-1")
+		}
 	}
 	// If DAO is supported/enabled, we need to handle it here. In geth 'proper', it's
 	// done in StateProcessor.Process(block, ...), right before transactions are applied.
@@ -207,18 +210,18 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		// - there are only 'bad' transactions, which aren't executed. In those cases,
 		//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 		var (
-			blockReward = uint256.NewInt().SetUint64(uint64(miningReward))
-			minerReward = uint256.NewInt().Set(blockReward)
-			perOmmer    = uint256.NewInt().Div(blockReward, uint256.NewInt().SetUint64(32))
+			blockReward = uint256.NewInt(uint64(miningReward))
+			minerReward = uint256.NewInt(0).Set(blockReward)
+			perOmmer    = uint256.NewInt(0).Div(blockReward, uint256.NewInt(32))
 		)
 		for _, ommer := range pre.Env.Ommers {
 			// Add 1/32th for each ommer included
 			minerReward.Add(minerReward, perOmmer)
 			// Add (8-delta)/8
-			reward := uint256.NewInt().SetUint64(8)
-			reward.Sub(reward, uint256.NewInt().SetUint64(ommer.Delta))
+			reward := uint256.NewInt(8)
+			reward.Sub(reward, uint256.NewInt(ommer.Delta))
 			reward.Mul(reward, blockReward)
-			reward.Div(reward, uint256.NewInt().SetUint64(8))
+			reward.Div(reward, uint256.NewInt(8))
 			ibs.AddBalance(ommer.Address, reward)
 		}
 		ibs.AddBalance(pre.Env.Coinbase, minerReward)
@@ -260,7 +263,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		statedb.SetBalance(addr, balance)
 		for k, v := range a.Storage {
 			key := k
-			val := uint256.NewInt().SetBytes(v.Bytes())
+			val := uint256.NewInt(0).SetBytes(v.Bytes())
 			statedb.SetState(addr, &key, *val)
 		}
 

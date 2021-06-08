@@ -34,16 +34,13 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/contracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -112,7 +109,7 @@ func TestCreate2Revive(t *testing.T) {
 			}
 			block.AddTx(tx)
 		case 2:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,7 +221,6 @@ func TestCreate2Revive(t *testing.T) {
 func TestCreate2Polymorth(t *testing.T) {
 
 	// Configure and generate a sample block chain
-	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -243,11 +239,11 @@ func TestCreate2Polymorth(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
-		signer  = types.LatestSignerForChainID(nil)
+		signer = types.LatestSignerForChainID(nil)
 	)
-
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -267,7 +263,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	// In the third block, we cause the first child contract to selfdestruct
 	// In the forth block, we create the second child contract
 	// In the 5th block, we delete and re-create the child contract twice
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -285,7 +281,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		case 2:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -302,7 +298,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		case 4:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -318,7 +314,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			}
 			block.AddTx(tx)
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -349,17 +345,17 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.PolyDeployEventIterator
@@ -373,7 +369,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 2", create2address.String())
 	}
@@ -385,16 +381,16 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[2], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if st.Exist(create2address) {
 		t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
 	}
 
 	// BLOCK 4
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[3], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -407,7 +403,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 4", create2address.String())
 	}
@@ -419,7 +415,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[4], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(4, 5)); err != nil {
 		t.Fatal(err)
 	}
 	it, err = poly.FilterDeployEvent(nil)
@@ -432,7 +428,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(create2address) {
 		t.Error("expected create2address to exist at the block 5", create2address.String())
 	}
@@ -447,7 +443,6 @@ func TestCreate2Polymorth(t *testing.T) {
 func TestReorgOverSelfDestruct(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -465,10 +460,11 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
 	)
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -480,7 +476,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -515,7 +511,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
 
-	longerChain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -541,11 +537,11 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[0:1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -556,25 +552,25 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCKS 2 + 3
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[1:], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if st.Exist(contractAddress) {
 		t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
 	}
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks[1:4], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -585,7 +581,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 func TestReorgOverStateChange(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -603,10 +598,11 @@ func TestReorgOverStateChange(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
 	)
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -618,7 +614,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var err error
 
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -646,7 +642,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerChain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -672,11 +668,11 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -687,21 +683,21 @@ func TestReorgOverStateChange(t *testing.T) {
 	st.GetState(contractAddress, &key0, &correctValueX)
 
 	// BLOCK 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[1:], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks[1:3], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(longerChain.Slice(1, 3)); err != nil {
 		t.Fatal(err)
 	}
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 	}
 
 	// Reload blockchain from the database
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	var valueX uint256.Int
 	st.GetState(contractAddress, &key0, &valueX)
 	if valueX != correctValueX {
@@ -724,7 +720,6 @@ func (b BucketsStats) Size() uint64 {
 
 func TestCreateOnExistingStorage(t *testing.T) {
 	// Configure and generate a sample block chain
-	db := ethdb.NewTestDB(t)
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -747,10 +742,11 @@ func TestCreateOnExistingStorage(t *testing.T) {
 				contractAddr: {Balance: funds, Storage: map[common.Hash]common.Hash{{}: common.HexToHash("0x42")}},
 			},
 		}
-		genesis = gspec.MustCommit(db)
 	)
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	var err error
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -766,7 +762,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
 	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
 	// We expect the pre-existing storage items to be removed by the deployment
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -792,7 +788,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -817,15 +813,16 @@ func TestReproduceCrash(t *testing.T) {
 	// 1. Setting storageKey 1 to a non-zero value
 	// 2. Setting storageKey 2 to a non-zero value
 	// 3. Setting both storageKey1 and storageKey2 to zero values
-	value0 := uint256.NewInt()
+	value0 := uint256.NewInt(0)
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	storageKey1 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541")
-	value1 := uint256.NewInt().SetUint64(0x016345785d8a0000)
+	value1 := uint256.NewInt(0x016345785d8a0000)
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
-	value2 := uint256.NewInt().SetUint64(0x58c00a51)
+	value2 := uint256.NewInt(0x58c00a51)
+
 	db := ethdb.NewTestDB(t)
-	tsw := state.NewDbStateWriter(db, 0)
-	intraBlockState := state.New(state.NewDbStateReader(db))
+	tsw := state.NewPlainStateWriter(db, nil, 0)
+	intraBlockState := state.New(state.NewPlainStateReader(db))
 	ctx := context.Background()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -838,13 +835,13 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
@@ -854,7 +851,6 @@ func TestReproduceCrash(t *testing.T) {
 func TestEip2200Gas(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -874,10 +870,11 @@ func TestEip2200Gas(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
 	)
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -890,7 +887,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
 	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -924,11 +921,11 @@ func TestEip2200Gas(t *testing.T) {
 	balanceBefore := st.GetBalance(address)
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -944,7 +941,6 @@ func TestEip2200Gas(t *testing.T) {
 func TestWrongIncarnation(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -960,10 +956,11 @@ func TestWrongIncarnation(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
 	)
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -974,7 +971,7 @@ func TestWrongIncarnation(t *testing.T) {
 	var changer *contracts.Changer
 	var err error
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1006,7 +1003,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[0], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1024,13 +1021,13 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal("Incorrect incarnation", acc.Incarnation)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
 	// BLOCKS 2
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, chain.Blocks[1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
@@ -1060,7 +1057,6 @@ func TestWrongIncarnation(t *testing.T) {
 func TestWrongIncarnation2(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -1076,13 +1072,14 @@ func TestWrongIncarnation2(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
-		signer  = types.LatestSignerForChainID(nil)
+		signer = types.LatestSignerForChainID(nil)
 	)
 
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -1092,12 +1089,12 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	var contractAddress common.Address
 
-	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1127,12 +1124,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerChain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 3, func(i int, block *core.BlockGen) {
+	longerChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1154,16 +1151,16 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:1], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCKS 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[1:], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(1, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
 
-	st = state.New(state.NewDbStateReader(db))
+	st = state.New(state.NewPlainStateReader(db))
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
@@ -1181,7 +1178,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation")
 	}
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks[1:], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(longerChain.Slice(1, longerChain.Length)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1202,7 +1199,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	db := ethdb.NewTestDB(t)
-	r, tsw := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
+	r, tsw := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1211,7 +1208,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, oldCode)
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %w", err)
 	}
@@ -1240,12 +1237,11 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 // TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
 func TestCacheCodeSizeSeparately(t *testing.T) {
-	t.Skip("to fix")
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	db := ethdb.NewTestDB(t)
-	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
+	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1254,7 +1250,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1279,7 +1275,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	db := ethdb.NewTestDB(t)
-	r, w := state.NewDbStateReader(db), state.NewDbStateWriter(db, 0)
+	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
 	// Start the 1st transaction
@@ -1288,7 +1284,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1327,7 +1323,6 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 func TestRecreateAndRewind(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewTestDB(t)
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
@@ -1337,11 +1332,11 @@ func TestRecreateAndRewind(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		genesis = gspec.MustCommit(db)
-		//signer  = types.HomesteadSigner{}
 	)
 
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(t, gspec, key)
+	db := ethdb.NewObjectDatabase(m.DB)
+	defer db.Close()
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 	transactOpts := bind.NewKeyedTransactor(key)
@@ -1352,7 +1347,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var phoenixAddress common.Address
 	var err error
 
-	chain, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 4, func(i int, block *core.BlockGen) {
+	chain, err1 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1414,7 +1409,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	defer contractBackendLonger.Close()
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerChain, err1 := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 5, func(i int, block *core.BlockGen) {
+	longerChain, err1 := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
 		var tx types.Transaction
 
 		switch i {
@@ -1469,11 +1464,11 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	// BLOCKS 1 and 2
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[:2], true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(0, 2)); err != nil {
 		t.Fatal(err)
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	st := state.New(state.NewPlainStateReader(db))
 	if !st.Exist(phoenixAddress) {
 		t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
 	}
@@ -1481,27 +1476,12 @@ func TestRecreateAndRewind(t *testing.T) {
 	var key0 common.Hash
 	var check0 uint256.Int
 	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(2)) != 0 {
+	if check0.Cmp(uint256.NewInt(2)) != 0 {
 		t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
 	}
 
 	// Block 3 and 4
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks[2:], true /* checkRoot */); err != nil {
-		t.Fatal(err)
-	}
-
-	st = state.New(state.NewDbStateReader(db))
-	if !st.Exist(phoenixAddress) {
-		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
-	}
-
-	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(1)) != 0 {
-		t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
-	}
-
-	// Reorg
-	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, longerChain.Blocks, true /* checkRoot */); err != nil {
+	if err = m.InsertChain(chain.Slice(2, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1511,7 +1491,22 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(0)) != 0 {
+	if check0.Cmp(uint256.NewInt(1)) != 0 {
+		t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
+	}
+
+	// Reorg
+	if err = m.InsertChain(longerChain); err != nil {
+		t.Fatal(err)
+	}
+
+	st = state.New(state.NewPlainStateReader(db))
+	if !st.Exist(phoenixAddress) {
+		t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+	}
+
+	st.GetState(phoenixAddress, &key0, &check0)
+	if check0.Cmp(uint256.NewInt(0)) != 0 {
 		t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
 	}
 }

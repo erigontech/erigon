@@ -25,30 +25,33 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 	defer tx.Rollback()
 
-	txn, _, blockNumber, txIndex := rawdb.ReadTransaction(tx, txHash)
-	if txn == nil {
+	blockNumber := rawdb.ReadTxLookupEntry(tx, txHash)
+	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
-	bn := hexutil.Uint64(blockNumber)
-
 	// Extract transactions from block
-	hash, hashErr := rawdb.ReadCanonicalHash(tx, blockNumber)
-	if hashErr != nil {
-		return nil, hashErr
-	}
-	block, _, bErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
+	block, _, bErr := rawdb.ReadBlockByNumberWithSenders(tx, *blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
 	if block == nil {
-		return nil, fmt.Errorf("could not find block %x %d", hash, uint64(bn))
+		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
 	}
+	var txIndex uint64
+	for idx, txn := range block.Transactions() {
+		if txn.Hash() == txHash {
+			txIndex = uint64(idx)
+			break
+		}
+	}
+	bn := hexutil.Uint64(*blockNumber)
 
 	parentNr := bn
 	if parentNr > 0 {
 		parentNr -= 1
 	}
+	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
 	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
@@ -192,6 +195,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
+		stream.WriteNil()
 		return fmt.Errorf("traceFilter cannot open tx: %v", err1)
 	}
 	defer dbtx.Rollback()
@@ -212,6 +216,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	if fromBlock > toBlock {
+		stream.WriteNil()
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
@@ -241,8 +246,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			toAddresses[*addr] = struct{}{}
 		}
 	}
-	allBlocks.RemoveRange(0, fromBlock)
-	allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
+	// Special case - if no addresses specified, take all traces
+	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
+		allBlocks.AddRange(fromBlock, toBlock+1)
+	} else {
+		allBlocks.RemoveRange(0, fromBlock)
+		allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
+	}
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -260,6 +270,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
 		if hashErr != nil {
+			stream.WriteNil()
 			return hashErr
 		}
 
@@ -269,6 +280,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			return bErr
 		}
 		if block == nil {
+			stream.WriteNil()
 			return fmt.Errorf("could not find block %x %d", hash, b)
 		}
 
@@ -277,14 +289,16 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header())
 		if tErr != nil {
+			stream.WriteNil()
 			return tErr
 		}
+		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
 			txPosition := uint64(i)
 			txHash := txs[i].Hash()
 			// Check if transaction concerns any of the addresses we wanted
 			for _, pt := range trace.Trace {
-				if filter_trace(pt, fromAddresses, toAddresses) {
+				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
 					pt.BlockHash = &blockHash
 					pt.BlockNumber = &blockNumber
 					pt.TransactionHash = &txHash
@@ -304,7 +318,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 		}
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-		if _, ok := toAddresses[block.Coinbase()]; ok {
+		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
 			var tr ParityTrace
 			var rewardAction = &RewardTraceAction{}
 			rewardAction.Author = block.Coinbase()
@@ -330,7 +344,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.Write(b)
 		}
 		for i, uncle := range block.Uncles() {
-			if _, ok := toAddresses[uncle.Coinbase]; ok {
+			if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 				if i < len(uncleRewards) {
 					var tr ParityTrace
 					rewardAction := &RewardTraceAction{}

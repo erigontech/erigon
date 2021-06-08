@@ -54,10 +54,15 @@ import (
 //	},
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test where apply migration twice
-var migrations = []Migration{
-	headerPrefixToSeparateBuckets,
-	removeCliqueBucket,
-	dbSchemaVersion,
+var migrations = map[ethdb.Label][]Migration{
+	ethdb.Chain: {
+		headerPrefixToSeparateBuckets,
+		removeCliqueBucket,
+		dbSchemaVersion,
+		rebuilCallTraceIndex,
+	},
+	ethdb.TxPool: {},
+	ethdb.Sentry: {},
 }
 
 type Migration struct {
@@ -71,9 +76,9 @@ var (
 	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 
-func NewMigrator() *Migrator {
+func NewMigrator(label ethdb.Label) *Migrator {
 	return &Migrator{
-		Migrations: migrations,
+		Migrations: migrations[label],
 	}
 }
 
@@ -81,32 +86,39 @@ type Migrator struct {
 	Migrations []Migration
 }
 
-func AppliedMigrations(db ethdb.Database, withPayload bool) (map[string][]byte, error) {
+func AppliedMigrations(tx ethdb.Tx, withPayload bool) (map[string][]byte, error) {
 	applied := map[string][]byte{}
-	err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, v []byte) (bool, error) {
+	err := tx.ForEach(dbutils.Migrations, nil, func(k []byte, v []byte) error {
 		if bytes.HasPrefix(k, []byte("_progress_")) {
-			return true, nil
+			return nil
 		}
 		if withPayload {
 			applied[string(common.CopyBytes(k))] = common.CopyBytes(v)
 		} else {
 			applied[string(common.CopyBytes(k))] = []byte{}
 		}
-		return true, nil
+		return nil
 	})
 	return applied, err
 }
 
-func (m *Migrator) HasPendingMigrations(db ethdb.Database) (bool, error) {
-	pending, err := m.PendingMigrations(db)
-	if err != nil {
+func (m *Migrator) HasPendingMigrations(db ethdb.RwKV) (bool, error) {
+	var has bool
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		pending, err := m.PendingMigrations(tx)
+		if err != nil {
+			return err
+		}
+		has = len(pending) > 0
+		return nil
+	}); err != nil {
 		return false, err
 	}
-	return len(pending) > 0, nil
+	return has, nil
 }
 
-func (m *Migrator) PendingMigrations(db ethdb.Database) ([]Migration, error) {
-	applied, err := AppliedMigrations(db, false)
+func (m *Migrator) PendingMigrations(tx ethdb.Tx) ([]Migration, error) {
+	applied, err := AppliedMigrations(tx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -136,10 +148,20 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string, mdbx bool) error {
 		return nil
 	}
 
-	applied, err1 := AppliedMigrations(db, false)
+	var applied map[string][]byte
+	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		var err error
+		applied, err = AppliedMigrations(tx, false)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
+	defer tx.Rollback()
 
 	// migration names must be unique, protection against people's mistake
 	uniqueNameCheck := map[string]bool{}
@@ -150,12 +172,6 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string, mdbx bool) error {
 		}
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
-
-	tx, err1 := db.Begin(context.Background(), ethdb.RW)
-	if err1 != nil {
-		return err1
-	}
-	defer tx.Rollback()
 
 	for i := range m.Migrations {
 		v := m.Migrations[i]

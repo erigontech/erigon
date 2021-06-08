@@ -358,19 +358,31 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 	}
 	gasPrice := new(uint256.Int)
 	if args.GasPrice != nil {
-		gasPrice.SetFromBig(args.GasPrice.ToInt())
+		overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.GasPrice higher than 2^256-1"))
+		}
 	}
 	var tip *uint256.Int
 	if args.Tip != nil {
-		tip.SetFromBig(args.Tip.ToInt())
+		overflow := tip.SetFromBig(args.Tip.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.GasPrice higher than 2^256-1"))
+		}
 	}
 	var feeCap *uint256.Int
 	if args.FeeCap != nil {
-		feeCap.SetFromBig(args.FeeCap.ToInt())
+		overflow := feeCap.SetFromBig(args.FeeCap.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.GasPrice higher than 2^256-1"))
+		}
 	}
 	value := new(uint256.Int)
 	if args.Value != nil {
-		value.SetFromBig(args.Value.ToInt())
+		overflow := value.SetFromBig(args.Value.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.GasPrice higher than 2^256-1"))
+		}
 	}
 	var data []byte
 	if args.Data != nil {
@@ -418,7 +430,10 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 		}
 		// Override account balance.
 		if account.Balance != nil {
-			balance, _ := uint256.FromBig((*big.Int)(*account.Balance))
+			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
+			if overflow {
+				panic(fmt.Errorf("account.Balance higher than 2^256-1"))
+			}
 			state.SetBalance(addr, balance)
 		}
 		if account.State != nil && account.StateDiff != nil {
@@ -825,7 +840,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
 	// because the return value of ChainId is zero for those transactions.
-	chainId := uint256.NewInt()
+	chainId := uint256.NewInt(0)
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(tx.Type()),
 		Gas:   hexutil.Uint64(tx.GetGas()),

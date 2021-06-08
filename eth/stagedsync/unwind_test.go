@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +19,7 @@ func TestUnwindStackLoadFromDb(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i]}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
 		assert.NoError(t, err)
 	}
 
@@ -42,7 +43,7 @@ func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i]}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
 		assert.NoError(t, err)
 	}
 
@@ -71,7 +72,7 @@ func TestUnwindStackLoadFromDbNoDone(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i]}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
 		assert.NoError(t, err)
 	}
 
@@ -98,7 +99,7 @@ func TestUnwindStackPopAndEmpty(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i]}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
 		assert.NoError(t, err)
 	}
 
@@ -131,13 +132,13 @@ func TestUnwindOverrideWithLower(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i]}, db)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, db)
 		assert.NoError(t, err)
 	}
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	err := stack.Add(UnwindState{stages[0], 5}, db)
+	err := stack.Add(UnwindState{stages[0], 5, common.Hash{}}, db)
 	assert.NoError(t, err)
 
 	// we append if the next unwind is to the lower block
@@ -154,13 +155,13 @@ func TestUnwindOverrideWithHigher(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i]}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
 		assert.NoError(t, err)
 	}
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	err := stack.Add(UnwindState{stages[0], 105}, tx)
+	err := stack.Add(UnwindState{stages[0], 105, common.Hash{}}, tx)
 	assert.NoError(t, err)
 
 	// we ignore if next unwind is to the higher block
@@ -177,13 +178,13 @@ func TestUnwindOverrideWithTheSame(t *testing.T) {
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i]}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
 		assert.NoError(t, err)
 	}
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	err := stack.Add(UnwindState{stages[0], 10}, tx)
+	err := stack.Add(UnwindState{stages[0], 10, common.Hash{}}, tx)
 	assert.NoError(t, err)
 
 	// we ignore if next unwind is to the higher block
