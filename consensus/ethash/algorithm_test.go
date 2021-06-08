@@ -21,12 +21,11 @@ import (
 	"encoding/binary"
 	"io"
 	"io/ioutil"
-	"os"
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 // prepare converts an ethash cache or dataset from a byte stream into the internal
@@ -744,12 +743,7 @@ func BenchmarkHashimotoFullSmall(b *testing.B) {
 
 func benchmarkHashimotoFullMmap(b *testing.B, name string, lock bool) {
 	b.Run(name, func(b *testing.B) {
-		tmpdir, err := ioutil.TempDir("", "ethash-test")
-		if err != nil {
-			b.Fatal(err)
-		}
-		defer os.RemoveAll(tmpdir)
-
+		tmpdir := b.TempDir()
 		d := &dataset{epoch: 0}
 		d.generate(tmpdir, 1, lock, false)
 		var hash [common.HashLength]byte

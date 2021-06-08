@@ -8,9 +8,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 )
 
 type StarkStatsBuilder struct {
@@ -217,7 +217,7 @@ func StarkStats(witness *Witness, w io.Writer, trace bool) error {
 			if trace {
 				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
 			}
-			balance := uint256.NewInt()
+			balance := uint256.NewInt(0)
 			balance.SetBytes(op.Balance.Bytes())
 			nonce := op.Nonce
 

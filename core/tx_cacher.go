@@ -19,8 +19,8 @@ package core
 import (
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // txSenderCacherRequest is a request for recovering transaction senders with a

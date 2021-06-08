@@ -24,8 +24,8 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type CommonTx struct {
@@ -64,9 +64,9 @@ type LegacyTx struct {
 	GasPrice *uint256.Int // wei per gas
 }
 
-func (tx LegacyTx) GetPrice() *uint256.Int {
-	return tx.GasPrice
-}
+func (tx LegacyTx) GetPrice() *uint256.Int  { return tx.GasPrice }
+func (tx LegacyTx) GetTip() *uint256.Int    { return tx.GasPrice }
+func (tx LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
 
 func (tx LegacyTx) Cost() *uint256.Int {
 	total := new(uint256.Int).SetUint64(tx.Gas)
@@ -410,7 +410,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx LegacyTx) AsMessage(_ *Header, s Signer) (Message, error) {
+func (tx LegacyTx) AsMessage(s Signer, _ *big.Int) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,

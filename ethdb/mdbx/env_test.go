@@ -2,10 +2,8 @@ package mdbx
 
 import (
 	"fmt"
-	"io/ioutil"
-	"os"
+	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -33,12 +31,7 @@ func TestEnv_Path(t *testing.T) {
 	}
 
 	// open an environment
-	dir, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	defer os.RemoveAll(dir)
-
+	dir := t.TempDir()
 	err = env.Open(dir, 0, 0644)
 	defer env.Close()
 	if err != nil {
@@ -73,35 +66,26 @@ func TestEnv_Open(t *testing.T) {
 		t.Error(err1)
 		return
 	}
-	defer func() {
-		if err := env.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer env.Close()
 
 	// open an environment at a temporary path.
-	path, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	defer os.RemoveAll(path)
-	err = env.Open(path, 0, 0664)
+	path := t.TempDir()
+	err := env.Open(path, 0, 0664)
 	if err != nil {
 		t.Errorf("open: %s", err)
 	}
 }
 
 func TestEnv_FD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FD funcs not supported on windows")
+	}
 	env, err1 := NewEnv()
 	if err1 != nil {
 		t.Error(err1)
 		return
 	}
-	defer func() {
-		if err := env.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
+	defer env.Close()
 
 	fd, err := env.FD()
 	if err != nil && !strings.Contains(err.Error(), "operation not permitted") {
@@ -109,11 +93,7 @@ func TestEnv_FD(t *testing.T) {
 	}
 
 	// open an environment at a temporary path.
-	path, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 	err = env.Open(path, 0, 0664)
 	if err != nil {
 		t.Errorf("open: %s", err)
@@ -130,7 +110,6 @@ func TestEnv_FD(t *testing.T) {
 
 func TestEnv_Flags(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	flags, err := env.Flags()
 	if err != nil {
@@ -173,25 +152,21 @@ func TestEnv_Flags(t *testing.T) {
 }
 
 func TestEnv_SetMaxReader(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-env-setmaxreaders-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	env, err := NewEnv()
 	if err != nil {
 		t.Error(err)
 	}
 
-	maxreaders := 246
-	err = env.SetMaxReaders(maxreaders)
+	maxreaders := uint64(246)
+	err = env.SetOption(OptMaxReaders, maxreaders)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	_maxreaders, err := env.MaxReaders()
+	_maxreaders, err := env.GetOption(OptMaxReaders)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	if _maxreaders < maxreaders {
 		t.Errorf("unexpected MaxReaders: %v (< %v)", _maxreaders, maxreaders)
@@ -203,27 +178,21 @@ func TestEnv_SetMaxReader(t *testing.T) {
 		env.Close()
 		t.Error(err)
 	}
-
-	err = env.SetMaxReaders(126)
-	if !IsErrnoSys(err, syscall.EPERM) {
-		t.Errorf("unexpected error: %v (!= %v)", err, syscall.EPERM)
-	}
-	_maxreaders, err = env.MaxReaders()
-	if err != nil {
-		t.Error(err)
-	}
-	if _maxreaders < maxreaders {
-		t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
-	}
+	//
+	//err = env.SetOption(OptMaxReaders, uint64(126))
+	//if !IsErrnoSys(err, syscall.EPERM) {
+	//	t.Errorf("unexpected error: %v (!= %v)", err, syscall.EPERM)
+	//}
+	//_maxreaders, err = env.GetOption(OptMaxReaders)
+	//if err != nil {
+	//	t.Error(err)
+	//}
+	//if _maxreaders < maxreaders {
+	//	t.Errorf("unexpected MaxReaders: %v (!= %v)", _maxreaders, maxreaders)
+	//}
 }
 
 func TestEnv_SetDebug(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-env-setmdebug-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
 	env, err := NewEnv()
 	if err != nil {
 		t.Error(err)
@@ -237,7 +206,7 @@ func TestEnv_SetDebug(t *testing.T) {
 
 //func TestEnv_SetMapSize(t *testing.T) {
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	const minsize = 100 << 20 // 100MB
 //	err := env.SetMapSize(minsize)
@@ -262,7 +231,7 @@ func TestEnv_SetDebug(t *testing.T) {
 
 //func TestEnv_ReaderList(t *testing.T) {
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	var numreaders = 2
 //
@@ -308,7 +277,7 @@ func TestEnv_SetDebug(t *testing.T) {
 
 //func TestEnv_ReaderList_error(t *testing.T) {
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	var numreaders = 2
 //
@@ -381,7 +350,6 @@ func TestEnv_SetDebug(t *testing.T) {
 
 func TestEnv_ReaderCheck(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	numDead, err := env.ReaderCheck()
 	if err != nil {
@@ -436,7 +404,7 @@ func TestEnv_ReaderCheck(t *testing.T) {
 //	}
 //
 //	env := setup(t)
-//	defer clean(env, t)
+//
 //
 //	item := struct{ k, v []byte }{
 //		[]byte("k0"),
@@ -500,7 +468,6 @@ func TestEnv_ReaderCheck(t *testing.T) {
 
 func TestEnv_Sync(t *testing.T) {
 	env := setupFlags(t, SafeNoSync)
-	defer clean(env, t)
 
 	item := struct{ k, v []byte }{[]byte("k0"), []byte("v0")}
 
@@ -521,37 +488,32 @@ func TestEnv_Sync(t *testing.T) {
 	}
 }
 
-func setup(t T) *Env {
+func setup(t testing.TB) *Env {
 	return setupFlags(t, 0)
 }
 
-func setupFlags(t T, flags uint) *Env {
+func setupFlags(t testing.TB, flags uint) *Env {
 	env, err := NewEnv()
 	if err != nil {
 		t.Fatalf("env: %s", err)
 	}
-	path, err := ioutil.TempDir("", "mdb_test")
-	if err != nil {
-		t.Fatalf("tempdir: %v", err)
-	}
-	err = os.MkdirAll(path, 0770)
-	if err != nil {
-		t.Fatalf("mkdir: %s", path)
-	}
-	err = env.SetMaxDBs(1024)
+	path := t.TempDir()
+	err = env.SetOption(OptMaxDB, 1024)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	err = env.SetGeometry(-1, -1, 10*1024*1024, -1, -1, 4096)
+	const pageSize = 4096
+	err = env.SetGeometry(-1, -1, 64*1024*pageSize, -1, -1, pageSize)
 	if err != nil {
 		t.Fatalf("setmaxdbs: %v", err)
 	}
-	flags |= UtterlyNoSync | NoMetaSync
 	err = env.Open(path, flags, 0664)
 	if err != nil {
 		t.Fatalf("open: %s", err)
 	}
-
+	t.Cleanup(func() {
+		env.Close()
+	})
 	return env
 }
 
@@ -560,31 +522,8 @@ type T interface {
 	Fatalf(format string, vals ...interface{})
 }
 
-func clean(env *Env, t T) {
-	path, err := env.Path()
-	if err != nil {
-		t.Errorf("path: %v", err)
-	}
-	err = env.Close()
-	if err != nil {
-		t.Errorf("close: %s", err)
-	}
-	if path != "" {
-		err = os.RemoveAll(path)
-		if err != nil {
-			t.Errorf("remove: %v", err)
-		}
-	}
-}
-
-func TestEnvCopy(t *testing.T) {
-	env := setup(t)
-	defer clean(env, t)
-}
-
 func TestEnv_MaxKeySize(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	n := env.MaxKeySize()
 	if n <= 0 {
@@ -603,7 +542,6 @@ func TestEnv_MaxKeySize_nil(t *testing.T) {
 
 func TestEnv_CloseDBI(t *testing.T) {
 	env := setup(t)
-	defer clean(env, t)
 
 	const numdb = 1000
 	for i := 0; i < numdb; i++ {

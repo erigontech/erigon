@@ -25,11 +25,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 func TestDecodeEmptyTypedReceipt(t *testing.T) {
@@ -50,7 +50,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 			"StoredReceiptRLP",
 			encodeAsStoredReceiptRLP,
 		},
-		// Turbo-Geth: all the legacy formats are removed intentionally
+		// Erigon: all the legacy formats are removed intentionally
 	}
 
 	tx := NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
@@ -150,10 +150,10 @@ func TestDeriveFields(t *testing.T) {
 				CommonTx: CommonTx{
 					To:    &to3,
 					Nonce: 3,
-					Value: uint256.NewInt().SetUint64(3),
+					Value: uint256.NewInt(3),
 					Gas:   3,
 				},
-				GasPrice: uint256.NewInt().SetUint64(3),
+				GasPrice: uint256.NewInt(3),
 			},
 		},
 	}

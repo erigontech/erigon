@@ -7,16 +7,13 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 )
-
-//MaxChangesetsSearch -
-const MaxChangesetsSearch = 256
 
 func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
@@ -42,19 +39,19 @@ func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, e
 }
 
 func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	var hBucket string
+	var csBucket string
 	if storage {
-		hBucket = dbutils.StorageHistoryBucket
+		csBucket = dbutils.StorageChangeSetBucket
 	} else {
-		hBucket = dbutils.AccountsHistoryBucket
+		csBucket = dbutils.AccountChangeSetBucket
 	}
 
-	ch, err := tx.Cursor(hBucket)
+	ch, err := tx.Cursor(changeset.Mapper[csBucket].IndexBucket)
 	if err != nil {
 		return nil, err
 	}
 	defer ch.Close()
-	k, v, seekErr := ch.Seek(dbutils.IndexChunkKey(key, timestamp))
+	k, v, seekErr := ch.Seek(changeset.Mapper[csBucket].IndexChunkKey(key, timestamp))
 	if seekErr != nil {
 		return nil, seekErr
 	}
@@ -81,7 +78,6 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 
 	var data []byte
 	if ok {
-		csBucket := dbutils.ChangeSetByIndexBucket(storage)
 		c, err := tx.CursorDupSort(csBucket)
 		if err != nil {
 			return nil, err

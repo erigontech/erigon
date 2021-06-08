@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +34,8 @@ var stateBuckets = []string{
 	dbutils.AccountsHistoryBucket,
 	dbutils.StorageHistoryBucket,
 	dbutils.TxLookupPrefix,
+	dbutils.ContractTEVMCodeBucket,
+	dbutils.ContractTEVMCodeStatusBucket,
 }
 
 var cmdCompareBucket = &cobra.Command{
@@ -403,7 +405,7 @@ MainLoop:
 
 func lmdbToMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
-	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint { return (flags | lmdb.Readonly) ^ lmdb.NoReadahead }).MustOpen()
+	src := ethdb.NewLMDB().Path(from).MustOpen()
 	dst := ethdb.NewMDBX().Path(to).MustOpen()
 	return kv2kv(ctx, src, dst)
 }

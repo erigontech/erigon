@@ -22,18 +22,19 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -68,6 +69,7 @@ type stEnv struct {
 	Timestamp   uint64                              `json:"currentTimestamp"  gencodec:"required"`
 	BlockHashes map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
 	Ommers      []ommer                             `json:"ommers,omitempty"`
+	BaseFee     *big.Int                            `json:"currentBaseFee,omitempty"`
 }
 
 type stEnvMarshaling struct {
@@ -76,6 +78,7 @@ type stEnvMarshaling struct {
 	GasLimit   math.HexOrDecimal64
 	Number     math.HexOrDecimal64
 	Timestamp  math.HexOrDecimal64
+	BaseFee    *math.HexOrDecimal256
 }
 
 // Apply applies a set of transactions to a pre-state
@@ -99,7 +102,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	}
 	var (
 		db          = ethdb.NewMemDatabase()
-		ibs, tds    = MakePreState(db, pre.Pre)
+		ibs         = MakePreState(context.Background(), db, pre.Pre)
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -115,10 +118,19 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		Transfer:    core.Transfer,
 		Coinbase:    pre.Env.Coinbase,
 		BlockNumber: pre.Env.Number,
+		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 		Time:        pre.Env.Timestamp,
 		Difficulty:  pre.Env.Difficulty,
 		GasLimit:    pre.Env.GasLimit,
 		GetHash:     getHash,
+	}
+	// If currentBaseFee is defined, add it to the vmContext.
+	if pre.Env.BaseFee != nil {
+		vmContext.BaseFee = new(uint256.Int)
+		overflow := vmContext.BaseFee.SetFromBig(pre.Env.BaseFee)
+		if overflow {
+			return nil, nil, fmt.Errorf("pre.Env.BaseFee higher than 2^256-1")
+		}
 	}
 	// If DAO is supported/enabled, we need to handle it here. In geth 'proper', it's
 	// done in StateProcessor.Process(block, ...), right before transactions are applied.
@@ -128,10 +140,8 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		misc.ApplyDAOHardFork(ibs)
 	}
 
-	tds.StartNewBuffer()
-
 	for i, tx := range txs {
-		msg, err := tx.AsMessage(nil, *signer)
+		msg, err := tx.AsMessage(*signer, pre.Env.BaseFee)
 		if err != nil {
 			log.Info("rejected tx", "index", i, "hash", tx.Hash(), "error", err)
 			rejectedTxs = append(rejectedTxs, i)
@@ -164,10 +174,6 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 		// Receipt:
 		{
-			if chainConfig.IsByzantium(vmContext.BlockNumber) {
-				tds.StartNewBuffer()
-			}
-
 			// Create a new receipt for the transaction, storing the intermediate root and
 			// gas used by the tx.
 			receipt := &types.Receipt{Type: tx.Type(), CumulativeGasUsed: gasUsed}
@@ -204,33 +210,36 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		// - there are only 'bad' transactions, which aren't executed. In those cases,
 		//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 		var (
-			blockReward = uint256.NewInt().SetUint64(uint64(miningReward))
-			minerReward = uint256.NewInt().Set(blockReward)
-			perOmmer    = uint256.NewInt().Div(blockReward, uint256.NewInt().SetUint64(32))
+			blockReward = uint256.NewInt(uint64(miningReward))
+			minerReward = uint256.NewInt(0).Set(blockReward)
+			perOmmer    = uint256.NewInt(0).Div(blockReward, uint256.NewInt(32))
 		)
 		for _, ommer := range pre.Env.Ommers {
 			// Add 1/32th for each ommer included
 			minerReward.Add(minerReward, perOmmer)
 			// Add (8-delta)/8
-			reward := uint256.NewInt().SetUint64(8)
-			reward.Sub(reward, uint256.NewInt().SetUint64(ommer.Delta))
+			reward := uint256.NewInt(8)
+			reward.Sub(reward, uint256.NewInt(ommer.Delta))
 			reward.Mul(reward, blockReward)
-			reward.Div(reward, uint256.NewInt().SetUint64(8))
+			reward.Div(reward, uint256.NewInt(8))
 			ibs.AddBalance(ommer.Address, reward)
 		}
 		ibs.AddBalance(pre.Env.Coinbase, minerReward)
 	}
 
-	err := ibs.FinalizeTx(context.Background(), tds.TrieStateWriter())
+	err := ibs.FinalizeTx(context.Background(), state.NewDbStateWriter(db, 1))
 	if err != nil {
 		return nil, nil, err
 	}
 	// Commit block
-	roots, err := tds.ComputeTrieRoots()
+	var root common.Hash
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		root, err = trie.CalcRoot("", tx)
+		return err
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	root := roots[len(roots)-1]
 	execRs := &ExecutionResult{
 		StateRoot:   root,
 		TxRoot:      types.DeriveSha(includedTxs),
@@ -243,31 +252,33 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	return db.RwKV(), execRs, nil
 }
 
-func MakePreState(db ethdb.Database, accounts core.GenesisAlloc) (*state.IntraBlockState, *state.TrieDbState) {
-	tds := state.NewTrieDbState(common.Hash{}, db, 0)
-	statedb := state.New(tds)
+func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc) *state.IntraBlockState {
+	var blockNr uint64 = 0
+	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
+	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		b, o := uint256.FromBig(a.Balance)
-		if o {
-			panic(fmt.Errorf("unexpected overflow in MakePreState"))
-		}
-		statedb.SetBalance(addr, b)
+		balance, _ := uint256.FromBig(a.Balance)
+		statedb.SetBalance(addr, balance)
 		for k, v := range a.Storage {
-			statedb.SetState(addr, &k, *uint256.NewInt().SetBytes(v.Bytes())) //nolint:scopelint
+			key := k
+			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			statedb.SetState(addr, &key, *val)
+		}
+
+		if len(a.Code) > 0 || len(a.Storage) > 0 {
+			statedb.SetIncarnation(addr, 1)
 		}
 	}
-	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
-	if err != nil {
+	// Commit and re-open to start with a clean state.
+	if err := statedb.FinalizeTx(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		panic(err)
 	}
-	_, err = tds.ComputeTrieRoots()
-	if err != nil {
+	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		panic(err)
 	}
-
-	return statedb, tds
+	return statedb
 }
 
 func rlpHash(x interface{}) (h common.Hash) {

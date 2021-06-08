@@ -9,31 +9,29 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 type TrieCfg struct {
-	db                ethdb.RwKV
-	checkRoot         bool
-	saveNewHashesToDB bool
-	tmpDir            string
+	db        ethdb.RwKV
+	checkRoot bool
+	tmpDir    string
 }
 
 func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	return TrieCfg{
-		db:                db,
-		checkRoot:         checkRoot,
-		saveNewHashesToDB: saveNewHashesToDB,
-		tmpDir:            tmpDir,
+		db:        db,
+		checkRoot: checkRoot,
+		tmpDir:    tmpDir,
 	}
 }
 
@@ -61,6 +59,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 	}
 
 	var expectedRootHash common.Hash
+	var headerHash common.Hash
 	if cfg.checkRoot {
 		var hash common.Hash
 		hash, err = rawdb.ReadCanonicalHash(tx, to)
@@ -69,29 +68,36 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 		}
 		syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 		expectedRootHash = syncHeadHeader.Root
+		headerHash = syncHeadHeader.Hash()
 	}
 
 	logPrefix := s.state.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
+	if to > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
+	}
 	var root common.Hash
 	if s.BlockNumber == 0 {
 		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
-			log.Error("Regeneration failed", "error", err)
+			return trie.EmptyRoot, err
 		}
 	} else {
 		if root, err = incrementIntermediateHashes(logPrefix, s, tx, to, cfg, expectedRootHash, quit); err != nil {
-			log.Error("Increment  failed", "error", err)
+			return trie.EmptyRoot, err
 		}
 	}
 
 	if err == nil {
-		if err1 := s.DoneAndUpdate(tx, to); err1 != nil {
-			return trie.EmptyRoot, err1
-		}
-	} else if to > s.BlockNumber {
-		log.Warn("Unwinding due to error", "to", s.BlockNumber)
-		if err1 := u.UnwindTo(s.BlockNumber, tx, tx); err1 != nil {
-			return trie.EmptyRoot, err1
+		if cfg.checkRoot && root != expectedRootHash {
+			log.Error(fmt.Sprintf("[%s] Wrong trie root: %x, expected (from header): %x", logPrefix, root, expectedRootHash))
+			if to > s.BlockNumber {
+				log.Warn("Unwinding due to incorrect root hash", "to", to-1)
+				if err = u.UnwindTo(to-1, tx, headerHash); err != nil {
+					return trie.EmptyRoot, err
+				}
+			}
+			s.Done()
+		} else if err = s.DoneAndUpdate(tx, to); err != nil {
+			return trie.EmptyRoot, err
 		}
 	} else {
 		return trie.EmptyRoot, err
@@ -124,7 +130,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	}
 
 	if cfg.checkRoot && hash != expectedRootHash {
-		return trie.EmptyRoot, fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
+		return hash, nil
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(),
 		"in", time.Since(calcStart))
@@ -224,19 +230,12 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
-		c, err := p.db.Cursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		cDel, err := p.db.RwCursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer cDel.Close()
 		for _, k := range deletedAccounts {
-			if err := ethdb.Walk(c, k, 8*len(k), func(k, v []byte) (bool, error) {
-				return true, cDel.Delete(k, v)
+			if err := p.db.ForPrefix(dbutils.TrieOfStorageBucket, k, func(k, v []byte) error {
+				if err := p.db.Delete(dbutils.TrieOfStorageBucket, k, v); err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -317,19 +316,12 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
-		c, err := p.db.Cursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		cDel, err := p.db.RwCursor(dbutils.TrieOfStorageBucket)
-		if err != nil {
-			return err
-		}
-		defer cDel.Close()
 		for _, k := range deletedAccounts {
-			if err := ethdb.Walk(c, k, 8*len(k), func(k, _ []byte) (bool, error) {
-				return true, cDel.Delete(k, nil)
+			if err := p.db.ForPrefix(dbutils.TrieOfStorageBucket, k, func(k, v []byte) error {
+				if err := p.db.Delete(dbutils.TrieOfStorageBucket, k, v); err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 				return err
 			}
@@ -368,7 +360,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	}
 
 	if cfg.checkRoot && hash != expectedRootHash {
-		return trie.EmptyRoot, fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
+		return hash, nil
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix),
 		" hash", hash.Hex(),

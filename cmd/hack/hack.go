@@ -1,5 +1,3 @@
-//+build mdbx
-
 package main
 
 import (
@@ -22,34 +20,30 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
+	"github.com/ledgerwatch/erigon/cmd/hack/db"
+	"github.com/ledgerwatch/erigon/cmd/hack/flow"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-
-	"github.com/ledgerwatch/turbo-geth/cmd/hack/db"
-	"github.com/ledgerwatch/turbo-geth/cmd/hack/flow"
-	"github.com/ledgerwatch/turbo-geth/cmd/hack/tool"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/mdbx"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
 )
 
 var (
@@ -831,7 +825,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 }
 
 func repairCurrent() {
-	historyDb := ethdb.MustOpen("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata")
+	historyDb := ethdb.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
 	defer historyDb.Close()
 	currentDb := ethdb.MustOpen("statedb")
 	defer currentDb.Close()
@@ -1365,7 +1359,7 @@ func supply(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
 	count := 0
-	supply := uint256.NewInt()
+	supply := uint256.NewInt(0)
 	var a accounts.Account
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.PlainStateBucket)
@@ -1698,61 +1692,6 @@ func extractBodies(chaindata string, block uint64) error {
 	return nil
 }
 
-func applyBlock(chaindata string, hash common.Hash) error {
-	db := ethdb.MustOpen(chaindata)
-	defer db.Close()
-	f, err := os.Open("out.txt")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	r := bufio.NewReader(f)
-	s := bufio.NewScanner(r)
-	s.Buffer(nil, 20000000)
-	count := 0
-	var body *types.Body
-	var header *types.Header
-	for s.Scan() {
-		fields := strings.Split(s.Text(), " ")
-		h := common.HexToHash(fields[2][:64])
-		if h != hash {
-			continue
-		}
-		switch fields[0] {
-		case "Body":
-			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &body); err != nil {
-				return nil
-			}
-		case "Header":
-			if err = rlp.DecodeBytes(common.FromHex(fields[3]), &header); err != nil {
-				return nil
-			}
-		}
-		count++
-	}
-	if s.Err() != nil {
-		return s.Err()
-	}
-	fmt.Printf("Lines: %d\n", count)
-	if body == nil {
-		fmt.Printf("block body with given hash %x not found\n", hash)
-		return nil
-	}
-	if header == nil {
-		fmt.Printf("header with given hash not found\n")
-		return nil
-	}
-	block := types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
-	fmt.Printf("Formed block %d %x\n", block.NumberU64(), block.Hash())
-	if _, err = stagedsync.InsertBlockInStages(db, params.MainnetChainConfig, &vm.Config{}, ethash.NewFaker(), block, true /* checkRoot */); err != nil {
-		return err
-	}
-	if err = rawdb.WriteCanonicalHash(db, hash, block.NumberU64()); err != nil {
-		return err
-	}
-	return nil
-}
-
 func fixUnwind(chaindata string) error {
 	contractAddr := common.HexToAddress("0x577a32aa9c40cf4266e49fc1e44c749c356309bd")
 	db := ethdb.MustOpen(chaindata)
@@ -1820,6 +1759,52 @@ func snapSizes(chaindata string) error {
 	fmt.Printf("Different keys %d\n", len(differentValues))
 	fmt.Printf("Total size: %d bytes\n", total)
 
+	return nil
+}
+
+func readCallTraces(chaindata string, block uint64) error {
+	kv := ethdb.MustOpenKV(chaindata)
+	defer kv.Close()
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	traceCursor, err1 := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	if err1 != nil {
+		return err1
+	}
+	defer traceCursor.Close()
+	var k []byte
+	var v []byte
+	count := 0
+	for k, v, err = traceCursor.First(); k != nil && err == nil; k, v, err = traceCursor.Next() {
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum == block {
+			fmt.Printf("%x\n", v)
+		}
+		count++
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Found %d records\n", count)
+	idxCursor, err2 := tx.Cursor(dbutils.CallToIndex)
+	if err2 != nil {
+		return err2
+	}
+	var acc common.Address = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
+	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
+		bm := roaring64.New()
+		_, err = bm.ReadFrom(bytes.NewReader(v))
+		if err != nil {
+			return err
+		}
+		//fmt.Printf("%x: %d\n", k, bm.ToArray())
+	}
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1926,9 +1911,6 @@ func main() {
 	case "extractBodies":
 		err = extractBodies(*chaindata, uint64(*block))
 
-	case "applyBlock":
-		err = applyBlock(*chaindata, common.HexToHash(*hash))
-
 	case "fixUnwind":
 		err = fixUnwind(*chaindata)
 
@@ -1962,6 +1944,8 @@ func main() {
 	case "dumpAddresses":
 		err = dumpAddresses(*chaindata)
 
+	case "readCallTraces":
+		err = readCallTraces(*chaindata, uint64(*block))
 	}
 
 	if err != nil {

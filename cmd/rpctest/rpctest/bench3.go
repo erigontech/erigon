@@ -3,13 +3,13 @@ package rpctest
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
 	"net/http"
 	"time"
 )
 
-func Bench3(turbogeth_url, geth_url string) {
+func Bench3(erigon_url, geth_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -27,7 +27,7 @@ func Bench3(turbogeth_url, geth_url string) {
 	for len(page) > 0 {
 		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
 			fmt.Printf("Could not get accountRange: %v\n", err)
 			return
 		}
@@ -72,7 +72,7 @@ func Bench3(turbogeth_url, geth_url string) {
 
 	template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
-	if err := post(client, turbogeth_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
+	if err := post(client, erigon_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
 		fmt.Printf("Could not retrieve block %d: %v\n", 1720000, err)
 		return
 	}
@@ -86,9 +86,9 @@ func Bench3(turbogeth_url, geth_url string) {
 		{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}
 			`
 		var trace EthTxTrace
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
 			fmt.Printf("Could not trace transaction %s: %v\n", txhash, err)
-			print(client, turbogeth_url, fmt.Sprintf(template, txhash, req_id))
+			print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 			return
 		}
 		if trace.Error != nil {
@@ -104,7 +104,7 @@ func Bench3(turbogeth_url, geth_url string) {
 			fmt.Printf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
 			return
 		}
-		//print(client, turbogeth_url, fmt.Sprintf(template, txhash, req_id))
+		//print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 		if !compareTraces(&trace, &traceg) {
 			fmt.Printf("Different traces block %d, tx %s\n", 1720000, txhash)
 			return
@@ -122,7 +122,7 @@ func Bench3(turbogeth_url, geth_url string) {
 	nextKey := &start
 	for nextKey != nil {
 		var sr DebugStorageRange
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
 			fmt.Printf("Could not get storageRange: %v\n", err)
 			return
 		}

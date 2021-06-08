@@ -18,19 +18,21 @@ package clique
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // Vote represents a single vote that an authorized signer made to modify the
@@ -62,11 +64,11 @@ type Snapshot struct {
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
-type signersAscending []common.Address
+type SignersAscending []common.Address
 
-func (s signersAscending) Len() int           { return len(s) }
-func (s signersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
-func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s SignersAscending) Len() int           { return len(s) }
+func (s SignersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
+func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
@@ -89,8 +91,13 @@ func newSnapshot(config *params.CliqueConfig, number uint64, hash common.Hash, s
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.CliqueConfig, db ethdb.Database, num uint64, hash common.Hash) (*Snapshot, error) {
-	blob, err := db.Get(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
+func loadSnapshot(config *params.CliqueConfig, db ethdb.RwKV, num uint64, hash common.Hash) (*Snapshot, error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blob, err := tx.GetOne(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
@@ -106,12 +113,18 @@ func loadSnapshot(config *params.CliqueConfig, db ethdb.Database, num uint64, ha
 
 var ErrNotFound = errors.New("not found")
 
-func lastSnapshot(db ethdb.Database) (uint64, error) {
-	lastEnc, err := db.Get(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
+func lastSnapshot(db ethdb.RwKV) (uint64, error) {
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
-		if !errors.Is(err, ethdb.ErrKeyNotFound) {
-			log.Error("can't check last snapshot", "err", err)
-		}
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	lastEnc, err := tx.GetOne(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
+	if err != nil {
+		return 0, fmt.Errorf("failed check last clique snapshot: %d", err)
+	}
+	if len(lastEnc) == 0 {
 		return 0, ErrNotFound
 	}
 
@@ -125,12 +138,14 @@ func lastSnapshot(db ethdb.Database) (uint64, error) {
 }
 
 // store inserts the snapshot into the database.
-func (s *Snapshot) store(db ethdb.Database) error {
+func (s *Snapshot) store(db ethdb.RwKV) error {
 	blob, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	return db.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob)
+	return db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob)
+	})
 }
 
 // validVote returns whether it makes sense to cast the specified vote in the
@@ -217,11 +232,11 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache, headers ...*types.Header) (*Sna
 			return nil, err
 		}
 		if _, ok := snap.Signers[signer]; !ok {
-			return nil, errUnauthorizedSigner
+			return nil, ErrUnauthorizedSigner
 		}
 		for _, recent := range snap.Recents {
 			if recent == signer {
-				return nil, errRecentlySigned
+				return nil, ErrRecentlySigned
 			}
 		}
 		snap.Recents[number] = signer
@@ -240,7 +255,7 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache, headers ...*types.Header) (*Sna
 		// Tally up the new vote from the signer
 		var authorize bool
 		switch {
-		case bytes.Equal(header.Nonce[:], nonceAuthVote):
+		case bytes.Equal(header.Nonce[:], NonceAuthVote):
 			authorize = true
 		case bytes.Equal(header.Nonce[:], nonceDropVote):
 			authorize = false
@@ -329,18 +344,18 @@ func (s *Snapshot) copy() *Snapshot {
 }
 
 // signers retrieves the list of authorized signers in ascending order.
-func (s *Snapshot) signers() []common.Address {
+func (s *Snapshot) GetSigners() []common.Address {
 	sigs := make([]common.Address, 0, len(s.Signers))
 	for sig := range s.Signers {
 		sigs = append(sigs, sig)
 	}
-	sort.Sort(signersAscending(sigs))
+	sort.Sort(SignersAscending(sigs))
 	return sigs
 }
 
 // inturn returns if a signer at a given block height is in-turn or not.
 func (s *Snapshot) inturn(number uint64, signer common.Address) bool {
-	signers, offset := s.signers(), 0
+	signers, offset := s.GetSigners(), 0
 	for offset < len(signers) && signers[offset] != signer {
 		offset++
 	}

@@ -2,13 +2,14 @@ package rpctest
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
-func Bench7(turbogethURL, gethURL string) {
-	setRoutes(turbogethURL, gethURL)
+func Bench7(erigonURL, gethURL string) {
+	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -32,7 +33,7 @@ func Bench7(turbogethURL, gethURL string) {
 	smg = make(map[common.Hash]storageEntry)
 	for nextKey != nil {
 		var sr DebugStorageRange
-		if err := post(client, turbogethURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, reqID), &sr); err != nil {
+		if err := post(client, erigonURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, reqID), &sr); err != nil {
 			fmt.Printf("Could not get storageRange: %v\n", err)
 			return
 		}

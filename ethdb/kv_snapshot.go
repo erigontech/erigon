@@ -5,33 +5,45 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
 var (
-	_ RwKV           = &SnapshotKV2{}
-	_ Tx             = &sn2TX{}
-	_ BucketMigrator = &sn2TX{}
-	_ Cursor         = &snCursor2{}
+	_ RwKV           = &SnapshotKV{}
+	_ RoKV           = &SnapshotKV{}
+	_ Tx             = &snTX{}
+	_ BucketMigrator = &snTX{}
+	_ RwCursor       = &snCursor{}
+	_ Cursor         = &snCursor{}
 )
 
-func NewSnapshot2KV() snapshotOpts2 {
-	return snapshotOpts2{}
+type SnapshotUpdater interface {
+	UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{})
+	SnapshotKV(bucket string) RoKV
+}
+
+type WriteDB interface {
+	WriteDB() RwKV
+}
+
+func NewSnapshotKV() snapshotOpts {
+	return snapshotOpts{}
 }
 
 type snapshotData struct {
 	buckets  []string
-	snapshot RwKV
+	snapshot RoKV
 }
-type snapshotOpts2 struct {
+type snapshotOpts struct {
 	db        RwKV
 	snapshots []snapshotData
 }
 
-func (opts snapshotOpts2) SnapshotDB(buckets []string, db RwKV) snapshotOpts2 {
+func (opts snapshotOpts) SnapshotDB(buckets []string, db RoKV) snapshotOpts {
 	opts.snapshots = append(opts.snapshots, snapshotData{
 		buckets:  buckets,
 		snapshot: db,
@@ -39,30 +51,31 @@ func (opts snapshotOpts2) SnapshotDB(buckets []string, db RwKV) snapshotOpts2 {
 	return opts
 }
 
-func (opts snapshotOpts2) DB(db RwKV) snapshotOpts2 {
+func (opts snapshotOpts) DB(db RwKV) snapshotOpts {
 	opts.db = db
 	return opts
 }
 
-func (opts snapshotOpts2) MustOpen() RwKV {
+func (opts snapshotOpts) Open() *SnapshotKV {
 	snapshots := make(map[string]snapshotData)
 	for i, v := range opts.snapshots {
 		for _, bucket := range v.buckets {
 			snapshots[bucket] = opts.snapshots[i]
 		}
 	}
-	return &SnapshotKV2{
+	return &SnapshotKV{
 		snapshots: snapshots,
 		db:        opts.db,
 	}
 }
 
-type SnapshotKV2 struct {
+type SnapshotKV struct {
 	db        RwKV
+	mtx       sync.RWMutex
 	snapshots map[string]snapshotData
 }
 
-func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
+func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 	snTX, err := s.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -71,7 +84,7 @@ func (s *SnapshotKV2) View(ctx context.Context, f func(tx Tx) error) error {
 	return f(snTX)
 }
 
-func (s *SnapshotKV2) Update(ctx context.Context, f func(tx RwTx) error) error {
+func (s *SnapshotKV) Update(ctx context.Context, f func(tx RwTx) error) error {
 	tx, err := s.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -85,75 +98,158 @@ func (s *SnapshotKV2) Update(ctx context.Context, f func(tx RwTx) error) error {
 	return err
 }
 
-func (s *SnapshotKV2) Close() {
+func (s *SnapshotKV) Close() {
 	s.db.Close()
 	for i := range s.snapshots {
 		s.snapshots[i].snapshot.Close()
 	}
 }
 
-func (s *SnapshotKV2) CollectMetrics() {
+func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{}) {
+	sd := snapshotData{
+		buckets:  buckets,
+		snapshot: snapshotKV,
+	}
+
+	toClose := []RoKV{}
+	var (
+		snData snapshotData
+		ok     bool
+	)
+	s.mtx.Lock()
+	for _, bucket := range buckets {
+		snData, ok = s.snapshots[bucket]
+		if ok {
+			toClose = append(toClose, snData.snapshot)
+		}
+		s.snapshots[bucket] = sd
+	}
+	s.mtx.Unlock()
+
+	go func() {
+		wg := sync.WaitGroup{}
+		wg.Add(len(toClose))
+
+		for i := range toClose {
+			i := i
+			go func() {
+				defer wg.Done()
+				toClose[i].Close()
+			}()
+		}
+		wg.Wait()
+		done <- struct{}{}
+	}()
+}
+
+func (s *SnapshotKV) WriteDB() RwKV {
+	return s.db
+}
+func (s *SnapshotKV) SnapshotKV(bucket string) RoKV {
+	return s.snapshots[bucket].snapshot
+}
+
+func (s *SnapshotKV) CollectMetrics() {
 	s.db.CollectMetrics()
 }
 
-func (s *SnapshotKV2) BeginRo(ctx context.Context) (Tx, error) {
+func (s *SnapshotKV) BeginRo(ctx context.Context) (Tx, error) {
 	dbTx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &sn2TX{
+	return &snTX{
 		dbTX:      dbTx,
-		snapshots: s.snapshots,
+		snapshots: s.copySnapshots(),
 		snTX:      map[string]Tx{},
 	}, nil
 }
+func (s *SnapshotKV) copySnapshots() map[string]snapshotData {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	mp := make(map[string]snapshotData, len(s.snapshots))
+	for i := range s.snapshots {
+		mp[i] = s.snapshots[i]
+	}
+	return mp
+}
 
-func (s *SnapshotKV2) BeginRw(ctx context.Context) (RwTx, error) {
+func (s *SnapshotKV) BeginRw(ctx context.Context) (RwTx, error) {
 	dbTx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &sn2TX{
+	return &snTX{
 		dbTX:      dbTx,
-		snapshots: s.snapshots,
+		snapshots: s.copySnapshots(),
 		snTX:      map[string]Tx{},
 	}, nil
 }
 
-func (s *SnapshotKV2) AllBuckets() dbutils.BucketsCfg {
+func (s *SnapshotKV) AllBuckets() dbutils.BucketsCfg {
 	return s.db.AllBuckets()
 }
 
 var ErrUnavailableSnapshot = errors.New("unavailable snapshot")
 
-type sn2TX struct {
+type snTX struct {
 	dbTX      Tx
 	snapshots map[string]snapshotData
 	snTX      map[string]Tx
 }
 
-func (s *sn2TX) DropBucket(bucket string) error {
+type DBTX interface {
+	DBTX() RwTx
+}
+
+func (s *snTX) DBTX() RwTx {
+	return s.dbTX.(RwTx)
+}
+func (s *snTX) RwCursor(bucket string) (RwCursor, error) {
+	tx, err := s.getSnapshotTX(bucket)
+	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
+		panic(err.Error())
+	}
+	//process only db buckets
+	if errors.Is(err, ErrUnavailableSnapshot) {
+		return s.dbTX.(RwTx).RwCursor(bucket)
+	}
+	dbCursor, err := s.dbTX.(RwTx).RwCursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	snCursor2, err := tx.Cursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+	return &snCursor{
+		dbCursor: dbCursor,
+		snCursor: snCursor2,
+	}, nil
+
+}
+
+func (s *snTX) DropBucket(bucket string) error {
 	return s.dbTX.(BucketMigrator).DropBucket(bucket)
 }
 
-func (s *sn2TX) CreateBucket(bucket string) error {
+func (s *snTX) CreateBucket(bucket string) error {
 	return s.dbTX.(BucketMigrator).CreateBucket(bucket)
 }
 
-func (s *sn2TX) ExistsBucket(bucket string) bool {
-	//todo snapshot check?
+func (s *snTX) ExistsBucket(bucket string) bool {
 	return s.dbTX.(BucketMigrator).ExistsBucket(bucket)
 }
 
-func (s *sn2TX) ClearBucket(bucket string) error {
+func (s *snTX) ClearBucket(bucket string) error {
 	return s.dbTX.(BucketMigrator).ClearBucket(bucket)
 }
 
-func (s *sn2TX) ExistingBuckets() ([]string, error) {
-	panic("implement me")
+func (s *snTX) ExistingBuckets() ([]string, error) {
+	return s.dbTX.(BucketMigrator).ExistingBuckets()
 }
 
-func (s *sn2TX) Cursor(bucket string) (Cursor, error) {
+func (s *snTX) Cursor(bucket string) (Cursor, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -166,25 +262,17 @@ func (s *sn2TX) Cursor(bucket string) (Cursor, error) {
 	if err != nil {
 		return nil, err
 	}
-	snCursor, err := tx.Cursor(bucket)
+	snCursor2, err := tx.Cursor(bucket)
 	if err != nil {
 		return nil, err
 	}
-	return &snCursor2{
+	return &snCursor{
 		dbCursor: dbCursor,
-		snCursor: snCursor,
+		snCursor: snCursor2,
 	}, nil
 }
 
-func (s *sn2TX) RwCursor(bucket string) (RwCursor, error) {
-	c, err := s.Cursor(bucket)
-	if err != nil {
-		return nil, err
-	}
-	return c.(RwCursor), nil
-}
-
-func (s *sn2TX) CursorDupSort(bucket string) (CursorDupSort, error) {
+func (s *snTX) CursorDupSort(bucket string) (CursorDupSort, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -201,8 +289,8 @@ func (s *sn2TX) CursorDupSort(bucket string) (CursorDupSort, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &snCursor2Dup{
-		snCursor2{
+	return &snCursorDup{
+		snCursor{
 			dbCursor: dbc,
 			snCursor: sncbc,
 		},
@@ -211,15 +299,14 @@ func (s *sn2TX) CursorDupSort(bucket string) (CursorDupSort, error) {
 	}, nil
 }
 
-func (s *sn2TX) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
+func (s *snTX) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
 	c, err := s.CursorDupSort(bucket)
 	if err != nil {
 		return nil, err
 	}
 	return c.(RwCursorDupSort), nil
 }
-
-func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
+func (s *snTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	v, err := s.dbTX.GetOne(bucket, key)
 	if err != nil {
 		return nil, err
@@ -245,19 +332,20 @@ func (s *sn2TX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	return v, nil
 }
 
-func (s *sn2TX) Put(bucket string, k, v []byte) error {
-	return s.dbTX.(RwTx).Put(bucket, k, v)
+func (s *snTX) Put(bucket string, k, v []byte) error    { return s.dbTX.(RwTx).Put(bucket, k, v) }
+func (s *snTX) Append(bucket string, k, v []byte) error { return s.dbTX.(RwTx).Append(bucket, k, v) }
+func (s *snTX) AppendDup(bucket string, k, v []byte) error {
+	return s.dbTX.(RwTx).AppendDup(bucket, k, v)
+}
+func (s *snTX) Delete(bucket string, k, v []byte) error {
+	return s.dbTX.(RwTx).Put(bucket, k, DeletedValue)
 }
 
-func (s *sn2TX) Delete(bucket string, k, v []byte) error {
-	return s.dbTX.(RwTx).Delete(bucket, k, v)
-}
-
-func (s *sn2TX) CollectMetrics() {
+func (s *snTX) CollectMetrics() {
 	s.dbTX.CollectMetrics()
 }
 
-func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
+func (s *snTX) getSnapshotTX(bucket string) (Tx, error) {
 	tx, ok := s.snTX[bucket]
 	if ok {
 		return tx, nil
@@ -271,12 +359,11 @@ func (s *sn2TX) getSnapshotTX(bucket string) (Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	s.snTX[bucket] = tx
 	return tx, nil
 }
 
-func (s *sn2TX) Has(bucket string, key []byte) (bool, error) {
+func (s *snTX) Has(bucket string, key []byte) (bool, error) {
 	v, err := s.dbTX.Has(bucket, key)
 	if err != nil {
 		return false, err
@@ -304,14 +391,70 @@ func (s *sn2TX) Has(bucket string, key []byte) (bool, error) {
 	return v, nil
 }
 
-func (s *sn2TX) Commit() error {
+func (s *snTX) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *snTX) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (s *snTX) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := s.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *snTX) Commit() error {
 	for i := range s.snTX {
 		defer s.snTX[i].Rollback()
 	}
 	return s.dbTX.Commit()
 }
 
-func (s *sn2TX) Rollback() {
+func (s *snTX) Rollback() {
 	for i := range s.snTX {
 		defer s.snTX[i].Rollback()
 	}
@@ -319,40 +462,48 @@ func (s *sn2TX) Rollback() {
 
 }
 
-func (s *sn2TX) BucketSize(name string) (uint64, error) {
+func (s *snTX) BucketSize(name string) (uint64, error) {
 	panic("implement me")
 }
 
-func (s *sn2TX) Comparator(bucket string) dbutils.CmpFunc {
+func (s *snTX) Comparator(bucket string) dbutils.CmpFunc {
 	return s.dbTX.Comparator(bucket)
 }
 
-func (s *sn2TX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
+func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
+	return s.dbTX.(RwTx).IncrementSequence(bucket, amount)
+}
+
+func (s *snTX) ReadSequence(bucket string) (uint64, error) {
 	panic("implement me")
 }
 
-func (s *sn2TX) ReadSequence(bucket string) (uint64, error) {
-	panic("implement me")
-}
-
-func (s *sn2TX) CHandle() unsafe.Pointer {
+func (s *snTX) CHandle() unsafe.Pointer {
 	return s.dbTX.CHandle()
 }
 
-var DeletedValue = []byte("it is deleted value")
+func (s *snTX) BucketExists(bucket string) (bool, error) {
+	return s.dbTX.(BucketsMigrator).BucketExists(bucket)
+}
 
-type snCursor2 struct {
+func (s *snTX) ClearBuckets(buckets ...string) error {
+	return s.dbTX.(BucketsMigrator).ClearBuckets(buckets...)
+}
+
+func (s *snTX) DropBuckets(buckets ...string) error {
+	return s.dbTX.(BucketsMigrator).DropBuckets(buckets...)
+}
+
+var DeletedValue = []byte{0}
+
+type snCursor struct {
 	dbCursor Cursor
 	snCursor Cursor
 
 	currentKey []byte
 }
 
-func (s *snCursor2) Prefetch(v uint) Cursor {
-	panic("implement me")
-}
-
-func (s *snCursor2) First() ([]byte, []byte, error) {
+func (s *snCursor) First() ([]byte, []byte, error) {
 	var err error
 	lastDBKey, lastDBVal, err := s.dbCursor.First()
 	if err != nil {
@@ -376,7 +527,7 @@ func (s *snCursor2) First() ([]byte, []byte, error) {
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
-func (s *snCursor2) Seek(seek []byte) ([]byte, []byte, error) {
+func (s *snCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	dbKey, dbVal, err := s.dbCursor.Seek(seek)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return nil, nil, err
@@ -401,7 +552,7 @@ func (s *snCursor2) Seek(seek []byte) ([]byte, []byte, error) {
 	return sndbKey, sndbVal, nil
 }
 
-func (s *snCursor2) SeekExact(key []byte) ([]byte, []byte, error) {
+func (s *snCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	k, v, err := s.dbCursor.SeekExact(key)
 	if err != nil {
 		return nil, nil, err
@@ -418,8 +569,9 @@ func (s *snCursor2) SeekExact(key []byte) ([]byte, []byte, error) {
 	return k, v, err
 }
 
-func (s *snCursor2) iteration(dbNextElement func() ([]byte, []byte, error), sndbNextElement func() ([]byte, []byte, error), cmpFunc func(kdb, ksndb []byte) (int, bool)) ([]byte, []byte, error) {
+func (s *snCursor) iteration(dbNextElement func() ([]byte, []byte, error), sndbNextElement func() ([]byte, []byte, error), cmpFunc func(kdb, ksndb []byte) (int, bool)) ([]byte, []byte, error) {
 	var err error
+	var noDBNext, noSnDBNext bool
 	//current returns error on empty bucket
 	lastDBKey, lastDBVal, err := s.dbCursor.Current()
 	if err != nil {
@@ -428,11 +580,17 @@ func (s *snCursor2) iteration(dbNextElement func() ([]byte, []byte, error), sndb
 		if innerErr != nil {
 			return nil, nil, fmt.Errorf("get current from db %w inner %v", err, innerErr)
 		}
+		noDBNext = true
 	}
 
 	lastSNDBKey, lastSNDBVal, err := s.snCursor.Current()
 	if err != nil {
-		return nil, nil, err
+		var innerErr error
+		lastSNDBKey, lastSNDBVal, innerErr = sndbNextElement()
+		if innerErr != nil {
+			return nil, nil, fmt.Errorf("get current from snapshot %w inner %v", err, innerErr)
+		}
+		noSnDBNext = true
 	}
 
 	cmp, br := cmpFunc(lastDBKey, lastSNDBKey)
@@ -442,40 +600,48 @@ func (s *snCursor2) iteration(dbNextElement func() ([]byte, []byte, error), sndb
 
 	//todo Seek fastpath
 	if cmp > 0 {
-		lastSNDBKey, lastSNDBVal, err = sndbNextElement()
-		if err != nil {
-			return nil, nil, err
-		}
-		//todo
-		if currentKeyCmp, _ := common.KeyCmp(s.currentKey, lastDBKey); len(lastSNDBKey) == 0 && currentKeyCmp >= 0 && len(s.currentKey) > 0 {
-			lastDBKey, lastDBVal, err = dbNextElement()
-		}
-		if err != nil {
-			return nil, nil, err
+		if !noSnDBNext {
+			lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if currentKeyCmp, _ := common.KeyCmp(s.currentKey, lastDBKey); len(lastSNDBKey) == 0 && currentKeyCmp >= 0 && len(s.currentKey) > 0 {
+				lastDBKey, lastDBVal, err = dbNextElement()
+			}
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
 	//current receives last acceptable key. If it is empty
 	if cmp < 0 {
-		lastDBKey, lastDBVal, err = dbNextElement()
-		if err != nil {
-			return nil, nil, err
-		}
-		if currentKeyCmp, _ := common.KeyCmp(s.currentKey, lastSNDBKey); len(lastDBKey) == 0 && currentKeyCmp >= 0 && len(s.currentKey) > 0 {
-			lastSNDBKey, lastSNDBVal, err = sndbNextElement()
-		}
-		if err != nil {
-			return nil, nil, err
+		if !noDBNext {
+			lastDBKey, lastDBVal, err = dbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
+			if currentKeyCmp, _ := common.KeyCmp(s.currentKey, lastSNDBKey); len(lastDBKey) == 0 && currentKeyCmp >= 0 && len(s.currentKey) > 0 {
+				lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+			}
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if cmp == 0 {
-		lastDBKey, lastDBVal, err = dbNextElement()
-		if err != nil {
-			return nil, nil, err
+		if !noDBNext {
+			lastDBKey, lastDBVal, err = dbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
 		}
-		lastSNDBKey, lastSNDBVal, err = sndbNextElement()
-		if err != nil {
-			return nil, nil, err
+		if !noSnDBNext {
+			lastSNDBKey, lastSNDBVal, err = sndbNextElement()
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
@@ -490,7 +656,7 @@ func (s *snCursor2) iteration(dbNextElement func() ([]byte, []byte, error), sndb
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
-func (s *snCursor2) Next() ([]byte, []byte, error) {
+func (s *snCursor) Next() ([]byte, []byte, error) {
 	k, v, err := s.iteration(s.dbCursor.Next, s.snCursor.Next, common.KeyCmp) //f(s.dbCursor.Next, s.snCursor.Next)
 	if err != nil {
 		return nil, nil, err
@@ -506,7 +672,7 @@ func (s *snCursor2) Next() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (s *snCursor2) Prev() ([]byte, []byte, error) {
+func (s *snCursor) Prev() ([]byte, []byte, error) {
 	k, v, err := s.iteration(s.dbCursor.Prev, s.snCursor.Prev, func(kdb, ksndb []byte) (int, bool) {
 		cmp, br := KeyCmpBackward(kdb, ksndb)
 		return -1 * cmp, br
@@ -527,7 +693,7 @@ func (s *snCursor2) Prev() ([]byte, []byte, error) {
 	return k, v, nil
 }
 
-func (s *snCursor2) Last() ([]byte, []byte, error) {
+func (s *snCursor) Last() ([]byte, []byte, error) {
 	var err error
 	lastSNDBKey, lastSNDBVal, err := s.snCursor.Last()
 	if err != nil {
@@ -550,7 +716,7 @@ func (s *snCursor2) Last() ([]byte, []byte, error) {
 	return lastSNDBKey, lastSNDBVal, nil
 }
 
-func (s *snCursor2) Current() ([]byte, []byte, error) {
+func (s *snCursor) Current() ([]byte, []byte, error) {
 	k, v, err := s.dbCursor.Current()
 	if bytes.Equal(k, s.currentKey) {
 		return k, v, err
@@ -558,38 +724,38 @@ func (s *snCursor2) Current() ([]byte, []byte, error) {
 	return s.snCursor.Current()
 }
 
-func (s *snCursor2) Put(k, v []byte) error {
+func (s *snCursor) Put(k, v []byte) error {
 	return s.dbCursor.(RwCursor).Put(k, v)
 }
 
-func (s *snCursor2) Append(k []byte, v []byte) error {
+func (s *snCursor) Append(k []byte, v []byte) error {
 	return s.dbCursor.(RwCursor).Append(k, v)
 }
 
-func (s *snCursor2) Delete(k, v []byte) error {
+func (s *snCursor) Delete(k, v []byte) error {
 	return s.dbCursor.(RwCursor).Put(k, DeletedValue)
 }
 
-func (s *snCursor2) DeleteCurrent() error {
+func (s *snCursor) DeleteCurrent() error {
 	panic("implement me")
 }
 
-func (s *snCursor2) Count() (uint64, error) {
+func (s *snCursor) Count() (uint64, error) {
 	panic("implement me")
 }
 
-func (s *snCursor2) Close() {
+func (s *snCursor) Close() {
 	s.dbCursor.Close()
 	s.snCursor.Close()
 }
 
-type snCursor2Dup struct {
-	snCursor2
+type snCursorDup struct {
+	snCursor
 	dbCursorDup   CursorDupSort
 	sndbCursorDup CursorDupSort
 }
 
-func (c *snCursor2Dup) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
+func (c *snCursorDup) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
 	k, v, err := c.dbCursorDup.SeekBothExact(key, value)
 	if err != nil {
 		return nil, nil, err
@@ -604,7 +770,7 @@ func (c *snCursor2Dup) SeekBothExact(key, value []byte) ([]byte, []byte, error) 
 
 }
 
-func (c *snCursor2Dup) SeekBothRange(key, value []byte) ([]byte, error) {
+func (c *snCursorDup) SeekBothRange(key, value []byte) ([]byte, error) {
 	dbVal, err := c.dbCursorDup.SeekBothRange(key, value)
 	if err != nil {
 		return nil, err
@@ -622,35 +788,35 @@ func (c *snCursor2Dup) SeekBothRange(key, value []byte) ([]byte, error) {
 	return snDBVal, nil
 }
 
-func (c *snCursor2Dup) FirstDup() ([]byte, error) {
+func (c *snCursorDup) FirstDup() ([]byte, error) {
 	panic("implement me")
 }
 
-func (c *snCursor2Dup) NextDup() ([]byte, []byte, error) {
+func (c *snCursorDup) NextDup() ([]byte, []byte, error) {
 	panic("implement me")
 }
 
-func (c *snCursor2Dup) NextNoDup() ([]byte, []byte, error) {
+func (c *snCursorDup) NextNoDup() ([]byte, []byte, error) {
 	panic("implement me")
 }
 
-func (c *snCursor2Dup) LastDup() ([]byte, error) {
+func (c *snCursorDup) LastDup() ([]byte, error) {
 	panic("implement me")
 }
 
-func (c *snCursor2Dup) CountDuplicates() (uint64, error) {
+func (c *snCursorDup) CountDuplicates() (uint64, error) {
 	panic("implement me")
 }
 
-func (c *snCursor2Dup) DeleteCurrentDuplicates() error {
+func (c *snCursorDup) DeleteCurrentDuplicates() error {
 	panic("implement me")
 }
 
-func (c *snCursor2Dup) AppendDup(key, value []byte) error {
+func (c *snCursorDup) AppendDup(key, value []byte) error {
 	panic("implement me")
 }
 
-func (s *snCursor2) saveCurrent(k []byte) {
+func (s *snCursor) saveCurrent(k []byte) {
 	if k != nil {
 		s.currentKey = common.CopyBytes(k)
 	}
@@ -675,7 +841,7 @@ type KvData struct {
 }
 
 func GenStateData(data []KvData) (RwKV, error) {
-	snapshot := NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snapshot := NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
 		}

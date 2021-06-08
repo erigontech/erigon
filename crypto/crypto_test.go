@@ -27,9 +27,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/u256"
 )
 
 var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
@@ -232,7 +232,7 @@ func TestValidateSignatureValues(t *testing.T) {
 			t.Errorf("mismatch for v: %d r: %d s: %d want: %v", v, r, s, expected)
 		}
 	}
-	minusOne := uint256.NewInt().SetAllOne()
+	minusOne := uint256.NewInt(0).SetAllOne()
 	one := u256.Num1
 	zero := u256.Num0
 	secp256k1nMinus1 := new(uint256.Int).Sub(secp256k1N, u256.Num1)

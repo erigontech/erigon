@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
 )
 
 // bench9 tests eth_getProof
-func Bench9(tgURL, gethURL string, needCompare bool) {
-	setRoutes(tgURL, gethURL)
+func Bench9(erigonURL, gethURL string, needCompare bool) {
+	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -23,7 +23,7 @@ func Bench9(tgURL, gethURL string, needCompare bool) {
 
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
-	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
 		fmt.Printf("Could not get block number: %v\n", res.Err)
 		return
@@ -42,15 +42,15 @@ func Bench9(tgURL, gethURL string, needCompare bool) {
 		accRangeTG := make(map[common.Address]state.DumpAccount)
 		var sr DebugAccountRange
 		reqGen.reqID++
-		res = reqGen.TurboGeth("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
+		res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
 
 		if res.Err != nil {
-			fmt.Printf("Could not get accountRange (turbo-geth): %v\n", res.Err)
+			fmt.Printf("Could not get accountRange (Erigon): %v\n", res.Err)
 			return
 		}
 
 		if sr.Error != nil {
-			fmt.Printf("Error getting accountRange (turbo-geth): %d %s\n", sr.Error.Code, sr.Error.Message)
+			fmt.Printf("Error getting accountRange (Erigon): %d %s\n", sr.Error.Code, sr.Error.Message)
 			break
 		} else {
 			page = sr.Result.Next
@@ -71,13 +71,13 @@ func Bench9(tgURL, gethURL string, needCompare bool) {
 					}
 				}
 			}
-			res = reqGen.TurboGeth("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
+			res = reqGen.Erigon("eth_getProof", reqGen.getProof(bn, address, storageList), &proof)
 			if res.Err != nil {
-				fmt.Printf("Could not get getProof (turbo-geth): %v\n", res.Err)
+				fmt.Printf("Could not get getProof (Erigon): %v\n", res.Err)
 				return
 			}
 			if proof.Error != nil {
-				fmt.Printf("Error getting getProof (turbo-geth): %d %s\n", proof.Error.Code, proof.Error.Message)
+				fmt.Printf("Error getting getProof (Erigon): %d %s\n", proof.Error.Code, proof.Error.Message)
 				break
 			}
 			if needCompare {

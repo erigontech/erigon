@@ -19,7 +19,7 @@ package trie
 import (
 	"io"
 
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // Trie keys are dealt with in three distinct encodings:

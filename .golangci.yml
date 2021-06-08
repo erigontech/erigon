@@ -4,6 +4,7 @@ run:
 linters:
   disable-all: true
   enable:
+    - gofmt
     - deadcode
     - errcheck
     - gosimple

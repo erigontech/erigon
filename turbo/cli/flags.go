@@ -5,13 +5,13 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
 )
@@ -20,12 +20,12 @@ var (
 	DatabaseFlag = cli.StringFlag{
 		Name:  "database",
 		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
-		Value: "lmdb",
+		Value: "mdbx",
 	}
 	DatabaseVerbosityFlag = cli.IntFlag{
 		Name:  "database.verbosity",
-		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db.",
-		Value: -1,
+		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
+		Value: 2,
 	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
@@ -50,18 +50,15 @@ var (
 		Value: 500,
 	}
 
-	DownloadV2Flag = cli.BoolFlag{
-		Name:  "download.v2",
-		Usage: "enable experimental downloader v2",
-	}
-
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
 * h - write history to the DB
 * r - write receipts to the DB
-* t - write tx lookup index to the DB`,
-		Value: ethdb.DefaultStorageMode.ToString(),
+* t - write tx lookup index to the DB
+* c - write call traces index to the DB,
+* e - write TEVM translated code to the DB`,
+		Value: "default",
 	}
 	SnapshotModeFlag = cli.StringFlag{
 		Name: "snapshot.mode",
@@ -76,6 +73,11 @@ var (
 	SeedSnapshotsFlag = cli.BoolTFlag{
 		Name:  "snapshot.seed",
 		Usage: `Seed snapshot seeding(default: true)`,
+	}
+	//todo replace to BoolT
+	SnapshotDatabaseLayoutFlag = cli.BoolFlag{
+		Name:  "snapshot.layout",
+		Usage: `Enable snapshot db layout(default: false)`,
 	}
 
 	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
@@ -110,16 +112,13 @@ var (
 		Usage: "Specify certificate authority",
 		Value: "",
 	}
-	SilkwormFlag = cli.StringFlag{
-		Name:  "silkworm",
-		Usage: "File path of libsilkworm_tg_api dynamic library (default = do not use Silkworm)",
-		Value: "",
+	StateStreamFlag = cli.BoolFlag{
+		Name:  "state.stream",
+		Usage: "Enable streaming of state changes from core to RPC daemon",
 	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.EnableDownloadV2 = ctx.GlobalBool(DownloadV2Flag.Name)
-
 	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -131,6 +130,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	cfg.SnapshotMode = snMode
 	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+	cfg.SnapshotLayout = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
 
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
@@ -150,6 +150,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
+	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
 }
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
@@ -188,6 +189,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(ExternalSnapshotDownloaderAddrFlag.Name, ExternalSnapshotDownloaderAddrFlag.Value, ExternalSnapshotDownloaderAddrFlag.Usage); v != nil {
 		cfg.ExternalSnapshotDownloaderAddr = *v
 	}
+	if v := f.Bool(StateStreamFlag.Name, false, StateStreamFlag.Usage); v != nil {
+		cfg.StateStream = *v
+	}
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
@@ -214,7 +218,8 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 			}
 		}
 	}
-
+	cfg.P2P.MDBX = cfg.MDBX
+	cfg.P2P.LMDB = cfg.LMDB
 }
 
 // setPrivateApi populates configuration fields related to the remote

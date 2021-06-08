@@ -3,17 +3,15 @@ package ethdb
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
-	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBucketCRUD(t *testing.T) {
 	require := require.New(t)
-	kv := NewLMDB().InMem().MustOpen()
+	kv := NewMemKV()
 	defer kv.Close()
 
 	ctx := context.Background()
@@ -30,7 +28,10 @@ func TestBucketCRUD(t *testing.T) {
 
 	// check thad buckets have unique DBI's
 	uniquness := map[dbutils.DBI]bool{}
-	castedKv := kv.(*LmdbKV)
+	castedKv, ok := kv.(*MdbxKV)
+	if !ok {
+		t.Skip()
+	}
 	for _, bucketCfg := range castedKv.buckets {
 		if bucketCfg.DBI == NonExistingDBI {
 			continue
@@ -78,24 +79,24 @@ func TestBucketCRUD(t *testing.T) {
 }
 
 func TestReadOnlyMode(t *testing.T) {
-	path := os.TempDir() + "/tm1"
-	err := os.RemoveAll(path)
-	require.NoError(t, err)
-	db1 := NewLMDB().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	path := t.TempDir()
+	db1 := NewMDBX().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
-	db2 := NewLMDB().Flags(func(flags uint) uint { return flags | lmdb.Readonly }).Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	db2 := NewMDBX().Readonly().Path(path).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
+	defer db2.Close()
 
 	tx, err := db2.BeginRo(context.Background())
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	c, err := tx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)

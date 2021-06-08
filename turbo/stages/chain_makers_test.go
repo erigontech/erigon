@@ -14,31 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package stages
+package stages_test
 
 import (
 	"fmt"
 	"math/big"
+	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
 
-func ExampleGenerateChain() {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-
+func TestGenerateChain(t *testing.T) {
 	var (
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key2, _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -56,26 +51,27 @@ func ExampleGenerateChain() {
 
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &core.Genesis{
-		Config: &params.ChainConfig{HomesteadBlock: new(big.Int)},
+		Config: &params.ChainConfig{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
 		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	genesis := gspec.MustCommit(db)
+	m := stages.MockWithGenesis(t, gspec, key1)
+	db := ethdb.NewObjectDatabase(m.DB)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.LatestSignerForChainID(nil)
-	chain, _, err := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, 5, func(i int, gen *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
-			tx, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt().SetUint64(10000), params.TxGas, nil, nil), *signer, key1)
+			tx, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt(10000), params.TxGas, nil, nil), *signer, key1)
 			gen.AddTx(tx)
 		case 1:
 			// In block 2, addr1 sends some more ether to addr2.
 			// addr2 passes it on to addr3.
-			tx1, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key1)
-			tx2, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr3, uint256.NewInt().SetUint64(1000), params.TxGas, nil, nil), *signer, key2)
+			tx1, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr1), addr2, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key1)
+			tx2, _ := types.SignTx(types.NewTransaction(gen.TxNonce(addr2), addr3, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key2)
 			gen.AddTx(tx1)
 			gen.AddTx(tx2)
 		case 2:
@@ -97,19 +93,22 @@ func ExampleGenerateChain() {
 	}
 
 	// Import the chain. This runs all block validation rules.
-	if _, err := stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, ethash.NewFaker(), chain, true /* checkRoot */); err != nil {
+	if err := m.InsertChain(chain); err != nil {
 		fmt.Printf("insert error%v\n", err)
 		return
 	}
 
 	st := state.New(state.NewDbStateReader(db))
-	fmt.Printf("last block: #%d\n", rawdb.ReadCurrentBlockDeprecated(db).Number())
-	fmt.Println("balance of addr1:", st.GetBalance(addr1))
-	fmt.Println("balance of addr2:", st.GetBalance(addr2))
-	fmt.Println("balance of addr3:", st.GetBalance(addr3))
-	// Output:
-	// last block: #5
-	// balance of addr1: 989000
-	// balance of addr2: 10000
-	// balance of addr3: 19687500000000001000
+	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
+		t.Errorf("wrong block number: %d", current(m.DB).Number())
+	}
+	if !uint256.NewInt(989000).Eq(st.GetBalance(addr1)) {
+		t.Errorf("wrong balance of addr1: %s", st.GetBalance(addr1))
+	}
+	if !uint256.NewInt(10000).Eq(st.GetBalance(addr2)) {
+		t.Errorf("wrong balance of addr2: %s", st.GetBalance(addr2))
+	}
+	if fmt.Sprintf("%s", st.GetBalance(addr3)) != "19687500000000001000" {
+		t.Errorf("wrong balance of addr3: %s", st.GetBalance(addr3))
+	}
 }

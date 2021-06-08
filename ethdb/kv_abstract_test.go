@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces"
+	"github.com/ledgerwatch/erigon/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -19,10 +20,9 @@ import (
 )
 
 func TestSequence(t *testing.T) {
-	writeDBs, _, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	writeDBs, _ := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return defaultBuckets
 	})
-	defer closeAll()
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
@@ -56,6 +56,7 @@ func TestSequence(t *testing.T) {
 		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
+		tx.Rollback()
 	}
 }
 
@@ -68,7 +69,7 @@ func TestManagedTx(t *testing.T) {
 	bucketID := 0
 	bucket1 := dbutils.Buckets[bucketID]
 	bucket2 := dbutils.Buckets[bucketID+1]
-	writeDBs, readDBs, closeAll := setupDatabases(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	writeDBs, readDBs := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return map[string]dbutils.BucketConfigItem{
 			bucket1: {
 				Flags:                     dbutils.DupSort,
@@ -81,7 +82,6 @@ func TestManagedTx(t *testing.T) {
 			},
 		}
 	})
-	defer closeAll()
 
 	ctx := context.Background()
 
@@ -140,47 +140,43 @@ func TestRemoteKvVersion(t *testing.T) {
 		return defaultBuckets
 	}
 	writeDb := ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen()
+	defer writeDb.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDb))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDb, false))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
+	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
 	// Different Major versions
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	_, err := ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major+1, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "", cancel)
+	v1 := v
+	v1.Major++
+	a, err := ethdb.NewRemote(v1).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	<-ctx.Done()
-	if !errors.Is(ctx.Err(), context.Canceled) {
-		t.Errorf("Should have failed due to incompatibitity")
-	}
+	require.False(t, a.EnsureVersionCompatibility())
 	// Different Minor versions
-	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
-	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor+1, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).Open("", "", "", cancel)
+	v2 := v
+	v2.Minor++
+	_, err = ethdb.NewRemote(v2).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	<-ctx.Done()
-	if !errors.Is(ctx.Err(), context.Canceled) {
-		t.Errorf("Should have failed due to incompatibitity")
-	}
+	require.False(t, a.EnsureVersionCompatibility())
 	// Different Patch versions
-	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
-	_, err = ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch+1).InMem(conn).Open("", "", "", cancel)
+	v3 := v
+	v3.Patch++
+	_, err = ethdb.NewRemote(v3).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	<-ctx.Done()
-	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		t.Errorf("Should not have failed due to incompatibitity: %v", ctx.Err())
-	}
+	require.False(t, a.EnsureVersionCompatibility())
 }
 
-func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV, close func()) {
+func setupDatabases(t *testing.T, f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV) {
 	writeDBs = []ethdb.RwKV{
 		ethdb.NewLMDB().InMem().WithBucketsConfig(f).MustOpen(),
 		ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
@@ -191,20 +187,20 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs [
 
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1], true))
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
 	}()
-
-	rdb := ethdb.NewRemote(remotedbserver.KvServiceAPIVersion.Major, remotedbserver.KvServiceAPIVersion.Minor, remotedbserver.KvServiceAPIVersion.Patch).InMem(conn).MustOpen()
+	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
+	rdb := ethdb.NewRemote(v).InMem(conn).MustOpen()
 	readDBs = []ethdb.RwKV{
 		writeDBs[0],
 		writeDBs[1],
 		rdb,
 	}
 
-	return writeDBs, readDBs, func() {
+	t.Cleanup(func() {
 		grpcServer.Stop()
 
 		if err := conn.Close(); err != nil {
@@ -218,7 +214,9 @@ func setupDatabases(f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs [
 		for _, db := range writeDBs {
 			db.Close()
 		}
-	}
+
+	})
+	return writeDBs, readDBs
 }
 
 func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {

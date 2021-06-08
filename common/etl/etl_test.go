@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/ugorji/go/codec"
 )
@@ -81,20 +81,14 @@ func TestNextKeyErr(t *testing.T) {
 
 func TestFileDataProviders(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(1))
 
-	err = extractBucketIntoFiles("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 10, len(collector.dataProviders))
@@ -118,18 +112,12 @@ func TestFileDataProviders(t *testing.T) {
 
 func TestRAMDataProviders(t *testing.T) {
 	// test invariant when we go through memory (1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
-	err = extractBucketIntoFiles("logPrefix", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
+	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, 0, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 
 	assert.Equal(t, 1, len(collector.dataProviders))
@@ -143,8 +131,7 @@ func TestRAMDataProviders(t *testing.T) {
 
 func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -169,8 +156,7 @@ func TestTransformRAMOnly(t *testing.T) {
 }
 
 func TestEmptySourceBucket(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -194,8 +180,7 @@ func TestEmptySourceBucket(t *testing.T) {
 
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -220,8 +205,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -248,8 +232,7 @@ func TestTransformThroughFiles(t *testing.T) {
 
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -274,8 +257,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -375,15 +357,15 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next Lo
 func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 string, startKey []byte) {
 	t.Helper()
 	b1Map := make(map[string]string)
-	err := db.Walk(b1, startKey, len(startKey), func(k, v []byte) (bool, error) {
+	err := db.ForEach(b1, startKey, func(k, v []byte) error {
 		b1Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	b2Map := make(map[string]string)
-	err = db.Walk(b2, nil, 0, func(k, v []byte) (bool, error) {
+	err = db.ForEach(b2, nil, func(k, v []byte) error {
 		b2Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, b1Map, b2Map)
@@ -392,16 +374,16 @@ func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 string, startKey []b
 func compareBucketsDouble(t *testing.T, db ethdb.Database, b1, b2 string) {
 	t.Helper()
 	b1Map := make(map[string]string)
-	err := db.Walk(b1, nil, 0, func(k, v []byte) (bool, error) {
+	err := db.ForEach(b1, nil, func(k, v []byte) error {
 		b1Map[fmt.Sprintf("%x", append(k, 0xAA))] = fmt.Sprintf("%x", append(v, 0xAA))
 		b1Map[fmt.Sprintf("%x", append(k, 0xBB))] = fmt.Sprintf("%x", append(v, 0xBB))
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	b2Map := make(map[string]string)
-	err = db.Walk(b2, nil, 0, func(k, v []byte) (bool, error) {
+	err = db.ForEach(b2, nil, func(k, v []byte) error {
 		b2Map[fmt.Sprintf("%x", k)] = fmt.Sprintf("%x", v)
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, b1Map, b2Map)

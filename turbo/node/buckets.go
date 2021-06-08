@@ -3,7 +3,7 @@ package node
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
 func prepareBuckets(customBuckets dbutils.BucketsCfg) {

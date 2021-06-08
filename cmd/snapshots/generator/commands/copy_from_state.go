@@ -6,17 +6,15 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	withDatadir(copyFromStateSnapshotCmd)
 	withSnapshotFile(copyFromStateSnapshotCmd)
-	withSnapshotData(copyFromStateSnapshotCmd)
 	withBlock(copyFromStateSnapshotCmd)
 	rootCmd.AddCommand(copyFromStateSnapshotCmd)
 
@@ -37,20 +35,6 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	if err != nil {
 		return err
 	}
-
-	kv := db.RwKV()
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
-	}
-	db.SetRwKV(kv)
 
 	err = os.RemoveAll(snapshotPath)
 	if err != nil {
@@ -161,5 +145,5 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	defer func() {
 		log.Info("Verify end", "t", time.Since(tt))
 	}()
-	return VerifyStateSnapshot(ctx, dbpath, snapshotPath, block)
+	return VerifyStateSnapshot(ctx, dbpath, snapshotPath, block, database)
 }

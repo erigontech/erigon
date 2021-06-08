@@ -5,8 +5,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestEmptyAccount(t *testing.T) {
@@ -126,7 +126,7 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 	a := Account{
 		Initialised: true,
 		Nonce:       0,
-		Balance:     *uint256.NewInt(),
+		Balance:     *uint256.NewInt(0),
 		Root:        common.HexToHash("123"),
 		CodeHash:    common.HexToHash("123"),
 		Incarnation: 1,
@@ -146,7 +146,7 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       0,
-		Balance:     *uint256.NewInt(),
+		Balance:     *uint256.NewInt(0),
 		Incarnation: 1,
 	}
 	encodedLen := a.EncodingLengthForStorage()

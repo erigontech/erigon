@@ -24,11 +24,11 @@ import (
 	"strings"
 
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type DbCopier interface {
@@ -71,7 +71,7 @@ func OpenKV(path string, readOnly bool) (RwKV, error) {
 	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
 		kv, err = NewMDBX().Path(path).Open()
 	default:
-		opts := NewLMDB().Path(path)
+		opts := NewMDBX().Path(path)
 		if readOnly {
 			opts = opts.Flags(func(flags uint) uint { return flags | lmdb.Readonly })
 		}
@@ -149,14 +149,6 @@ func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *ObjectDatabase) DiskSize(ctx context.Context) (uint64, error) {
-	casted, ok := db.kv.(HasStats)
-	if !ok {
-		return 0, nil
-	}
-	return casted.DiskSize(ctx)
-}
-
 func (db *ObjectDatabase) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
 	err = db.kv.Update(context.Background(), func(tx RwTx) error {
 		res, err = tx.IncrementSequence(bucket, amount)
@@ -224,6 +216,23 @@ func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, wa
 		return Walk(c, startkey, fixedbits, walker)
 	})
 	return err
+}
+
+func (db *ObjectDatabase) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForEach(bucket, fromPrefix, walker)
+	})
+}
+func (db *ObjectDatabase) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForAmount(bucket, fromPrefix, amount, walker)
+	})
+}
+
+func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return db.kv.View(context.Background(), func(tx Tx) error {
+		return tx.ForPrefix(bucket, prefix, walker)
+	})
 }
 
 // Delete deletes the key from the queue and database
@@ -432,12 +441,12 @@ func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
 }
 
 func InspectDatabase(db Database) error {
-	// FIXME: implement in Turbo-Geth
+	// FIXME: implement in Erigon
 	// see https://github.com/ethereum/go-ethereum/blob/f5d89cdb72c1e82e9deb54754bef8dd20bf12591/core/rawdb/database.go#L224
 	return errNotSupported
 }
 
 func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {
-	// FIXME: implement freezer in Turbo-Geth
+	// FIXME: implement freezer in Erigon
 	return db, nil
 }

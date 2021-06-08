@@ -14,9 +14,10 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/gointerfaces"
+	"github.com/ledgerwatch/erigon/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
@@ -26,15 +27,11 @@ import (
 )
 
 // generate the messages and services
-//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/kv.proto" -I=. -I=./../build/include/google
-//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/db.proto" -I=. -I=./../build/include/google
-//go:generate protoc --proto_path=../interfaces --go_out=. --go-grpc_out=. "remote/ethbackend.proto" -I=. -I=./../build/include/google
-
 type remoteOpts struct {
-	DialAddress                              string
-	inMemConn                                *bufconn.Listener // for tests
-	bucketsCfg                               BucketConfigsFunc
-	versionMajor, versionMinor, versionPatch uint32 // KV interface version of the client - to perform compatibility check when opening
+	DialAddress string
+	inMemConn   *bufconn.Listener // for tests
+	bucketsCfg  BucketConfigsFunc
+	version     gointerfaces.Version
 }
 
 type RemoteKV struct {
@@ -52,6 +49,7 @@ type remoteTx struct {
 	stream             remote.KV_TxClient
 	streamCancelFn     context.CancelFunc
 	streamingRequested bool
+	statelessCursors   map[string]Cursor
 }
 
 type remoteCursor struct {
@@ -86,10 +84,14 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.CancelFunc) (*RemoteKV, error) {
+func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error) {
 	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
 	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoff.DefaultConfig, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
@@ -145,31 +147,6 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.C
 	}
 
 	kvClient := remote.NewKVClient(conn)
-	// Perform compatibility check
-	go func() {
-		versionReply, err := kvClient.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
-		if err != nil {
-			log.Error("getting Version info from remove KV", "error", err)
-			cancelFn()
-			return
-		}
-		var compatible bool
-		if versionReply.Major != opts.versionMajor {
-			compatible = false
-		} else if versionReply.Minor != opts.versionMinor {
-			compatible = false
-		} else {
-			compatible = true
-		}
-		if !compatible {
-			log.Error("incompatible KV interface versions", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
-				"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-			cancelFn()
-			return
-		}
-		log.Info("KV interfaces compatible", "client", fmt.Sprintf("%d.%d.%d", opts.versionMajor, opts.versionMinor, opts.versionPatch),
-			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-	}()
 	db := &RemoteKV{
 		opts:     opts,
 		conn:     conn,
@@ -186,7 +163,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string, cancelFn context.C
 }
 
 func (opts remoteOpts) MustOpen() RwKV {
-	db, err := opts.Open("", "", "", func() {})
+	db, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)
 	}
@@ -196,8 +173,8 @@ func (opts remoteOpts) MustOpen() RwKV {
 // NewRemote defines new remove KV connection (without actually opening it)
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
-func NewRemote(versionMajor, versionMinor, versionPatch uint32) remoteOpts {
-	return remoteOpts{bucketsCfg: DefaultBucketConfigs, versionMajor: versionMajor, versionMinor: versionMinor, versionPatch: versionPatch}
+func NewRemote(v gointerfaces.Version) remoteOpts {
+	return remoteOpts{bucketsCfg: DefaultBucketConfigs, version: v}
 }
 
 func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
@@ -208,8 +185,22 @@ func (db *RemoteKV) GrpcConn() *grpc.ClientConn {
 	return db.conn
 }
 
-// Close
-// All transactions must be closed before closing the database.
+func (db *RemoteKV) EnsureVersionCompatibility() bool {
+	versionReply, err := db.remoteKV.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		db.log.Error("getting Version", "error", err)
+		return false
+	}
+	if !gointerfaces.EnsureVersion(db.opts.version, versionReply) {
+		db.log.Error("incompatible interface versions", "client", db.opts.version.String(),
+			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+		return false
+	}
+	db.log.Info("interfaces compatible", "client", db.opts.version.String(),
+		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
+	return true
+}
+
 func (db *RemoteKV) Close() {
 	if db.conn != nil {
 		if err := db.conn.Close(); err != nil {
@@ -261,6 +252,8 @@ func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, err
 func (tx *remoteTx) ReadSequence(bucket string) (uint64, error) {
 	panic("not implemented yet")
 }
+func (tx *remoteTx) Append(bucket string, k, v []byte) error    { panic("no write methods") }
+func (tx *remoteTx) AppendDup(bucket string, k, v []byte) error { panic("no write methods") }
 
 func (tx *remoteTx) Commit() error {
 	panic("remote db is read-only")
@@ -273,16 +266,96 @@ func (tx *remoteTx) Rollback() {
 	tx.closeGrpcStream()
 }
 
-func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
-	c, _ := tx.Cursor(bucket)
+func (tx *remoteTx) statelessCursor(bucket string) (Cursor, error) {
+	if tx.statelessCursors == nil {
+		tx.statelessCursors = make(map[string]Cursor)
+	}
+	c, ok := tx.statelessCursors[bucket]
+	if !ok {
+		var err error
+		c, err = tx.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		tx.statelessCursors[bucket] = c
+	}
+	return c, nil
+}
+
+// TODO: this must be optimized - and implemented as single command on server, with server-side buffered streaming
+func (tx *remoteTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
 	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TODO: this must be optimized - and implemented as single command on server, with server-side buffered streaming
+func (tx *remoteTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *remoteTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
+}
+
+func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return nil, err
+	}
 	_, val, err = c.SeekExact(key)
 	return val, err
 }
 
 func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
-	c, _ := tx.Cursor(bucket)
-	defer c.Close()
+	c, err := tx.statelessCursor(bucket)
+	if err != nil {
+		return false, err
+	}
 	k, _, err := c.Seek(key)
 	if err != nil {
 		return false, err

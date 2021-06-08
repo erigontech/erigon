@@ -22,8 +22,8 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // nonceHeap is a heap.Interface implementation over 64bit unsigned integers for
@@ -280,9 +280,9 @@ func (l *txList) Add(tx types.Transaction, priceBump uint64) (bool, types.Transa
 	old := l.txs.Get(tx.GetNonce())
 	if old != nil {
 		// threshold = oldGP * (100 + priceBump) / 100
-		a := uint256.NewInt().SetUint64(100 + priceBump)
+		a := uint256.NewInt(100 + priceBump)
 		a = a.Mul(a, old.GetPrice())
-		b := uint256.NewInt().SetUint64(100)
+		b := uint256.NewInt(100)
 		threshold := a.Div(a, b)
 		// Have to ensure that the new gas price is higher than the old gas
 		// price as well as checking the percentage threshold to ensure that

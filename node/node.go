@@ -27,11 +27,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/migrations"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/prometheus/tsdb/fileutil"
 )
 
@@ -95,7 +95,6 @@ func New(conf *Config) (*Node, error) {
 		inprocHandler: rpc.NewServer(),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
-		server:        &p2p.Server{Config: conf.P2P},
 		databases:     make([]ethdb.Closer, 0),
 	}
 	// Register built-in APIs.
@@ -108,36 +107,12 @@ func New(conf *Config) (*Node, error) {
 
 	var err error
 	// Initialize the p2p server. This creates the node key and discovery databases.
-	node.server.Config.PrivateKey, err = node.config.NodeKey()
-	if err != nil {
-		return nil, err
-	}
-	node.server.Config.Name = node.Config().NodeName()
-	node.server.Config.Logger = node.log
-	if node.server.Config.StaticNodes == nil {
-		node.server.Config.StaticNodes, err = node.config.StaticNodes()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if node.server.Config.TrustedNodes == nil {
-		node.server.Config.TrustedNodes, err = node.config.TrustedNodes()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if node.server.Config.NodeDatabase == "" {
-		node.server.Config.NodeDatabase, err = node.config.NodeDB()
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	// Check HTTP/WS prefixes are valid.
-	if err := validatePrefix("HTTP", conf.HTTPPathPrefix); err != nil {
+	if err = validatePrefix("HTTP", conf.HTTPPathPrefix); err != nil {
 		return nil, err
 	}
-	if err := validatePrefix("WebSocket", conf.WSPathPrefix); err != nil {
+	if err = validatePrefix("WebSocket", conf.WSPathPrefix); err != nil {
 		return nil, err
 	}
 
@@ -150,7 +125,6 @@ func New(conf *Config) (*Node, error) {
 }
 
 func (n *Node) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
-	n.server.SetP2PListenFunc(listenFunc)
 }
 
 // Start starts all registered lifecycles, RPC services and p2p networking.
@@ -254,21 +228,10 @@ func (n *Node) doClose(errs []error) error {
 
 // openEndpoints starts all network and RPC endpoints.
 func (n *Node) openEndpoints() error {
-	// start networking endpoints
-	n.log.Info("Starting peer-to-peer node", "instance", n.server.Name)
-	if len(n.config.P2P.SentryAddr) == 0 {
-		if err := n.server.Start(); err != nil {
-			return convertFileLockError(err)
-		}
-	}
-
 	// start RPC endpoints
 	err := n.startRPC()
 	if err != nil {
 		n.stopRPC()
-		if len(n.config.P2P.SentryAddr) == 0 {
-			n.server.Stop()
-		}
 	}
 	return err
 }
@@ -294,11 +257,6 @@ func (n *Node) stopServices(running []Lifecycle) error {
 		if err := running[i].Stop(); err != nil {
 			failure.Services[reflect.TypeOf(running[i])] = err
 		}
-	}
-
-	if len(n.config.P2P.SentryAddr) == 0 {
-		// Stop p2p networking.
-		n.server.Stop()
 	}
 
 	if len(failure.Services) > 0 {
@@ -450,7 +408,6 @@ func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
 	if n.state != initializingState {
 		panic("can't register protocols on running/stopped node")
 	}
-	n.server.Protocols = append(n.server.Protocols, protocols...)
 }
 
 // RegisterAPIs registers the APIs a service provides on the node.
@@ -544,17 +501,7 @@ func (n *Node) WSEndpoint() string {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(name string, datadir string) (*ethdb.ObjectDatabase, error) {
-	return n.OpenDatabaseWithFreezer(name, datadir)
-}
-
-// OpenDatabaseWithFreezer opens an existing database with the given name (or
-// creates one if no previous can be found) from within the node's data directory,
-// also attaching a chain freezer to it that moves ancient chain data from the
-// database to immutable append-only files. If the node is an ephemeral one, a
-// memory database is returned.
-// NOTE: kept for compatibility and for easier rebases (turbo-geth)
-func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.ObjectDatabase, error) {
+func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*ethdb.ObjectDatabase, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -562,69 +509,75 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 		return nil, ErrNodeStopped
 	}
 
+	var name string
+	switch label {
+	case ethdb.Chain:
+		name = "chaindata"
+	case ethdb.TxPool:
+		name = "txpool"
+	default:
+		name = "test"
+	}
 	var db *ethdb.ObjectDatabase
 	if n.config.DataDir == "" {
-		fmt.Printf("Opening In-memory Database (LMDB): %s\n", name)
 		db = ethdb.NewMemDatabase()
+		n.databases = append(n.databases, db)
+		return db, nil
+	}
+	dbPath := n.config.ResolvePath(name)
+
+	var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
+	if n.config.MDBX {
+		log.Info("Opening Database", "label", name, "type", "mdbx")
+		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+			opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
+			if exclusive {
+				opts = opts.Exclusive()
+			}
+			kv, err1 := opts.Open()
+			if err1 != nil {
+				return nil, err1
+			}
+			return ethdb.NewObjectDatabase(kv), nil
+		}
 	} else {
-		dbPath, err := n.config.ResolvePath(name)
+		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
+		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+			opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
+			if exclusive {
+				opts = opts.Exclusive()
+			}
+			kv, err1 := opts.Open()
+			if err1 != nil {
+				return nil, err1
+			}
+			return ethdb.NewObjectDatabase(kv), nil
+		}
+	}
+	var err error
+	db, err = openFunc(false)
+	if err != nil {
+		return nil, err
+	}
+	migrator := migrations.NewMigrator(label)
+	has, err := migrator.HasPendingMigrations(db.RwKV())
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		log.Info("Re-Opening DB in exclusive mode to apply migrations")
+		db.Close()
+		db, err = openFunc(true)
 		if err != nil {
 			return nil, err
 		}
-
-		var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
-		if n.config.MDBX {
-			log.Info("Opening Database (MDBX)", "mapSize", n.config.LMDBMapSize.HR())
-			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-				opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-				if exclusive {
-					opts = opts.Exclusive()
-				}
-				kv, err1 := opts.Open()
-				if err1 != nil {
-					return nil, err1
-				}
-				return ethdb.NewObjectDatabase(kv), nil
-			}
-		} else {
-			log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
-			openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-				opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-				if exclusive {
-					opts = opts.Exclusive()
-				}
-				kv, err1 := opts.Open()
-				if err1 != nil {
-					return nil, err1
-				}
-				return ethdb.NewObjectDatabase(kv), nil
-			}
+		if err = migrator.Apply(db, datadir, n.config.MDBX); err != nil {
+			return nil, err
 		}
-
+		db.Close()
 		db, err = openFunc(false)
 		if err != nil {
 			return nil, err
-		}
-		migrator := migrations.NewMigrator()
-		has, err := migrator.HasPendingMigrations(db)
-		if err != nil {
-			return nil, err
-		}
-		if has {
-			log.Info("Re-Opening DB in exclusive mode to apply migrations")
-			db.Close()
-			db, err = openFunc(true)
-			if err != nil {
-				return nil, err
-			}
-			if err = migrator.Apply(db, datadir); err != nil {
-				return nil, err
-			}
-			db.Close()
-			db, err = openFunc(false)
-			if err != nil {
-				return nil, err
-			}
 		}
 	}
 
@@ -633,6 +586,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, datadir string) (*ethdb.Obje
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.
-func (n *Node) ResolvePath(x string) (string, error) {
+func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
 }

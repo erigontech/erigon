@@ -3,13 +3,161 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"golang.org/x/crypto/sha3"
 )
+
+func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
+	dbtx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer dbtx.Rollback()
+
+	chainConfig, err := api.chainConfig(dbtx)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(txHashes) == 0 {
+		return nil, nil
+	}
+
+	var txs types.Transactions
+
+	for _, txHash := range txHashes {
+		txn, _, _, _ := rawdb.ReadTransaction(dbtx, txHash)
+		if txn == nil {
+			return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		}
+		txs = append(txs, txn)
+	}
+	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
+
+	stateBlockNumber, hash, err := rpchelper.GetBlockNumber(stateBlockNumberOrHash, dbtx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	var stateReader state.StateReader
+	if num, ok := stateBlockNumberOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+		stateReader = state.NewPlainStateReader(dbtx)
+	} else {
+		stateReader = state.NewPlainKvState(dbtx, stateBlockNumber)
+	}
+	st := state.New(stateReader)
+
+	parent := rawdb.ReadHeader(dbtx, hash, stateBlockNumber)
+	if parent == nil {
+		return nil, fmt.Errorf("block %d(%x) not found", stateBlockNumber, hash)
+	}
+
+	blockNumber := stateBlockNumber + 1
+
+	timestamp := parent.Time // Dont care about the timestamp
+
+	coinbase := parent.Coinbase
+	header := &types.Header{
+		ParentHash: parent.Hash(),
+		Number:     big.NewInt(int64(blockNumber)),
+		GasLimit:   parent.GasLimit,
+		Time:       timestamp,
+		Difficulty: parent.Difficulty,
+		Coinbase:   coinbase,
+	}
+
+	// Get a new instance of the EVM
+	signer := types.MakeSigner(chainConfig, blockNumber)
+	firstMsg, err := txs[0].AsMessage(*signer, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, dbtx)
+	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+
+	timeoutMilliSeconds := int64(5000)
+	if timeoutMilliSecondsPtr != nil {
+		timeoutMilliSeconds = *timeoutMilliSecondsPtr
+	}
+	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
+
+	// Setup context so it may be cancelled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	// Make sure the context is cancelled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+
+	// Wait for the context to be done and cancel the evm. Even if the
+	// EVM has finished, cancelling may be done (repeatedly)
+	go func() {
+		<-ctx.Done()
+		evm.Cancel()
+	}()
+
+	// Setup the gas pool (also for unmetered requests)
+	// and apply the message.
+	gp := new(core.GasPool).AddGas(math.MaxUint64)
+
+	results := []map[string]interface{}{}
+
+	bundleHash := sha3.NewLegacyKeccak256()
+	for _, tx := range txs {
+		msg, err := tx.AsMessage(*signer, nil)
+		if err != nil {
+			return nil, err
+		}
+		// Execute the transaction message
+		result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			return nil, err
+		}
+		// If the timer caused an abort, return an appropriate error message
+		if evm.Cancelled() {
+			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
+		}
+
+		txHash := tx.Hash().String()
+		jsonResult := map[string]interface{}{
+			"txHash":  txHash,
+			"gasUsed": result.UsedGas,
+		}
+		bundleHash.Write(tx.Hash().Bytes())
+		if result.Err != nil {
+			jsonResult["error"] = result.Err.Error()
+		} else {
+			jsonResult["value"] = common.BytesToHash(result.Return())
+		}
+
+		results = append(results, jsonResult)
+	}
+
+	ret := map[string]interface{}{}
+	ret["results"] = results
+	ret["bundleHash"] = "0x" + common.Bytes2Hex(bundleHash.Sum(nil))
+	return ret, nil
+}
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
@@ -18,27 +166,21 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	blockNum, err := getBlockNumber(number, tx)
+	b, err := api.getBlockByNumber(number, tx)
 	if err != nil {
 		return nil, err
+	}
+	if b == nil {
+		return nil, nil
 	}
 	additionalFields := make(map[string]interface{})
 
-	block, _, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
-	}
-
-	td, err := rawdb.ReadTd(tx, block.Hash(), blockNum)
+	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
 	if err != nil {
 		return nil, err
 	}
 	additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
-	response, err := ethapi.RPCMarshalBlock(block, true, fullTx, additionalFields)
+	response, err := ethapi.RPCMarshalBlock(b, true, fullTx, additionalFields)
 
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -56,7 +198,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		// eth_getBlockByHash with a block number as a parameter
 		// so no matter how weird that is, we would love to support that.
 		if numberOrHash.BlockNumber == nil {
-			return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 		}
 		return api.GetBlockByNumber(ctx, *numberOrHash.BlockNumber, fullTx)
 	}
@@ -75,7 +217,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 	number := block.NumberU64()
 
@@ -102,20 +244,29 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 	defer tx.Rollback()
-
+	if blockNr == rpc.PendingBlockNumber {
+		b, err := api.getBlockByNumber(blockNr, tx)
+		if err != nil {
+			return nil, err
+		}
+		if b == nil {
+			return nil, nil
+		}
+		n := hexutil.Uint(len(b.Transactions()))
+		return &n, nil
+	}
 	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
-
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	body, _, txAmount, err := rawdb.ReadBodyByNumber(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+	if body == nil {
+		return nil, nil
 	}
-	n := hexutil.Uint(len(block.Transactions()))
+	n := hexutil.Uint(txAmount)
 	return &n, nil
 }
 
@@ -127,13 +278,14 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
-	if err != nil {
-		return nil, err
+	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	if num == nil {
+		return nil, nil
 	}
-	if block == nil {
-		return nil, fmt.Errorf("block not found: %x", blockHash)
+	body, _, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, *num)
+	if body == nil {
+		return nil, nil
 	}
-	n := hexutil.Uint(len(block.Transactions()))
+	n := hexutil.Uint(txAmount)
 	return &n, nil
 }

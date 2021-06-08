@@ -11,10 +11,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ugorji/go/codec"
 )
 
@@ -165,7 +165,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, provide
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	var pervK []byte
+	var pervK, pervV []byte
 
 	i := 0
 	loadNextFunc := func(originalK, k, v []byte) error {
@@ -213,8 +213,10 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, provide
 				pervK = k
 			} else {
 				if err := c.Append(k, v); err != nil {
-					return fmt.Errorf("%s: bucket: %s, append: k=%x, %w", logPrefix, bucket, k, err)
+					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x,prevK=%x, prevV=%x, %w", logPrefix, bucket, k, v, pervK, pervV, err)
 				}
+				pervK = k
+				pervV = v
 			}
 
 			return nil

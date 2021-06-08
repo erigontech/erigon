@@ -5,8 +5,8 @@ import (
 	"errors"
 	"unsafe"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 const ReadersLimit = 2000 // MDBX_READERS_LIMIT on 64bit system
@@ -16,12 +16,43 @@ var (
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
 
 	dbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
+	txLimit   = metrics.GetOrRegisterGauge("tx/limit", metrics.DefaultRegistry)   //nolint
 	txSpill   = metrics.GetOrRegisterGauge("tx/spill", metrics.DefaultRegistry)   //nolint
 	txUnspill = metrics.GetOrRegisterGauge("tx/unspill", metrics.DefaultRegistry) //nolint
 	txDirty   = metrics.GetOrRegisterGauge("tx/dirty", metrics.DefaultRegistry)   //nolint
+
+	dbCommitPreparation = metrics.GetOrRegisterTimer("db/commit/preparation", metrics.DefaultRegistry) //nolint
+	dbCommitGc          = metrics.GetOrRegisterTimer("db/commit/gc", metrics.DefaultRegistry)          //nolint
+	dbCommitAudit       = metrics.GetOrRegisterTimer("db/commit/audit", metrics.DefaultRegistry)       //nolint
+	dbCommitWrite       = metrics.GetOrRegisterTimer("db/commit/write", metrics.DefaultRegistry)       //nolint
+	dbCommitSync        = metrics.GetOrRegisterTimer("db/commit/sync", metrics.DefaultRegistry)        //nolint
+	dbCommitEnding      = metrics.GetOrRegisterTimer("db/commit/ending", metrics.DefaultRegistry)      //nolint
+
+	dbPgopsNewly   = metrics.GetOrRegisterGauge("db/pgops/newly", metrics.DefaultRegistry)   //nolint
+	dbPgopsCow     = metrics.GetOrRegisterGauge("db/pgops/cow", metrics.DefaultRegistry)     //nolint
+	dbPgopsClone   = metrics.GetOrRegisterGauge("db/pgops/clone", metrics.DefaultRegistry)   //nolint
+	dbPgopsSplit   = metrics.GetOrRegisterGauge("db/pgops/split", metrics.DefaultRegistry)   //nolint
+	dbPgopsMerge   = metrics.GetOrRegisterGauge("db/pgops/merge", metrics.DefaultRegistry)   //nolint
+	dbPgopsSpill   = metrics.GetOrRegisterGauge("db/pgops/spill", metrics.DefaultRegistry)   //nolint
+	dbPgopsUnspill = metrics.GetOrRegisterGauge("db/pgops/unspill", metrics.DefaultRegistry) //nolint
+	dbPgopsWops    = metrics.GetOrRegisterGauge("db/pgops/wops", metrics.DefaultRegistry)    //nolint
+
+	gcLeafMetric     = metrics.GetOrRegisterGauge("db/gc/leaf", metrics.DefaultRegistry)     //nolint
+	gcOverflowMetric = metrics.GetOrRegisterGauge("db/gc/overflow", metrics.DefaultRegistry) //nolint
+	gcPagesMetric    = metrics.GetOrRegisterGauge("db/gc/pages", metrics.DefaultRegistry)    //nolint
+
+	stateLeafMetric     = metrics.GetOrRegisterGauge("db/state/leaf", metrics.DefaultRegistry)   //nolint
+	stateBranchesMetric = metrics.GetOrRegisterGauge("db/state/branch", metrics.DefaultRegistry) //nolint
 )
 
 type DBVerbosityLvl int8
+type Label uint8
+
+const (
+	Chain  Label = 0
+	TxPool Label = 1
+	Sentry Label = 2
+)
 
 type Has interface {
 	// Has indicates whether a key exists in the database.
@@ -32,6 +63,15 @@ type KVGetter interface {
 	Has
 
 	GetOne(bucket string, key []byte) (val []byte, err error)
+
+	// ForEach iterates over entries with keys greater or equal to fromPrefix.
+	// walker is called for each eligible entry.
+	// If walker returns an error:
+	//   - implementations of local db - stop
+	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
+	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
 // Putter wraps the database write operations.
@@ -125,6 +165,8 @@ type StatelessWriteTx interface {
 	Deleter
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
+	Append(bucket string, k, v []byte) error
+	AppendDup(bucket string, k, v []byte) error
 }
 
 type StatelessRwTx interface {
@@ -144,6 +186,10 @@ type Tx interface {
 	Cursor(bucket string) (Cursor, error)
 	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has lmdb.DupSort flag
 
+	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+
 	Comparator(bucket string) dbutils.CmpFunc
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
@@ -153,6 +199,7 @@ type Tx interface {
 type RwTx interface {
 	Tx
 	StatelessWriteTx
+	BucketMigrator
 
 	RwCursor(bucket string) (RwCursor, error)
 	RwCursorDupSort(bucket string) (RwCursorDupSort, error)

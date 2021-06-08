@@ -6,8 +6,8 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/valyala/fastjson"
 )
 
@@ -168,15 +168,24 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	tx.V.SetFromBig(dec.V.ToInt())
+	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.V higher than 2^256-1")
+	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	tx.R.SetFromBig(dec.R.ToInt())
+	overflow = tx.R.SetFromBig(dec.R.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.R higher than 2^256-1")
+	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	tx.S.SetFromBig(dec.S.ToInt())
+	overflow = tx.S.SetFromBig(dec.S.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.S higher than 2^256-1")
+	}
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
 	}
@@ -238,15 +247,24 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	tx.V.SetFromBig(dec.V.ToInt())
+	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.V higher than 2^256-1")
+	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	tx.R.SetFromBig(dec.R.ToInt())
+	overflow = tx.R.SetFromBig(dec.R.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.R higher than 2^256-1")
+	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	tx.S.SetFromBig(dec.S.ToInt())
+	overflow = tx.S.SetFromBig(dec.S.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.S higher than 2^256-1")
+	}
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
 		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
@@ -309,15 +327,24 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	tx.V.SetFromBig(dec.V.ToInt())
+	overflow = tx.V.SetFromBig(dec.V.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.V higher than 2^256-1")
+	}
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	tx.R.SetFromBig(dec.R.ToInt())
+	overflow = tx.R.SetFromBig(dec.R.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.R higher than 2^256-1")
+	}
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	tx.S.SetFromBig(dec.S.ToInt())
+	overflow = tx.S.SetFromBig(dec.S.ToInt())
+	if overflow {
+		return fmt.Errorf("dec.S higher than 2^256-1")
+	}
 	if overflow {
 		return errors.New("'s' in transaction does not fit in 256 bits")
 	}

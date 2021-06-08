@@ -21,18 +21,16 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/bloombits"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/bloombits"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/event"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type Backend interface {
-	ChainDb() ethdb.Database
 	HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error)
 	HeaderByHash(ctx context.Context, blockHash common.Hash) (*types.Header, error)
 	GetReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, error)
@@ -52,7 +50,6 @@ type Backend interface {
 type Filter struct {
 	backend Backend
 
-	db        ethdb.Database
 	addresses []common.Address
 	topics    [][]common.Hash
 
@@ -65,7 +62,7 @@ type Filter struct {
 // NewRangeFilter creates a new filter which uses a bloom filter on blocks to
 // figure out whether a particular block is interesting or not.
 func NewRangeFilter(backend Backend, begin, end int64, addresses []common.Address, topics [][]common.Hash) *Filter {
-	log.Error("Log filter not used in turbo-get, please see implementation of eth_getLogs in RPCDaemon for more details")
+	log.Error("Log filter not used in Erigon, please see implementation of eth_getLogs in RPCDaemon for more details")
 	// Flatten the address and topic filter clauses into a single bloombits filter
 	// system. Since the bloombits are not positional, nil topics are permitted,
 	// which get flattened into a nil byte slice.
@@ -112,7 +109,6 @@ func newFilter(backend Backend, addresses []common.Address, topics [][]common.Ha
 		backend:   backend,
 		addresses: addresses,
 		topics:    topics,
-		db:        backend.ChainDb(),
 	}
 }
 

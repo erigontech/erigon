@@ -21,7 +21,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 // Handler returns a log handler which logs to the unit test log of t.

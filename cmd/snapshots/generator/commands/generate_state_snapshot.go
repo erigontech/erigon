@@ -7,20 +7,18 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	withDatadir(generateStateSnapshotCmd)
 	withSnapshotFile(generateStateSnapshotCmd)
-	withSnapshotData(generateStateSnapshotCmd)
 	withBlock(generateStateSnapshotCmd)
 	rootCmd.AddCommand(generateStateSnapshotCmd)
 
@@ -32,11 +30,11 @@ var generateStateSnapshotCmd = &cobra.Command{
 	Short:   "Generate state snapshot",
 	Example: "go run ./cmd/state/main.go stateSnapshot --block 11000000 --datadir /media/b00ris/nvme/tgstaged/ --snapshot /media/b00ris/nvme/snapshots/state",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return GenerateStateSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+		return GenerateStateSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode, database)
 	},
 }
 
-func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
+func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string, database string) error {
 	if snapshotPath == "" {
 		return errors.New("empty snapshot path")
 	}
@@ -45,30 +43,29 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	if err != nil {
 		return err
 	}
-	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
+	var kv, snkv ethdb.RwKV
 
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
+	if database == "lmdb" {
+		kv = ethdb.NewLMDB().Path(dbPath).MustOpen()
+		snkv = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
+				dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
+				dbutils.CodeBucket:              dbutils.BucketConfigItem{},
+				dbutils.StateSnapshotInfoBucket: dbutils.BucketConfigItem{},
+			}
+		}).Path(snapshotPath).MustOpen()
+	} else {
+		kv = ethdb.NewMDBX().Path(dbPath).MustOpen()
+		snkv = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
+				dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
+				dbutils.CodeBucket:              dbutils.BucketConfigItem{},
+				dbutils.StateSnapshotInfoBucket: dbutils.BucketConfigItem{},
+			}
+		}).Path(snapshotPath).MustOpen()
 	}
-
-	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
-			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
-			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
-			dbutils.StateSnapshotInfoBucket: dbutils.BucketConfigItem{},
-		}
-	}).Path(snapshotPath).MustOpen()
-
 	sndb := ethdb.NewObjectDatabase(snkv)
 	mt := sndb.NewBatch()
 
@@ -175,5 +172,5 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	}
 	fmt.Println("took", time.Since(t))
 
-	return VerifyStateSnapshot(ctx, dbPath, snapshotFile, block)
+	return VerifyStateSnapshot(ctx, dbPath, snapshotFile, block, database)
 }

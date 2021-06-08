@@ -4,9 +4,11 @@ package remote
 
 import (
 	context "context"
+	types "github.com/ledgerwatch/erigon/gointerfaces/types"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -20,34 +22,13 @@ const _ = grpc.SupportPackageIsVersion7
 type ETHBACKENDClient interface {
 	Etherbase(ctx context.Context, in *EtherbaseRequest, opts ...grpc.CallOption) (*EtherbaseReply, error)
 	NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error)
+	// Version returns the service version number
+	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
 	ProtocolVersion(ctx context.Context, in *ProtocolVersionRequest, opts ...grpc.CallOption) (*ProtocolVersionReply, error)
-	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
+	// ClientVersion returns the Ethereum client version string using node name convention (e.g. Erigon/v2021.03.2-alpha/Linux).
 	ClientVersion(ctx context.Context, in *ClientVersionRequest, opts ...grpc.CallOption) (*ClientVersionReply, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (ETHBACKEND_SubscribeClient, error)
-	// GetWork returns a work package for external miner.
-	//
-	// The work package consists of 3 strings:
-	//   result[0] - 32 bytes hex encoded current block header pow-hash
-	//   result[1] - 32 bytes hex encoded seed hash used for DAG
-	//   result[2] - 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
-	//   result[3] - hex encoded block number
-	GetWork(ctx context.Context, in *GetWorkRequest, opts ...grpc.CallOption) (*GetWorkReply, error)
-	// SubmitWork can be used by external miner to submit their POW solution.
-	// It returns an indication if the work was accepted.
-	// Note either an invalid solution, a stale work a non-existent work will return false.
-	SubmitWork(ctx context.Context, in *SubmitWorkRequest, opts ...grpc.CallOption) (*SubmitWorkReply, error)
-	// SubmitHashRate can be used for remote miners to submit their hash rate.
-	// This enables the node to report the combined hash rate of all miners
-	// which submit work through this node.
-	//
-	// It accepts the miner hash rate and an identifier which must be unique
-	// between nodes.
-	SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error)
-	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
-	GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error)
-	// Mining returns an indication if this node is currently mining and it's mining configuration
-	Mining(ctx context.Context, in *MiningRequest, opts ...grpc.CallOption) (*MiningReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -70,6 +51,15 @@ func (c *eTHBACKENDClient) Etherbase(ctx context.Context, in *EtherbaseRequest, 
 func (c *eTHBACKENDClient) NetVersion(ctx context.Context, in *NetVersionRequest, opts ...grpc.CallOption) (*NetVersionReply, error) {
 	out := new(NetVersionReply)
 	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/NetVersion", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+	out := new(types.VersionReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/Version", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,85 +116,19 @@ func (x *eTHBACKENDSubscribeClient) Recv() (*SubscribeReply, error) {
 	return m, nil
 }
 
-func (c *eTHBACKENDClient) GetWork(ctx context.Context, in *GetWorkRequest, opts ...grpc.CallOption) (*GetWorkReply, error) {
-	out := new(GetWorkReply)
-	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/GetWork", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *eTHBACKENDClient) SubmitWork(ctx context.Context, in *SubmitWorkRequest, opts ...grpc.CallOption) (*SubmitWorkReply, error) {
-	out := new(SubmitWorkReply)
-	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/SubmitWork", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *eTHBACKENDClient) SubmitHashRate(ctx context.Context, in *SubmitHashRateRequest, opts ...grpc.CallOption) (*SubmitHashRateReply, error) {
-	out := new(SubmitHashRateReply)
-	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/SubmitHashRate", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *eTHBACKENDClient) GetHashRate(ctx context.Context, in *GetHashRateRequest, opts ...grpc.CallOption) (*GetHashRateReply, error) {
-	out := new(GetHashRateReply)
-	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/GetHashRate", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *eTHBACKENDClient) Mining(ctx context.Context, in *MiningRequest, opts ...grpc.CallOption) (*MiningReply, error) {
-	out := new(MiningReply)
-	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/Mining", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility
 type ETHBACKENDServer interface {
 	Etherbase(context.Context, *EtherbaseRequest) (*EtherbaseReply, error)
 	NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error)
+	// Version returns the service version number
+	Version(context.Context, *emptypb.Empty) (*types.VersionReply, error)
 	// ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
 	ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error)
-	// ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
+	// ClientVersion returns the Ethereum client version string using node name convention (e.g. Erigon/v2021.03.2-alpha/Linux).
 	ClientVersion(context.Context, *ClientVersionRequest) (*ClientVersionReply, error)
 	Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error
-	// GetWork returns a work package for external miner.
-	//
-	// The work package consists of 3 strings:
-	//   result[0] - 32 bytes hex encoded current block header pow-hash
-	//   result[1] - 32 bytes hex encoded seed hash used for DAG
-	//   result[2] - 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
-	//   result[3] - hex encoded block number
-	GetWork(context.Context, *GetWorkRequest) (*GetWorkReply, error)
-	// SubmitWork can be used by external miner to submit their POW solution.
-	// It returns an indication if the work was accepted.
-	// Note either an invalid solution, a stale work a non-existent work will return false.
-	SubmitWork(context.Context, *SubmitWorkRequest) (*SubmitWorkReply, error)
-	// SubmitHashRate can be used for remote miners to submit their hash rate.
-	// This enables the node to report the combined hash rate of all miners
-	// which submit work through this node.
-	//
-	// It accepts the miner hash rate and an identifier which must be unique
-	// between nodes.
-	SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error)
-	// GetHashRate returns the current hashrate for local CPU miner and remote miner.
-	GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error)
-	// Mining returns an indication if this node is currently mining and it's mining configuration
-	Mining(context.Context, *MiningRequest) (*MiningReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -218,6 +142,9 @@ func (UnimplementedETHBACKENDServer) Etherbase(context.Context, *EtherbaseReques
 func (UnimplementedETHBACKENDServer) NetVersion(context.Context, *NetVersionRequest) (*NetVersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NetVersion not implemented")
 }
+func (UnimplementedETHBACKENDServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
+}
 func (UnimplementedETHBACKENDServer) ProtocolVersion(context.Context, *ProtocolVersionRequest) (*ProtocolVersionReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProtocolVersion not implemented")
 }
@@ -226,21 +153,6 @@ func (UnimplementedETHBACKENDServer) ClientVersion(context.Context, *ClientVersi
 }
 func (UnimplementedETHBACKENDServer) Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error {
 	return status.Errorf(codes.Unimplemented, "method Subscribe not implemented")
-}
-func (UnimplementedETHBACKENDServer) GetWork(context.Context, *GetWorkRequest) (*GetWorkReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetWork not implemented")
-}
-func (UnimplementedETHBACKENDServer) SubmitWork(context.Context, *SubmitWorkRequest) (*SubmitWorkReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SubmitWork not implemented")
-}
-func (UnimplementedETHBACKENDServer) SubmitHashRate(context.Context, *SubmitHashRateRequest) (*SubmitHashRateReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SubmitHashRate not implemented")
-}
-func (UnimplementedETHBACKENDServer) GetHashRate(context.Context, *GetHashRateRequest) (*GetHashRateReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetHashRate not implemented")
-}
-func (UnimplementedETHBACKENDServer) Mining(context.Context, *MiningRequest) (*MiningReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Mining not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 
@@ -287,6 +199,24 @@ func _ETHBACKEND_NetVersion_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ETHBACKENDServer).NetVersion(ctx, req.(*NetVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_Version_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).Version(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/Version",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).Version(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -348,96 +278,6 @@ func (x *eTHBACKENDSubscribeServer) Send(m *SubscribeReply) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func _ETHBACKEND_GetWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetWorkRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).GetWork(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/remote.ETHBACKEND/GetWork",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).GetWork(ctx, req.(*GetWorkRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ETHBACKEND_SubmitWork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SubmitWorkRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).SubmitWork(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/remote.ETHBACKEND/SubmitWork",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).SubmitWork(ctx, req.(*SubmitWorkRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ETHBACKEND_SubmitHashRate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SubmitHashRateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).SubmitHashRate(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/remote.ETHBACKEND/SubmitHashRate",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).SubmitHashRate(ctx, req.(*SubmitHashRateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ETHBACKEND_GetHashRate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetHashRateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).GetHashRate(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/remote.ETHBACKEND/GetHashRate",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).GetHashRate(ctx, req.(*GetHashRateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ETHBACKEND_Mining_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MiningRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).Mining(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/remote.ETHBACKEND/Mining",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).Mining(ctx, req.(*MiningRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -454,32 +294,16 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ETHBACKEND_NetVersion_Handler,
 		},
 		{
+			MethodName: "Version",
+			Handler:    _ETHBACKEND_Version_Handler,
+		},
+		{
 			MethodName: "ProtocolVersion",
 			Handler:    _ETHBACKEND_ProtocolVersion_Handler,
 		},
 		{
 			MethodName: "ClientVersion",
 			Handler:    _ETHBACKEND_ClientVersion_Handler,
-		},
-		{
-			MethodName: "GetWork",
-			Handler:    _ETHBACKEND_GetWork_Handler,
-		},
-		{
-			MethodName: "SubmitWork",
-			Handler:    _ETHBACKEND_SubmitWork_Handler,
-		},
-		{
-			MethodName: "SubmitHashRate",
-			Handler:    _ETHBACKEND_SubmitHashRate_Handler,
-		},
-		{
-			MethodName: "GetHashRate",
-			Handler:    _ETHBACKEND_GetHashRate_Handler,
-		},
-		{
-			MethodName: "Mining",
-			Handler:    _ETHBACKEND_Mining_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

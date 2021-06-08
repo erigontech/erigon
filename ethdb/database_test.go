@@ -27,34 +27,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestLmdb() *ObjectDatabase {
-	return NewObjectDatabase(NewLMDB().InMem().MustOpen())
-}
-
 var testBucket = dbutils.HashedAccountsBucket
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
-func TestMemoryDB_PutGet(t *testing.T) {
-	db := NewMemDatabase()
-	defer db.Close()
-	testPutGet(db, t)
-	testNoPanicAfterDbClosed(db, t)
-}
+func TestPutGet(t *testing.T) {
+	_, tx := NewTestTx(t)
 
-func TestLMDB_PutGet(t *testing.T) {
-	db := newTestLmdb()
-	defer db.Close()
-	testPutGet(db, t)
-	testNoPanicAfterDbClosed(db, t)
-}
-
-func testPutGet(db MinDatabase, t *testing.T) {
 	//for _, k := range testValues {
 	//	err := db.Put(testBucket, []byte(k), []byte{})
 	//	if err != nil {
@@ -72,81 +56,54 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	//	}
 	//}
 
-	_, err := db.Get(testBucket, []byte("non-exist-key"))
-	if err == nil {
-		t.Fatalf("expect to return a not found error")
+	_, err := tx.GetOne(testBucket, []byte("non-exist-key"))
+	require.NoError(t, err)
+
+	for _, v := range testValues {
+		err := tx.Put(testBucket, []byte(v), []byte(v))
+		require.NoError(t, err)
 	}
 
 	for _, v := range testValues {
-		err := db.Put(testBucket, []byte(v), []byte(v))
-		if err != nil {
-			t.Fatalf("put failed: %v", err)
-		}
-	}
-
-	for _, v := range testValues {
-		data, err := db.Get(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
+		data, err := tx.GetOne(testBucket, []byte(v))
+		require.NoError(t, err)
 		if !bytes.Equal(data, []byte(v)) {
 			t.Fatalf("get returned wrong result, got %q expected %q", string(data), v)
 		}
 	}
 
 	for _, v := range testValues {
-		err := db.Put(testBucket, []byte(v), []byte("?"))
-		if err != nil {
-			t.Fatalf("put override failed: %v", err)
-		}
+		err := tx.Put(testBucket, []byte(v), []byte("?"))
+		require.NoError(t, err)
 	}
 
 	for _, v := range testValues {
-		data, err := db.Get(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
+		data, err := tx.GetOne(testBucket, []byte(v))
+		require.NoError(t, err)
 		if !bytes.Equal(data, []byte("?")) {
 			t.Fatalf("get returned wrong result, got %q expected ?", string(data))
 		}
 	}
 
 	for _, v := range testValues {
-		orig, err := db.Get(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
-		orig[0] = byte(0xff)
-		data, err := db.Get(testBucket, []byte(v))
-		if err != nil {
-			t.Fatalf("get failed: %v", err)
-		}
-		if !bytes.Equal(data, []byte("?")) {
-			fmt.Printf("Error: %s %s\n", v, data)
-			t.Fatalf("get returned wrong result, got %s expected ?", string(data))
-		}
+		err := tx.Delete(testBucket, []byte(v), nil)
+		require.NoError(t, err)
 	}
 
 	for _, v := range testValues {
-		err := db.Delete(testBucket, []byte(v), nil)
-		if err != nil {
-			t.Fatalf("delete %q failed: %v", v, err)
-		}
-	}
-
-	for _, v := range testValues {
-		_, err := db.Get(testBucket, []byte(v))
-		if err == nil {
-			t.Fatalf("got deleted value %q", v)
-		}
+		_, err := tx.GetOne(testBucket, []byte(v))
+		require.NoError(t, err)
 	}
 }
 
-func testNoPanicAfterDbClosed(db Database, t *testing.T) {
-	tx, err := db.(HasRwKV).RwKV().BeginRo(context.Background())
+func TestNoPanicAfterDbClosed(t *testing.T) {
+	db := NewTestKV(t)
+	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
-	writeTx, err := db.(HasRwKV).RwKV().BeginRw(context.Background())
+	defer tx.Rollback()
+	writeTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer writeTx.Rollback()
 
 	closeCh := make(chan struct{}, 1)
 	go func() {
@@ -168,27 +125,17 @@ func testNoPanicAfterDbClosed(db Database, t *testing.T) {
 	close(closeCh)
 
 	// after db closed, methods must not panic but return some error
-	require.NotPanics(t, func() {
-		_, err := db.Get(testBucket, []byte{11})
-		require.Error(t, err)
-		err = db.Put(testBucket, []byte{11}, []byte{11})
-		require.Error(t, err)
-	})
+	//require.NotPanics(t, func() {
+	//	_, err := tx.GetOne(testBucket, []byte{11})
+	//	require.Error(t, err)
+	//	err = writeTx.Put(testBucket, []byte{11}, []byte{11})
+	//	require.Error(t, err)
+	//})
 }
 
-func TestMemoryDB_ParallelPutGet(t *testing.T) {
-	db := NewMemDatabase()
-	defer db.Close()
-	testParallelPutGet(db)
-}
+func TestParallelPutGet(t *testing.T) {
+	db := NewTestKV(t)
 
-func TestLMDB_ParallelPutGet(t *testing.T) {
-	db := newTestLmdb()
-	defer db.Close()
-	testParallelPutGet(db)
-}
-
-func testParallelPutGet(db MinDatabase) {
 	const n = 8
 	var pending sync.WaitGroup
 
@@ -196,10 +143,13 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Put(testBucket, []byte(key), []byte("v"+key))
-			if err != nil {
-				panic("put failed: " + err.Error())
-			}
+			_ = db.Update(context.Background(), func(tx RwTx) error {
+				err := tx.Put(testBucket, []byte(key), []byte("v"+key))
+				if err != nil {
+					panic("put failed: " + err.Error())
+				}
+				return nil
+			})
 		}(strconv.Itoa(i))
 	}
 	pending.Wait()
@@ -208,13 +158,16 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			data, err := db.Get(testBucket, []byte(key))
-			if err != nil {
-				panic("get failed: " + err.Error())
-			}
-			if !bytes.Equal(data, []byte("v"+key)) {
-				panic(fmt.Sprintf("get failed, got %q expected %q", data, []byte("v"+key)))
-			}
+			_ = db.View(context.Background(), func(tx Tx) error {
+				data, err := tx.GetOne(testBucket, []byte(key))
+				if err != nil {
+					panic("get failed: " + err.Error())
+				}
+				if !bytes.Equal(data, []byte("v"+key)) {
+					panic(fmt.Sprintf("get failed, got %q expected %q", data, []byte("v"+key)))
+				}
+				return nil
+			})
 		}(strconv.Itoa(i))
 	}
 	pending.Wait()
@@ -223,10 +176,13 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Delete(testBucket, []byte(key), nil)
-			if err != nil {
-				panic("delete failed: " + err.Error())
-			}
+			_ = db.Update(context.Background(), func(tx RwTx) error {
+				err := tx.Delete(testBucket, []byte(key), nil)
+				if err != nil {
+					panic("delete failed: " + err.Error())
+				}
+				return nil
+			})
 		}(strconv.Itoa(i))
 	}
 	pending.Wait()
@@ -235,25 +191,19 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_, err := db.Get(testBucket, []byte(key))
-			if err == nil {
-				panic("get succeeded")
-			}
+			_ = db.Update(context.Background(), func(tx RwTx) error {
+				v, err := tx.GetOne(testBucket, []byte(key))
+				if err != nil {
+					panic(err)
+				}
+				if v != nil {
+					panic("get returned something")
+				}
+				return nil
+			})
 		}(strconv.Itoa(i))
 	}
 	pending.Wait()
-}
-
-func TestMemoryDB_Walk(t *testing.T) {
-	db := NewMemDatabase()
-	defer db.Close()
-	testWalk(db, t)
-}
-
-func TestLMDB_Walk(t *testing.T) {
-	db := newTestLmdb()
-	defer db.Close()
-	testWalk(db, t)
 }
 
 var hexEntries = map[string]string{
@@ -270,17 +220,23 @@ var fixedBits = 3
 
 var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
 
-func testWalk(db Database, t *testing.T) {
+func TestWalk(t *testing.T) {
+	_, tx := NewTestTx(t)
+
 	for k, v := range hexEntries {
-		err := db.Put(testBucket, common.FromHex(k), common.FromHex(v))
+		err := tx.Put(testBucket, common.FromHex(k), common.FromHex(v))
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
 	}
 
 	var gotKeys [][]byte
-
-	err := db.Walk(testBucket, startKey, fixedBits, func(key, val []byte) (bool, error) {
+	c, err := tx.Cursor(testBucket)
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	err = Walk(c, startKey, fixedBits, func(key, val []byte) (bool, error) {
 		gotKeys = append(gotKeys, common.CopyBytes(key))
 		return true, nil
 	})

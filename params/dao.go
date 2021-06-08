@@ -19,7 +19,7 @@ package params
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // DAOForkBlockExtra is the block header extra-data field to set for the DAO fork

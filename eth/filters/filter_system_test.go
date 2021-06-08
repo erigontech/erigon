@@ -18,30 +18,17 @@ package filters
 
 import (
 	"context"
-	"fmt"
-	"math/big"
 	"math/rand"
-	"reflect"
-	"runtime"
-	"testing"
-	"time"
 
-	"github.com/holiman/uint256"
-	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/bloombits"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-)
-
-var (
-	deadline = 5 * time.Minute
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/bloombits"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/event"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type testBackend struct {
@@ -52,10 +39,6 @@ type testBackend struct {
 	rmLogsFeed      event.Feed
 	pendingLogsFeed event.Feed
 	chainFeed       event.Feed
-}
-
-func (b *testBackend) ChainDb() ethdb.Database {
-	return b.db
 }
 
 func (b *testBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error) {
@@ -89,23 +72,35 @@ func (b *testBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*type
 	return rawdb.ReadHeader(b.db, hash, *number), nil
 }
 
-func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
-	if number := rawdb.ReadHeaderNumber(b.db, hash); number != nil {
-		return rawdb.ReadReceiptsDeprecated(b.db, hash, *number), nil
+func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (receipts types.Receipts, err error) {
+	if err := b.db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+		b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+		if err != nil {
+			return err
+		}
+		receipts = rawdb.ReadReceipts(tx, b, senders)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return nil, nil
 }
 
 func (b *testBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	number := rawdb.ReadHeaderNumber(b.db, hash)
-	if number == nil {
-		return nil, nil
-	}
-	receipts := rawdb.ReadReceiptsDeprecated(b.db, hash, *number)
-
-	logs := make([][]*types.Log, len(receipts))
-	for i, receipt := range receipts {
-		logs[i] = receipt.Logs
+	var logs [][]*types.Log
+	if err := b.db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+		b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+		if err != nil {
+			return err
+		}
+		receipts := rawdb.ReadReceipts(tx, b, senders)
+		logs = make([][]*types.Log, len(receipts))
+		for i, receipt := range receipts {
+			logs[i] = receipt.Logs
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return logs, nil
 }
@@ -165,6 +160,11 @@ func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.Matc
 	}()
 }
 
+/*
+var (
+	deadline = 5 * time.Minute
+)
+
 // TestBlockSubscription tests if a block subscription returns block hashes for posted chain events.
 // It creates multiple subscriptions:
 // - one at the start and should receive all posted chain events and a second (blockHashes)
@@ -173,17 +173,16 @@ func (b *testBackend) ServiceFilter(ctx context.Context, session *bloombits.Matc
 func TestBlockSubscription(t *testing.T) {
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend     = &testBackend{db: db}
 		api         = NewPublicFilterAPI(backend, deadline)
-		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommit(db)
-		chain, _, _ = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 10, func(i int, gen *core.BlockGen) {}, false /* intermediateHashes */)
+		genesis     = (&core.Genesis{Config: params.TestChainConfig}).MustCommitDeprecated(db)
+		chain, _    = core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 10, func(i int, gen *core.BlockGen) {}, false)
 		chainEvents = []core.ChainEvent{}
 	)
 
-	for _, blk := range chain {
+	for _, blk := range chain.Blocks {
 		chainEvents = append(chainEvents, core.ChainEvent{Hash: blk.Hash(), Block: blk})
 	}
 
@@ -226,9 +225,7 @@ func TestBlockSubscription(t *testing.T) {
 func TestPendingTxFilter(t *testing.T) {
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -283,8 +280,7 @@ func TestPendingTxFilter(t *testing.T) {
 // TestLogFilterCreation test whether a given filter criteria makes sense.
 // If not it must return an error.
 func TestLogFilterCreation(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -327,8 +323,7 @@ func TestLogFilterCreation(t *testing.T) {
 // when the filter is created.
 func TestInvalidLogFilterCreation(t *testing.T) {
 	t.Parallel()
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -350,8 +345,7 @@ func TestInvalidLogFilterCreation(t *testing.T) {
 }
 
 func TestInvalidGetLogsRequest(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend   = &testBackend{db: db}
 		api       = NewPublicFilterAPI(backend, deadline)
@@ -374,11 +368,10 @@ func TestInvalidGetLogsRequest(t *testing.T) {
 
 // TestLogFilter tests whether log filters match the correct logs that are posted to the event feed.
 func TestLogFilter(t *testing.T) {
-	t.Skip("TG doesn't have public API, move this test to RPCDaemon")
+	t.Skip("Erigon doesn't have public API, move this test to RPCDaemon")
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -492,8 +485,7 @@ func TestLogFilter(t *testing.T) {
 func TestPendingLogsSubscription(t *testing.T) {
 	t.Parallel()
 
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	db := ethdb.NewTestDB(t)
 	var (
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, deadline)
@@ -626,11 +618,14 @@ func TestPendingLogsSubscription(t *testing.T) {
 // txes arrive at the same time that one of multiple filters is timing out.
 // Please refer to #22131 for more details.
 func TestPendingTxFilterDeadlock(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	t.Parallel()
 	timeout := 100 * time.Millisecond
 
 	var (
-		db      = ethdb.NewMemoryDatabase()
+		db      = ethdb.NewTestDB(t)
 		backend = &testBackend{db: db}
 		api     = NewPublicFilterAPI(backend, timeout)
 		done    = make(chan struct{})
@@ -646,7 +641,7 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 			default:
 			}
 
-			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), uint256.NewInt(), 0, uint256.NewInt(), nil)
+			tx := types.NewTransaction(i, common.HexToAddress("0xb794f5ea0ba39494ce83a213fffba74279579268"), uint256.NewInt(0), 0, uint256.NewInt(0), nil)
 			backend.txFeed.Send(core.NewTxsEvent{Txs: []types.Transaction{tx}})
 			i++
 		}
@@ -688,7 +683,6 @@ func TestPendingTxFilterDeadlock(t *testing.T) {
 		t.Error("Tx sending loop hangs")
 	}
 }
-
 func flattenLogs(pl [][]*types.Log) []*types.Log {
 	//nolint: prealloc
 	var logs []*types.Log
@@ -697,3 +691,4 @@ func flattenLogs(pl [][]*types.Log) []*types.Log {
 	}
 	return logs
 }
+*/

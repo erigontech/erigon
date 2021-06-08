@@ -21,16 +21,16 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 // BlockGen creates blocks for testing.
@@ -93,6 +93,9 @@ func (b *BlockGen) SetDifficulty(diff *big.Int) {
 func (b *BlockGen) AddTx(tx types.Transaction) {
 	b.AddTxWithChain(nil, nil, tx)
 }
+func (b *BlockGen) AddFailedTx(tx types.Transaction) {
+	b.AddFailedTxWithChain(nil, nil, tx)
+}
 
 // AddTxWithChain adds a transaction to the generated block. If no coinbase has
 // been set, the block's coinbase is set to the zero address.
@@ -107,10 +110,23 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	receipt, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
+	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
+	receipt, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, checkTEVM)
 	if err != nil {
 		panic(err)
 	}
+	b.txs = append(b.txs, tx)
+	b.receipts = append(b.receipts, receipt)
+}
+
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, tx types.Transaction) {
+	if b.gasPool == nil {
+		b.SetCoinbase(common.Address{})
+	}
+	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
+	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
+	receipt, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, checkTEVM)
+	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
 }
@@ -192,6 +208,26 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 
 var GenerateTrace bool
 
+type ChainPack struct {
+	Length   int
+	Headers  []*types.Header
+	Blocks   []*types.Block
+	Receipts []types.Receipts
+	TopBlock *types.Block // Convinience field to access the last block
+}
+
+// OneBlock returns a ChainPack which contains just one
+// block with given index
+func (cp ChainPack) Slice(i, j int) *ChainPack {
+	return &ChainPack{
+		Length:   j + 1 - i,
+		Headers:  cp.Headers[i:j],
+		Blocks:   cp.Blocks[i:j],
+		Receipts: cp.Receipts[i:j],
+		TopBlock: cp.Blocks[j-1],
+	}
+}
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.
@@ -204,17 +240,17 @@ var GenerateTrace bool
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
-func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen),
+func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.RwKV, n int, gen func(int, *BlockGen),
 	intermediateHashes bool,
-) ([]*types.Block, []types.Receipts, error) {
+) (*ChainPack, error) {
 	if config == nil {
 		config = params.TestChainConfig
 	}
-	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
+	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
-	tx, errBegin := db.Begin(context.Background(), ethdb.RW)
+	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
-		return nil, nil, errBegin
+		return nil, errBegin
 	}
 	defer tx.Rollback()
 
@@ -249,17 +285,19 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
 
-			if err := tx.Walk(dbutils.HashedAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
-				return true, tx.Delete(dbutils.HashedAccountsBucket, k, v)
-			}); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+			if err := tx.ClearBucket(dbutils.HashedAccountsBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedAccountsBucket bucket: %w", err)
 			}
-			if err := tx.Walk(dbutils.HashedStorageBucket, nil, 0, func(k, v []byte) (bool, error) {
-				return true, tx.Delete(dbutils.HashedStorageBucket, k, v)
-			}); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+			if err := tx.ClearBucket(dbutils.HashedStorageBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedStorageBucket bucket: %w", err)
 			}
-			c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.PlainStateBucket)
+			if err := tx.ClearBucket(dbutils.TrieOfAccountsBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfAccountsBucket bucket: %w", err)
+			}
+			if err := tx.ClearBucket(dbutils.TrieOfStorageBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfStorageBucket bucket: %w", err)
+			}
+			c, err := tx.Cursor(dbutils.PlainStateBucket)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -299,10 +337,17 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			c.Close()
 			if GenerateTrace {
-				fmt.Printf("State after %d================\n", i)
-				if err := tx.Walk(dbutils.HashedAccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+				fmt.Printf("State after %d================\n", b.header.Number)
+				if err := tx.ForEach(dbutils.HashedAccountsBucket, nil, func(k, v []byte) error {
 					fmt.Printf("%x: %x\n", k, v)
-					return true, nil
+					return nil
+				}); err != nil {
+					return nil, nil, fmt.Errorf("print state: %w", err)
+				}
+				fmt.Printf("..................\n")
+				if err := tx.ForEach(dbutils.HashedStorageBucket, nil, func(k, v []byte) error {
+					fmt.Printf("%x: %x\n", k, v)
+					return nil
 				}); err != nil {
 					return nil, nil, fmt.Errorf("print state: %w", err)
 				}
@@ -327,8 +372,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {
-			return nil, nil, fmt.Errorf("generating block %d: %w", i, err)
+			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
+		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
@@ -336,7 +382,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	tx.Rollback()
 
-	return blocks, receipts, nil
+	return &ChainPack{Length: n, Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
 func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {
@@ -363,13 +409,11 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Time:     time,
 	}
 
-	if chain.Config().IsAleut(parent.Number().Uint64()) || chain.Config().IsBaikal(parent.Number().Uint64()) {
-		header.BaseFee = misc.CalcBaseFee(parent.Header())
-		header.Eip1559 = true
-	} else if chain.Config().IsAleut(header.Number.Uint64()) || chain.Config().IsBaikal(header.Number.Uint64()) {
-		header.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+	if chain.Config().IsLondon(header.Number.Uint64()) {
+		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
 		header.Eip1559 = true
 	}
+	//header.WithSeal = debug.HeadersSeal()
 
 	return header
 }
@@ -389,3 +433,4 @@ func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header       
 func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
+func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }

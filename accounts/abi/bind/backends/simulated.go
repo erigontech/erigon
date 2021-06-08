@@ -22,32 +22,31 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
-
-	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/bloombits"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/filters"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/bloombits"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/event"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -65,9 +64,9 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	database  *ethdb.ObjectDatabase // In memory database to store our testing data
-	engine    consensus.Engine
+	m         *stages.MockSentry
 	getHeader func(hash common.Hash, number uint64) *types.Header
+	checkTEVM func(hash common.Hash) (bool, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -80,68 +79,52 @@ type SimulatedBackend struct {
 
 	events *filters.EventSystem // Event system for filtering log events live
 
-	config     *params.ChainConfig
 	rmLogsFeed event.Feed
 	chainFeed  event.Feed
 	logsFeed   event.Feed
 }
 
-// NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
-// and uses a simulated blockchain for testing purposes.
-// A simulated backend always uses chainID 1337.
-func NewSimulatedBackendWithDatabase(database *ethdb.ObjectDatabase, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
-	genesisBlock := genesis.MustCommit(database)
-	engine := ethash.NewFaker()
-
-	backend := &SimulatedBackend{
-		prependBlock: genesisBlock,
-		database:     database,
-		engine:       engine,
-		getHeader: func(hash common.Hash, number uint64) *types.Header {
-			return rawdb.ReadHeader(database, hash, number)
-		},
-		config: genesis.Config,
-	}
-	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
-	backend.emptyPendingBlock()
-	return backend
-}
-
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
 func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
-	database := ethdb.NewMemDatabase()
 	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
-	genesisBlock := genesis.MustCommit(database)
 	engine := ethash.NewFaker()
-
+	m := stages.MockWithGenesisEngine(nil, &genesis, engine)
 	backend := &SimulatedBackend{
-		prependBlock: genesisBlock,
-		database:     database,
-		engine:       engine,
-		config:       genesis.Config,
-		getHeader: func(hash common.Hash, number uint64) *types.Header {
-			return rawdb.ReadHeader(database, hash, number)
+		m:            m,
+		prependBlock: m.Genesis,
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
+			if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+				h = rawdb.ReadHeader(tx, hash, number)
+				return nil
+			}); err != nil {
+				panic(err)
+			}
+			return h
 		},
 	}
-	backend.events = filters.NewEventSystem(&filterBackend{database, backend})
+	backend.checkTEVM = ethdb.GetCheckTEVM(ethdb.NewObjectDatabase(m.DB))
+	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
 	backend.emptyPendingBlock()
 	return backend
 }
 
 // A simulated backend always uses chainID 1337.
-func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	return NewSimulatedBackendWithDatabase(ethdb.NewMemDatabase(), alloc, gasLimit)
+func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+	b := NewSimulatedBackendWithConfig(alloc, params.AllEthashProtocolChanges, gasLimit)
+	t.Cleanup(func() {
+		b.m.DB.Close()
+	})
+	return b
 }
 
-func (b *SimulatedBackend) DB() ethdb.Database {
-	return b.database
+func (b *SimulatedBackend) DB() ethdb.RwKV {
+	return b.m.DB
 }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() error {
-	b.database.Close()
+	b.m.DB.Close()
 	return nil
 }
 
@@ -150,7 +133,12 @@ func (b *SimulatedBackend) Close() error {
 func (b *SimulatedBackend) Commit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := stagedsync.InsertBlockInStages(b.database, b.config, &vm.Config{}, b.engine, b.pendingBlock, false /* checkRoot */); err != nil {
+	if err := b.m.InsertChain(&core.ChainPack{
+		Headers:  []*types.Header{b.pendingHeader},
+		Blocks:   []*types.Block{b.pendingBlock},
+		Length:   1,
+		TopBlock: b.pendingBlock,
+	}); err != nil {
 		panic(err)
 	}
 	//nolint:prealloc
@@ -172,34 +160,33 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blocks, receipts, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
-	b.pendingBlock = blocks[0]
-	b.pendingReceipts = receipts[0]
-	b.pendingHeader = b.pendingBlock.Header()
+	chain, _ := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(int, *core.BlockGen) {}, false /* intermediateHashes */)
+	b.pendingBlock = chain.Blocks[0]
+	b.pendingReceipts = chain.Receipts[0]
+	b.pendingHeader = chain.Headers[0]
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingReader = state.NewPlainStateReader(b.database)
+	b.pendingReader = state.NewPlainStateReader(ethdb.NewObjectDatabase(b.m.DB))
 	b.pendingState = state.New(b.pendingReader)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(db ethdb.Database, blockNumber *big.Int) *state.IntraBlockState {
+func (b *SimulatedBackend) stateByBlockNumber(db ethdb.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainDBState(db, b.pendingBlock.NumberU64()))
+		return state.New(state.NewPlainKvState(db, b.pendingBlock.NumberU64()))
 	}
-	return state.New(state.NewPlainDBState(db, uint64(blockNumber.Int64())))
+	return state.New(state.NewPlainKvState(db, uint64(blockNumber.Int64())))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
 func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
-	if err1 != nil {
-		return nil, err1
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	defer dbtx.Rollback()
-	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
+	defer tx.Rollback()
+	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	return stateDB.GetCode(contract), nil
 }
 
@@ -207,13 +194,12 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (*uint256.Int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
-	if err1 != nil {
-		return nil, err1
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	defer dbtx.Rollback()
-	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
+	defer tx.Rollback()
+	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	return stateDB.GetBalance(contract), nil
 }
 
@@ -221,13 +207,13 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (uint64, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
-	if err1 != nil {
-		return 0, err1
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return 0, err
 	}
-	defer dbtx.Rollback()
-	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
+	defer tx.Rollback()
+
+	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	return stateDB.GetNonce(contract), nil
 }
 
@@ -235,13 +221,13 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	dbtx, err1 := b.database.Begin(ctx, ethdb.RO)
-	if err1 != nil {
-		return nil, err1
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	defer dbtx.Rollback()
-	stateDB := b.stateByBlockNumber(dbtx, blockNumber)
+	defer tx.Rollback()
+
+	stateDB := b.stateByBlockNumber(tx, blockNumber)
 	var val uint256.Int
 	stateDB.GetState(contract, &key, &val)
 	return val.Bytes(), nil
@@ -252,7 +238,12 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	receipt, _, _, _ := rawdb.ReadReceipt(tx, txHash)
 	return receipt, nil
 }
 
@@ -264,13 +255,19 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	tx := b.pendingBlock.Transaction(txHash)
-	if tx != nil {
-		return tx, true, nil
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, false, err
 	}
-	tx, _, _, _ = rawdb.ReadTransactionDeprecated(b.database, txHash)
-	if tx != nil {
-		return tx, false, nil
+	defer tx.Rollback()
+
+	txn := b.pendingBlock.Transaction(txHash)
+	if txn != nil {
+		return txn, true, nil
+	}
+	txn, _, _, _ = rawdb.ReadTransaction(tx, txHash)
+	if txn != nil {
+		return txn, false, nil
 	}
 	return nil, false, ethereum.NotFound
 }
@@ -283,8 +280,13 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock, nil
 	}
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHashDeprecated(b.database, hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -311,11 +313,17 @@ func (b *SimulatedBackend) blockByNumberNoLock(_ context.Context, number *big.In
 		return b.prependBlock, nil
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	tx, err := b.m.DB.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	block := rawdb.ReadBlockDeprecated(b.database, hash, number.Uint64())
+	defer tx.Rollback()
+
+	hash, err := rawdb.ReadCanonicalHash(tx, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+	block := rawdb.ReadBlock(tx, hash, number.Uint64())
 	if block == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -331,12 +339,17 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 	if hash == b.pendingBlock.Hash() {
 		return b.pendingBlock.Header(), nil
 	}
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(b.database, hash)
+	number := rawdb.ReadHeaderNumber(tx, hash)
 	if number == nil {
 		return nil, errBlockDoesNotExist
 	}
-	header := rawdb.ReadHeader(b.database, hash, *number)
+	header := rawdb.ReadHeader(tx, hash, *number)
 	if header == nil {
 		return nil, errBlockDoesNotExist
 	}
@@ -349,15 +362,20 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
 	if number == nil || number.Cmp(b.prependBlock.Number()) == 0 {
 		return b.prependBlock.Header(), nil
 	}
-	hash, err := rawdb.ReadCanonicalHash(b.database, number.Uint64())
+	hash, err := rawdb.ReadCanonicalHash(tx, number.Uint64())
 	if err != nil {
 		return nil, err
 	}
-	header := rawdb.ReadHeader(b.database, hash, number.Uint64())
+	header := rawdb.ReadHeader(tx, hash, number.Uint64())
 	return header, nil
 }
 
@@ -369,8 +387,13 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 	if blockHash == b.pendingBlock.Hash() {
 		return uint(b.pendingBlock.Transactions().Len()), nil
 	}
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHashDeprecated(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHash(tx, blockHash)
 	if err != nil {
 		return 0, err
 	}
@@ -394,8 +417,13 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 
 		return transactions[index], nil
 	}
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHashDeprecated(b.database, blockHash)
+	block, err := rawdb.ReadBlockByHash(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -457,9 +485,15 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	if blockNumber != nil && blockNumber.Cmp(b.pendingBlock.Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	s := state.New(state.NewPlainStateReader(b.database))
-	res, err := b.callContract(ctx, call, b.pendingBlock, s)
-	if err != nil {
+	var res *core.ExecutionResult
+	if err := b.m.DB.View(context.Background(), func(tx ethdb.Tx) (err error) {
+		s := state.New(state.NewPlainStateReader(tx))
+		res, err = b.callContract(ctx, call, b.pendingBlock, s)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	// If the result contains a revert reason, try to unpack and return it.
@@ -610,15 +644,15 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	}
 	// Set infinite balance to the fake caller account.
 	from := statedb.GetOrNewStateObject(call.From)
-	from.SetBalance(uint256.NewInt().SetAllOne())
+	from.SetBalance(uint256.NewInt(0).SetAllOne())
 	// Execute the call.
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.engine, nil)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.m.Engine, nil, b.checkTEVM)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
-	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.config, vm.Config{})
+	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
 	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
 
 	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
@@ -631,7 +665,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	defer b.mu.Unlock()
 
 	// Check transaction validity.
-	signer := types.MakeSigner(b.config, b.pendingBlock.NumberU64())
+	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %v", senderErr)
@@ -644,27 +678,27 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := core.ApplyTransaction(
-		b.config, b.getHeader, b.engine,
+		b.m.ChainConfig, b.getHeader, b.m.Engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
+		&b.pendingHeader.GasUsed, vm.Config{}, b.checkTEVM); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	blocks, receipts, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.engine, tx)
+			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
-		block.AddTxWithChain(b.getHeader, b.engine, tx)
+		block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
 	}
 	//fmt.Printf("==== End producing block %d\n", b.pendingBlock.NumberU64())
-	b.pendingBlock = blocks[0]
-	b.pendingReceipts = receipts[0]
-	b.pendingHeader = b.pendingBlock.Header()
+	b.pendingBlock = chain.Blocks[0]
+	b.pendingReceipts = chain.Receipts[0]
+	b.pendingHeader = chain.Headers[0]
 	return nil
 }
 
@@ -676,7 +710,7 @@ func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.Filter
 	var filter *filters.Filter
 	if query.BlockHash != nil {
 		// Block filter requested, construct a single-shot filter
-		filter = filters.NewBlockFilter(&filterBackend{b.database, b}, *query.BlockHash, query.Addresses, query.Topics)
+		filter = filters.NewBlockFilter(&filterBackend{b.m.DB, b}, *query.BlockHash, query.Addresses, query.Topics)
 	} else {
 		// Initialize unset filter boundaries to run from genesis to chain head
 		from := int64(0)
@@ -688,7 +722,7 @@ func (b *SimulatedBackend) FilterLogs(ctx context.Context, query ethereum.Filter
 			to = query.ToBlock.Int64()
 		}
 		// Construct the range filter
-		filter = filters.NewRangeFilter(&filterBackend{b.database, b}, from, to, query.Addresses, query.Topics)
+		filter = filters.NewRangeFilter(&filterBackend{b.m.DB, b}, from, to, query.Addresses, query.Topics)
 	}
 	// Run the filter and return all the logs
 	logs, err := filter.Logs(ctx)
@@ -773,17 +807,17 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		return errors.New("could not adjust time on non-empty block")
 	}
 
-	blocks, _, err := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.database, 1, func(number int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTxWithChain(b.getHeader, b.engine, tx)
+			block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	}, false /* intermediateHashes */)
 	if err != nil {
 		return err
 	}
-	b.pendingBlock = blocks[0]
-	b.pendingHeader = b.pendingBlock.Header()
+	b.pendingBlock = chain.Blocks[0]
+	b.pendingHeader = chain.Headers[0]
 
 	return nil
 }
@@ -808,11 +842,9 @@ func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
 type filterBackend struct {
-	db ethdb.Database
+	db ethdb.RwKV
 	b  *SimulatedBackend
 }
-
-func (fb *filterBackend) ChainDb() ethdb.Database { return fb.db }
 
 func (fb *filterBackend) HeaderByNumber(ctx context.Context, block rpc.BlockNumber) (*types.Header, error) {
 	if block == rpc.LatestBlockNumber {
@@ -826,19 +858,29 @@ func (fb *filterBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*t
 }
 
 func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
-	number := rawdb.ReadHeaderNumber(fb.db, hash)
-	if number == nil {
-		return nil, nil
+	tx, err := fb.db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	return rawdb.ReadReceiptsDeprecated(fb.db, hash, *number), nil
+	defer tx.Rollback()
+	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	return rawdb.ReadReceipts(tx, b, senders), nil
 }
 
 func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	number := rawdb.ReadHeaderNumber(fb.db, hash)
-	if number == nil {
-		return nil, nil
+	tx, err := fb.db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
 	}
-	receipts := rawdb.ReadReceiptsDeprecated(fb.db, hash, *number)
+	defer tx.Rollback()
+	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	receipts := rawdb.ReadReceipts(tx, b, senders)
 	if receipts == nil {
 		return nil, nil
 	}

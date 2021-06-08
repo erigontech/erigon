@@ -6,6 +6,9 @@ ENV GIT_COMMIT=$git_commit
 ARG git_branch
 ENV GIT_BRANCH=$git_branch
 
+ARG git_tag
+ENV GIT_TAG=$git_tag
+
 # for linters to avoid warnings. we won't use linters in Docker anyway
 ENV LATEST_COMMIT="undefined"
 
@@ -22,7 +25,7 @@ RUN make all
 
 FROM alpine:3.13
 
-RUN apk add --no-cache ca-certificates libgcc libstdc++
+RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
 EXPOSE 8545 8546 30303 30303/udp 8080 9090 6060

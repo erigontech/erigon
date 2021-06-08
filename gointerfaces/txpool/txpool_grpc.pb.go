@@ -4,9 +4,11 @@ package txpool
 
 import (
 	context "context"
+	types "github.com/ledgerwatch/erigon/gointerfaces/types"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -18,6 +20,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TxpoolClient interface {
+	// Version returns the service version number
+	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error)
 	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknown(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error)
 	// Expecting signed transactions. Preserves incoming order and amount
@@ -35,6 +39,15 @@ type txpoolClient struct {
 
 func NewTxpoolClient(cc grpc.ClientConnInterface) TxpoolClient {
 	return &txpoolClient{cc}
+}
+
+func (c *txpoolClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+	out := new(types.VersionReply)
+	err := c.cc.Invoke(ctx, "/txpool.Txpool/Version", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *txpoolClient) FindUnknown(ctx context.Context, in *TxHashes, opts ...grpc.CallOption) (*TxHashes, error) {
@@ -100,6 +113,8 @@ func (x *txpoolOnAddClient) Recv() (*OnAddReply, error) {
 // All implementations must embed UnimplementedTxpoolServer
 // for forward compatibility
 type TxpoolServer interface {
+	// Version returns the service version number
+	Version(context.Context, *emptypb.Empty) (*types.VersionReply, error)
 	// preserves incoming order, changes amount, unknown hashes will be omitted
 	FindUnknown(context.Context, *TxHashes) (*TxHashes, error)
 	// Expecting signed transactions. Preserves incoming order and amount
@@ -116,6 +131,9 @@ type TxpoolServer interface {
 type UnimplementedTxpoolServer struct {
 }
 
+func (UnimplementedTxpoolServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Version not implemented")
+}
 func (UnimplementedTxpoolServer) FindUnknown(context.Context, *TxHashes) (*TxHashes, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FindUnknown not implemented")
 }
@@ -139,6 +157,24 @@ type UnsafeTxpoolServer interface {
 
 func RegisterTxpoolServer(s grpc.ServiceRegistrar, srv TxpoolServer) {
 	s.RegisterService(&Txpool_ServiceDesc, srv)
+}
+
+func _Txpool_Version_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TxpoolServer).Version(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/txpool.Txpool/Version",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TxpoolServer).Version(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Txpool_FindUnknown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -223,6 +259,10 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "txpool.Txpool",
 	HandlerType: (*TxpoolServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "Version",
+			Handler:    _Txpool_Version_Handler,
+		},
 		{
 			MethodName: "FindUnknown",
 			Handler:    _Txpool_FindUnknown_Handler,

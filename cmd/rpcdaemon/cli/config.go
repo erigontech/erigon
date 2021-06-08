@@ -8,24 +8,25 @@ import (
 	"path"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces"
+	"github.com/ledgerwatch/erigon/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
 type Flags struct {
 	PrivateApiAddr       string
-	SingleNodeMode       bool // TG's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with TG process.
+	SingleNodeMode       bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	Datadir              string
 	Database             string
 	Chaindata            string
@@ -38,6 +39,7 @@ type Flags struct {
 	HttpPort             int
 	HttpCORSDomain       []string
 	HttpVirtualHost      []string
+	HttpCompression      bool
 	API                  []string
 	Gascap               uint64
 	MaxTraces            uint64
@@ -48,7 +50,7 @@ type Flags struct {
 
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
-	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
+	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
 func RootCommand() (*cobra.Command, *Flags) {
@@ -56,8 +58,8 @@ func RootCommand() (*cobra.Command, *Flags) {
 
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
-	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to turbo-geth working directory")
-	rootCmd.PersistentFlags().StringVar(&cfg.Database, "database", "lmdb", "lmdb|mdbx engines")
+	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
+	rootCmd.PersistentFlags().StringVar(&cfg.Database, "database", "mdbx", "lmdb|mdbx engines")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot.mode", "", `Configures the storage mode of the app(only for chaindata mode):
@@ -73,7 +75,8 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "tg"}, "API's offered over the HTTP-RPC interface")
+	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the HTTP-RPC interface")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 25000000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().StringVar(&cfg.TraceType, "trace.type", "parity", "Specify the type of tracing [geth|parity*] (experimental)")
@@ -103,10 +106,10 @@ func RootCommand() (*cobra.Command, *Flags) {
 				cfg.Datadir = paths.DefaultDataDir()
 			}
 			if cfg.Chaindata == "" {
-				cfg.Chaindata = path.Join(cfg.Datadir, "tg", "chaindata")
+				cfg.Chaindata = path.Join(cfg.Datadir, "erigon", "chaindata")
 			}
 			//if cfg.SnapshotDir == "" {
-			//	cfg.SnapshotDir = path.Join(cfg.Datadir, "tg", "snapshot")
+			//	cfg.SnapshotDir = path.Join(cfg.Datadir, "erigon", "snapshot")
 			//}
 		}
 		return nil
@@ -119,7 +122,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func checkDbCompatibility(db ethdb.RoKV) error {
+func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 	// DB schema version compatibility check
 	var version []byte
 	var compatErr error
@@ -132,79 +135,101 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
 	if len(version) != 12 {
-		return fmt.Errorf("database does not have major schema version. upgrade and restart turbo-geth core")
+		return fmt.Errorf("database does not have major schema version. upgrade and restart Erigon core")
 	}
 	major := binary.BigEndian.Uint32(version[:])
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
-	if major != dbutils.DBSchemaVersion.Major {
+	var dbSchemaVersion *types.VersionReply
+	if mdbx {
+		dbSchemaVersion = &dbutils.DBSchemaVersionMDBX
+	} else {
+		dbSchemaVersion = &dbutils.DBSchemaVersionLMDB
+	}
+	if major != dbSchemaVersion.Major {
 		compatible = false
-	} else if minor != dbutils.DBSchemaVersion.Minor {
+	} else if minor != dbSchemaVersion.Minor {
 		compatible = false
 	} else {
 		compatible = true
 	}
 	if !compatible {
 		return fmt.Errorf("incompatible DB Schema versions: reader %d.%d.%d, database %d.%d.%d",
-			dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch,
+			dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch,
 			major, minor, patch)
 	}
-	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch),
+	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch),
 		"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
 	return nil
 }
 
-func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, err error) {
+func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
+		return nil, nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
 	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
 		var rwKv ethdb.RwKV
+		var mdbx bool
 		if cfg.Database == "mdbx" {
 			rwKv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
+			mdbx = true
 		} else {
 			rwKv, err = ethdb.NewLMDB().Path(cfg.Chaindata).Readonly().Open()
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
+			mdbx = false
 		}
-		if compatErr := checkDbCompatibility(rwKv); compatErr != nil {
-			return nil, nil, nil, compatErr
+		if compatErr := checkDbCompatibility(rwKv, mdbx); compatErr != nil {
+			return nil, nil, nil, nil, compatErr
 		}
 		kv = rwKv
 		if cfg.SnapshotMode != "" {
 			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
 			if innerErr != nil {
-				return nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
+				return nil, nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 			}
 			snapKv, innerErr := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
 			if innerErr != nil {
-				return nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+				return nil, nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
 			}
 			kv = snapKv
 		}
 	}
 	if cfg.PrivateApiAddr != "" {
-		remoteKv, err := ethdb.NewRemote(
-			remotedbserver.KvServiceAPIVersion.Major,
-			remotedbserver.KvServiceAPIVersion.Minor,
-			remotedbserver.KvServiceAPIVersion.Patch).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, rootCancel)
+		remoteKv, err := ethdb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
-		eth = core.NewRemoteBackend(remoteKv.GrpcConn())
-		txPool = txpool.NewTxpoolClient(remoteKv.GrpcConn())
+		remoteEth := services.NewRemoteBackend(remoteKv.GrpcConn())
+		mining = services.NewMiningService(remoteKv.GrpcConn())
+		txPool = services.NewTxPoolService(remoteKv.GrpcConn())
 		if kv == nil {
 			kv = remoteKv
 		}
+		eth = remoteEth
+		go func() {
+			if !remoteKv.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !remoteEth.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !mining.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+			if !txPool.EnsureVersionCompatibility() {
+				rootCancel()
+			}
+		}()
 	}
-	return kv, eth, txPool, err
+	return kv, eth, txPool, mining, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
@@ -223,7 +248,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
-	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost)
+	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		wsHandler = srv.WebsocketHandler([]string{"*"})

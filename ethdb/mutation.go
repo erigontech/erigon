@@ -12,10 +12,10 @@ import (
 	"unsafe"
 
 	"github.com/google/btree"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 var (
@@ -208,10 +208,19 @@ func (m *mutation) BatchSize() int {
 	return m.size
 }
 
-// WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) Walk(table string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
+func (m *mutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	m.panicOnEmptyDB()
-	return m.db.Walk(table, startkey, fixedbits, walker)
+	return m.db.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *mutation) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	m.panicOnEmptyDB()
+	return m.db.ForPrefix(bucket, prefix, walker)
+}
+
+func (m *mutation) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	m.panicOnEmptyDB()
+	return m.db.ForAmount(bucket, prefix, amount, walker)
 }
 
 func (m *mutation) Delete(table string, k, v []byte) error {
@@ -288,9 +297,11 @@ func (m *mutation) doCommit(tx RwTx) error {
 		case <-logEvery.C:
 			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
 			log.Info("Write to db", "progress", progress, "current table", mi.table)
+			tx.CollectMetrics()
 		}
 		return true
 	})
+	tx.CollectMetrics()
 	return innerErr
 }
 

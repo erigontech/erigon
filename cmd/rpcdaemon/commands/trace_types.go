@@ -3,9 +3,9 @@ package commands
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // TODO:(tjayrush)
@@ -154,8 +154,7 @@ func (t ParityTrace) String() string {
 
 // Takes a hierarchical Geth trace with fields of different meaning stored in the same named fields depending on 'type'. Parity traces
 // are flattened depth first and each field is put in its proper place
-//nolint
-func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx types.Transaction, txIndex uint64, depth []int) ParityTraces {
+func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx types.Transaction, txIndex uint64, depth []int) ParityTraces { //nolint: unused
 	var traces ParityTraces // nolint prealloc
 	return traces
 }

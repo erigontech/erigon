@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 type Walker interface {
@@ -173,30 +173,30 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 
 var Mapper = map[string]struct {
 	IndexBucket   string
+	IndexChunkKey func([]byte, uint64) []byte
 	WalkerAdapter func(cursor ethdb.CursorDupSort) Walker
-	Template      string
 	New           func() *ChangeSet
 	Encode        Encoder
 	Decode        Decoder
 }{
 	dbutils.AccountChangeSetBucket: {
-		IndexBucket: dbutils.AccountsHistoryBucket,
+		IndexBucket:   dbutils.AccountsHistoryBucket,
+		IndexChunkKey: dbutils.AccountIndexChunkKey,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return AccountChangeSet{c: c}
 		},
-		Template: "acc-ind-",
-		New:      NewAccountChangeSet,
-		Encode:   EncodeAccounts,
-		Decode:   DecodeAccounts,
+		New:    NewAccountChangeSet,
+		Encode: EncodeAccounts,
+		Decode: DecodeAccounts,
 	},
 	dbutils.StorageChangeSetBucket: {
-		IndexBucket: dbutils.StorageHistoryBucket,
+		IndexBucket:   dbutils.StorageHistoryBucket,
+		IndexChunkKey: dbutils.StorageIndexChunkKey,
 		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
 			return StorageChangeSet{c: c}
 		},
-		Template: "st-ind-",
-		New:      NewStorageChangeSet,
-		Encode:   EncodeStorage,
-		Decode:   DecodeStorage,
+		New:    NewStorageChangeSet,
+		Encode: EncodeStorage,
+		Decode: DecodeStorage,
 	},
 }

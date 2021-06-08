@@ -9,15 +9,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
@@ -51,14 +50,24 @@ var cmdSnapshotCheck = &cobra.Command{
 		}
 
 		stateSnapshotPath := filepath.Join(snapshotDir, "state")
-		stateSnapshot := ethdb.NewLMDB().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-				dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
-			}
-		}).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).MustOpen()
-
+		var stateSnapshot ethdb.RwKV
+		if database == "lmdb" {
+			stateSnapshot = ethdb.NewLMDB().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+				return dbutils.BucketsCfg{
+					dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+					dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+					dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+				}
+			}).Readonly().MustOpen()
+		} else {
+			stateSnapshot = ethdb.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+				return dbutils.BucketsCfg{
+					dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+					dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+					dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+				}
+			}).Readonly().MustOpen()
+		}
 		isNew := true
 		var path string
 		if len(tmpDBPath) > 0 {
@@ -78,23 +87,26 @@ var cmdSnapshotCheck = &cobra.Command{
 				log.Info("Temp database", "path", path)
 			}
 		}()
-		tmpDb := ethdb.NewLMDB().Path(path).MustOpen()
-
-		kv := ethdb.NewSnapshot2KV().
+		var tmpDb ethdb.RwKV
+		if database == "lmdb" {
+			tmpDb = ethdb.NewLMDB().Path(path).MustOpen()
+		} else {
+			tmpDb = ethdb.NewMDBX().Path(path).MustOpen()
+		}
+		kv := ethdb.NewSnapshotKV().
 			DB(tmpDb).
 			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
 			SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
-			MustOpen()
+			Open()
 
-		db := ethdb.NewObjectDatabase(kv)
-		defer db.Close()
 		if isNew {
-			err = ethdb.SetStorageModeIfNotExist(db, ethdb.StorageMode{})
-			if err != nil {
+			if err := kv.Update(ctx, func(tx ethdb.RwTx) error {
+				return ethdb.SetStorageModeIfNotExist(tx, ethdb.StorageMode{})
+			}); err != nil {
 				return err
 			}
 		}
-		if err := snapshotCheck(ctx, db, isNew, os.TempDir()); err != nil {
+		if err := snapshotCheck(ctx, kv, isNew, os.TempDir()); err != nil {
 			log.Error("snapshotCheck error", "err", err)
 			return err
 		}
@@ -102,95 +114,101 @@ var cmdSnapshotCheck = &cobra.Command{
 	},
 }
 
-func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir string) (err error) {
+func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string) (err error) {
+	_, engine, chainConfig, vmConfig, _, sync, _, _, _ := newSync(ctx, db)
+
 	var snapshotBlock uint64 = 11_000_000
-	blockNum, err := stages.GetStageProgress(db, stages.Execution)
-	if err != nil {
-		return err
-	}
-
-	//snapshot or last executed block
-	if blockNum > snapshotBlock {
-		snapshotBlock = blockNum
-	}
-
-	//get end of check
-	var lastBlockHeaderNumber uint64
-	if block == 0 {
-		lastBlockHash := rawdb.ReadHeadBlockHash(db)
-		lastBlockHeader, innerErr := rawdb.ReadHeaderByHash(db, lastBlockHash)
-		if innerErr != nil {
-			return innerErr
+	var lastBlockHeaderNumber, blockNum uint64
+	if err := db.View(ctx, func(tx ethdb.Tx) error {
+		blockNum, err = stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
 		}
-		lastBlockHeaderNumber = lastBlockHeader.Number.Uint64()
-	} else {
-		lastBlockHeaderNumber = block
-	}
 
-	if lastBlockHeaderNumber <= snapshotBlock {
-		return fmt.Errorf("incorrect header number last block:%v, snapshotBlock: %v", lastBlockHeaderNumber, snapshotBlock)
+		//snapshot or last executed block
+		if blockNum > snapshotBlock {
+			snapshotBlock = blockNum
+		}
+
+		//get end of check
+		if block == 0 {
+			lastBlockHash := rawdb.ReadHeadBlockHash(tx)
+			lastBlockHeader, innerErr := rawdb.ReadHeaderByHash(tx, lastBlockHash)
+			if innerErr != nil {
+				return innerErr
+			}
+			lastBlockHeaderNumber = lastBlockHeader.Number.Uint64()
+		} else {
+			lastBlockHeaderNumber = block
+		}
+
+		if lastBlockHeaderNumber <= snapshotBlock {
+			return fmt.Errorf("incorrect header number last block:%v, snapshotBlock: %v", lastBlockHeaderNumber, snapshotBlock)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if isNew {
 		log.Info("New tmp db. We need to promote hash state.")
-		tx, innerErr := db.Begin(context.Background(), ethdb.RW)
-		if innerErr != nil {
-			return innerErr
-		}
-		defer tx.Rollback()
+		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
 
-		tt := time.Now()
-		err = stagedsync.PromoteHashedStateCleanly("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageHashStateCfg(db.RwKV(), tmpDir), ctx.Done())
-		log.Info("Promote took", "t", time.Since(tt))
-		if err != nil {
-			return fmt.Errorf("promote state err: %w", err)
+			tt := time.Now()
+			err = stagedsync.PromoteHashedStateCleanly("", tx, stagedsync.StageHashStateCfg(db, tmpDir), ctx.Done())
+			log.Info("Promote took", "t", time.Since(tt))
+			if err != nil {
+				return fmt.Errorf("promote state err: %w", err)
+			}
+			tt = time.Now()
+			err = tx.Commit()
+			if err != nil {
+				return fmt.Errorf("commit promote state err: %w", err)
+			}
+			log.Info("promote committed", "t", time.Since(tt))
+			return nil
+		}); err != nil {
+			return err
 		}
-		tt = time.Now()
-		err = tx.Commit()
-		if err != nil {
-			return fmt.Errorf("commit promote state err: %w", err)
-		}
-		log.Info("promote committed", "t", time.Since(tt))
 	}
 
 	if isNew {
 		log.Info("Regenerate IH")
-		tx, innerErr := db.Begin(context.Background(), ethdb.RW)
-		if innerErr != nil {
-			return innerErr
-		}
-		defer tx.Rollback()
+		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
+			hash, innerErr := rawdb.ReadCanonicalHash(tx, snapshotBlock)
+			if innerErr != nil {
+				return innerErr
+			}
 
-		hash, innerErr := rawdb.ReadCanonicalHash(tx, snapshotBlock)
-		if innerErr != nil {
-			return innerErr
-		}
+			syncHeadHeader := rawdb.ReadHeader(tx, hash, snapshotBlock)
+			if syncHeadHeader == nil {
+				return fmt.Errorf("empty header for %v", snapshotBlock)
+			}
+			expectedRootHash := syncHeadHeader.Root
 
-		syncHeadHeader := rawdb.ReadHeader(tx, hash, snapshotBlock)
-		if syncHeadHeader == nil {
-			return fmt.Errorf("empty header for %v", snapshotBlock)
-		}
-		expectedRootHash := syncHeadHeader.Root
-
-		tt := time.Now()
-		_, err = stagedsync.RegenerateIntermediateHashes("", tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(db.RwKV(), true, true, tmpDir), expectedRootHash, ctx.Done())
-		if err != nil {
-			return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
-		}
-		log.Info("RegenerateIntermediateHashes took", "t", time.Since(tt))
-		tt = time.Now()
-		err = tx.Commit()
-		if err != nil {
+			tt := time.Now()
+			_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, tmpDir), expectedRootHash, ctx.Done())
+			if err != nil {
+				return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
+			}
+			log.Info("RegenerateIntermediateHashes took", "t", time.Since(tt))
+			return nil
+		}); err != nil {
 			return err
 		}
-		log.Info("Commit", "t", time.Since(tt))
 	}
 
-	engine, chainConfig, vmConfig, st, _, progress := newSync(ctx.Done(), db, db, nil)
-	st.DisableStages(stages.Headers,
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	sync.DisableStages(stages.Headers,
 		stages.BlockHashes,
 		stages.Bodies,
 		stages.Senders,
+		stages.Translation,
 		stages.AccountHistoryIndex,
 		stages.StorageHistoryIndex,
 		stages.LogIndex,
@@ -201,25 +219,25 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 	)
 
 	if isNew {
-		stage3 := progress(stages.Senders)
-		err = stage3.DoneAndUpdate(db, lastBlockHeaderNumber)
+		stage3 := stage(sync, tx, stages.Senders)
+		err = stage3.DoneAndUpdate(tx, lastBlockHeaderNumber)
 		if err != nil {
 			return err
 		}
 
-		stage4 := progress(stages.Execution)
-		err = stage4.DoneAndUpdate(db, snapshotBlock)
+		stage4 := stage(sync, tx, stages.Execution)
+		err = stage4.DoneAndUpdate(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
-		stage5 := progress(stages.HashState)
-		err = stage5.DoneAndUpdate(db, snapshotBlock)
+		stage5 := stage(sync, tx, stages.HashState)
+		err = stage5.DoneAndUpdate(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
 
-		stage6 := progress(stages.IntermediateHashes)
-		err = stage6.DoneAndUpdate(db, snapshotBlock)
+		stage6 := stage(sync, tx, stages.IntermediateHashes)
+		err = stage6.DoneAndUpdate(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
@@ -229,51 +247,51 @@ func snapshotCheck(ctx context.Context, db ethdb.Database, isNew bool, tmpDir st
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	kv := db.RwKV()
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	for blockNumber := snapshotBlock + 1; blockNumber <= lastBlockHeaderNumber; blockNumber++ {
-		err = st.SetCurrentStage(stages.Execution)
+		err = sync.SetCurrentStage(stages.Execution)
 		if err != nil {
 			return err
 		}
-		stage4 := progress(stages.Execution)
+		stage4 := stage(sync, tx, stages.Execution)
 		stage4.BlockNumber = blockNumber - 1
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, tx, blockNumber, ch,
-			stagedsync.StageExecuteBlocksCfg(kv, false, batchSize, nil, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir),
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, sync, tx, blockNumber, ch,
+			stagedsync.StageExecuteBlocksCfg(db, false, false, false, 0, batchSize, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir), nil,
 		)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)
 		}
 
-		stage5 := progress(stages.HashState)
+		stage5 := stage(sync, tx, stages.HashState)
 		stage5.BlockNumber = blockNumber - 1
 		log.Info("Stage5", "progress", stage5.BlockNumber)
-		err = stagedsync.SpawnHashStateStage(stage5, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageHashStateCfg(kv, tmpDir), ch)
+		err = stagedsync.SpawnHashStateStage(stage5, tx, stagedsync.StageHashStateCfg(db, tmpDir), ch)
 		if err != nil {
 			return fmt.Errorf("spawnHashStateStage err %w", err)
 		}
 
-		stage6 := progress(stages.IntermediateHashes)
+		stage6 := stage(sync, tx, stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), stagedsync.StageTrieCfg(kv, true, true, tmpDir), ch); err != nil {
+		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx, stagedsync.StageTrieCfg(db, true, true, tmpDir), ch); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}
 
 		log.Info("Done", "progress", blockNumber)
-		err = tx.CommitAndBegin(context.TODO())
+		err = tx.Commit()
 		if err != nil {
 			log.Error("Error on commit", "err", err, "block", blockNumber)
 			return err
 		}
+		tx, err = db.BeginRw(ctx)
+		if err != nil {
+			log.Error("Error on begin", "err", err, "block", blockNumber)
+			return err
+		}
+		defer tx.Rollback()
 	}
 
 	return nil

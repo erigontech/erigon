@@ -79,7 +79,13 @@ elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" AND
   set(MDBX_AMALGAMATED_SOURCE TRUE)
   set(MDBX_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 else()
-  message(FATAL_ERROR "Please use libmdbx as a git-submodule or the amalgamated source code")
+  message(FATAL_ERROR "\n"
+    "Please don't use tarballs nor zips which are automatically provided by Github!  "
+    "These archives do not contain version information and thus are unfit to build libmdbx.  "
+    "You can vote for ability of disabling auto-creation such unsuitable archives at https://github.community/t/disable-tarball\n"
+    "Instead of above, just clone the git repository, either download a tarball or zip with the properly amalgamated source core.  "
+    "For embedding libmdbx use a git-submodule or the amalgamated source code.\n"
+    "Please, avoid using any other techniques.")
 endif()
 
 if(DEFINED PROJECT_NAME)
@@ -443,11 +449,8 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin" OR IOS)
 endif()
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
   if(MDBX_NTDLL_EXTRA_IMPLIB)
-    add_mdbx_option(MDBX_AVOID_CRT "Avoid dependence from MSVC CRT and use ntdll.dll instead" OFF)
+    add_mdbx_option(MDBX_WITHOUT_MSVC_CRT "Avoid dependence from MSVC CRT and use ntdll.dll instead" OFF)
   endif()
-  add_mdbx_option(MDBX_CONFIG_MANUAL_TLS_CALLBACK
-    "Provide mdbx_dll_handler() for manual initialization" OFF)
-  mark_as_advanced(MDBX_CONFIG_MANUAL_TLS_CALLBACK)
 else()
   add_mdbx_option(MDBX_USE_OFDLOCKS "Use Open file description locks (aka OFD locks, non-POSIX)" AUTO)
   mark_as_advanced(MDBX_USE_OFDLOCKS)
@@ -478,7 +481,7 @@ if(CMAKE_CXX_COMPILER_LOADED AND MDBX_CXX_STANDARD GREATER_EQUAL 11 AND MDBX_CXX
   if(NOT MDBX_AMALGAMATED_SOURCE)
     option(MDBX_ENABLE_TESTS "Build MDBX tests" ${BUILD_TESTING})
   endif()
-  if(NOT MDBX_AVOID_CRT
+  if(NOT MDBX_WITHOUT_MSVC_CRT
       AND NOT (CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.8)
       AND NOT (CMAKE_COMPILER_IS_CLANG AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4)
       AND NOT (MSVC AND MSVC_VERSION LESS 1900))
@@ -561,8 +564,8 @@ endmacro()
 macro(libmdbx_setup_libs TARGET MODE)
   target_link_libraries(${TARGET} ${MODE} Threads::Threads)
   if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    target_link_libraries(${TARGET} ${MODE} ntdll.lib)
-    if(MDBX_NTDLL_EXTRA_IMPLIB AND MDBX_AVOID_CRT)
+    target_link_libraries(${TARGET} ${MODE} ntdll)
+    if(MDBX_NTDLL_EXTRA_IMPLIB AND MDBX_WITHOUT_MSVC_CRT)
       target_link_libraries(${TARGET} ${MODE} ntdll_extra)
     endif()
   elseif(${CMAKE_SYSTEM_NAME} STREQUAL "SunOS" OR ${CMAKE_SYSTEM_NAME} STREQUAL "Solaris")
@@ -601,7 +604,7 @@ if(MDBX_BUILD_SHARED_LIBRARY)
   target_setup_options(mdbx)
   libmdbx_setup_libs(mdbx PRIVATE)
   if(MSVC)
-    if(MDBX_NTDLL_EXTRA_IMPLIB AND MDBX_AVOID_CRT)
+    if(MDBX_NTDLL_EXTRA_IMPLIB AND MDBX_WITHOUT_MSVC_CRT)
       set_property(TARGET mdbx PROPERTY LINKER_FLAGS "/NODEFAULTLIB")
     else()
       set_property(TARGET mdbx PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")

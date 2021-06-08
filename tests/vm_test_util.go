@@ -24,16 +24,16 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // VMTest checks EVM execution without block or transaction context.
@@ -81,11 +81,9 @@ type vmExecMarshaling struct {
 	GasPrice *math.HexOrDecimal256
 }
 
-func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+func (t *VMTest) Run(tx ethdb.RwTx, vmconfig vm.Config, blockNr uint64) error {
 	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), blockNr)
-	state, err := MakePreState2(ctx, db, t.json.Pre, blockNr)
+	state, err := MakePreState(ctx, ethdb.WrapIntoTxDB(tx), t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
 	}
@@ -119,7 +117,7 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 			}
 		}
 	}
-	root, err := trie.CalcRoot("test", db)
+	root, err := trie.CalcRoot("test", tx)
 	if err != nil {
 		return fmt.Errorf("Error calculating state root: %v", err)
 	}
@@ -157,6 +155,7 @@ func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 		CanTransfer: canTransfer,
 		Transfer:    transfer,
 		GetHash:     vmTestBlockHash,
+		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 		Coinbase:    t.json.Env.Coinbase,
 		BlockNumber: t.json.Env.Number,
 		Time:        t.json.Env.Timestamp,

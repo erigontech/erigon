@@ -6,13 +6,13 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +21,7 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
 		err := resetState(db, ctx)
@@ -39,11 +39,12 @@ var cmdClearUnwindStack = &cobra.Command{
 	Short: "Clear unwind stack",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDatabase(chaindata, true)
+		db := openDB(chaindata, true)
 		defer db.Close()
 
-		err := clearUnwindStack(db, ctx)
-		if err != nil {
+		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
+			return clearUnwindStack(tx, ctx)
+		}); err != nil {
 			log.Error(err.Error())
 			return err
 		}
@@ -62,7 +63,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearUnwindStack)
 }
 
-func clearUnwindStack(db ethdb.Putter, _ context.Context) error {
+func clearUnwindStack(db ethdb.RwTx, _ context.Context) error {
 	for _, stage := range stages.AllStages {
 		if err := stages.SaveStageUnwind(db, stage, 0); err != nil {
 			return err
@@ -71,12 +72,11 @@ func clearUnwindStack(db ethdb.Putter, _ context.Context) error {
 	return nil
 }
 
-func resetState(db ethdb.Database, ctx context.Context) error {
+func resetState(kv ethdb.RwKV, ctx context.Context) error {
 	fmt.Printf("Before reset: \n")
-	if err := printStages(db); err != nil {
+	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
-	kv := db.(ethdb.HasRwKV).RwKV()
 	// don't reset senders here
 	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) }); err != nil {
 		return err
@@ -119,7 +119,7 @@ func resetState(db ethdb.Database, ctx context.Context) error {
 	}
 
 	fmt.Printf("After reset: \n")
-	if err := printStages(db); err != nil {
+	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
 	return nil
@@ -172,10 +172,10 @@ func resetExec(tx ethdb.RwTx) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CodeBucket); err != nil {
 		return err
 	}
-	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallTraceSet); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
 	return nil
@@ -274,7 +274,7 @@ func resetFinish(tx ethdb.RwTx) error {
 	return nil
 }
 
-func printStages(db ethdb.Getter) error {
+func printStages(db ethdb.KVGetter) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)

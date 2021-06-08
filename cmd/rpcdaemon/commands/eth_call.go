@@ -6,35 +6,35 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
-	dbtx, err := api.db.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer dbtx.Rollback()
+	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := transactions.DoCall(ctx, args, dbtx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.pending)
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -48,16 +48,15 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 }
 
 func HeaderByNumberOrHash(ctx context.Context, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
-	db := ethdb.NewRoTxDb(tx)
 	if blockLabel, ok := blockNrOrHash.Number(); ok {
 		blockNum, err := getBlockNumber(blockLabel, tx)
 		if err != nil {
 			return nil, err
 		}
-		return rawdb.ReadHeaderByNumber(db, blockNum), nil
+		return rawdb.ReadHeaderByNumber(tx, blockNum), nil
 	}
 	if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err := rawdb.ReadHeaderByHash(db, hash)
+		header, err := rawdb.ReadHeaderByHash(tx, hash)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +65,7 @@ func HeaderByNumberOrHash(ctx context.Context, tx ethdb.Tx, blockNrOrHash rpc.Bl
 		}
 
 		if blockNrOrHash.RequireCanonical {
-			can, err := rawdb.ReadCanonicalHash(db, header.Number.Uint64())
+			can, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
 			if err != nil {
 				return nil, err
 			}
@@ -75,7 +74,7 @@ func HeaderByNumberOrHash(ctx context.Context, tx ethdb.Tx, blockNrOrHash rpc.Bl
 			}
 		}
 
-		h := rawdb.ReadHeader(db, hash, header.Number.Uint64())
+		h := rawdb.ReadHeader(tx, hash, header.Number.Uint64())
 		if h == nil {
 			return nil, errors.New("header found, but block body is missing")
 		}
@@ -164,7 +163,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.pending)
+		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.filters)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

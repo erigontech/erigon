@@ -3,14 +3,15 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 var (
 	chaindata          string
 	database           string
+	databaseVerbosity  int
 	snapshotMode       string
 	snapshotDir        string
 	toChaindata        string
@@ -26,9 +27,10 @@ var (
 	migration          string
 	integritySlow      bool
 	integrityFast      bool
-	silkwormPath       string
 	file               string
 	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
+	storageMode        string
+	chain              string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
 
 func must(err error) {
@@ -89,7 +91,8 @@ func withDatadir2(cmd *cobra.Command) {
 	cmd.Flags().String(utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 }
 
 func withDatadir(cmd *cobra.Command) {
@@ -104,7 +107,8 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 	must(cmd.MarkFlagDirname("snapshot.dir"))
 
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -120,11 +124,10 @@ func withMigration(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&migration, "migration", "", "action to apply to given migration")
 }
 
-func withSilkworm(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_tg_api.so")
-	must(cmd.MarkFlagFilename("silkworm"))
-}
-
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
+}
+
+func withChain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
 }

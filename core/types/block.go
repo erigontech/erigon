@@ -28,9 +28,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 var (
@@ -87,11 +88,23 @@ type Header struct {
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFee"`
 	Eip1559     bool           // to avoid relying on BaseFee != nil for that
+	Seal        []rlp.RawValue // AuRa POA network field
+	WithSeal    bool           // to avoid relying on Seal != nil for that
 }
 
 func (h Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
-		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
+		33 /* ReceiptHash */ + 259 /* Bloom */
+
+	if h.WithSeal {
+		encodingSize++
+		for i := range h.Seal {
+			//encodingSize++
+			encodingSize += len(h.Seal[i])
+		}
+	} else {
+		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
+	}
 	encodingSize++
 	var diffLen int
 	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
@@ -145,13 +158,24 @@ func (h Header) EncodingSize() int {
 		}
 		encodingSize += baseFeeLen
 	}
+
 	return encodingSize
 }
 
 func (h Header) EncodeRLP(w io.Writer) error {
 	// Precompute the size of the encoding
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
-		33 /* ReceiptHash */ + 259 /* Bloom */ + 33 /* MixDigest */ + 9 /* BlockNonce */
+		33 /* ReceiptHash */ + 259 /* Bloom */
+	if h.WithSeal {
+		encodingSize++
+		for i := range h.Seal {
+			//encodingSize++
+			encodingSize += len(h.Seal[i])
+		}
+	} else {
+		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
+	}
+
 	encodingSize++
 	var diffLen int
 	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
@@ -204,6 +228,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		}
 		encodingSize += baseFeeLen
 	}
+
 	var b [33]byte
 	// Prefix
 	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
@@ -324,20 +349,34 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	if err := EncodeString(h.Extra, w, b[:]); err != nil {
 		return err
 	}
-	b[0] = 128 + 32
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
+
+	if h.WithSeal {
+		b[0] = 128
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		for i := range h.Seal {
+			if _, err := w.Write(h.Seal[i]); err != nil {
+				return err
+			}
+		}
+	} else {
+		b[0] = 128 + 32
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.MixDigest.Bytes()); err != nil {
+			return err
+		}
+		b[0] = 128 + 8
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.Nonce[:]); err != nil {
+			return err
+		}
 	}
-	if _, err := w.Write(h.MixDigest.Bytes()); err != nil {
-		return err
-	}
-	b[0] = 128 + 8
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if _, err := w.Write(h.Nonce[:]); err != nil {
-		return err
-	}
+
 	if h.Eip1559 {
 		if h.BaseFee.BitLen() > 0 && h.BaseFee.BitLen() < 8 {
 			b[0] = byte(h.BaseFee.Uint64())
@@ -356,6 +395,9 @@ func (h Header) EncodeRLP(w io.Writer) error {
 }
 
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
+	if !h.WithSeal { // then tests can enable without env flag
+		h.WithSeal = debug.HeadersSeal()
+	}
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -437,36 +479,48 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if h.Extra, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Extra: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read MixDigest: %w", err)
-	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for MixDigest: %d", len(b))
-	}
-	copy(h.MixDigest[:], b)
-	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Nonce: %w", err)
-	}
-	if len(b) != 8 {
-		return fmt.Errorf("wrong size for Nonce: %d", len(b))
-	}
-	copy(h.Nonce[:], b)
-	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.BaseFee = nil
-			h.Eip1559 = false
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no basefee): %w", err)
-			}
-			return nil
+
+	if h.WithSeal {
+		h.WithSeal = true
+		for b, err = s.Raw(); err == nil; b, err = s.Raw() {
+			h.Seal = append(h.Seal, make(rlp.RawValue, len(b)))
+			copy(h.Seal[len(h.Seal)-1][:], b)
 		}
-		return fmt.Errorf("read BaseFee: %w", err)
+		if !errors.Is(err, rlp.EOL) {
+			return fmt.Errorf("open accessTuple: %d %w", len(h.Seal), err)
+		}
+	} else {
+		if b, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read MixDigest: %w", err)
+		}
+		if len(b) != 32 {
+			return fmt.Errorf("wrong size for MixDigest: %d", len(b))
+		}
+		copy(h.MixDigest[:], b)
+		if b, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read Nonce: %w", err)
+		}
+		if len(b) != 8 {
+			return fmt.Errorf("wrong size for Nonce: %d", len(b))
+		}
+		copy(h.Nonce[:], b)
+		if b, err = s.Bytes(); err != nil {
+			if errors.Is(err, rlp.EOL) {
+				h.BaseFee = nil
+				h.Eip1559 = false
+				if err := s.ListEnd(); err != nil {
+					return fmt.Errorf("close header struct (no basefee): %w", err)
+				}
+				return nil
+			}
+			return fmt.Errorf("read BaseFee: %w", err)
+		}
+		if len(b) > 32 {
+			return fmt.Errorf("wrong size for BaseFee: %d", len(b))
+		}
+		h.Eip1559 = true
+		h.BaseFee = new(big.Int).SetBytes(b)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for BaseFee: %d", len(b))
-	}
-	h.Eip1559 = true
-	h.BaseFee = new(big.Int).SetBytes(b)
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
 	}
@@ -533,6 +587,14 @@ func (h *Header) EmptyReceipts() bool {
 // a block's data contents (transactions and uncles) together.
 type Body struct {
 	Transactions []Transaction
+	Uncles       []*Header
+}
+
+// RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
+// It is useful in the situations when actual transaction context is not important, for example
+// when downloading Block bodies from other peers or serving them to other peers
+type RawBody struct {
+	Transactions [][]byte
 	Uncles       []*Header
 }
 
@@ -603,6 +665,112 @@ func (b *Body) SendersFromTxs() []common.Address {
 		}
 	}
 	return senders
+}
+
+func (rb RawBody) EncodingSize() int {
+	payloadSize, _, _ := rb.payloadSize()
+	return payloadSize
+}
+
+func (rb RawBody) payloadSize() (payloadSize int, txsLen, unclesLen int) {
+	// size of Transactions
+	payloadSize++
+	for _, tx := range rb.Transactions {
+		txsLen++
+		var txLen = len(tx)
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		payloadSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	payloadSize += txsLen
+	// size of Uncles
+	payloadSize++
+	for _, uncle := range rb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		payloadSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	payloadSize += unclesLen
+	return payloadSize, txsLen, unclesLen
+}
+
+func (rb RawBody) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen := rb.payloadSize()
+	var b [33]byte
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range rb.Transactions {
+		if _, err := w.Write(tx); err != nil {
+			return nil
+		}
+	}
+	// encode Uncles
+	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range rb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx []byte
+	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
+		rb.Transactions = append(rb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		rb.Uncles = append(rb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
 }
 
 func (bb Body) EncodingSize() int {
@@ -769,7 +937,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	return b
 }
 
-// NewBlockWithHeader creates a block with the given header data. The
+// NewBlockWithHeader creates a blxock with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
 func NewBlockWithHeader(header *Header) *Block {
@@ -793,6 +961,12 @@ func CopyHeader(h *Header) *Header {
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
+	}
+	if len(h.Seal) > 0 {
+		cpy.Seal = make([]rlp.RawValue, len(h.Seal))
+		for i := range h.Seal {
+			cpy.Seal[i] = common.CopyBytes(h.Seal[i])
+		}
 	}
 	return &cpy
 }
@@ -1000,6 +1174,20 @@ func (b *Block) Body() *Body {
 	bd := &Body{Transactions: b.transactions, Uncles: b.uncles}
 	bd.SendersFromTxs()
 	return bd
+}
+
+// RawBody creates a RawBody based on the block. It is not very efficient, so
+// will probably be removed in favour of RawBlock. Also it panics
+func (b *Block) RawBody() *RawBody {
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles}
+	for i, tx := range b.transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return br
 }
 
 // Size returns the true RLP encoded storage size of the block, either by encoding

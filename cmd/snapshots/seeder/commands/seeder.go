@@ -11,12 +11,16 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/log"
-	trnt "github.com/ledgerwatch/turbo-geth/turbo/snapshotsync/bittorrent"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/log"
+	trnt "github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 func Seed(ctx context.Context, datadir string) error {
+	defer func() {
+		//hack origin lib don't have proper close handling
+		time.Sleep(time.Second * 5)
+	}()
 	datadir = filepath.Dir(datadir)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -33,7 +37,6 @@ func Seed(ctx context.Context, datadir string) error {
 		cfg.DataDir + "/headers",
 		cfg.DataDir + "/bodies",
 		cfg.DataDir + "/state",
-		//cfg.DataDir+"/receipts",
 	}
 
 	cl, err := torrent.NewClient(cfg)
@@ -47,7 +50,7 @@ func Seed(ctx context.Context, datadir string) error {
 		i := i
 		mi := &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
-			CreatedBy:    "turbogeth",
+			CreatedBy:    "erigon",
 			AnnounceList: trnt.Trackers,
 		}
 
@@ -61,7 +64,7 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
-		info, err := trnt.BuildInfoBytesForLMDBSnapshot(v)
+		info, err := trnt.BuildInfoBytesForSnapshot(v, trnt.MdbxFilename)
 		if err != nil {
 			return err
 		}
@@ -90,8 +93,6 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return common.ErrStopped
 		}
-
-		torrents[i].VerifyData()
 	}
 
 	go func() {

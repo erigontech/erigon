@@ -3,25 +3,24 @@ package commands
 import (
 	"context"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, kv ethdb.RoKV, eth core.ApiBackend, txPool txpool.TxpoolClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+func APIList(ctx context.Context, db ethdb.RoKV, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
-	pending := rpchelper.NewPending(filters, ctx.Done())
-	ethImpl := NewEthAPI(kv, eth, txPool, cfg.Gascap, filters, pending)
-	tgImpl := NewTgAPI(kv, pending)
+	base := NewBaseApi(filters)
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
+	erigonImpl := NewErigonAPI(base, db)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(kv, cfg.Gascap, pending)
-	traceImpl := NewTraceAPI(kv, pending, &cfg)
+	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
+	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl()   /* deprecated */
 	shhImpl := NewSHHAPIImpl() /* deprecated */
@@ -77,11 +76,11 @@ func APIList(ctx context.Context, kv ethdb.RoKV, eth core.ApiBackend, txPool txp
 				Service:   SHHAPI(shhImpl),
 				Version:   "1.0",
 			})
-		case "tg":
+		case "erigon":
 			defaultAPIList = append(defaultAPIList, rpc.API{
-				Namespace: "tg",
+				Namespace: "erigon",
 				Public:    true,
-				Service:   TgAPI(tgImpl),
+				Service:   ErigonAPI(erigonImpl),
 				Version:   "1.0",
 			})
 		}

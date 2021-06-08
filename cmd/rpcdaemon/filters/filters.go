@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
@@ -31,20 +31,22 @@ type (
 type Filters struct {
 	mu sync.RWMutex
 
+	pendingBlock *types.Block
+
 	headsSubs        map[HeadsSubID]chan *types.Header
 	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 }
 
-func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolClient) *Filters {
-	log.Info("rpc filters: subscribing to tg events")
+func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) *Filters {
+	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
 		headsSubs:        make(map[HeadsSubID]chan *types.Header),
+		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
 		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
 		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
-		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
 	}
 
 	go func() {
@@ -57,17 +59,34 @@ func New(ctx context.Context, ethBackend core.ApiBackend, txPool txpool.TxpoolCl
 		}
 	}()
 
-	go func() {
-		if txPool == nil {
-			return
-		}
-		if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
-			log.Warn("rpc filters: error subscribing to events", "err", err)
-			time.Sleep(time.Second)
-		}
-	}()
+	if txPool != nil {
+		go func() {
+			if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
+				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+				time.Sleep(time.Second)
+			}
+		}()
+		go func() {
+			if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
+				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+				time.Sleep(time.Second)
+			}
+		}()
+		go func() {
+			if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
+				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+				time.Sleep(time.Second)
+			}
+		}()
+	}
 
 	return ff
+}
+
+func (ff *Filters) LastPendingBlock() *types.Block {
+	ff.mu.RLock()
+	defer ff.mu.RUnlock()
+	return ff.pendingBlock
 }
 
 func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
@@ -93,6 +112,92 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 	return nil
 }
 
+func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.MiningClient) error {
+	subscription, err := mining.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		event, err := subscription.Recv()
+		if err == io.EOF {
+			log.Info("rpcdaemon: the subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		ff.HandlePendingBlock(event)
+	}
+	return nil
+}
+
+func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
+	b := &types.Block{}
+	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
+		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
+	}
+
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	ff.pendingBlock = b
+
+	for _, v := range ff.pendingBlockSubs {
+		v <- b
+	}
+}
+
+func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.MiningClient) error {
+	subscription, err := mining.OnPendingLogs(ctx, &txpool.OnPendingLogsRequest{}, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
+		event, err := subscription.Recv()
+		if err == io.EOF {
+			log.Info("rpcdaemon: the subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		ff.HandlePendingLogs(event)
+	}
+	return nil
+}
+
+func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
+	l := []*types.Log{}
+	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), &l); err != nil {
+		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
+	}
+
+	ff.mu.RLock()
+	defer ff.mu.RUnlock()
+	for _, v := range ff.pendingLogsSubs {
+		v <- l
+	}
+}
+
 func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
@@ -107,11 +212,11 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) {
 	delete(ff.headsSubs, id)
 }
 
-func (ff *Filters) SubscribePendingLogs(out chan types.Logs) PendingLogsSubID {
+func (ff *Filters) SubscribePendingLogs(c chan types.Logs) PendingLogsSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	id := PendingLogsSubID(generateSubscriptionID())
-	ff.pendingLogsSubs[id] = out
+	ff.pendingLogsSubs[id] = c
 	return id
 }
 
@@ -121,12 +226,18 @@ func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
 	delete(ff.pendingLogsSubs, id)
 }
 
-func (ff *Filters) SubscribePendingBlock(out chan *types.Block) PendingBlockSubID {
+func (ff *Filters) SubscribePendingBlock(f chan *types.Block) PendingBlockSubID {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	id := PendingBlockSubID(generateSubscriptionID())
-	ff.pendingBlockSubs[id] = out
+	ff.pendingBlockSubs[id] = f
 	return id
+}
+
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	delete(ff.pendingBlockSubs, id)
 }
 
 func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {
@@ -141,12 +252,6 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	delete(ff.pendingTxsSubs, id)
-}
-
-func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	delete(ff.pendingBlockSubs, id)
 }
 
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
@@ -167,30 +272,30 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 				v <- &header
 			}
 		}
-	case remote.Event_PENDING_LOGS:
-		payload := event.Data
-		var logs types.Logs
-		err := rlp.Decode(bytes.NewReader(payload), &logs)
-		if err != nil {
-			// ignoring what we can't unmarshal
-			log.Warn("OnNewEvent rpc filters (pending logs), unprocessable payload", "err", err)
-		} else {
-			for _, v := range ff.pendingLogsSubs {
-				v <- logs
-			}
-		}
-	case remote.Event_PENDING_BLOCK:
-		payload := event.Data
-		var block types.Block
-		err := rlp.Decode(bytes.NewReader(payload), &block)
-		if err != nil {
-			// ignoring what we can't unmarshal
-			log.Warn("OnNewEvent rpc filters (pending txs), unprocessable payload", "err", err)
-		} else {
-			for _, v := range ff.pendingBlockSubs {
-				v <- &block
-			}
-		}
+	//case remote.Event_PENDING_LOGS:
+	//	payload := event.Data
+	//	var logs types.Logs
+	//	err := rlp.Decode(bytes.NewReader(payload), &logs)
+	//	if err != nil {
+	//		// ignoring what we can't unmarshal
+	//		log.Warn("OnNewEvent rpc filters (pending logs), unprocessable payload", "err", err)
+	//	} else {
+	//		for _, v := range ff.pendingLogsSubs {
+	//			v <- logs
+	//		}
+	//	}
+	//case remote.Event_PENDING_BLOCK:
+	//	payload := event.Data
+	//	var block types.Block
+	//	err := rlp.Decode(bytes.NewReader(payload), &block)
+	//	if err != nil {
+	//		// ignoring what we can't unmarshal
+	//		log.Warn("OnNewEvent rpc filters (pending txs), unprocessable payload", "err", err)
+	//	} else {
+	//		for _, v := range ff.pendingBlockSubs {
+	//			v <- &block
+	//		}
+	//	}
 	default:
 		log.Warn("OnNewEvent rpc filters: unsupported event type", "type", event.Type)
 		return

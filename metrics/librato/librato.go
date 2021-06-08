@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 // a regexp for extracting the unit from time.Duration.String

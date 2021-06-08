@@ -7,25 +7,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
-
-type changesetFactory func() *changeset.ChangeSet
-type accountKeyGen func(common.Address) ([]byte, error)
-type storageKeyGen func(common.Address, uint64, common.Hash) ([]byte, error)
-
-func plainAccountKeyGen(a common.Address) ([]byte, error) {
-	return a[:], nil
-}
-
-func plainStorageKeyGen(address common.Address, incarnation uint64, key common.Hash) ([]byte, error) {
-	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes()), nil
-}
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
@@ -33,10 +21,6 @@ type ChangeSetWriter struct {
 	accountChanges map[common.Address][]byte
 	storageChanged map[common.Address]bool
 	storageChanges map[string][]byte
-	storageFactory changesetFactory
-	accountFactory changesetFactory
-	accountKeyGen  accountKeyGen
-	storageKeyGen  storageKeyGen
 	blockNumber    uint64
 }
 
@@ -45,10 +29,6 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		accountChanges: make(map[common.Address][]byte),
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
-		storageFactory: changeset.NewStorageChangeSet,
-		accountFactory: changeset.NewAccountChangeSet,
-		accountKeyGen:  plainAccountKeyGen,
-		storageKeyGen:  plainStorageKeyGen,
 	}
 }
 func NewChangeSetWriterPlain(db ethdb.RwTx, blockNumber uint64) *ChangeSetWriter {
@@ -57,29 +37,21 @@ func NewChangeSetWriterPlain(db ethdb.RwTx, blockNumber uint64) *ChangeSetWriter
 		accountChanges: make(map[common.Address][]byte),
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
-		storageFactory: changeset.NewStorageChangeSet,
-		accountFactory: changeset.NewAccountChangeSet,
-		accountKeyGen:  plainAccountKeyGen,
-		storageKeyGen:  plainStorageKeyGen,
 		blockNumber:    blockNumber,
 	}
 }
 
 func (w *ChangeSetWriter) GetAccountChanges() (*changeset.ChangeSet, error) {
-	cs := w.accountFactory()
+	cs := changeset.NewAccountChangeSet()
 	for address, val := range w.accountChanges {
-		key, err := w.accountKeyGen(address)
-		if err != nil {
-			return nil, err
-		}
-		if err := cs.Add(key, val); err != nil {
+		if err := cs.Add(common.CopyBytes(address[:]), val); err != nil {
 			return nil, err
 		}
 	}
 	return cs, nil
 }
 func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
-	cs := w.storageFactory()
+	cs := changeset.NewStorageChangeSet()
 	for key, val := range w.storageChanges {
 		if err := cs.Add([]byte(key), val); err != nil {
 			return nil, err
@@ -115,7 +87,6 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	if !accountsEqual(original, account) || w.storageChanged[address] {
-
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
 	}
 	return nil
@@ -135,10 +106,7 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 		return nil
 	}
 
-	compositeKey, err := w.storageKeyGen(address, incarnation, *key)
-	if err != nil {
-		return err
-	}
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 
 	w.storageChanges[string(compositeKey)] = original.Bytes()
 	w.storageChanged[address] = true
@@ -151,17 +119,6 @@ func (w *ChangeSetWriter) CreateContract(address common.Address) error {
 }
 
 func (w *ChangeSetWriter) WriteChangeSets() error {
-	accC, err := w.db.RwCursorDupSort(dbutils.AccountChangeSetBucket)
-	if err != nil {
-		return err
-	}
-	defer accC.Close()
-	stC, err := w.db.RwCursorDupSort(dbutils.StorageChangeSetBucket)
-	if err != nil {
-		return err
-	}
-	defer stC.Close()
-
 	accountChanges, err := w.GetAccountChanges()
 	if err != nil {
 		return err
@@ -169,11 +126,11 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	var prevK []byte
 	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
 		if bytes.Equal(k, prevK) {
-			if err = accC.AppendDup(k, v); err != nil {
+			if err = w.db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		} else {
-			if err = accC.Append(k, v); err != nil {
+			if err = w.db.Append(dbutils.AccountChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		}
@@ -193,11 +150,11 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	}
 	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
 		if bytes.Equal(k, prevK) {
-			if err = stC.AppendDup(k, v); err != nil {
+			if err = w.db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		} else {
-			if err = stC.Append(k, v); err != nil {
+			if err = w.db.Append(dbutils.StorageChangeSetBucket, k, v); err != nil {
 				return err
 			}
 		}

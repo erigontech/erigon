@@ -5,24 +5,26 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 type TxPoolCfg struct {
-	db   ethdb.RwKV
-	pool *core.TxPool
+	db        ethdb.RwKV
+	pool      *core.TxPool
+	startFunc func()
 }
 
-func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool) TxPoolCfg {
+func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool, startFunc func()) TxPoolCfg {
 	return TxPoolCfg{
-		db:   db,
-		pool: pool,
+		db:        db,
+		pool:      pool,
+		startFunc: startFunc,
 	}
 }
 
@@ -58,6 +60,9 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, quitCh <-chan stru
 		headHeader := rawdb.ReadHeader(tx, headHash, to)
 		if err := cfg.pool.Start(headHeader.GasLimit, to); err != nil {
 			return fmt.Errorf("%s: start pool phase 1: %w", logPrefix, err)
+		}
+		if cfg.startFunc != nil {
+			cfg.startFunc()
 		}
 	}
 	if cfg.pool != nil && cfg.pool.IsStarted() && s.BlockNumber > 0 {
@@ -111,7 +116,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 		currentHeaderIdx++
 	}
 
-	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
+	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	bodies, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {
 		return err
@@ -207,7 +212,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 
 		copy(canonical[blockNumber-from-1][:], v)
 	}
-	log.Info(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
+	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
 	sendersC, err := tx.Cursor(dbutils.Senders)
 	if err != nil {

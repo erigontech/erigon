@@ -4,14 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestGetChainConfig(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	config, _, err := core.SetupGenesisBlock(ethdb.NewObjectDatabase(db), core.DefaultGenesisBlock(), false /* history */, false /* overwrite */)
+	db := ethdb.NewTestKV(t)
+	config, _, err := core.CommitGenesisBlock(db, core.DefaultGenesisBlock(), false)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)
 	}

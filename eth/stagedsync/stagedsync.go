@@ -1,15 +1,15 @@
 package stagedsync
 
 import (
-	"unsafe"
-
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/stages/bodydownload"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 )
 
 type StagedSync struct {
@@ -31,10 +31,9 @@ type OptionalParameters struct {
 	// It can be used to update bloom or other types of filters between block execution.
 	StateWriterBuilder StateWriterBuilder
 
-	// Notifier allows sending some data when new headers or new blocks are added
-	Notifier ChainEventNotifier
-
-	SilkwormExecutionFunc unsafe.Pointer
+	SnapshotDir      string
+	TorrnetClient    *snapshotsync.Client
+	SnapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
 func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
@@ -52,7 +51,7 @@ func (stagedSync *StagedSync) Prepare(
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	db ethdb.Database,
-	tx ethdb.Database,
+	tx ethdb.Tx,
 	pid string,
 	storageMode ethdb.StorageMode,
 	tmpdir string,
@@ -62,6 +61,7 @@ func (stagedSync *StagedSync) Prepare(
 	txPool *core.TxPool,
 	initialCycle bool,
 	miningConfig *MiningCfg,
+	accumulator *shards.Accumulator,
 ) (*State, error) {
 	var readerBuilder StateReaderBuilder
 	if stagedSync.params.StateReaderBuilder != nil {
@@ -73,32 +73,30 @@ func (stagedSync *StagedSync) Prepare(
 		writerBuilder = stagedSync.params.StateWriterBuilder
 	}
 
-	if stagedSync.params.Notifier != nil {
-		stagedSync.Notifier = stagedSync.params.Notifier
-	}
-
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
-			d:                     d,
-			ChainConfig:           chainConfig,
-			Engine:                engine,
-			vmConfig:              vmConfig,
-			DB:                    db,
-			TX:                    tx,
-			pid:                   pid,
-			storageMode:           storageMode,
-			TmpDir:                tmpdir,
-			QuitCh:                quitCh,
-			headersFetchers:       headersFetchers,
-			txPool:                txPool,
-			BatchSize:             batchSize,
-			prefetchedBlocks:      stagedSync.PrefetchedBlocks,
-			stateReaderBuilder:    readerBuilder,
-			stateWriterBuilder:    writerBuilder,
-			notifier:              stagedSync.Notifier,
-			silkwormExecutionFunc: stagedSync.params.SilkwormExecutionFunc,
-			InitialCycle:          initialCycle,
-			mining:                miningConfig,
+			d:                  d,
+			ChainConfig:        chainConfig,
+			Engine:             engine,
+			vmConfig:           vmConfig,
+			DB:                 db,
+			pid:                pid,
+			storageMode:        storageMode,
+			TmpDir:             tmpdir,
+			QuitCh:             quitCh,
+			headersFetchers:    headersFetchers,
+			txPool:             txPool,
+			BatchSize:          batchSize,
+			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
+			stateReaderBuilder: readerBuilder,
+			stateWriterBuilder: writerBuilder,
+			notifier:           stagedSync.Notifier,
+			InitialCycle:       initialCycle,
+			mining:             miningConfig,
+			snapshotsDir:       stagedSync.params.SnapshotDir,
+			btClient:           stagedSync.params.TorrnetClient,
+			SnapshotBuilder:    stagedSync.params.SnapshotMigrator,
+			Accumulator:        accumulator,
 		},
 	)
 	state := NewState(stages)
@@ -109,11 +107,26 @@ func (stagedSync *StagedSync) Prepare(
 		state.unwindOrder[i] = stages[stageIndex]
 	}
 
-	if hasTx, ok := tx.(ethdb.HasTx); ok && hasTx.Tx() != nil {
-		db = tx
-	}
-	if err := state.LoadUnwindInfo(db); err != nil {
-		return nil, err
+	if tx != nil {
+		if err := state.LoadUnwindInfo(tx); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := state.LoadUnwindInfo(db); err != nil {
+			return nil, err
+		}
 	}
 	return state, nil
+}
+
+func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
+	stagedSync.params.TorrnetClient = client
+	stagedSync.params.SnapshotDir = snapshotsDir
+	stagedSync.params.SnapshotMigrator = snapshotMigrator
+}
+func (stagedSync *StagedSync) GetSnapshotMigratorFinal() func(tx ethdb.Tx) error {
+	if stagedSync.params.SnapshotMigrator != nil {
+		return stagedSync.params.SnapshotMigrator.Final
+	}
+	return nil
 }

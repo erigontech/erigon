@@ -5,18 +5,14 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 func TestEmptyQuery(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
-	api := NewTraceAPI(db, nil, &cli.Flags{})
+	db := createTestKV(t)
+	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
@@ -31,12 +27,8 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 func TestCoinbaseBalance(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
-	api := NewTraceAPI(db, nil, &cli.Flags{})
+	db := createTestKV(t)
+	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`

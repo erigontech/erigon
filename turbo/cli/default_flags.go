@@ -1,12 +1,12 @@
 package cli
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 
 	"github.com/urfave/cli"
 )
 
-// DefaultFlags contains all flags that are used and supported by turbo-geth binary.
+// DefaultFlags contains all flags that are used and supported by Erigon binary.
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
 	utils.EthashDatasetDirFlag,
@@ -24,6 +24,7 @@ var DefaultFlags = []cli.Flag{
 	StorageModeFlag,
 	SnapshotModeFlag,
 	SeedSnapshotsFlag,
+	SnapshotDatabaseLayoutFlag,
 	ExternalSnapshotDownloaderAddrFlag,
 	BatchSizeFlag,
 	DatabaseFlag,
@@ -36,6 +37,7 @@ var DefaultFlags = []cli.Flag{
 	TLSKeyFlag,
 	TLSCACertFlag,
 	utils.ListenPortFlag,
+	utils.ListenPort65Flag,
 	utils.NATFlag,
 	utils.NoDiscoverFlag,
 	utils.DiscoveryV5Flag,
@@ -60,7 +62,6 @@ var DefaultFlags = []cli.Flag{
 	utils.CliqueSnapshotInmemorySnapshotsFlag,
 	utils.CliqueSnapshotInmemorySignaturesFlag,
 	utils.CliqueDataDirFlag,
-	SilkwormFlag,
 	utils.MiningEnabledFlag,
 	utils.MinerNotifyFlag,
 	utils.MinerGasTargetFlag,
@@ -68,6 +69,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MinerEtherbaseFlag,
 	utils.MinerExtraDataFlag,
 	utils.MinerNoVerfiyFlag,
-	DownloadV2Flag,
 	utils.SentryAddrFlag,
 }

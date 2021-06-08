@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +52,7 @@ func must(err error) {
 func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 }
 
 func withApiAddr(cmd *cobra.Command) {
@@ -63,21 +63,20 @@ func withConfig(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&config, "config", "", "`file:<path>` to specify config file in file system, `embed:<path>` to use embedded file, `test` to register test interface and receive config from test driver")
 }
 
-func openDatabase(path string) *ethdb.ObjectDatabase {
-	db := ethdb.NewObjectDatabase(openKV(path, false))
-	return db
+func openDatabase(path string) ethdb.RwKV {
+	return openKV(path, false)
 }
 
 func openKV(path string, exclusive bool) ethdb.RwKV {
-	if database == "mdbx" {
-		opts := ethdb.NewMDBX().Path(path)
+	if database == "lmdb" {
+		opts := ethdb.NewLMDB().Path(path)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
 		return opts.MustOpen()
 	}
 
-	opts := ethdb.NewLMDB().Path(path)
+	opts := ethdb.NewMDBX().Path(path)
 	if exclusive {
 		opts = opts.Exclusive()
 	}

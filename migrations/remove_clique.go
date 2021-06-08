@@ -1,9 +1,9 @@
 package migrations
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var removeCliqueBucket = Migration{
@@ -22,5 +22,4 @@ var removeCliqueBucket = Migration{
 
 		return CommitProgress(db, nil, true)
 	},
-
 }

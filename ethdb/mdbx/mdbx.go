@@ -1,5 +1,3 @@
-// +build mdbx
-
 /*
 Package lmdb provides bindings to the lmdb C API.  The package bindings are
 fairly low level and are designed to provide a minimal interface that prevents
@@ -133,15 +131,11 @@ details about dealing with such situations.
 package mdbx
 
 /*
-//#define MDBX_BUILD_FLAGS_CONFIG "config.h"
-//#cgo CFLAGS: -Wno-deprecated-declarations -pthread -W -Wall -Wextra -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-parameter -Wno-format-extra-args -Wbad-function-cast -Wno-missing-field-initializers -O0 -g
-//
-//#include "config.h"
-//#include "mdbx.h"
-//#include "mdbxgo.h"
+#cgo !windows CFLAGS: -O2 -g -Wno-deprecated-declarations -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
+#cgo windows CFLAGS: -O2 -g -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 
-#cgo CFLAGS: -O2 -g -Wno-deprecated-declarations -pthread -W -Wall -Werror -Wextra -Wpedantic -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-parameter -Wno-format-extra-args -Wbad-function-cast -Wno-missing-field-initializers
-#cgo LDFLAGS: ${SRCDIR}/dist/mdbx-static.o
+#cgo !windows LDFLAGS: ${SRCDIR}/dist/mdbx-static.o
+#cgo windows LDFLAGS: -L. -L./dist -L"${SRCDIR}" -llibmdbx
 */
 import "C"
 

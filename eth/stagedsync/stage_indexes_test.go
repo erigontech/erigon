@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
@@ -27,7 +27,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	kv := db.RwKV()
-	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
+	cfg := StageHistoryCfg(db.RwKV(), t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := kv.BeginRw(context.Background())
@@ -67,10 +67,8 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	kv := db.RwKV()
-	cfg := StageHistoryCfg(db.RwKV(), getTmpDir())
+	kv := ethdb.NewTestKV(t)
+	cfg := StageHistoryCfg(kv, t.TempDir())
 	for i := range buckets {
 		csbucket := buckets[i]
 

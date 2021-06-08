@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ugorji/go/codec"
 )
 
@@ -54,29 +54,15 @@ import (
 //	},
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test where apply migration twice
-var migrations = []Migration{
-	stagesToUseNamedKeys,
-	unwindStagesToUseNamedKeys,
-	stagedsyncToUseStageBlockhashes,
-	unwindStagedsyncToUseStageBlockhashes,
-	dupSortHashState,
-	dupSortPlainState,
-	dupSortIH,
-	clearIndices,
-	resetIHBucketToRecoverDB,
-	receiptsCborEncode,
-	receiptsOnePerTx,
-	accChangeSetDupSort,
-	storageChangeSetDupSort,
-	transactionsTable,
-	historyAccBitmap,
-	historyStorageBitmap,
-	splitHashStateBucket,
-	splitIHBucket,
-	deleteExtensionHashesFromTrieBucket,
-	headerPrefixToSeparateBuckets,
-	removeCliqueBucket,
-	dbSchemaVersion,
+var migrations = map[ethdb.Label][]Migration{
+	ethdb.Chain: {
+		headerPrefixToSeparateBuckets,
+		removeCliqueBucket,
+		dbSchemaVersion,
+		rebuilCallTraceIndex,
+	},
+	ethdb.TxPool: {},
+	ethdb.Sentry: {},
 }
 
 type Migration struct {
@@ -90,9 +76,9 @@ var (
 	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 
-func NewMigrator() *Migrator {
+func NewMigrator(label ethdb.Label) *Migrator {
 	return &Migrator{
-		Migrations: migrations,
+		Migrations: migrations[label],
 	}
 }
 
@@ -100,32 +86,39 @@ type Migrator struct {
 	Migrations []Migration
 }
 
-func AppliedMigrations(db ethdb.Database, withPayload bool) (map[string][]byte, error) {
+func AppliedMigrations(tx ethdb.Tx, withPayload bool) (map[string][]byte, error) {
 	applied := map[string][]byte{}
-	err := db.Walk(dbutils.Migrations, nil, 0, func(k []byte, v []byte) (bool, error) {
+	err := tx.ForEach(dbutils.Migrations, nil, func(k []byte, v []byte) error {
 		if bytes.HasPrefix(k, []byte("_progress_")) {
-			return true, nil
+			return nil
 		}
 		if withPayload {
 			applied[string(common.CopyBytes(k))] = common.CopyBytes(v)
 		} else {
 			applied[string(common.CopyBytes(k))] = []byte{}
 		}
-		return true, nil
+		return nil
 	})
 	return applied, err
 }
 
-func (m *Migrator) HasPendingMigrations(db ethdb.Database) (bool, error) {
-	pending, err := m.PendingMigrations(db)
-	if err != nil {
+func (m *Migrator) HasPendingMigrations(db ethdb.RwKV) (bool, error) {
+	var has bool
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		pending, err := m.PendingMigrations(tx)
+		if err != nil {
+			return err
+		}
+		has = len(pending) > 0
+		return nil
+	}); err != nil {
 		return false, err
 	}
-	return len(pending) > 0, nil
+	return has, nil
 }
 
-func (m *Migrator) PendingMigrations(db ethdb.Database) ([]Migration, error) {
-	applied, err := AppliedMigrations(db, false)
+func (m *Migrator) PendingMigrations(tx ethdb.Tx) ([]Migration, error) {
+	applied, err := AppliedMigrations(tx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -150,15 +143,25 @@ func (m *Migrator) PendingMigrations(db ethdb.Database) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
+func (m *Migrator) Apply(db ethdb.Database, datadir string, mdbx bool) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
 
-	applied, err1 := AppliedMigrations(db, false)
+	var applied map[string][]byte
+	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		var err error
+		applied, err = AppliedMigrations(tx, false)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return err1
 	}
+	defer tx.Rollback()
 
 	// migration names must be unique, protection against people's mistake
 	uniqueNameCheck := map[string]bool{}
@@ -169,12 +172,6 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		}
 		uniqueNameCheck[m.Migrations[i].Name] = true
 	}
-
-	tx, err1 := db.Begin(context.Background(), ethdb.RW)
-	if err1 != nil {
-		return err1
-	}
-	defer tx.Rollback()
 
 	for i := range m.Migrations {
 		v := m.Migrations[i]
@@ -235,16 +232,26 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 	}
 	// Write DB schema version
 	var version [12]byte
-	binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersion.Major)
-	binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersion.Minor)
-	binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersion.Patch)
+	if mdbx {
+		binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersionMDBX.Major)
+		binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersionMDBX.Minor)
+		binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersionMDBX.Patch)
+	} else {
+		binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersionLMDB.Major)
+		binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersionLMDB.Minor)
+		binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersionLMDB.Patch)
+	}
 	if err := tx.Put(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionKey, version[:]); err != nil {
 		return fmt.Errorf("writing DB schema version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing DB version update: %w", err)
 	}
-	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch))
+	if mdbx {
+		log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersionMDBX.Major, dbutils.DBSchemaVersionMDBX.Minor, dbutils.DBSchemaVersionMDBX.Patch))
+	} else {
+		log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersionLMDB.Major, dbutils.DBSchemaVersionLMDB.Minor, dbutils.DBSchemaVersionLMDB.Patch))
+	}
 	return nil
 }
 

@@ -24,10 +24,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // emptyCodeHash is used by create to ensure deployment is disallowed to already
@@ -77,20 +77,21 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 
 // run runs the given contract and takes care of running precompiles with a fallback to the byte code interpreter.
 func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, error) {
-	for _, interpreter := range evm.interpreters {
-		if interpreter.CanRun(contract.Code) {
-			if evm.interpreter != interpreter {
-				// Ensure that the interpreter pointer is set back
-				// to its current value upon return.
-				defer func(i Interpreter) {
-					evm.interpreter = i
-				}(evm.interpreter)
-				evm.interpreter = interpreter
-			}
-			return interpreter.Run(contract, input, readOnly)
-		}
+	interpreter := evm.interpreter
+	defer func() {
+		evm.interpreter = interpreter
+	}()
+
+	switch contract.vmType {
+	case EVMType:
+		evm.interpreter = evm.interpreters[EVMType]
+	case TEVMType:
+		evm.interpreter = evm.interpreters[TEVMType]
+	default:
+		return nil, errors.New("no compatible interpreter")
 	}
-	return nil, errors.New("no compatible interpreter")
+
+	return evm.interpreter.Run(contract, input, readOnly)
 }
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -103,6 +104,8 @@ type BlockContext struct {
 	Transfer TransferFunc
 	// GetHash returns the hash corresponding to n
 	GetHash GetHashFunc
+	// checkTEVM returns true if the contract has TEVM code
+	CheckTEVM func(codeHash common.Hash) (bool, error)
 
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE
@@ -170,11 +173,13 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chain
 		vmConfig:        vmConfig,
 		chainConfig:     chainConfig,
 		chainRules:      chainConfig.Rules(blockCtx.BlockNumber),
-		interpreters:    make([]Interpreter, 0, 1),
 	}
 
-	evm.interpreters = append(evm.interpreters, NewEVMInterpreter(evm, vmConfig))
-	evm.interpreter = evm.interpreters[0]
+	evm.interpreters = []Interpreter{
+		EVMType:  NewEVMInterpreter(evm, vmConfig),
+		TEVMType: NewTEVMInterpreter(evm, vmConfig),
+	}
+	evm.interpreter = evm.interpreters[EVMType]
 
 	return evm
 }
@@ -253,10 +258,17 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			addrCopy := addr
 			// If the account has no code, we can abort here
 			// The depth-check is already done, and precompiles handled above
-			contract := NewContract(caller, AccountRef(addrCopy), value, gas, evm.vmConfig.SkipAnalysis)
-			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), code)
-			ret, err = run(evm, contract, input, false)
-			gas = contract.Gas
+			codehash := evm.IntraBlockState.GetCodeHash(addrCopy)
+
+			var isTEVM bool
+			isTEVM, err = evm.Context.CheckTEVM(codehash)
+
+			if err == nil {
+				contract := NewContract(caller, AccountRef(addrCopy), value, gas, evm.vmConfig.SkipAnalysis, isTEVM)
+				contract.SetCallCode(&addrCopy, codehash, code)
+				ret, err = run(evm, contract, input, false)
+				gas = contract.Gas
+			}
 		}
 	}
 	// When an error was returned by the EVM or when setting the creation code
@@ -315,10 +327,17 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.vmConfig.SkipAnalysis)
-		contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
-		ret, err = run(evm, contract, input, false)
-		gas = contract.Gas
+		var isTEVM bool
+
+		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
+		isTEVM, err = evm.Context.CheckTEVM(codeHash)
+
+		if err == nil {
+			contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.vmConfig.SkipAnalysis, isTEVM)
+			contract.SetCallCode(&addrCopy, codeHash, evm.IntraBlockState.GetCode(addrCopy))
+			ret, err = run(evm, contract, input, false)
+			gas = contract.Gas
+		}
 	}
 	if err != nil {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
@@ -358,10 +377,16 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	} else {
 		addrCopy := addr
 		// Initialise a new contract and make initialise the delegate values
-		contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.vmConfig.SkipAnalysis).AsDelegate()
-		contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
-		ret, err = run(evm, contract, input, false)
-		gas = contract.Gas
+		var isTEVM bool
+		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
+		isTEVM, err = evm.Context.CheckTEVM(codeHash)
+
+		if err == nil {
+			contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.vmConfig.SkipAnalysis, isTEVM).AsDelegate()
+			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
+			ret, err = run(evm, contract, input, false)
+			gas = contract.Gas
+		}
 	}
 	if err != nil {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
@@ -414,13 +439,19 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		addrCopy := addr
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		contract := NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.vmConfig.SkipAnalysis)
-		contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
-		// When an error was returned by the EVM or when setting the creation code
-		// above we revert to the snapshot and consume any gas remaining. Additionally
-		// when we're in Homestead this also counts for code storage gas errors.
-		ret, err = run(evm, contract, input, true)
-		gas = contract.Gas
+		var isTEVM bool
+		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
+		isTEVM, err = evm.Context.CheckTEVM(codeHash)
+
+		if err == nil {
+			contract := NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.vmConfig.SkipAnalysis, isTEVM)
+			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
+			// When an error was returned by the EVM or when setting the creation code
+			// above we revert to the snapshot and consume any gas remaining. Additionally
+			// when we're in Homestead this also counts for code storage gas errors.
+			ret, err = run(evm, contract, input, true)
+			gas = contract.Gas
+		}
 	}
 	if err != nil {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
@@ -484,7 +515,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, AccountRef(address), value, gas, evm.vmConfig.SkipAnalysis)
+	contract := NewContract(caller, AccountRef(address), value, gas, evm.vmConfig.SkipAnalysis, false)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.vmConfig.NoRecursion && evm.depth > 0 {
@@ -498,7 +529,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && !maxCodeSizeExceeded {
-		if evm.chainRules.IsBaikal && len(ret) >= 1 && ret[0] == 0xEF {
+		if evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 			err = ErrInvalidCode
 		}
 	}

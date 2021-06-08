@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 const NumberLength = 8
@@ -26,12 +26,12 @@ func DecodeBlockNumber(number []byte) (uint64, error) {
 	return binary.BigEndian.Uint64(number), nil
 }
 
-// headerKey = headerPrefix + num (uint64 big endian) + hash
+// HeaderKey = num (uint64 big endian) + hash
 func HeaderKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
-// blockBodyKey = blockBodyPrefix + num (uint64 big endian) + hash
+// BlockBodyKey = num (uint64 big endian) + hash
 func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }

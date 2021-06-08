@@ -21,8 +21,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
@@ -89,7 +89,7 @@ func BenchmarkJumpDest(b *testing.B) {
 
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		contract := NewContract(contractRef, contractRef, nil, 0, false /* skipAnalysis */)
+		contract := NewContract(contractRef, contractRef, nil, 0, false /* skipAnalysis */, false)
 		contract.Code = code
 		contract.CodeHash = hash
 

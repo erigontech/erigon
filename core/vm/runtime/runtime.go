@@ -23,12 +23,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -50,6 +50,7 @@ type Config struct {
 	r         state.StateReader
 	w         state.StateWriter
 	GetHashFn func(n uint64) common.Hash
+	CheckTEVM func(hash common.Hash) (bool, error)
 }
 
 // sets defaults on the config
@@ -94,6 +95,11 @@ func setDefaults(cfg *Config) {
 	if cfg.GetHashFn == nil {
 		cfg.GetHashFn = func(n uint64) common.Hash {
 			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
+		}
+	}
+	if cfg.CheckTEVM == nil {
+		cfg.CheckTEVM = func(hash common.Hash) (bool, error) {
+			return false, nil
 		}
 	}
 }

@@ -17,16 +17,18 @@
 package ethdb
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-)
+	"context"
+	"testing"
 
-// NewMemoryDatabase is just an alias to simplify rebasing (the same name as `rawdb.NewMemoryDatabase` in vanilla geth)
-func NewMemoryDatabase() *ObjectDatabase {
-	return NewMemDatabase()
-}
+	"github.com/ledgerwatch/erigon/common/debug"
+)
 
 func NewMemDatabase() *ObjectDatabase {
 	return NewObjectDatabase(NewMemKV())
+}
+
+func NewTestDB(t testing.TB) *ObjectDatabase {
+	return NewObjectDatabase(NewTestKV(t))
 }
 
 func NewMemKV() RwKV {
@@ -39,6 +41,38 @@ func NewMemKV() RwKV {
 		// mdbx is too slow for our tests currently, so we keep
 		// lmdb as our in-mem db
 		// with mdbx tests time out, especially ./tests package
-		return NewLMDB().InMem().MustOpen()
+		return NewMDBX().InMem().MustOpen()
 	}
+}
+
+func NewTestKV(t testing.TB) RwKV {
+	kv := NewMemKV()
+	switch tt := t.(type) {
+	case *testing.T:
+		if tt != nil {
+			tt.Cleanup(kv.Close)
+		}
+	}
+	return kv
+}
+
+func NewTestTx(t testing.TB) (RwKV, RwTx) {
+	kv := NewMemKV()
+	switch tt := t.(type) {
+	case *testing.T:
+		if tt != nil {
+			tt.Cleanup(kv.Close)
+		}
+	}
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch tt := t.(type) {
+	case *testing.T:
+		if tt != nil {
+			tt.Cleanup(tx.Rollback)
+		}
+	}
+	return kv, tx
 }

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestValue(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be restored. skipped for Erigon")
 
 	h := newHasher(false)
 	var hn common.Hash

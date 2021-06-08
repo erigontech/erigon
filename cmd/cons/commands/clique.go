@@ -17,18 +17,18 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus/clique"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces"
-	proto_cons "github.com/ledgerwatch/turbo-geth/gointerfaces/consensus"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/params"
-	toml "github.com/pelletier/go-toml"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/clique"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/gointerfaces"
+	proto_cons "github.com/ledgerwatch/erigon/gointerfaces/consensus"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/metrics"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -151,7 +151,7 @@ type CliqueServerImpl struct {
 	genesis     *core.Genesis
 	chainConfig *params.ChainConfig
 	c           *clique.Clique
-	db          ethdb.Database
+	db          ethdb.RwKV
 }
 
 func NewCliqueServer(_ context.Context) *CliqueServerImpl {
@@ -236,8 +236,8 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 			chainConfig.IstanbulBlock = bigNumber
 		case "berlin":
 			chainConfig.BerlinBlock = bigNumber
-		case "aleut":
-			chainConfig.AleutBlock = bigNumber
+		case "london":
+			chainConfig.LondonBlock = bigNumber
 		default:
 			return fmt.Errorf("unknown fork name [%s]", forkName)
 		}
@@ -264,7 +264,7 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 		}
 	}
 	var genesisBlock *types.Block
-	if genesisBlock, _, err = genesis.ToBlock(false /* history */); err != nil {
+	if genesisBlock, _, err = genesis.ToBlock(); err != nil {
 		return fmt.Errorf("creating genesis block: %w", err)
 	}
 	log.Info("Created genesis block", "hash", genesisBlock.Hash())

@@ -3,16 +3,17 @@ package rpchelper
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/adapter"
 )
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *Pending) (uint64, common.Hash, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()
@@ -26,7 +27,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, pending *P
 		} else if number == rpc.EarliestBlockNumber {
 			blockNumber = 0
 		} else if number == rpc.PendingBlockNumber {
-			pendingBlock := pending.Block()
+			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
 				blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
 				if err != nil {

@@ -3,16 +3,41 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
 
-//var prev common.Hash
+type MiningFinishCfg struct {
+	db              ethdb.RwKV
+	chainConfig     params.ChainConfig
+	engine          consensus.Engine
+	pendingBlocksCh chan<- *types.Block
+	minedBlocksCh   chan<- *types.Block
+	sealCancel      <-chan struct{}
+}
 
-func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlock, engine consensus.Engine, chainConfig *params.ChainConfig, results chan<- *types.Block, sealCancel <-chan struct{}, quit <-chan struct{}) error {
+func StageMiningFinishCfg(
+	db ethdb.RwKV,
+	chainConfig params.ChainConfig,
+	engine consensus.Engine,
+	pendingBlocksCh chan<- *types.Block,
+	minedBlocksCh chan<- *types.Block,
+	sealCancel <-chan struct{},
+) MiningFinishCfg {
+	return MiningFinishCfg{
+		db:              db,
+		chainConfig:     chainConfig,
+		engine:          engine,
+		pendingBlocksCh: pendingBlocksCh,
+		minedBlocksCh:   minedBlocksCh,
+		sealCancel:      sealCancel,
+	}
+}
+
+func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, cfg MiningFinishCfg, quit <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
@@ -33,10 +58,12 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 
 	// Tests may set pre-calculated nonce
 	if block.Header().Nonce.Uint64() != 0 {
-		results <- block
+		cfg.minedBlocksCh <- block
 		s.Done()
 		return nil
 	}
+
+	cfg.pendingBlocksCh <- block
 
 	log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
 		"number", block.NumberU64(),
@@ -46,8 +73,8 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.Database, current *miningBlo
 		"difficulty", block.Difficulty(),
 	)
 
-	chain := ChainReader{Cfg: chainConfig, Db: tx}
-	if err := engine.Seal(chain, block, results, sealCancel); err != nil {
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: ethdb.WrapIntoTxDB(tx)}
+	if err := cfg.engine.Seal(chain, block, cfg.minedBlocksCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}
 

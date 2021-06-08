@@ -2,16 +2,15 @@ package changeset
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"math/rand"
 	"reflect"
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -198,11 +197,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 	m := Mapper[storageTable]
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, err := db.RwKV().BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	c, err := tx.CursorDupSort(storageTable)
 	require.NoError(t, err)
@@ -229,11 +224,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnation(t *testing.T) {
 	bkt := storageTable
 	m := Mapper[bkt]
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, err := db.RwKV().BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	c, err := tx.CursorDupSort(bkt)
 	require.NoError(t, err)
@@ -387,11 +378,7 @@ func formatTestName(elements, keys int) string {
 func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	bkt := dbutils.StorageChangeSetBucket
 	m := Mapper[bkt]
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	tx, err := db.RwKV().BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	c1, err := tx.CursorDupSort(bkt)
 	require.NoError(t, err)

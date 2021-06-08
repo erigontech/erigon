@@ -22,11 +22,11 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -328,7 +328,10 @@ func (s *PlainKVState) ForEachStorage(addr common.Address, startLocation common.
 	st := llrb.New()
 	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(k[:], addr[:])
-	accData, _ := GetAsOf(s.tx, false /* storage */, addr[:], s.blockNr+1)
+	accData, err := GetAsOf(s.tx, false /* storage */, addr[:], s.blockNr+1)
+	if err != nil {
+		return err
+	}
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)

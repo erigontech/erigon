@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ledgerwatch/turbo-geth/cmd/snapshots/downloader/commands"
+	"github.com/ledgerwatch/erigon/cmd/snapshots/downloader/commands"
 )
 
 func main() {

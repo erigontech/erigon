@@ -3,14 +3,14 @@ package adapter
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type chainContext struct {
@@ -33,7 +33,7 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *type
 func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	panic("must not be called")
 }
-func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
+func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Header, uncles []*types.Header) error {
 	panic("must not be called")
 }
 func (c *powEngine) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
@@ -72,7 +72,7 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 }
 
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(ethdb.NewRoTxDb(c.tx), hash, number)
+	return rawdb.ReadHeader(c.tx, hash, number)
 }
 
 func (c *chainContext) Engine() consensus.Engine {

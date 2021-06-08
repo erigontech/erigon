@@ -8,11 +8,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/log"
 )
 
-func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(tgURL, gethURL)
+func Bench8(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -39,7 +39,7 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
-	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
 	if res.Err != nil {
 		fmt.Printf("Could not get block number: %v\n", res.Err)
 		return
@@ -57,30 +57,30 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 		// Checking modified accounts
 		reqGen.reqID++
 		var mag DebugModifiedAccounts
-		res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
+		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			fmt.Printf("Could not get modified accounts (turbo-geth): %v\n", res.Err)
+			fmt.Printf("Could not get modified accounts (Erigon): %v\n", res.Err)
 			return
 		}
 		if mag.Error != nil {
-			fmt.Printf("Error getting modified accounts (turbo-geth): %d %s\n", mag.Error.Code, mag.Error.Message)
+			fmt.Printf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
 			return
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
 			for account := range accountSet {
 				reqGen.reqID++
-				startTG := time.Now()
+				startErigon := time.Now()
 				request := reqGen.getLogs(prevBn, bn, account)
 				recording := rec != nil // This flag will be set to false if recording is not to be performed
-				res = reqGen.TurboGeth2("eth_getLogs", request)
-				durationTG := time.Since(startTG).Seconds()
+				res = reqGen.Erigon2("eth_getLogs", request)
+				durationErigon := time.Since(startErigon).Seconds()
 				if res.Err != nil {
-					fmt.Printf("Could not get logs for account (turbo-geth) %x: %v\n", account, res.Err)
+					fmt.Printf("Could not get logs for account (Erigon) %x: %v\n", account, res.Err)
 					return
 				}
 				if errVal := res.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error getting logs for account (turbo-geth) %x: %d %s\n", account, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+					fmt.Printf("Error getting logs for account (Erigon) %x: %d %s\n", account, errVal.GetInt("code"), errVal.GetStringBytes("message"))
 					return
 				}
 				var durationG float64
@@ -104,7 +104,7 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 						}
 					}
 				}
-				log.Info("Results", "count", len(res.Result.GetArray("result")), "durationTG", durationTG, "durationG", durationG)
+				log.Info("Results", "count", len(res.Result.GetArray("result")), "durationErigon", durationErigon, "durationG", durationG)
 				if recording {
 					fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 				}
@@ -112,17 +112,17 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 				// All combination of account and one topic
 				for _, topic := range topics {
 					reqGen.reqID++
-					startTG := time.Now()
+					startErigon := time.Now()
 					request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
 					recording = rec != nil
-					res = reqGen.TurboGeth2("eth_getLogs", request)
-					durationTG := time.Since(startTG).Seconds()
+					res = reqGen.Erigon2("eth_getLogs", request)
+					durationErigon := time.Since(startErigon).Seconds()
 					if res.Err != nil {
-						fmt.Printf("Could not get logs for account (turbo-geth) %x %x: %v\n", account, topic, res.Err)
+						fmt.Printf("Could not get logs for account (Erigon) %x %x: %v\n", account, topic, res.Err)
 						return
 					}
 					if errVal := res.Result.Get("error"); errVal != nil {
-						fmt.Printf("Error getting logs for account (turbo-geth) %x %x: %d %s\n", account, topic, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+						fmt.Printf("Error getting logs for account (Erigon) %x %x: %d %s\n", account, topic, errVal.GetInt("code"), errVal.GetStringBytes("message"))
 						return
 					}
 					if needCompare {
@@ -148,7 +148,7 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 					if recording {
 						fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 					}
-					log.Info("Results", "count", len(res.Result.GetArray("result")), "durationTG", durationTG, "durationG", durationG)
+					log.Info("Results", "count", len(res.Result.GetArray("result")), "durationErigon", durationErigon, "durationG", durationG)
 				}
 				// Random combinations of two topics
 				if len(topics) >= 2 {
@@ -160,13 +160,13 @@ func Bench8(tgURL, gethURL string, needCompare bool, blockFrom uint64, blockTo u
 					reqGen.reqID++
 					request = reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2])
 					recording = rec != nil
-					res = reqGen.TurboGeth2("eth_getLogs", request)
+					res = reqGen.Erigon2("eth_getLogs", request)
 					if res.Err != nil {
-						fmt.Printf("Could not get logs for account (turbo-geth) %x %x %x: %v\n", account, topics[idx1], topics[idx2], res.Err)
+						fmt.Printf("Could not get logs for account (Erigon) %x %x %x: %v\n", account, topics[idx1], topics[idx2], res.Err)
 						return
 					}
 					if errVal := res.Result.Get("error"); errVal != nil {
-						fmt.Printf("Error getting logs for account (turbo-geth) %x %x %x: %d %s\n", account, topics[idx1], topics[idx2], errVal.GetInt("code"), errVal.GetStringBytes("message"))
+						fmt.Printf("Error getting logs for account (Erigon) %x %x %x: %d %s\n", account, topics[idx1], topics[idx2], errVal.GetInt("code"), errVal.GetStringBytes("message"))
 						return
 					}
 					if needCompare {

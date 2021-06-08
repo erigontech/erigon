@@ -17,7 +17,7 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func minSwapStack(n int) int {

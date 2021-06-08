@@ -73,7 +73,6 @@ _MithrilDB_ is a rightly relevant name.
 
 [![https://t.me/libmdbx](https://raw.githubusercontent.com/wiki/erthink/libmdbx/img/telegram.png)](https://t.me/libmdbx)
 [![GithubCI](https://github.com/erthink/libmdbx/workflows/CI/badge.svg)](https://github.com/erthink/libmdbx/actions?query=workflow%3ACI)
-[![TravisCI](https://travis-ci.org/erthink/libmdbx.svg?branch=master)](https://travis-ci.org/erthink/libmdbx)
 [![AppveyorCI](https://ci.appveyor.com/api/projects/status/ue94mlopn50dqiqg/branch/master?svg=true)](https://ci.appveyor.com/project/leo-yuriev/libmdbx/branch/master)
 [![CircleCI](https://circleci.com/gh/erthink/libmdbx/tree/master.svg?style=svg)](https://circleci.com/gh/erthink/libmdbx/tree/master)
 [![CirrusCI](https://api.cirrus-ci.com/github/erthink/libmdbx.svg)](https://cirrus-ci.com/github/erthink/libmdbx)
@@ -155,8 +154,8 @@ transaction journal. No crash recovery needed. No maintenance is required.
 ## Limitations
 
 - **Page size**: a power of 2, minimum `256` (mostly for testing), maximum `65536` bytes, default `4096` bytes.
-- **Key size**: minimum `0`, maximum ≈¼ pagesize (`1348` bytes for default 4K pagesize, `21828` bytes for 64K pagesize).
-- **Value size**: minimum `0`, maximum `2146435072` (`0x7FF00000`) bytes for maps, ≈¼ pagesize for multimaps (`1348` bytes for default 4K pagesize, `21828` bytes for 64K pagesize).
+- **Key size**: minimum `0`, maximum ≈½ pagesize (`2022` bytes for default 4K pagesize, `32742` bytes for 64K pagesize).
+- **Value size**: minimum `0`, maximum `2146435072` (`0x7FF00000`) bytes for maps, ≈½ pagesize for multimaps (`2022` bytes for default 4K pagesize, `32742` bytes for 64K pagesize).
 - **Write transaction size**: up to `1327217884` pages (`4.944272` TiB for default 4K pagesize, `79.108351` TiB for 64K pagesize).
 - **Database size**: up to `2147483648` pages (≈`8.0` TiB for default 4K pagesize, ≈`128.0` TiB for 64K pagesize).
 - **Maximum sub-databases**: `32765`.
@@ -201,8 +200,8 @@ the user's point of view.
 ## Added Features
 
 1. Keys could be more than 2 times longer than _LMDB_.
-  > For DB with default page size _libmdbx_ support keys up to 1300 bytes
-  > and up to 21780 bytes for 64K page size. _LMDB_ allows key size up to
+  > For DB with default page size _libmdbx_ support keys up to 2022 bytes
+  > and up to 32742 bytes for 64K page size. _LMDB_ allows key size up to
   > 511 bytes and may silently loses data with large values.
 
 2. Up to 30% faster than _LMDB_ in [CRUD](https://en.wikipedia.org/wiki/Create,_read,_update_and_delete) benchmarks.
@@ -344,6 +343,13 @@ Currently, libmdbx is only available in a
 Packages support for common Linux distributions is planned in the future,
 since release the version 1.0.
 
+## Never use tarballs nor zips automatically provided by Github !
+
+Please don't use tarballs nor zips which are automatically provided by Github.
+These archives do not contain version information and thus are unfit to build _libmdbx_.
+Instead of ones just clone the git repository, either download a tarball or zip with the properly amalgamated source core.
+Moreover, please vote for [ability of disabling auto-creation such unsuitable archives](https://github.community/t/disable-tarball).
+
 ## Source code embedding
 
 _libmdbx_ provides two official ways for integration in source code form:
@@ -373,7 +379,9 @@ are completely traditional and have minimal prerequirements like
 `build-essential`, i.e. the non-obsolete C/C++ compiler and a
 [SDK](https://en.wikipedia.org/wiki/Software_development_kit) for the
 target platform. Obviously you need building tools itself, i.e. `git`,
-`cmake` or GNU `make` with `bash`.
+`cmake` or GNU `make` with `bash`. For your convenience, `make help`
+and `make options` are also available for listing existing targets
+and build options respectively.
 
 So just using CMake or GNU Make in your habitual manner and feel free to
 fill an issue or make pull request in the case something will be
@@ -431,11 +439,11 @@ recommended. Otherwise do not forget to add `ntdll.lib` to linking.
 
 Building by MinGW, MSYS or Cygwin is potentially possible. However,
 these scripts are not tested and will probably require you to modify the
-CMakeLists.txt or Makefile respectively.
+`CMakeLists.txt` or `Makefile` respectively.
 
 It should be noted that in _libmdbx_ was efforts to resolve
-runtime dependencies from CRT and other libraries Visual Studio.
-For this is enough to define the `MDBX_AVOID_CRT` during build.
+runtime dependencies from CRT and other MSVC libraries.
+For this is enough to define the `MDBX_WITHOUT_MSVC_CRT` during build.
 
 An example of running a basic test script can be found in the
 [CI-script](appveyor.yml) for [AppVeyor](https://www.appveyor.com/). To

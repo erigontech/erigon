@@ -3,7 +3,7 @@ Tutorial: Build a personalized daemon
 
 For the following tutorial, we will make references to https://github.com/Giulio2002/hello-tg-daemon.
 
-We are going to build our daemon using golang and turbo-geth packages, so first of all we are going to create a file in which we are going to store our API methods and informations. (`api.go`).
+We are going to build our daemon using golang and Erigon packages, so first of all we are going to create a file in which we are going to store our API methods and informations. (`api.go`).
 
 our daemon will only contain one method: `myNamespace_getBlockNumberByHash` which will return the block number associated to certain hash.
 
@@ -14,9 +14,9 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
     import (
         "context"
 
-        "github.com/ledgerwatch/turbo-geth/common"
-        "github.com/ledgerwatch/turbo-geth/core/rawdb"
-        "github.com/ledgerwatch/turbo-geth/ethdb"
+        "github.com/ledgerwatch/erigon/common"
+        "github.com/ledgerwatch/erigon/core/rawdb"
+        "github.com/ledgerwatch/erigon/ethdb"
     )
 
     // API - implementation of ExampleApi
@@ -37,7 +37,7 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
         return rawdb.ReadBlockByHash(api.db, hash).NumberU64(), nil
     }
 
-The type `Api` is the type that is going to contain the methods for our custom daemon. This type has two members: `kv` and `db` which are objects used to interact with the turbo-geth node remotely. they behave like normal db objects and can be used alongside with the rawdb package.
+The type `Api` is the type that is going to contain the methods for our custom daemon. This type has two members: `kv` and `db` which are objects used to interact with the Erigon node remotely. they behave like normal db objects and can be used alongside with the rawdb package.
 
 In our example we are making an rpcdaemon call that by receiving a certain block hash, it give the block number associated as an output. this is all done in `GetBlockNumberByHash`.
 
@@ -51,13 +51,13 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
         "context"
         "os"
 
-        "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-        "github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
-        "github.com/ledgerwatch/turbo-geth/cmd/utils"
-        "github.com/ledgerwatch/turbo-geth/common"
-        "github.com/ledgerwatch/turbo-geth/ethdb"
-        "github.com/ledgerwatch/turbo-geth/log"
-        "github.com/ledgerwatch/turbo-geth/rpc"
+        "github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+        "github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
+        "github.com/ledgerwatch/erigon/cmd/utils"
+        "github.com/ledgerwatch/erigon/common"
+        "github.com/ledgerwatch/erigon/ethdb"
+        "github.com/ledgerwatch/erigon/log"
+        "github.com/ledgerwatch/erigon/rpc"
         "github.com/spf13/cobra"
     )
 
@@ -93,7 +93,7 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
             },
         }
 
-        // Add default TurboGeth api's
+        // Add default Erigon api's
         return commands.APIList(kv, eth, *cfg, customAPIList)
     }
 
@@ -106,7 +106,7 @@ Let's now try it:
     $ go build
     $ ./hello-tg-daemon --http.api=myNamespace # the flag enables our namespace.
 
-**Note: Remember to run turbo-geth with --private.api.addr=localhost:9090**
+**Note: Remember to run Erigon with --private.api.addr=localhost:9090**
 
 now it should be all set and we can test it with:
 

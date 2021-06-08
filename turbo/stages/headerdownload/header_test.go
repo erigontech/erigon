@@ -4,8 +4,8 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func TestSplitIntoSegments(t *testing.T) {
@@ -51,7 +51,7 @@ func TestSplitIntoSegments(t *testing.T) {
 	}
 
 	// Single header with a bad hash
-	hd.badHeaders[h.Hash()] = struct{}{}
+	hd.BadHeaders[h.Hash()] = struct{}{}
 	if chainSegments, penalty, err := hd.SplitIntoSegments([][]byte{{}}, []*types.Header{&h}); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
@@ -166,7 +166,7 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 	}
 
 	// Same header with a bad hash
-	hd.badHeaders[h.Hash()] = struct{}{}
+	hd.BadHeaders[h.Hash()] = struct{}{}
 	if chainSegments, penalty, err := hd.SingleHeaderAsSegment([]byte{}, &h); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)

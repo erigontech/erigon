@@ -1,12 +1,15 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/eth/tracers"
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/tracers"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 )
 
 var debugTraceTransactionTests = []struct {
@@ -32,18 +35,22 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceTransaction(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
-	api := NewPrivateDebugAPI(db, 0, nil)
+	db := createTestKV(t)
+	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionTests {
-		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{})
-		if err1 != nil {
-			t.Errorf("traceTransaction %s: %v", tt.txHash, err1)
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
+		if err != nil {
+			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		er := result.(*ethapi.ExecutionResult)
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
 		if er.Gas != tt.gas {
 			t.Errorf("wrong gas for transaction %s, got %d, expected %d", tt.txHash, er.Gas, tt.gas)
 		}
@@ -57,19 +64,23 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	db, err := createTestKV()
-	if err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-	defer db.Close()
-	api := NewPrivateDebugAPI(db, 0, nil)
+	db := createTestKV(t)
+	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
 		var norefunds = true
-		result, err1 := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds})
-		if err1 != nil {
-			t.Errorf("traceTransaction %s: %v", tt.txHash, err1)
+		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
+		if err != nil {
+			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
-		er := result.(*ethapi.ExecutionResult)
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
 		if er.Gas != tt.gas {
 			t.Errorf("wrong gas for transaction %s, got %d, expected %d", tt.txHash, er.Gas, tt.gas)
 		}

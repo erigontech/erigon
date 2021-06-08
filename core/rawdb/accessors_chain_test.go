@@ -18,111 +18,39 @@ package rawdb
 
 import (
 	"bytes"
-	"context"
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"math/rand"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 )
 
-// Tests block storage and retrieval operations.
-func TestBadBlockStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-
-	// Create a test block to move around the database and make sure it's really new
-	block := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(1),
-		Extra:       []byte("bad block"),
-		UncleHash:   types.EmptyUncleHash,
-		TxHash:      types.EmptyRootHash,
-		ReceiptHash: types.EmptyRootHash,
-	})
-	if entry := ReadBadBlock(db, block.Hash()); entry != nil {
-		t.Fatalf("Non existent block returned: %v", entry)
-	}
-	// Write and verify the block in the database
-	WriteBadBlock(db, block)
-	if entry := ReadBadBlock(db, block.Hash()); entry == nil {
-		t.Fatalf("Stored block not found")
-	} else if entry.Hash() != block.Hash() {
-		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
-	}
-	// Write one more bad block
-	blockTwo := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(2),
-		Extra:       []byte("bad block two"),
-		UncleHash:   types.EmptyUncleHash,
-		TxHash:      types.EmptyRootHash,
-		ReceiptHash: types.EmptyRootHash,
-	})
-	WriteBadBlock(db, blockTwo)
-
-	// Write the block one again, should be filtered out.
-	WriteBadBlock(db, block)
-	badBlocks := ReadAllBadBlocks(db)
-	if len(badBlocks) != 2 {
-		t.Fatalf("Failed to load all bad blocks")
-	}
-
-	// Write a bunch of bad blocks, all the blocks are should sorted
-	// in reverse order. The extra blocks should be truncated.
-	for _, n := range rand.Perm(100) {
-		block := types.NewBlockWithHeader(&types.Header{
-			Number:      big.NewInt(int64(n)),
-			Extra:       []byte("bad block"),
-			UncleHash:   types.EmptyUncleHash,
-			TxHash:      types.EmptyRootHash,
-			ReceiptHash: types.EmptyRootHash,
-		})
-		WriteBadBlock(db, block)
-	}
-	badBlocks = ReadAllBadBlocks(db)
-	if len(badBlocks) != badBlockToKeep {
-		t.Fatalf("The number of persised bad blocks in incorrect %d", len(badBlocks))
-	}
-	for i := 0; i < len(badBlocks)-1; i++ {
-		if badBlocks[i].NumberU64() < badBlocks[i+1].NumberU64() {
-			t.Fatalf("The bad blocks are not sorted #[%d](%d) < #[%d](%d)", i, i+1, badBlocks[i].NumberU64(), badBlocks[i+1].NumberU64())
-		}
-	}
-
-	// Delete all bad blocks
-	DeleteBadBlocks(db)
-	badBlocks = ReadAllBadBlocks(db)
-	if len(badBlocks) != 0 {
-		t.Fatalf("Failed to delete bad blocks")
-	}
-}
-
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	_, tx := ethdb.NewTestTx(t)
 
 	// Create a test header to move around the database and make sure it's really new
 	header := &types.Header{Number: big.NewInt(42), Extra: []byte("test header")}
-	if entry := ReadHeader(db, header.Hash(), header.Number.Uint64()); entry != nil {
+	if entry := ReadHeader(tx, header.Hash(), header.Number.Uint64()); entry != nil {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
 	// Write and verify the header in the database
-	WriteHeader(db, header)
-	if entry := ReadHeader(db, header.Hash(), header.Number.Uint64()); entry == nil {
+	WriteHeader(tx, header)
+	if entry := ReadHeader(tx, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != header.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, header)
 	}
-	if entry := ReadHeaderRLP(db, header.Hash(), header.Number.Uint64()); entry == nil {
+	if entry := ReadHeaderRLP(tx, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header RLP not found")
 	} else {
 		hasher := sha3.NewLegacyKeccak256()
@@ -133,19 +61,16 @@ func TestHeaderStorage(t *testing.T) {
 		}
 	}
 	// Delete the header and verify the execution
-	DeleteHeader(db, header.Hash(), header.Number.Uint64())
-	if entry := ReadHeader(db, header.Hash(), header.Number.Uint64()); entry != nil {
+	DeleteHeader(tx, header.Hash(), header.Number.Uint64())
+	if entry := ReadHeader(tx, header.Hash(), header.Number.Uint64()); entry != nil {
 		t.Fatalf("Deleted header returned: %v", entry)
 	}
 }
 
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
-	db, require := ethdb.NewMemKV(), require.New(t)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
+	require := require.New(t)
 
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
@@ -199,11 +124,7 @@ func TestBodyStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
@@ -222,7 +143,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the block in the database
-	err = WriteBlock(tx, block)
+	err := WriteBlock(tx, block)
 	if err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
@@ -258,11 +179,7 @@ func TestBlockStorage(t *testing.T) {
 
 // Tests that partial block contents don't get reassembled into full blocks.
 func TestPartialBlockStorage(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
 	block := types.NewBlockWithHeader(&types.Header{
 		Extra:       []byte("test block"),
 		UncleHash:   types.EmptyUncleHash,
@@ -300,12 +217,11 @@ func TestPartialBlockStorage(t *testing.T) {
 
 // Tests block total difficulty storage and retrieval operations.
 func TestTdStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	_, tx := ethdb.NewTestTx(t)
 
 	// Create a test TD to move around the database and make sure it's really new
 	hash, td := common.Hash{}, big.NewInt(314)
-	entry, err := ReadTd(db, hash, 0)
+	entry, err := ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
 	}
@@ -313,11 +229,11 @@ func TestTdStorage(t *testing.T) {
 		t.Fatalf("Non existent TD returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	err = WriteTd(db, hash, 0, td)
+	err = WriteTd(tx, hash, 0, td)
 	if err != nil {
 		t.Fatalf("WriteTd failed: %v", err)
 	}
-	entry, err = ReadTd(db, hash, 0)
+	entry, err = ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
 	}
@@ -327,11 +243,11 @@ func TestTdStorage(t *testing.T) {
 		t.Fatalf("Retrieved TD mismatch: have %v, want %v", entry, td)
 	}
 	// Delete the TD and verify the execution
-	err = DeleteTd(db, hash, 0)
+	err = DeleteTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("DeleteTd failed: %v", err)
 	}
-	entry, err = ReadTd(db, hash, 0)
+	entry, err = ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
 	}
@@ -342,12 +258,11 @@ func TestTdStorage(t *testing.T) {
 
 // Tests that canonical numbers can be mapped to hashes and retrieved.
 func TestCanonicalMappingStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	_, tx := ethdb.NewTestTx(t)
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := common.Hash{0: 0xff}, uint64(314)
-	entry, err := ReadCanonicalHash(db, number)
+	entry, err := ReadCanonicalHash(tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
@@ -355,11 +270,11 @@ func TestCanonicalMappingStorage(t *testing.T) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	err = WriteCanonicalHash(db, hash, number)
+	err = WriteCanonicalHash(tx, hash, number)
 	if err != nil {
 		t.Fatalf("WriteCanoncalHash failed: %v", err)
 	}
-	entry, err = ReadCanonicalHash(db, number)
+	entry, err = ReadCanonicalHash(tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
@@ -369,11 +284,11 @@ func TestCanonicalMappingStorage(t *testing.T) {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
 	}
 	// Delete the TD and verify the execution
-	err = DeleteCanonicalHash(db, number)
+	err = DeleteCanonicalHash(tx, number)
 	if err != nil {
 		t.Fatalf("DeleteCanonicalHash failed: %v", err)
 	}
-	entry, err = ReadCanonicalHash(db, number)
+	entry, err = ReadCanonicalHash(tx, number)
 	if err != nil {
 		t.Error(err)
 	}
@@ -384,8 +299,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	_, db := ethdb.NewTestTx(t)
 
 	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header")})
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")})
@@ -412,11 +326,8 @@ func TestHeadStorage(t *testing.T) {
 
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	_, tx := ethdb.NewTestTx(t)
+	require := require.New(t)
 
 	// Create a live block since we need metadata to reconstruct the receipt
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
@@ -451,25 +362,29 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
 	receipts := []*types.Receipt{receipt1, receipt2}
+	header := &types.Header{Number: big.NewInt(0)}
 
 	// Check that no receipt entries are in a pristine database
-	hash := common.BytesToHash([]byte{0x03, 0x14})
-	if rs := ReadReceipts(tx, hash, 0); len(rs) != 0 {
+	hash := header.Hash() //common.BytesToHash([]byte{0x03, 0x14})
+	b, senders, err := ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(err)
+	//require.NotNil(t, b)
+	if rs := ReadReceipts(tx, b, senders); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
+
+	WriteHeader(tx, header)
 	// Insert the body that corresponds to the receipts
-	if err := WriteBody(tx, hash, 0, body); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteSenders(tx, hash, 0, body.SendersFromTxs()); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(WriteBody(tx, hash, 0, body))
+	require.NoError(WriteSenders(tx, hash, 0, body.SendersFromTxs()))
 
 	// Insert the receipt slice into the database and check presence
-	if err := WriteReceipts(tx, 0, receipts); err != nil {
-		t.Fatalf("WriteReceipts failed: %v", err)
-	}
-	if rs := ReadReceipts(tx, hash, 0); len(rs) == 0 {
+	require.NoError(WriteReceipts(tx, 0, receipts))
+
+	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(err)
+	require.NotNil(b)
+	if rs := ReadReceipts(tx, b, senders); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
 		if err := checkReceiptsRLP(rs, receipts); err != nil {
@@ -477,23 +392,26 @@ func TestBlockReceiptStorage(t *testing.T) {
 		}
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
+	DeleteHeader(tx, hash, 0)
 	DeleteBody(tx, hash, 0)
-	if rs := ReadReceipts(tx, hash, 0); rs != nil {
+	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(err)
+	require.Nil(b)
+	if rs := ReadReceipts(tx, b, senders); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
-	if err := checkReceiptsRLP(ReadRawReceipts(tx, hash, 0), receipts); err != nil {
+	if err := checkReceiptsRLP(ReadRawReceipts(tx, 0), receipts); err != nil {
 		t.Fatal(err)
 	}
+	WriteHeader(tx, header)
 	// Sanity check that body alone without the receipt is a full purge
-	if err := WriteBody(tx, hash, 0, body); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := DeleteReceipts(tx, 0); err != nil {
-		t.Fatalf("DeleteReceipts failed: %v", err)
-	}
-	if rs := ReadReceipts(tx, hash, 0); len(rs) != 0 {
+	require.NoError(WriteBody(tx, hash, 0, body))
+	require.NoError(DeleteReceipts(tx, 0))
+	b, senders, err = ReadBlockWithSenders(tx, hash, 0)
+	require.NoError(err)
+	require.NotNil(b)
+	if rs := ReadReceipts(tx, b, senders); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
 }

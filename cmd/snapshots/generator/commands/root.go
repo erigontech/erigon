@@ -8,10 +8,10 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/internal/debug"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +62,7 @@ var rootCmd = &cobra.Command{
 			panic(err)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "tg", "chaindata")
+			chaindata = path.Join(datadir, "erigon", "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -79,10 +79,6 @@ func must(err error) {
 func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 1, "specifies a block number for operation")
 }
-func withSnapshotData(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
-}
 
 func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
@@ -95,7 +91,7 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 	must(cmd.MarkFlagDirname("snapshot.dir"))
 
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 }
 
 func withSnapshotFile(cmd *cobra.Command) {

@@ -1,10 +1,11 @@
 GOBIN = $(CURDIR)/build/bin
-GOTEST = go test ./... -p 1 --tags 'mdbx'
+GOTEST = GODEBUG=cgocheck=2 go test ./... -p 1
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GOBUILD = env GO111MODULE=on CGO_CFLAGS='-DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=mdbx -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}"
-GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' go build -trimpath -tags=mdbx,debug -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH}" -gcflags=all="-N -l"  # see delve docs
+GIT_TAG    ?= $(shell git describe --tags)
+GOBUILD = env GO111MODULE=on go build -trimpath -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH} -X main.gitTag=${GIT_TAG}"
+GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' GODEBUG=cgocheck=2 go build -trimpath -tags=debug -ldflags "-X main.gitCommit=${GIT_COMMIT} -X main.gitBranch=${GIT_BRANCH} -X main.gitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
@@ -18,8 +19,7 @@ endif
 ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
-
-all: tg hack rpctest state pics rpcdaemon integration db-tools
+all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
 
 go-version:
 	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
@@ -28,7 +28,7 @@ go-version:
 	fi
 
 docker:
-	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' .
+	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' --build-arg git_tag='${GIT_TAG}' .
 
 docker-compose:
 	docker-compose up
@@ -37,16 +37,14 @@ docker-compose:
 dbg: mdbx-dbg
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-geth:
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+geth: erigon
 
-tg: go-version mdbx
-	@echo "Building tg"
-	$(GOBUILD) -o $(GOBIN)/tg ./cmd/tg
+erigon: go-version mdbx
+	@echo "Building Erigon"
+	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tg\" to launch turbo-geth."
+	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
 hack:
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
@@ -79,15 +77,36 @@ integration:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
-headers:
-	$(GOBUILD) -o $(GOBIN)/headers ./cmd/headers
+sentry:
+	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
+	rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/headers\" to run headers download PoC."
+	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
 
 cons:
 	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
+
+evm:
+	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/evm\" to run EVM"
+
+seeder:
+	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
+
+sndownloader:
+	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
+
+tracker:
+	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
 db-tools: mdbx
 	@echo "Building bb-tools"
@@ -108,6 +127,10 @@ mdbx:
 		&& make clean && make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
+		&& mv config.h config2.h \
+		&& tail -n +2 config2.h > config.h  \
+		&& rm -f config2.h \
+		&& cat config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 mdbx-dbg:
@@ -125,19 +148,19 @@ test-lmdb:
 	TEST_DB=lmdb $(GOTEST)
 
 
-test-mdbx: mdbx
-	TEST_DB=mdbx $(GOTEST)
+test-mdbx:
+	TEST_DB=mdbx $(GOTEST) --timeout 20m
 
 lint:
-	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
+	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 lintci: mdbx
 	@echo "--> Running linter for code"
-	@./build/bin/golangci-lint run --build-tags="mdbx" --config ./.golangci.yml
+	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.38.0
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.40.1
 
 clean:
 	env GO111MODULE=on go clean -cache
@@ -171,7 +194,7 @@ grpc:
 	rm -rf ./build/include*
 
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
+	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.17.0/protoc-3.17.0-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
 	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
@@ -179,14 +202,14 @@ grpc:
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
 		types/types.proto
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
-		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
-		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/turbo-geth/gointerfaces/types \
+		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/gointerfaces/types \
+		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon/gointerfaces/types \
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		snapshot_downloader/external_downloader.proto \
 		consensus_engine/consensus.proto \
 		testing/testing.proto \
-		txpool/txpool.proto
+		txpool/txpool.proto txpool/mining.proto
 
 prometheus:
 	docker-compose up prometheus grafana

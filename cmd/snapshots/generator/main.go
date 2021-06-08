@@ -1,6 +1,6 @@
 package main
 
-import "github.com/ledgerwatch/turbo-geth/cmd/snapshots/generator/commands"
+import "github.com/ledgerwatch/erigon/cmd/snapshots/generator/commands"
 
 func main() {
 	commands.Execute()

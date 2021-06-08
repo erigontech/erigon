@@ -3,12 +3,12 @@ package main
 import (
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/filters"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/fdlimit"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,7 @@ func main() {
 	cmd, cfg := cli.RootCommand()
 	rootCtx, rootCancel := utils.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		db, backend, txPool, err := cli.RemoteServices(*cfg, rootCancel)
+		db, backend, txPool, mining, err := cli.RemoteServices(*cfg, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "error", err)
 			return nil
@@ -26,12 +26,12 @@ func main() {
 
 		var ff *filters.Filters
 		if backend != nil {
-			ff = filters.New(rootCtx, backend, txPool)
+			ff = filters.New(rootCtx, backend, txPool, mining)
 		} else {
 			log.Info("filters are not supported in chaindata mode")
 		}
 
-		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, txPool, ff, *cfg, nil)); err != nil {
+		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, txPool, mining, ff, *cfg, nil)); err != nil {
 			log.Error(err.Error())
 			return nil
 		}

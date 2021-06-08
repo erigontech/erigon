@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 var (
@@ -52,12 +52,14 @@ type Transaction interface {
 	GetChainID() *uint256.Int
 	GetNonce() uint64
 	GetPrice() *uint256.Int
+	GetTip() *uint256.Int
+	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
 	GetGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *common.Address
-	AsMessage(h *Header, s Signer) (Message, error)
+	AsMessage(s Signer, baseFee *big.Int) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash

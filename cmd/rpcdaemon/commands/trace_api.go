@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // TraceAPI RPC interface into tracing API
@@ -25,7 +25,7 @@ type TraceAPI interface {
 	Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error)
 	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (*ParityTrace, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error)
-	Filter(ctx context.Context, req TraceFilterRequest) (ParityTraces, error)
+	Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
@@ -35,17 +35,15 @@ type TraceAPIImpl struct {
 	maxTraces uint64
 	traceType string
 	gasCap    uint64
-	pending   *rpchelper.Pending
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(kv ethdb.RoKV, pending *rpchelper.Pending, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(base *BaseAPI, kv ethdb.RoKV, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
-		BaseAPI:   &BaseAPI{},
+		BaseAPI:   base,
 		kv:        kv,
 		maxTraces: cfg.MaxTraces,
 		traceType: cfg.TraceType,
 		gasCap:    cfg.Gascap,
-		pending:   pending,
 	}
 }

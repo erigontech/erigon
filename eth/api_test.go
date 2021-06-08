@@ -17,13 +17,13 @@
 package eth_test
 
 /*
-TODO: revive this tests for RPCDaemon - https://github.com/ledgerwatch/turbo-geth/issues/939
+TODO: revive this tests for RPCDaemon - https://github.com/ledgerwatch/erigon/issues/939
 
 import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/turbo/adapter"
+	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"reflect"
 	"sort"
 	"strconv"
@@ -31,14 +31,14 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/cmd/rpcdaemon/commands"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 var dumper = spew.ConfigState{Indent: "    "}
@@ -194,7 +194,7 @@ func TestStorageRangeAt(t *testing.T) {
 	tds.StartNewBuffer()
 
 	for _, entry := range storage {
-		val := uint256.NewInt().SetBytes(entry.Value.Bytes())
+		val := uint256.NewInt(0).SetBytes(entry.Value.Bytes())
 		statedb.SetState(addr, entry.Key, *val)
 	}
 	//we are working with contract, so it need codehash&incarnation

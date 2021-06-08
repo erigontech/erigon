@@ -21,8 +21,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/turbo/rlphacks"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 )
 
 // Experimental code for separating data and structural information
@@ -124,9 +124,9 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		//if trace || maxLen >= len(curr) {
-		//	fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
-		//}
+		if trace || maxLen >= len(curr) {
+			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
+		}
 
 		// Add the digit immediately following the max common prefix and compute length of remainder length
 		extraDigit := curr[maxLen]

@@ -26,11 +26,13 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/ledgerwatch/turbo-geth/log"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 var (
 	contextType      = reflect.TypeOf((*context.Context)(nil)).Elem()
+	jsonStreamType   = reflect.TypeOf(&jsoniter.Stream{})
 	errorType        = reflect.TypeOf((*error)(nil)).Elem()
 	subscriptionType = reflect.TypeOf(Subscription{})
 	stringType       = reflect.TypeOf("")
@@ -56,6 +58,7 @@ type callback struct {
 	hasCtx      bool           // method's first argument is a context (not included in argTypes)
 	errPos      int            // err return idx, of -1 when method cannot return error
 	isSubscribe bool           // true if this is a subscription callback
+	streamable  bool           // support JSON streaming (more efficient for large responses)
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
@@ -121,11 +124,11 @@ func suitableCallbacks(receiver reflect.Value) map[string]*callback {
 		if method.PkgPath != "" {
 			continue // method not exported
 		}
-		cb := newCallback(receiver, method.Func)
+		name := formatName(method.Name)
+		cb := newCallback(receiver, method.Func, name)
 		if cb == nil {
 			continue // function invalid
 		}
-		name := formatName(method.Name)
 		callbacks[name] = cb
 	}
 	return callbacks
@@ -133,7 +136,7 @@ func suitableCallbacks(receiver reflect.Value) map[string]*callback {
 
 // newCallback turns fn (a function) into a callback object. It returns nil if the function
 // is unsuitable as an RPC callback.
-func newCallback(receiver, fn reflect.Value) *callback {
+func newCallback(receiver, fn reflect.Value, name string) *callback {
 	fntype := fn.Type()
 	c := &callback{fn: fn, rcvr: receiver, errPos: -1, isSubscribe: isPubSub(fntype)}
 	// Determine parameter types. They must all be exported or builtin types.
@@ -146,6 +149,7 @@ func newCallback(receiver, fn reflect.Value) *callback {
 		outs[i] = fntype.Out(i)
 	}
 	if len(outs) > 2 {
+		log.Warn("Cannot register RPC callback [%s] - maximum 2 return values are allowed, got %d", name, len(outs))
 		return nil
 	}
 	// If an error is returned, it must be the last returned value.
@@ -154,9 +158,15 @@ func newCallback(receiver, fn reflect.Value) *callback {
 		c.errPos = 0
 	case len(outs) == 2:
 		if isErrorType(outs[0]) || !isErrorType(outs[1]) {
+			log.Warn("Cannot register RPC callback [%s] - error must the last return value", name)
 			return nil
 		}
 		c.errPos = 1
+	}
+	// If there is only one return value (error), and the last argument is *jsoniter.Stream, mark it as streamable
+	if len(outs) != 1 && c.streamable {
+		log.Warn("Cannot register RPC callback [%s] - streamable method may only return 1 value (error)", name)
+		return nil
 	}
 	return c
 }
@@ -173,15 +183,21 @@ func (c *callback) makeArgTypes() {
 		c.hasCtx = true
 		firstArg++
 	}
-	// Add all remaining parameters.
-	c.argTypes = make([]reflect.Type, fntype.NumIn()-firstArg)
-	for i := firstArg; i < fntype.NumIn(); i++ {
+	// Check if method is streamable
+	numArgs := fntype.NumIn()
+	if fntype.NumIn() > firstArg && fntype.In(numArgs-1) == jsonStreamType {
+		c.streamable = true
+		numArgs--
+	}
+	// Add all remaining parameters (expect json stream, if present)
+	c.argTypes = make([]reflect.Type, numArgs-firstArg)
+	for i := firstArg; i < numArgs; i++ {
 		c.argTypes[i-firstArg] = fntype.In(i)
 	}
 }
 
 // call invokes the callback.
-func (c *callback) call(ctx context.Context, method string, args []reflect.Value) (res interface{}, errRes error) {
+func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream *jsoniter.Stream) (res interface{}, errRes error) {
 	// Create the argument slice.
 	fullargs := make([]reflect.Value, 0, 2+len(args))
 	if c.rcvr.IsValid() {
@@ -191,6 +207,9 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 		fullargs = append(fullargs, reflect.ValueOf(ctx))
 	}
 	fullargs = append(fullargs, args...)
+	if c.streamable {
+		fullargs = append(fullargs, reflect.ValueOf(stream))
+	}
 
 	// Catch panic while running the callback.
 	defer func() {

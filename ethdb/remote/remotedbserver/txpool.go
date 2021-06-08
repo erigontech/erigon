@@ -5,14 +5,19 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces"
-	proto_txpool "github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/event"
+	"github.com/ledgerwatch/erigon/gointerfaces"
+	proto_txpool "github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	types2 "github.com/ledgerwatch/erigon/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/log"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+// TxPoolAPIVersion
+var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type txPool interface {
 	Get(hash common.Hash) types.Transaction
@@ -29,6 +34,11 @@ type TxPoolServer struct {
 func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
 	return &TxPoolServer{ctx: ctx, txPool: txPool}
 }
+
+func (s *TxPoolServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
+	return MiningAPIVersion, nil
+}
+
 func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {
 	return nil, fmt.Errorf("unimplemented")
 	/*

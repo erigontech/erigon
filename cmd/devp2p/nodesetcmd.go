@@ -21,10 +21,10 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/p2p/enr"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 
 	"github.com/urfave/cli"
 )
@@ -165,6 +165,8 @@ func ethFilter(args []string) (nodeFilter, error) {
 		filter = forkid.NewStaticFilter(params.GoerliChainConfig, params.GoerliGenesisHash)
 	case "ropsten":
 		filter = forkid.NewStaticFilter(params.RopstenChainConfig, params.RopstenGenesisHash)
+	case "sokol":
+		filter = forkid.NewStaticFilter(params.SokolChainConfig, params.SokolGenesisHash)
 	default:
 		return nil, fmt.Errorf("unknown network %q", args[0])
 	}

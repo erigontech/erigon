@@ -19,9 +19,7 @@ package enode
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"net"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -89,7 +87,10 @@ var nodeDBInt64Tests = []struct {
 }
 
 func TestDBInt64(t *testing.T) {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	tests := nodeDBInt64Tests
@@ -121,7 +122,10 @@ func TestDBFetchStore(t *testing.T) {
 	inst := time.Now()
 	num := 314
 
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	// Check fetch/store operations on a node ping object
@@ -260,7 +264,10 @@ func TestDBSeedQuery(t *testing.T) {
 }
 
 func testSeedQuery() error {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	// Insert a batch of nodes for querying
@@ -300,12 +307,7 @@ func testSeedQuery() error {
 }
 
 func TestDBPersistency(t *testing.T) {
-	root, err := ioutil.TempDir("", "nodedb-")
-	if err != nil {
-		t.Fatalf("failed to create temporary data folder: %v", err)
-	}
-	defer os.RemoveAll(root)
-
+	root := t.TempDir()
 	var (
 		testKey = []byte("somekey")
 		testInt = int64(314)
@@ -423,7 +425,10 @@ var nodeDBExpirationNodes = []struct {
 }
 
 func TestDBExpiration(t *testing.T) {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	// Add all the test nodes and set their last pong time.
@@ -466,7 +471,10 @@ func TestDBExpiration(t *testing.T) {
 // This test checks that expiration works when discovery v5 data is present
 // in the database.
 func TestDBExpireV5(t *testing.T) {
-	db, _ := OpenDB("")
+	db, err := OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 
 	ip := net.IP{127, 0, 0, 1}

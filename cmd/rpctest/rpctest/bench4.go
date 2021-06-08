@@ -2,12 +2,12 @@ package rpctest
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 	"net/http"
 	"time"
 )
 
-func Bench4(turbogeth_url string) {
+func Bench4(erigon_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -16,7 +16,7 @@ func Bench4(turbogeth_url string) {
 	req_id := 1
 	template := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
-	if err := post(client, turbogeth_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
+	if err := post(client, erigon_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
 		fmt.Printf("Could not retrieve block %d: %v\n", 1720000, err)
 		return
 	}
@@ -28,15 +28,15 @@ func Bench4(turbogeth_url string) {
 		req_id++
 		template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 		var trace EthTxTrace
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
 			fmt.Printf("Could not trace transaction %s: %v\n", txhash, err)
-			print(client, turbogeth_url, fmt.Sprintf(template, txhash, req_id))
+			print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 			return
 		}
 		if trace.Error != nil {
 			fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 		}
-		print(client, turbogeth_url, fmt.Sprintf(template, txhash, req_id))
+		print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 	}
 	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
 	sm := make(map[common.Hash]storageEntry)
@@ -48,7 +48,7 @@ func Bench4(turbogeth_url string) {
 	nextKey := &start
 	for nextKey != nil {
 		var sr DebugStorageRange
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
 			fmt.Printf("Could not get storageRange: %v\n", err)
 			return
 		}

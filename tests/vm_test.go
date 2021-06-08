@@ -17,9 +17,11 @@
 package tests
 
 import (
+	"context"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestVM(t *testing.T) {
@@ -28,9 +30,16 @@ func TestVM(t *testing.T) {
 	vmt.slow("^vmPerformance")
 	vmt.fails("^vmSystemOperationsTest.json/createNameRegistrator$", "fails without parallel execution")
 
+	db := ethdb.NewTestKV(t)
+
 	vmt.walk(t, vmTestDir, func(t *testing.T, name string, test *VMTest) {
 		withTrace(t, test.json.Exec.GasLimit, func(vmconfig vm.Config) error {
-			return vmt.checkFailure(t, test.Run(vmconfig, 0))
+			tx, err := db.BeginRw(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			return vmt.checkFailure(t, test.Run(tx, vmconfig, 0))
 		})
 	})
 }

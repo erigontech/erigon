@@ -24,10 +24,11 @@ import (
 	"math/big"
 	"math/bits"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/core/types"
+	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // Constants to match up protocol versions and messages
@@ -73,15 +74,104 @@ const (
 	PooledTransactionsMsg         = 0x0a
 )
 
+//nolint
+var ToString = map[uint]string{
+	StatusMsg:                     "StatusMsg",
+	NewBlockHashesMsg:             "NewBlockHashesMsg",
+	TransactionsMsg:               "TransactionsMsg",
+	GetBlockHeadersMsg:            "GetBlockHeadersMsg",
+	BlockHeadersMsg:               "BlockHeadersMsg",
+	GetBlockBodiesMsg:             "GetBlockBodiesMsg",
+	BlockBodiesMsg:                "BlockBodiesMsg",
+	NewBlockMsg:                   "NewBlockMsg",
+	GetNodeDataMsg:                "GetNodeDataMsg",
+	NodeDataMsg:                   "NodeDataMsg",
+	GetReceiptsMsg:                "GetReceiptsMsg",
+	ReceiptsMsg:                   "ReceiptsMsg",
+	NewPooledTransactionHashesMsg: "NewPooledTransactionHashesMsg",
+	GetPooledTransactionsMsg:      "GetPooledTransactionsMsg",
+	PooledTransactionsMsg:         "PooledTransactionsMsg",
+}
+
+var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
+	ETH65: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_65,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_65,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_65,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_65,
+		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_65,
+		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_65,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_65,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_65,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_65,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_65,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_65,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_65,
+	},
+	ETH66: {
+		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_66,
+		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_66,
+		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_66,
+		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_66,
+		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_66,
+		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
+	},
+}
+
+var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+	ETH65: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_65:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_65:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_65:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_65:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_NODE_DATA_65:                 GetNodeDataMsg,
+		proto_sentry.MessageId_NODE_DATA_65:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_65:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_65:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_65:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_65:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_65:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_65:           PooledTransactionsMsg,
+	},
+	ETH66: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_NODE_DATA_66:                 GetNodeDataMsg,
+		proto_sentry.MessageId_NODE_DATA_66:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+	},
+}
+
 var (
-	errNoStatusMsg             = errors.New("no status message")
+	ErrNoStatusMsg             = errors.New("no status message")
 	errMsgTooLarge             = errors.New("message too long")
 	errDecode                  = errors.New("invalid message")
 	errInvalidMsgCode          = errors.New("invalid message code")
-	errProtocolVersionMismatch = errors.New("protocol version mismatch")
-	errNetworkIDMismatch       = errors.New("network ID mismatch")
-	errGenesisMismatch         = errors.New("genesis mismatch")
-	errForkIDRejected          = errors.New("fork ID rejected")
+	ErrProtocolVersionMismatch = errors.New("protocol version mismatch")
+	ErrNetworkIDMismatch       = errors.New("network ID mismatch")
+	ErrGenesisMismatch         = errors.New("genesis mismatch")
+	ErrForkIDRejected          = errors.New("fork ID rejected")
 )
 
 // Packet represents a p2p message in the `eth` protocol.
@@ -345,10 +435,19 @@ type GetBlockBodiesPacket66 struct {
 // BlockBodiesPacket is the network packet for block content distribution.
 type BlockBodiesPacket []*BlockBody
 
+// BlockRawBodiesPacket is the network packet for block content distribution.
+type BlockRawBodiesPacket []*BlockRawBody
+
 // BlockBodiesPacket is the network packet for block content distribution over eth/66.
 type BlockBodiesPacket66 struct {
 	RequestId uint64
 	BlockBodiesPacket
+}
+
+// BlockBodiesPacket is the network packet for block content distribution over eth/66.
+type BlockRawBodiesPacket66 struct {
+	RequestId uint64
+	BlockRawBodiesPacket
 }
 
 // BlockBodiesRLPPacket is used for replying to block body requests, in cases
@@ -366,6 +465,12 @@ type BlockBodiesRLPPacket66 struct {
 type BlockBody struct {
 	Transactions []types.Transaction // Transactions contained within a block
 	Uncles       []*types.Header     // Uncles contained within a block
+}
+
+// BlockRawBody represents the data content of a single block.
+type BlockRawBody struct {
+	Transactions [][]byte        // Transactions contained within a block
+	Uncles       []*types.Header // Uncles contained within a block
 }
 
 func (bb BlockBody) EncodeRLP(w io.Writer) error {
@@ -491,6 +596,121 @@ func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
 func (p *BlockBodiesPacket) Unpack() ([][]types.Transaction, [][]*types.Header) {
 	var (
 		txset    = make([][]types.Transaction, len(*p))
+		uncleset = make([][]*types.Header, len(*p))
+	)
+	for i, body := range *p {
+		txset[i], uncleset[i] = body.Transactions, body.Uncles
+	}
+	return txset, uncleset
+}
+
+func (rb BlockRawBody) EncodeRLP(w io.Writer) error {
+	encodingSize := 0
+	// size of Transactions
+	encodingSize++
+	var txsLen int
+	for _, tx := range rb.Transactions {
+		txsLen++
+		var txLen int = len(tx)
+		if txLen >= 56 {
+			txsLen += (bits.Len(uint(txLen)) + 7) / 8
+		}
+		txsLen += txLen
+	}
+	if txsLen >= 56 {
+		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
+	}
+	encodingSize += txsLen
+	// size of Uncles
+	encodingSize++
+	var unclesLen int
+	for _, uncle := range rb.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
+	}
+	encodingSize += unclesLen
+	var b [33]byte
+	// prefix
+	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode Transactions
+	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, tx := range rb.Transactions {
+		if _, err := w.Write(tx); err != nil {
+			return err
+		}
+	}
+	// encode Uncles
+	if err := types.EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range rb.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (rb *BlockRawBody) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	// decode Transactions
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	var tx []byte
+	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
+		if tx == nil {
+			fmt.Printf("BlockRawBody.DecodeRLP tx nil\n")
+		}
+		rb.Transactions = append(rb.Transactions, tx)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Transactions
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle types.Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		rb.Uncles = append(rb.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	return s.ListEnd()
+}
+
+// Unpack retrieves the transactions and uncles from the range packet and returns
+// them in a split flat format that's more consistent with the internal data structures.
+func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header) {
+	var (
+		txset    = make([][][]byte, len(*p))
 		uncleset = make([][]*types.Header, len(*p))
 	)
 	for i, body := range *p {

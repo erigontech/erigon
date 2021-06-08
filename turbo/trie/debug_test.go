@@ -25,8 +25,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 var debugTests = []struct {
@@ -63,7 +63,7 @@ func TestPrintLoad(t *testing.T) {
 		}
 		tr := New(common.Hash{})
 		for i, balance := range debugTest.aBalances {
-			account := &accounts.Account{Initialised: true, Balance: *uint256.NewInt().SetUint64(balance), CodeHash: emptyState}
+			account := &accounts.Account{Initialised: true, Balance: *uint256.NewInt(balance), CodeHash: emptyState}
 			tr.UpdateAccount(common.FromHex(debugTest.aHexKeys[i]), account)
 		}
 		for i, sHexKey := range debugTest.sHexKeys {

@@ -27,10 +27,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 func TestMocker(t *testing.T) {
+	t.Skip("need test for p2p sentry")
 	//start the simulation HTTP server
 	_, s := testHTTPServer(t)
 	defer s.Close()

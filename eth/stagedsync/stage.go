@@ -1,19 +1,19 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(state *StageState, unwinder Unwinder) error
+type ExecFunc func(state *StageState, unwinder Unwinder, tx ethdb.RwTx) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(unwindState *UnwindState, state *StageState) error
+type UnwindFunc func(unwindState *UnwindState, state *StageState, tx ethdb.RwTx) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {

@@ -32,16 +32,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/mclock"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p/discover"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/enr"
-	"github.com/ledgerwatch/turbo-geth/p2p/nat"
-	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/mclock"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/event"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p/discover"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/p2p/netutil"
 )
 
 const (
@@ -139,8 +139,10 @@ type Config struct {
 	// If the port is zero, the operating system will pick a port. The
 	// ListenAddr field will be updated with the actual address when
 	// the server is started.
-	ListenAddr string
-	SentryAddr []string
+	ListenAddr   string
+	ListenAddr65 string
+	Eth65Enabled bool
+	SentryAddr   []string
 
 	// If set to a non-nil value, the given NAT port mapper
 	// is used to make the listening port available to the
@@ -163,6 +165,8 @@ type Config struct {
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
+	MDBX  bool
+	LMDB  bool
 }
 
 // Server manages all peer connections.
@@ -441,6 +445,11 @@ func (s *sharedUDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err err
 func (s *sharedUDPConn) Close() error {
 	return nil
 }
+func (srv *Server) Running() bool {
+	srv.lock.Lock()
+	defer srv.lock.Unlock()
+	return srv.running
+}
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
@@ -507,8 +516,7 @@ func (srv *Server) setupLocalNode() error {
 		srv.ourHandshake.Caps = append(srv.ourHandshake.Caps, p.cap())
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
-
-	// Create the local node.
+	// Create the local node
 	db, err := enode.OpenDB(srv.Config.NodeDatabase)
 	if err != nil {
 		return err

@@ -19,7 +19,7 @@
 
 # -- Project information -----------------------------------------------------
 
-project = u'Turbo Geth'
+project = u'Erigon'
 copyright = u'2020, Ledgerwatch'
 author = u'Ledgerwatch'
 
@@ -102,7 +102,7 @@ html_static_path = ['.static']
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'TurboGethdoc'
+htmlhelp_basename = 'Erigondoc'
 
 
 # -- Options for LaTeX output ------------------------------------------------
@@ -129,7 +129,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'TurboGeth.tex', u'Turbo Geth Documentation',
+    (master_doc, 'Erigon.tex', u'Erigon Documentation',
      u'Ledgerwatch', 'manual'),
 ]
 
@@ -139,7 +139,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'turbogeth', u'Turbo Geth Documentation',
+    (master_doc, 'erigon', u'Erigon Documentation',
      [author], 1)
 ]
 
@@ -150,8 +150,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'TurboGeth', u'Turbo Geth Documentation',
-     author, 'TurboGeth', 'One line description of project.',
+    (master_doc, 'Erigon', u'Erigon Documentation',
+     author, 'Erigon', 'One line description of project.',
      'Miscellaneous'),
 ]
 

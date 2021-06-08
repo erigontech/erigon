@@ -27,19 +27,19 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/ethdb"
 
-	ethereum "github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
+	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func TestSimulatedBackend(t *testing.T) {
@@ -49,8 +49,7 @@ func TestSimulatedBackend(t *testing.T) {
 	genAlloc := make(core.GenesisAlloc)
 	genAlloc[auth.From] = core.GenesisAccount{Balance: big.NewInt(9223372036854775807)}
 
-	sim := NewSimulatedBackend(genAlloc, gasLimit)
-	defer sim.Close()
+	sim := NewSimulatedBackend(t, genAlloc, gasLimit)
 
 	// should return an error if the tx is not found
 	txHash := common.HexToHash("2")
@@ -114,9 +113,9 @@ const deployedCode = `60806040526004361061003b576000357c010000000000000000000000
 // expected return value contains "hello world"
 var expectedReturn = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
-func simTestBackend(testAddr common.Address) *SimulatedBackend {
-	expectedBal := uint256.NewInt().SetUint64(10000000000)
-	return NewSimulatedBackend(
+func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
+	expectedBal := uint256.NewInt(10000000000)
+	return NewSimulatedBackend(t,
 		core.GenesisAlloc{
 			testAddr: {Balance: expectedBal.ToBig()},
 		}, 10000000,
@@ -125,24 +124,30 @@ func simTestBackend(testAddr common.Address) *SimulatedBackend {
 
 func TestNewSimulatedBackend(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	expectedBal := uint256.NewInt().SetUint64(10000000000)
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	expectedBal := uint256.NewInt(10000000000)
+	sim := simTestBackend(t, testAddr)
 
-	if sim.config != params.AllEthashProtocolChanges {
-		t.Errorf("expected sim config to equal params.AllEthashProtocolChanges, got %v", sim.config)
+	if sim.m.ChainConfig != params.AllEthashProtocolChanges {
+		t.Errorf("expected sim config to equal params.AllEthashProtocolChanges, got %v", sim.m.ChainConfig)
 	}
 
-	if sim.config != params.AllEthashProtocolChanges {
-		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.config)
+	if sim.m.ChainConfig != params.AllEthashProtocolChanges {
+		t.Errorf("expected sim blockchain config to equal params.AllEthashProtocolChanges, got %v", sim.m.ChainConfig)
 	}
-	tx, err1 := sim.DB().Begin(context.Background(), ethdb.RO)
+	tx, err1 := sim.DB().BeginRo(context.Background())
 	if err1 != nil {
 		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
 	}
 	defer tx.Rollback()
 
-	statedb := state.New(state.NewPlainDBState(tx, rawdb.ReadCurrentHeader(sim.database).Number.Uint64()))
+	var num uint64
+	if err := sim.m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		num = rawdb.ReadCurrentHeader(tx).Number.Uint64()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	statedb := state.New(state.NewPlainDBState(ethdb.NewRoTxDb(tx), num))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
@@ -150,10 +155,9 @@ func TestNewSimulatedBackend(t *testing.T) {
 }
 
 func TestSimulatedBackend_AdjustTime(t *testing.T) {
-	sim := NewSimulatedBackend(
+	sim := NewSimulatedBackend(t,
 		core.GenesisAlloc{}, 10000000,
 	)
-	defer sim.Close()
 
 	prevTime := sim.pendingBlock.Time()
 	if err := sim.AdjustTime(time.Second); err != nil {
@@ -168,8 +172,7 @@ func TestSimulatedBackend_AdjustTime(t *testing.T) {
 
 func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	// Create tx and send
 	amount, _ := uint256.FromBig(big.NewInt(1000))
 	gasPrice, _ := uint256.FromBig(big.NewInt(1))
@@ -212,9 +215,8 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 
 func TestSimulatedBackend_BalanceAt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	expectedBal := uint256.NewInt().SetUint64(10000000000)
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	expectedBal := uint256.NewInt(10000000000)
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	bal, err := sim.BalanceAt(bgCtx, testAddr, nil)
@@ -228,10 +230,9 @@ func TestSimulatedBackend_BalanceAt(t *testing.T) {
 }
 
 func TestSimulatedBackend_BlockByHash(t *testing.T) {
-	sim := NewSimulatedBackend(
+	sim := NewSimulatedBackend(t,
 		core.GenesisAlloc{}, 10000000,
 	)
-	defer sim.Close()
 	bgCtx := context.Background()
 
 	block, err := sim.BlockByNumber(bgCtx, nil)
@@ -249,10 +250,9 @@ func TestSimulatedBackend_BlockByHash(t *testing.T) {
 }
 
 func TestSimulatedBackend_BlockByNumber(t *testing.T) {
-	sim := NewSimulatedBackend(
+	sim := NewSimulatedBackend(t,
 		core.GenesisAlloc{}, 10000000,
 	)
-	defer sim.Close()
 	bgCtx := context.Background()
 
 	block, err := sim.BlockByNumber(bgCtx, nil)
@@ -286,8 +286,7 @@ func TestSimulatedBackend_BlockByNumber(t *testing.T) {
 func TestSimulatedBackend_NonceAt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	nonce, err := sim.NonceAt(bgCtx, testAddr, big.NewInt(0))
@@ -301,7 +300,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -337,13 +336,12 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 func TestSimulatedBackend_SendTransaction(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -369,17 +367,15 @@ func TestSimulatedBackend_SendTransaction(t *testing.T) {
 func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := NewSimulatedBackend(
+	sim := NewSimulatedBackend(t,
 		core.GenesisAlloc{
 			testAddr: {Balance: big.NewInt(10000000000)},
-		}, 10000000,
-	)
-	defer sim.Close()
+		}, 10000000)
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -435,8 +431,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	opts, _ := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1337))
 
-	sim := NewSimulatedBackend(core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether)}}, 10000000)
-	defer sim.Close()
+	sim := NewSimulatedBackend(t, core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether)}}, 10000000)
 
 	parsed, _ := abi.JSON(strings.NewReader(contractAbi))
 	contractAddr, _, _, _ := bind.DeployContract(opts, parsed, common.FromHex(contractBin), sim)
@@ -540,8 +535,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 
-	sim := NewSimulatedBackend(core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether*2 + 2e17)}}, 10000000)
-	defer sim.Close()
+	sim := NewSimulatedBackend(t, core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether*2 + 2e17)}}, 10000000)
 
 	recipient := common.HexToAddress("deadbeef")
 	var cases = []struct {
@@ -554,8 +548,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt(),
-			Value:    uint256.NewInt().SetUint64(1000),
+			GasPrice: uint256.NewInt(0),
+			Value:    uint256.NewInt(1000),
 			Data:     nil,
 		}, 21000, nil},
 
@@ -563,8 +557,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt().SetUint64(1000),
-			Value:    uint256.NewInt().SetUint64(1000),
+			GasPrice: uint256.NewInt(1000),
+			Value:    uint256.NewInt(1000),
 			Data:     nil,
 		}, 21000, nil},
 
@@ -572,8 +566,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt().SetUint64(1e14), // gascost = 2.1ether
-			Value:    uint256.NewInt().SetUint64(1e17), // the remaining balance for fee is 2.1ether
+			GasPrice: uint256.NewInt(1e14), // gascost = 2.1ether
+			Value:    uint256.NewInt(1e17), // the remaining balance for fee is 2.1ether
 			Data:     nil,
 		}, 21000, nil},
 
@@ -581,8 +575,8 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 			From:     addr,
 			To:       &recipient,
 			Gas:      0,
-			GasPrice: uint256.NewInt().SetUint64(2e14), // gascost = 4.2ether
-			Value:    uint256.NewInt().SetUint64(1000),
+			GasPrice: uint256.NewInt(2e14), // gascost = 4.2ether
+			Value:    uint256.NewInt(1000),
 			Data:     nil,
 		}, 21000, errors.New("gas required exceeds allowance (10999)")}, // 10999=(2.2ether-1000wei)/(2e14)
 	}
@@ -606,8 +600,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 func TestSimulatedBackend_HeaderByHash(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	header, err := sim.HeaderByNumber(bgCtx, nil)
@@ -627,8 +620,7 @@ func TestSimulatedBackend_HeaderByHash(t *testing.T) {
 func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	latestBlockHeader, err := sim.HeaderByNumber(bgCtx, nil)
@@ -673,8 +665,7 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 func TestSimulatedBackend_TransactionCount(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 	currentBlock, err := sim.BlockByNumber(bgCtx, nil)
 	if err != nil || currentBlock == nil {
@@ -692,7 +683,7 @@ func TestSimulatedBackend_TransactionCount(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -724,8 +715,7 @@ func TestSimulatedBackend_TransactionCount(t *testing.T) {
 func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	transaction, err := sim.TransactionInBlock(bgCtx, sim.pendingBlock.Hash(), uint(0))
@@ -748,7 +738,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -788,8 +778,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	// expect pending nonce to be 0 since account has not been used
@@ -804,7 +793,7 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -827,7 +816,7 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	}
 
 	// make a new transaction with a nonce of 1
-	tx = types.NewTransaction(uint64(1), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	tx = types.NewTransaction(uint64(1), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err = types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -851,13 +840,12 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
 	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt().SetUint64(1000), params.TxGas, uint256.NewInt().SetUint64(1), nil)
+	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
 		t.Errorf("could not sign tx: %v", err)
@@ -881,11 +869,10 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 }
 
 func TestSimulatedBackend_SuggestGasPrice(t *testing.T) {
-	sim := NewSimulatedBackend(
+	sim := NewSimulatedBackend(t,
 		core.GenesisAlloc{},
 		10000000,
 	)
-	defer sim.Close()
 	bgCtx := context.Background()
 	gasPrice, err := sim.SuggestGasPrice(bgCtx)
 	if err != nil {
@@ -898,8 +885,7 @@ func TestSimulatedBackend_SuggestGasPrice(t *testing.T) {
 
 func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 	code, err := sim.CodeAt(bgCtx, testAddr, nil)
 	if err != nil {
@@ -934,8 +920,7 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 
 func TestSimulatedBackend_CodeAt(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 	code, err := sim.CodeAt(bgCtx, testAddr, nil)
 	if err != nil {
@@ -973,8 +958,7 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 //   receipt{status=1 cgas=23949 bloom=00000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000040200000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 logs=[log: b6818c8064f645cd82d99b59a1a267d6d61117ef [75fd880d39c1daf53b6547ab6cb59451fc6452d27caa90e5b6649dd8293b9eed] 000000000000000000000000376c47978271565f56deb45495afa69e59c16ab200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000000158 9ae378b6d4409eada347a5dc0c180f186cb62dc68fcc0f043425eb917335aa28 0 95d429d309bb9d753954195fe2d69bd140b4ae731b9b5b605c34323de162cf00 0]}
 func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	parsed, err := abi.JSON(strings.NewReader(abiJSON))
@@ -1057,8 +1041,7 @@ contract Reverter {
 }*/
 func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	sim := simTestBackend(testAddr)
-	defer sim.Close()
+	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
 	reverterABI := `[{"inputs": [],"name": "noRevert","outputs": [],"stateMutability": "pure","type": "function"},{"inputs": [],"name": "revertASM","outputs": [],"stateMutability": "pure","type": "function"},{"inputs": [],"name": "revertNoString","outputs": [],"stateMutability": "pure","type": "function"},{"inputs": [],"name": "revertString","outputs": [],"stateMutability": "pure","type": "function"}]`

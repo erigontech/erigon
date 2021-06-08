@@ -8,17 +8,16 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/ethutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 type miningBlock struct {
@@ -31,12 +30,39 @@ type miningBlock struct {
 	RemoteTxs types.TransactionsStream
 }
 
+type MiningCreateBlockCfg struct {
+	db          ethdb.RwKV
+	mining      params.MiningConfig
+	chainConfig params.ChainConfig
+	engine      consensus.Engine
+	txPool      *core.TxPool
+	tmpdir      string
+}
+
+func StageMiningCreateBlockCfg(
+	db ethdb.RwKV,
+	mining params.MiningConfig,
+	chainConfig params.ChainConfig,
+	engine consensus.Engine,
+	txPool *core.TxPool,
+	tmpdir string,
+) MiningCreateBlockCfg {
+	return MiningCreateBlockCfg{
+		db:          db,
+		mining:      mining,
+		chainConfig: chainConfig,
+		engine:      engine,
+		txPool:      txPool,
+		tmpdir:      tmpdir,
+	}
+}
+
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, engine consensus.Engine, extra hexutil.Bytes, gasFloor, gasCeil uint64, coinbase common.Address, txPool *core.TxPool, quit <-chan struct{}) error {
-	txPoolLocals := txPool.Locals()
-	pendingTxs, err := txPool.Pending()
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateBlockCfg, current *miningBlock, quit <-chan struct{}) error {
+	txPoolLocals := cfg.txPool.Locals()
+	pendingTxs, err := cfg.txPool.Pending()
 	if err != nil {
 		return err
 	}
@@ -46,7 +72,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		staleThreshold = 7
 	)
 
-	if coinbase == (common.Address{}) {
+	if cfg.mining.Etherbase == (common.Address{}) {
 		return fmt.Errorf("refusing to mine without etherbase")
 	}
 
@@ -56,25 +82,25 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
-	if parent == nil { // todo: how to return error and don't stop TG?
+	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
 
 	blockNum := executionAt + 1
-	signer := types.MakeSigner(chainConfig, blockNum)
+	signer := types.MakeSigner(&cfg.chainConfig, blockNum)
 
-	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx.(ethdb.HasTx).Tx(), blockNum, engine, coinbase, txPoolLocals)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, cfg.mining.Etherbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: chainConfig, Db: tx}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: ethdb.WrapIntoTxDB(tx)}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
 			return nil
 		}
 		for i := 0; i < n; i++ {
-			block := rawdb.ReadBlockWithoutTransactions(tx.(ethdb.HasTx).Tx(), hash, *number)
+			block := rawdb.ReadBlock(tx, hash, *number)
 			if block == nil {
 				break
 			}
@@ -92,7 +118,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 		uncles    mapset.Set // uncle set
 	}
 	env := &envT{
-		signer:    types.MakeSigner(chainConfig, blockNum),
+		signer:    types.MakeSigner(&cfg.chainConfig, blockNum),
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),
@@ -107,17 +133,17 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, gasFloor, gasCeil),
-		Extra:      extra,
+		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.mining.GasFloor, cfg.mining.GasCeil),
+		Extra:      cfg.mining.ExtraData,
 		Time:       uint64(timestamp),
 	}
 
 	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
 	//if w.isRunning() {
-	header.Coinbase = coinbase
+	header.Coinbase = cfg.mining.Etherbase
 	//}
 
-	if err = engine.Prepare(chain, header); err != nil {
+	if err = cfg.engine.Prepare(chain, header); err != nil {
 		log.Error("Failed to prepare header for mining",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),
@@ -130,12 +156,12 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.Database, current *mini
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
-	if daoBlock := chainConfig.DAOForkBlock; daoBlock != nil {
+	if daoBlock := cfg.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
 		limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
 		if header.Number.Cmp(daoBlock) >= 0 && header.Number.Cmp(limit) < 0 {
 			// Depending whether we support or oppose the fork, override differently
-			if chainConfig.DAOForkSupport {
+			if cfg.chainConfig.DAOForkSupport {
 				header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
 			} else if bytes.Equal(header.Extra, params.DAOForkBlockExtra) {
 				header.Extra = []byte{} // If miner opposes, don't let it use the reserved extra-data

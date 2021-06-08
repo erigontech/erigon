@@ -8,9 +8,9 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
@@ -353,7 +353,7 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	acc := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
-		Balance:     *uint256.NewInt().SetUint64(200),
+		Balance:     *uint256.NewInt(200),
 		Root:        EmptyRoot,
 		CodeHash:    emptyState,
 	}

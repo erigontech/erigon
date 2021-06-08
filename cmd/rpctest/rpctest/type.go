@@ -3,13 +3,13 @@ package rpctest
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/state"
 )
 
 const Geth = "geth"
-const TurboGeth = "turbo_geth"
+const Erigon = "erigon"
 
 type EthError struct {
 	Code    int    `json:"code"`

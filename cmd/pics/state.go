@@ -12,22 +12,20 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
-	"github.com/ledgerwatch/turbo-geth/visual"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
+	"github.com/ledgerwatch/erigon/cmd/pics/contracts"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/erigon/visual"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -70,28 +68,30 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	dbutils.BlockReceiptsPrefix:    "Receipts",
-	dbutils.Log:                    "Event Logs",
-	dbutils.AccountsHistoryBucket:  "History Of Accounts",
-	dbutils.StorageHistoryBucket:   "History Of Storage",
-	dbutils.HeadersBucket:          "Headers",
-	dbutils.HeaderCanonicalBucket:  "Canonical headers",
-	dbutils.HeaderTDBucket:         "Headers TD",
-	dbutils.BlockBodyPrefix:        "Block Bodies",
-	dbutils.HeaderNumberBucket:     "Header Numbers",
-	dbutils.TxLookupPrefix:         "Transaction Index",
-	dbutils.CodeBucket:             "Code Of Contracts",
-	dbutils.SyncStageProgress:      "Sync Progress",
-	dbutils.PlainStateBucket:       "Plain State",
-	dbutils.HashedAccountsBucket:   "Hashed Accounts",
-	dbutils.HashedStorageBucket:    "Hashed Storage",
-	dbutils.TrieOfAccountsBucket:   "Intermediate Hashes Of Accounts",
-	dbutils.TrieOfStorageBucket:    "Intermediate Hashes Of Storage",
-	dbutils.SyncStageUnwind:        "Unwind",
-	dbutils.AccountChangeSetBucket: "Account Changes",
-	dbutils.StorageChangeSetBucket: "Storage Changes",
-	dbutils.IncarnationMapBucket:   "Incarnations",
-	dbutils.Senders:                "Transaction Senders",
+	dbutils.BlockReceiptsPrefix:          "Receipts",
+	dbutils.Log:                          "Event Logs",
+	dbutils.AccountsHistoryBucket:        "History Of Accounts",
+	dbutils.StorageHistoryBucket:         "History Of Storage",
+	dbutils.HeadersBucket:                "Headers",
+	dbutils.HeaderCanonicalBucket:        "Canonical headers",
+	dbutils.HeaderTDBucket:               "Headers TD",
+	dbutils.BlockBodyPrefix:              "Block Bodies",
+	dbutils.HeaderNumberBucket:           "Header Numbers",
+	dbutils.TxLookupPrefix:               "Transaction Index",
+	dbutils.CodeBucket:                   "Code Of Contracts",
+	dbutils.SyncStageProgress:            "Sync Progress",
+	dbutils.PlainStateBucket:             "Plain State",
+	dbutils.HashedAccountsBucket:         "Hashed Accounts",
+	dbutils.HashedStorageBucket:          "Hashed Storage",
+	dbutils.TrieOfAccountsBucket:         "Intermediate Hashes Of Accounts",
+	dbutils.TrieOfStorageBucket:          "Intermediate Hashes Of Storage",
+	dbutils.SyncStageUnwind:              "Unwind",
+	dbutils.AccountChangeSetBucket:       "Account Changes",
+	dbutils.StorageChangeSetBucket:       "Storage Changes",
+	dbutils.IncarnationMapBucket:         "Incarnations",
+	dbutils.Senders:                      "Transaction Senders",
+	dbutils.ContractTEVMCodeBucket:       "Contract TEVM code",
+	dbutils.ContractTEVMCodeStatusBucket: "Contract TEVM code status",
 }
 
 /*dbutils.PlainContractCodeBucket,
@@ -265,10 +265,10 @@ func dot2png(dotFileName string) string {
 }
 
 func initialState1() error {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	fmt.Printf("Initial state 1\n")
 	// Configure and generate a sample block chain
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -284,23 +284,13 @@ func initialState1() error {
 				address1: {Balance: big.NewInt(200000000000000000)},
 				address2: {Balance: big.NewInt(300000000000000000)},
 			},
+			GasLimit: 10000000,
 		}
 		// this code generates a log
 		signer = types.MakeSigner(params.AllEthashProtocolChanges, 1)
 	)
-	// Create intermediate hash bucket since it is mandatory now
-	_, genesisHash, err := core.SetupGenesisBlock(db, gspec, true, false)
-	if err != nil {
-		return err
-	}
-	genesis := rawdb.ReadBlockDeprecated(db, genesisHash, 0)
-	if err != nil {
-		return err
-	}
-	genesisDb := db.MemCopy()
-	defer genesisDb.Close()
-
-	engine := ethash.NewFaker()
+	m := stages.MockWithGenesis(nil, gspec, key)
+	defer m.DB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
@@ -310,22 +300,29 @@ func initialState1() error {
 
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
-	blocks, _, err := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 8, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *core.BlockGen) {
 		var (
 			tx  types.Transaction
 			txs []types.Transaction
+			err error
 		)
 
 		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number().Uint64())
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				panic(err)
+			}
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				panic(err)
+			}
 			err = contractBackend.SendTransaction(ctx, tx)
 			if err != nil {
 				panic(err)
@@ -343,7 +340,7 @@ func initialState1() error {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
@@ -380,7 +377,7 @@ func initialState1() error {
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt().SetUint64(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
@@ -412,129 +409,34 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	db.Close()
-	// We reset the DB and use the generated blocks
-	db = ethdb.NewMemDatabase()
-	kv := db.RwKV()
-	snapshotDB := db.MemCopy()
-
-	_, _, err = core.SetupGenesisBlock(db, gspec, true, false)
-	if err != nil {
-		return err
-	}
-	engine = ethash.NewFaker()
+	m2 := stages.MockWithGenesis(nil, gspec, key)
+	defer m2.DB.Close()
 
 	if err = hexPalette(); err != nil {
 		return err
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 0); err != nil {
+	emptyKv := ethdb.NewMemKV()
+	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}
+	defer emptyKv.Close()
 
-	snapshotDB.Close()
+	// BLOCKS
 
-	// BLOCK 1
-	snapshotDB = db.MemCopy()
-
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[0], true /* rootCheck */); err != nil {
-		return err
+	for i := 0; i < chain.Length; i++ {
+		if err = m2.InsertChain(chain.Slice(i, i+1)); err != nil {
+			return err
+		}
+		if err = stateDatabaseComparison(m.DB, m2.DB, i+1); err != nil {
+			return err
+		}
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+			return err
+		}
 	}
 
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 1); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-
-	// BLOCK 2
-	snapshotDB = db.MemCopy()
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[1], true /* rootCheck */); err != nil {
-		return err
-	}
-
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 2); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-
-	// BLOCK 3
-	snapshotDB = db.MemCopy()
-
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[2], true /* rootCheck */); err != nil {
-		return err
-	}
-
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 3); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-
-	// BLOCK 4
-	snapshotDB = db.MemCopy()
-
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[3], true /* rootCheck */); err != nil {
-		return err
-	}
-
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 4); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-
-	// BLOCK 5
-	snapshotDB = db.MemCopy()
-
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[4], true /* rootCheck */); err != nil {
-		return err
-	}
-
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 5); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-
-	// BLOCK 6
-	snapshotDB = db.MemCopy()
-
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[5], true /* rootCheck */); err != nil {
-		return err
-	}
-
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 6); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-
-	// BLOCK 7
-	snapshotDB = db.MemCopy()
-
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[6], true /* rootCheck */); err != nil {
-		return err
-	}
-
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 7); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-	if err != nil {
-		return err
-	}
-
-	// BLOCK 8
-	snapshotDB = db.MemCopy()
-
-	if _, err = stagedsync.InsertBlockInStages(db, gspec.Config, &vm.Config{}, engine, blocks[7], true /* rootCheck */); err != nil {
-		return err
-	}
-
-	if err = stateDatabaseComparison(snapshotDB.RwKV(), kv, 8); err != nil {
-		return err
-	}
-	snapshotDB.Close()
-
-	kv2 := ethdb.NewMemDatabase().RwKV()
-	defer kv2.Close()
-	if err = stateDatabaseComparison(kv2, kv, 9); err != nil {
+	if err = stateDatabaseComparison(emptyKv, m.DB, 9); err != nil {
 		return err
 	}
 	return nil

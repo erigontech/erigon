@@ -26,15 +26,15 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 const (
@@ -49,7 +49,7 @@ const (
 // all registered services.
 type Config struct {
 	// Name sets the instance name of the node. It must not contain the / character and is
-	// used in the devp2p node identifier. The instance name of Turbo-Geth is "turbo-geth". If no
+	// used in the devp2p node identifier. The instance name of Erigon is "erigon". If no
 	// value is specified, the basename of the current executable is used.
 	Name string `toml:"-"`
 
@@ -191,7 +191,7 @@ func (c *Config) IPCEndpoint() string {
 }
 
 // NodeDB returns the path to the discovery node database.
-func (c *Config) NodeDB() (string, error) {
+func (c *Config) NodeDB() string {
 	return c.ResolvePath(datadirNodeDatabase)
 }
 
@@ -269,14 +269,14 @@ func (c *Config) name() string {
 }
 
 // ResolvePath resolves path in the instance directory.
-func (c *Config) ResolvePath(path string) (string, error) {
+func (c *Config) ResolvePath(path string) string {
 	if filepath.IsAbs(path) {
-		return path, nil
+		return path
 	}
 	if c.DataDir == "" {
-		return "", nil
+		return ""
 	}
-	return filepath.Join(c.instanceDir(), path), nil
+	return filepath.Join(c.instanceDir(), path)
 }
 
 func (c *Config) instanceDir() string {
@@ -307,10 +307,7 @@ func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 		return key, nil
 	}
 
-	keyfile, err := c.ResolvePath(datadirPrivateKey)
-	if err != nil {
-		return nil, err
-	}
+	keyfile := c.ResolvePath(datadirPrivateKey)
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key, nil
 	}
@@ -333,19 +330,13 @@ func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 
 // StaticNodes returns a list of node enode URLs configured as static nodes.
 func (c *Config) StaticNodes() ([]*enode.Node, error) {
-	dbPath, err := c.ResolvePath(datadirStaticNodes)
-	if err != nil {
-		return nil, err
-	}
+	dbPath := c.ResolvePath(datadirStaticNodes)
 	return c.parsePersistentNodes(&c.staticNodesWarning, dbPath), nil
 }
 
 // TrustedNodes returns a list of node enode URLs configured as trusted nodes.
 func (c *Config) TrustedNodes() ([]*enode.Node, error) {
-	dbPath, err := c.ResolvePath(datadirTrustedNodes)
-	if err != nil {
-		return nil, err
-	}
+	dbPath := c.ResolvePath(datadirTrustedNodes)
 	return c.parsePersistentNodes(&c.trustedNodesWarning, dbPath), nil
 }
 

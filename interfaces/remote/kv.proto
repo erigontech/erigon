@@ -3,22 +3,6 @@ syntax = "proto3";
 import "google/protobuf/empty.proto";
 import "types/types.proto";
 
-// This is the Service Interface Version: change these numbers according to semver rules
-// anytime the service-level protocol changes (e.g. string or bytes format). Such version
-// cannot change at runtime during service execution.
-//
-// Examples of how to change version (M.m.p) for the KV protocol are:
-// 1. bump M obtaining (M+1.m.p) when
-// - changing table name i.e. bucketName field in Cursor
-// - changing key/value format i.e. k, v fields in Pair
-// 2. bump m obtaining (M.m+1.p) when
-// - adding new table name i.e. bucketName field in Cursor
-// 3. bump p obtaining (M.m.p+1) when
-// - correcting wrong data in value i.e. v field in Pair
-option (types.service_major_version) = 1;
-option (types.service_minor_version) = 0;
-option (types.service_patch_version) = 0;
-
 package remote;
 
 option go_package = "./remote;remote";
@@ -30,6 +14,8 @@ service KV {
 
   // Tx exposes read-only transactions for the key-value store
   rpc Tx(stream Cursor) returns (stream Pair);
+
+  rpc ReceiveStateChanges(google.protobuf.Empty) returns (stream StateChange);
 }
 
 enum Op {
@@ -65,4 +51,38 @@ message Pair {
   bytes k = 1;
   bytes v = 2;
   uint32 cursorID = 3;
+}
+
+enum Action {
+  STORAGE = 0;     // Change only in the storage
+  UPSERT = 1;      // Change of balance or nonce (and optionally storage)
+  CODE = 2;        // Change of code (and optionally storage)
+  UPSERT_CODE = 3; // Change in (balance or nonce) and code (and optinally storage)
+  DELETE = 4;      // Account is deleted
+}
+
+message StorageChange {
+  types.H256 location = 1;
+  bytes data = 2;
+}
+
+message AccountChange {
+  types.H160 address = 1;
+  uint64 incarnation = 2;
+  Action action = 3;
+  bytes data = 4; // nil if there is no UPSERT in action
+  bytes code = 5; // nil if there is no CODE in action
+  repeated StorageChange storageChanges = 6;
+}
+
+enum Direction {
+  FORWARD = 0;
+  UNWIND = 1;
+}
+
+message StateChange {
+  Direction direction = 1;
+  uint64 blockHeight = 2;
+  types.H256 blockHash = 3;
+  repeated AccountChange changes = 4;
 }

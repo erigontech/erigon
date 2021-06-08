@@ -10,21 +10,21 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/core/vm/stack"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/turbo/rpchelper"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
-	"github.com/ledgerwatch/turbo-geth/turbo/transactions"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/stack"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
 const (
@@ -116,19 +116,31 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 	}
 	gasPrice := new(uint256.Int)
 	if args.GasPrice != nil {
-		gasPrice.SetFromBig(args.GasPrice.ToInt())
+		overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.GasPrice higher than 2^256-1"))
+		}
 	}
 	var tip *uint256.Int
 	if args.Tip != nil {
-		tip.SetFromBig(args.Tip.ToInt())
+		overflow := tip.SetFromBig(args.Tip.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.Tip higher than 2^256-1"))
+		}
 	}
 	var feeCap *uint256.Int
 	if args.FeeCap != nil {
-		feeCap.SetFromBig(args.FeeCap.ToInt())
+		overflow := feeCap.SetFromBig(args.FeeCap.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.FeeCap higher than 2^256-1"))
+		}
 	}
 	value := new(uint256.Int)
 	if args.Value != nil {
-		value.SetFromBig(args.Value.ToInt())
+		overflow := value.SetFromBig(args.Value.ToInt())
+		if overflow {
+			panic(fmt.Errorf("args.Value higher than 2^256-1"))
+		}
 	}
 	var data []byte
 	if args.Data != nil {
@@ -241,6 +253,8 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 			topTrace.Error = "Out of gas"
 		case vm.ErrExecutionReverted:
 			topTrace.Error = "Reverted"
+		case vm.ErrWriteProtection:
+			topTrace.Error = "Mutable Call In Static Context"
 		default:
 			switch err.(type) {
 			case *vm.ErrStackUnderflow:
@@ -452,13 +466,13 @@ const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) (*TraceCallResult, error) {
-	dbtx, err := api.kv.BeginRo(ctx)
+	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer dbtx.Rollback()
+	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(dbtx)
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -467,19 +481,19 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		var num = rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		stateReader = state.NewPlainStateReader(tx)
 	} else {
-		stateReader = state.NewPlainKvState(dbtx, blockNumber)
+		stateReader = state.NewPlainKvState(tx, blockNumber)
 	}
 	ibs := state.New(stateReader)
 
-	header := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
+	header := rawdb.ReadHeader(tx, hash, blockNumber)
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
@@ -520,7 +534,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	// Get a new instance of the EVM.
 	msg := args.ToMessage(api.gasCap)
 
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
 	//blockCtx.BlockNumber++
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
@@ -624,7 +638,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.pending)
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +653,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
-	parentHeader := rawdb.ReadHeader(ethdb.NewRoTxDb(dbtx), hash, blockNumber)
+	parentHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if parentHeader == nil {
 		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}
@@ -730,7 +744,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			return nil, fmt.Errorf("vmTrace not implemented yet")
 		}
 		results = append(results, traceResult)
-		txIndex++ //nolint
 	}
 	return results, nil
 }

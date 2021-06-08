@@ -19,7 +19,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func TestTransaction(t *testing.T) {

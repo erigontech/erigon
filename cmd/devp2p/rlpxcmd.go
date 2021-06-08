@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/devp2p/internal/ethtest"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/p2p/rlpx"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/cmd/devp2p/internal/ethtest"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/rlpx"
+	"github.com/ledgerwatch/erigon/rlp"
 
 	"github.com/urfave/cli"
 )

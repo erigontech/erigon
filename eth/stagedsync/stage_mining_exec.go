@@ -3,30 +3,60 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
+
+type MiningExecCfg struct {
+	db          ethdb.RwKV
+	mining      params.MiningConfig
+	notifier    ChainEventNotifier
+	chainConfig params.ChainConfig
+	engine      consensus.Engine
+	vmConfig    *vm.Config
+	tmpdir      string
+}
+
+func StageMiningExecCfg(
+	db ethdb.RwKV,
+	mining params.MiningConfig,
+	notifier ChainEventNotifier,
+	chainConfig params.ChainConfig,
+	engine consensus.Engine,
+	vmConfig *vm.Config,
+	tmpdir string,
+) MiningExecCfg {
+	return MiningExecCfg{
+		db:          db,
+		mining:      mining,
+		notifier:    notifier,
+		chainConfig: chainConfig,
+		engine:      engine,
+		vmConfig:    vmConfig,
+		tmpdir:      tmpdir,
+	}
+}
 
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, engine consensus.Engine, localTxs, remoteTxs types.TransactionsStream, coinbase common.Address, noempty bool, notifier ChainEventNotifier, quit <-chan struct{}) error {
-	vmConfig.NoReceipts = false
+func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, current *miningBlock, localTxs, remoteTxs types.TransactionsStream, noempty bool, quit <-chan struct{}) error {
+	cfg.vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
 
 	ibs := state.New(state.NewPlainStateReader(tx))
-	stateWriter := state.NewPlainStateWriter(tx, tx.(ethdb.HasTx).Tx().(ethdb.RwTx), current.Header.Number.Uint64())
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
+	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
+	if cfg.chainConfig.DAOForkSupport && cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 
@@ -39,13 +69,14 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	checkTEVM := ethdb.GetCheckTEVM(tx)
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, localTxs, coinbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, localTxs, cfg.mining.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -53,11 +84,11 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			// when we are mining, the worker will regenerate a mining block every 3 seconds.
 			// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 			//if !w.isRunning() {
-			NotifyPendingLogs(logPrefix, notifier, logs)
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs)
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, chainConfig, vmConfig, getHeader, engine, remoteTxs, coinbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, remoteTxs, cfg.mining.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -65,12 +96,12 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 			// when we are mining, the worker will regenerate a mining block every 3 seconds.
 			// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 			//if !w.isRunning() {
-			NotifyPendingLogs(logPrefix, notifier, logs)
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs)
 			//}
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(engine, current.Header, current.Txs, current.Uncles, stateWriter, chainConfig, ibs); err != nil {
+	if err := core.FinalizeBlockExecution(cfg.engine, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs); err != nil {
 		return err
 	}
 
@@ -110,18 +141,18 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.Database, current *miningBlock
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *miningBlock, chainConfig *params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *miningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(hash common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
-	signer := types.MakeSigner(chainConfig, header.Number.Uint64())
+	signer := types.MakeSigner(&chainConfig, header.Number.Uint64())
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig *params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
-		receipt, err := core.ApplyTransaction(chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig)
+		receipt, err := core.ApplyTransaction(&chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, checkTEVM)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			return nil, err
@@ -241,16 +272,4 @@ func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types
 		return
 	}
 	notifier.OnNewPendingLogs(logs)
-}
-
-func NotifyPendingBlock(logPrefix string, notifier ChainEventNotifier, block *types.Block) {
-	if block == nil {
-		return
-	}
-
-	if notifier == nil {
-		log.Warn(fmt.Sprintf("[%s] rpc notifier is not set, rpc daemon won't be updated about pending logs", logPrefix))
-		return
-	}
-	notifier.OnNewPendingBlock(block)
 }

@@ -1,5 +1,5 @@
-// Copyright 2020 The turbo-geth Authors
-// This file is part of the turbo-geth library.
+// Copyright 2020 The Erigon Authors
+// This file is part of the Erigon library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
@@ -20,8 +20,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
@@ -35,6 +35,7 @@ var (
 	Bodies              SyncStage = "Bodies"              // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders             SyncStage = "Senders"             // "From" recovered from signatures, bodies re-written
 	Execution           SyncStage = "Execution"           // Executing each block w/o buildinf a trie
+	Translation         SyncStage = "Translation"         // Translation each marked for translation contract (from EVM to TEVM)
 	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts
@@ -48,6 +49,10 @@ var (
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
+
+	CreateHeadersSnapshot SyncStage = "CreateHeadersSnapshot"
+	CreateBodiesSnapshot  SyncStage = "CreateBodiesSnapshot"
+	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
 )
 
 var AllStages = []SyncStage{
@@ -56,6 +61,7 @@ var AllStages = []SyncStage{
 	Bodies,
 	Senders,
 	Execution,
+	Translation,
 	IntermediateHashes,
 	HashState,
 	AccountHistoryIndex,

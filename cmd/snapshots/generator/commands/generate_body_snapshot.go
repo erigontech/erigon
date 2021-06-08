@@ -9,18 +9,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 func init() {
 	withDatadir(generateBodiesSnapshotCmd)
 	withSnapshotFile(generateBodiesSnapshotCmd)
-	withSnapshotData(generateBodiesSnapshotCmd)
 	withBlock(generateBodiesSnapshotCmd)
 	rootCmd.AddCommand(generateBodiesSnapshotCmd)
 
@@ -31,32 +29,30 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 	Short:   "Generate bodies snapshot",
 	Example: "go run cmd/snapshots/generator/main.go bodies --block 11000000 --datadir /media/b00ris/nvme/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/bodies_test",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return BodySnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+		return BodySnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode, database)
 	},
 }
 
-func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
-	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
+func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string, database string) error {
+	var kv, snKV ethdb.RwKV
 	var err error
-	if snapshotDir != "" {
-		var mode snapshotsync.SnapshotMode
-		mode, err = snapshotsync.SnapshotModeFromString(snapshotMode)
-		if err != nil {
-			return err
-		}
-
-		kv, err = snapshotsync.WrapBySnapshotsFromDir(kv, snapshotDir, mode)
-		if err != nil {
-			return err
-		}
+	if database == "lmdb" {
+		kv = ethdb.NewLMDB().Path(dbPath).MustOpen()
+		snKV = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
+				dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
+			}
+		}).Path(snapshotPath).MustOpen()
+	} else {
+		kv = ethdb.NewMDBX().Path(dbPath).MustOpen()
+		snKV = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
+				dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
+			}
+		}).Path(snapshotPath).MustOpen()
 	}
-
-	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
-			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
-		}
-	}).Path(snapshotPath).MustOpen()
 
 	snDB := ethdb.NewObjectDatabase(snKV)
 	tx, err := kv.BeginRo(context.Background())
@@ -109,7 +105,11 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 		return err
 	}
 	snDB.Close()
-	err = os.Remove(snapshotPath + "/lock.mdb")
+	if database == "lmdb" {
+		err = os.Remove(snapshotPath + "/lock.mdb")
+	} else {
+		err = os.Remove(snapshotPath + "/mdbx.lck")
+	}
 	if err != nil {
 		log.Warn("Remove lock", "err", err)
 		return err

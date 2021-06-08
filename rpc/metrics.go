@@ -19,7 +19,7 @@ package rpc
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/metrics"
 )
 
 var (

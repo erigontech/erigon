@@ -19,15 +19,14 @@ package core
 import (
 	"fmt"
 	"math"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	cmath "github.com/ledgerwatch/turbo-geth/common/math"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	cmath "github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 /*
@@ -192,22 +191,24 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	price := st.gasPrice
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
-		// price = min(tip, feeCap - baseFee) + baseFee
-		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
+	mgval := uint256.NewInt(st.msg.Gas())
+	mgval = mgval.Mul(mgval, st.gasPrice)
+	balanceCheck := mgval
+	if st.feeCap != nil {
+		balanceCheck = uint256.NewInt(st.msg.Gas())
+		balanceCheck = balanceCheck.Mul(balanceCheck, st.feeCap)
 	}
-	mgval := new(big.Int).Mul(new(big.Int).SetUint64(st.msg.Gas()), price.ToBig())
-	gasCost, overflow := uint256.FromBig(mgval)
-	if have, want := st.state.GetBalance(st.msg.From()), mgval; overflow || st.state.GetBalance(st.msg.From()).Lt(gasCost) {
+	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		if !gasBailout {
 			return fmt.Errorf("%w: address %v have %v want %v", ErrInsufficientFunds, st.msg.From().Hex(), have, want)
 		}
 	} else {
-		st.state.SubBalance(st.msg.From(), gasCost)
+		st.state.SubBalance(st.msg.From(), mgval)
 	}
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
-		return err
+		if !gasBailout {
+			return err
+		}
 	}
 	st.gas += st.msg.Gas()
 
@@ -229,7 +230,19 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	// Make sure the transaction feeCap is greater than the block's baseFee.
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
+	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
+		if l := st.feeCap.BitLen(); l > 256 {
+			return fmt.Errorf("%w: address %v, feeCap bit length: %d", ErrFeeCapVeryHigh,
+				st.msg.From().Hex(), l)
+		}
+		if l := st.tip.BitLen(); l > 256 {
+			return fmt.Errorf("%w: address %v, tip bit length: %d", ErrTipVeryHigh,
+				st.msg.From().Hex(), l)
+		}
+		if st.feeCap.Cmp(st.tip) < 0 {
+			return fmt.Errorf("%w: address %v, tip: %s, feeCap: %s", ErrTipAboveFeeCap,
+				st.msg.From().Hex(), st.feeCap, st.tip)
+		}
 		if st.feeCap.Cmp(st.evm.Context.BaseFee) < 0 {
 			return fmt.Errorf("%w: address %v, feeCap: %d baseFee: %d", ErrFeeCapTooLow,
 				st.msg.From().Hex(), st.feeCap.Uint64(), st.evm.Context.BaseFee.Uint64())
@@ -271,7 +284,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	sender := vm.AccountRef(msg.From())
 	homestead := st.evm.ChainConfig().IsHomestead(st.evm.Context.BlockNumber)
 	istanbul := st.evm.ChainConfig().IsIstanbul(st.evm.Context.BlockNumber)
-	baikal := st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber)
+	london := st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber)
 	contractCreation := msg.To() == nil
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
@@ -314,23 +327,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout)
 	}
 	if refunds {
-		if baikal {
-			// After EIP-2539: refunds are capped to gasUsed / 5
-			st.refundGas(5)
+		if london {
+			// After EIP-3529: refunds are capped to gasUsed / 5
+			st.refundGas(params.RefundQuotientEIP3529)
 		} else {
-			// Before EIP-2539: refunds were capped to gasUsed / 2
-			st.refundGas(2)
+			// Before EIP-3529: refunds were capped to gasUsed / 2
+			st.refundGas(params.RefundQuotient)
 		}
 	}
-	price := st.gasPrice
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
-		var feeDiff uint256.Int
-		if st.evm.Context.BaseFee.Lt(st.feeCap) {
-			feeDiff.Sub(st.feeCap, st.evm.Context.BaseFee)
-		}
-		price = cmath.Min256(st.tip, &feeDiff)
+	effectiveTip := st.gasPrice
+	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
+		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.feeCap, st.evm.Context.BaseFee))
 	}
-	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), price))
+	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
@@ -348,12 +357,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	st.gas += refund
 
 	// Return ETH for remaining gas, exchanged at the original rate.
-	price := st.gasPrice
-	if st.evm.ChainConfig().IsAleut(st.evm.Context.BlockNumber) || st.evm.ChainConfig().IsBaikal(st.evm.Context.BlockNumber) {
-		// price = min(tip, feeCap - baseFee) + baseFee
-		price = cmath.Min256(new(uint256.Int).Add(st.tip, st.evm.Context.BaseFee), st.feeCap)
-	}
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), price)
+	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining)
 
 	// Also return remaining gas to the block gas counter so it is

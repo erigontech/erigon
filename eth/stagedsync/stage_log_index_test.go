@@ -1,28 +1,22 @@
 package stagedsync
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLogIndex(t *testing.T) {
 	require := require.New(t)
-
-	db := ethdb.NewMemKV()
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(err)
-	defer tx.Rollback()
+	db, tx := ethdb.NewTestTx(t)
 
 	addr1, addr2 := common.HexToAddress("0x0"), common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2")
 	topic1, topic2 := common.HexToHash("0x0"), common.HexToHash("0x1234")
@@ -46,7 +40,7 @@ func TestLogIndex(t *testing.T) {
 			},
 		},
 	}}
-	err = rawdb.AppendReceipts(tx, 1, receipts1)
+	err := rawdb.AppendReceipts(tx, 1, receipts1)
 	require.NoError(err)
 
 	err = rawdb.AppendReceipts(tx, 2, receipts2)

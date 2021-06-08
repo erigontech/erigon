@@ -28,30 +28,29 @@ import (
 	"strings"
 	"text/tabwriter"
 	"text/template"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/eth/ethconfig"
-	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/internal/flags"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
-	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/nat"
-	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/gasprice"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/internal/flags"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/metrics"
+	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func init() {
@@ -147,50 +146,13 @@ var (
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
 	}
-	GCModePruningFlag = cli.BoolFlag{
-		Name:  "pruning",
-		Usage: `Enable storage pruning`,
-	}
-	GCModeLimitFlag = cli.Uint64Flag{
-		Name:  "pruning.stop_limit",
-		Usage: `Blockchain pruning limit`,
-		Value: 1024,
-	}
-	GCModeBlockToPruneFlag = cli.Uint64Flag{
-		Name:  "pruning.processing_limit",
-		Usage: `Block to prune per tick`,
-		Value: 20,
-	}
-	GCModeTickTimeout = cli.DurationFlag{
-		Name:  "pruning.tick",
-		Usage: `Time of tick`,
-		Value: time.Second * 2,
-	}
-	LightServFlag = cli.IntFlag{
-		Name:  "lightserv",
-		Usage: "Maximum percentage of time allowed for serving LES requests (0-90)",
-		Value: 0,
-	}
-	LightKDFFlag = cli.BoolFlag{
-		Name:  "lightkdf",
-		Usage: "Reduce key-derivation RAM & CPU usage at some expense of KDF strength",
-	}
 	WhitelistFlag = cli.StringFlag{
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	BloomFilterSizeFlag = cli.Uint64Flag{
-		Name:  "bloomfilter.size",
-		Usage: "Megabytes of memory allocated to bloom-filter for pruning",
-		Value: 2048,
-	}
-	OverrideBerlinFlag = cli.Uint64Flag{
-		Name:  "override.berlin",
-		Usage: "Manually specify Berlin fork-block, overriding the bundled setting",
-	}
-	DownloadOnlyFlag = cli.BoolFlag{
-		Name:  "download-only",
-		Usage: "Run in download only mode - only fetch blocks but not process them",
+	OverrideLondonFlag = cli.Uint64Flag{
+		Name:  "override.london",
+		Usage: "Manually specify London fork-block, overriding the bundled setting",
 	}
 	DebugProtocolFlag = cli.BoolFlag{
 		Name:  "debug-protocol",
@@ -343,10 +305,6 @@ var (
 		Name:  "fakepow",
 		Usage: "Disables proof-of-work verification",
 	}
-	NoCompactionFlag = cli.BoolFlag{
-		Name:  "nocompaction",
-		Usage: "Disables db compaction after import",
-	}
 	// RPC settings
 	IPCDisabledFlag = cli.BoolFlag{
 		Name:  "ipcdisable",
@@ -467,7 +425,12 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
-	SentryAddrFlag = cli.StringSliceFlag{
+	ListenPort65Flag = cli.IntFlag{
+		Name:  "p2p.eth65.port",
+		Usage: "ETH65 Network listening port",
+		Value: 30304,
+	}
+	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
@@ -490,9 +453,16 @@ var (
 		Usage: "P2P node key as hex (for testing)",
 	}
 	NATFlag = cli.StringFlag{
-		Name:  "nat",
-		Usage: "NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)",
-		Value: "any",
+		Name: "nat",
+		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)
+	     "" or "none"         default - do not nat
+	     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
+	     "any"                uses the first auto-detected mechanism
+	     "upnp"               uses the Universal Plug and Play protocol
+	     "pmp"                uses NAT-PMP with an auto-detected gateway address
+	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+`,
+		Value: "",
 	}
 	NoDiscoverFlag = cli.BoolFlag{
 		Name:  "nodiscover",
@@ -637,10 +607,12 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.TurboMineName:
-			urls = params.TurboMineBootnodes
-		case params.AleutChainName:
-			urls = params.AleutBootnodes
+		case params.ErigonMineName:
+			urls = params.ErigonBootnodes
+		case params.CalaverasChainName:
+			urls = params.CalaverasBootnodes
+		case params.SokolChainName:
+			urls = params.SokolBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -677,10 +649,12 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case params.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.TurboMineName:
-			urls = params.TurboMineBootnodes
-		case params.AleutChainName:
-			urls = params.AleutBootnodes
+		case params.ErigonMineName:
+			urls = params.ErigonBootnodes
+		case params.CalaverasChainName:
+			urls = params.CalaverasBootnodes
+		case params.SokolChainName:
+			urls = params.SokolBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -724,8 +698,12 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
 	}
+	if ctx.GlobalIsSet(ListenPort65Flag.Name) {
+		cfg.ListenAddr65 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort65Flag.Name))
+		cfg.Eth65Enabled = true
+	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
-		cfg.SentryAddr = ctx.GlobalStringSlice(SentryAddrFlag.Name)
+		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
 	}
 }
 
@@ -838,8 +816,10 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.AleutChainName:
-		return filepath.Join(datadir, "aleut")
+	case params.CalaverasChainName:
+		return filepath.Join(datadir, "calaveras")
+	case params.SokolChainName:
+		return filepath.Join(datadir, "sokol")
 	default:
 		return datadir
 	}
@@ -936,9 +916,11 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 }
 
-func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
+func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
+	} else {
+		cfg.Ethash.DatasetDir = path.Join(datadir, "erigon", "ethash-dags")
 	}
 	if ctx.GlobalIsSet(EthashCachesInMemoryFlag.Name) {
 		cfg.Ethash.CachesInMem = ctx.GlobalInt(EthashCachesInMemoryFlag.Name)
@@ -962,7 +944,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
 	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
 	if err != nil {
@@ -1026,7 +1008,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		cfg.Enabled = true
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("TurboGeth supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
 	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1121,7 +1103,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
-	setEthash(ctx, cfg)
+	setEthash(ctx, stack.Config().DataDir, cfg)
 	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
@@ -1131,16 +1113,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
-
-	// todo uncomment after fix pruning
-	//cfg.Pruning = ctx.GlobalBool(GCModePruningFlag.Name)
-	cfg.Pruning = false
-	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
-	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
-	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
-
-	// Read the value from the flag no matter if it's set or not.
-	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
 
@@ -1204,16 +1176,21 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case params.TurboMineName:
+	case params.ErigonMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = new(big.Int).SetBytes([]byte("turbo-mine")).Uint64() // turbo-mine
+			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
 		}
-		cfg.Genesis = core.DefaultTurboMineGenesisBlock()
-	case params.AleutChainName:
+		cfg.Genesis = core.DefaultErigonGenesisBlock()
+	case params.CalaverasChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 7822 // aleut
+			cfg.NetworkID = 123 // https://gist.github.com/holiman/c5697b041b3dc18c50a5cdd382cbdd16
 		}
-		cfg.Genesis = core.DefaultAleutGenesisBlock()
+		cfg.Genesis = core.DefaultCalaverasGenesisBlock()
+	case params.SokolChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 77
+		}
+		cfg.Genesis = core.DefaultSokolGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1279,8 +1256,7 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
-	name := "chaindata"
-	chainDb, err := stack.OpenDatabase(name, stack.Config().DataDir)
+	chainDb, err := stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}
@@ -1297,10 +1273,12 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case params.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.TurboMineName:
-		genesis = core.DefaultTurboMineGenesisBlock()
-	case params.AleutChainName:
-		genesis = core.DefaultAleutGenesisBlock()
+	case params.ErigonMineName:
+		genesis = core.DefaultErigonGenesisBlock()
+	case params.CalaverasChainName:
+		genesis = core.DefaultCalaverasGenesisBlock()
+	case params.SokolChainName:
+		genesis = core.DefaultSokolGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

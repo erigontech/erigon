@@ -18,19 +18,17 @@ package filters
 
 import (
 	"context"
-	"io/ioutil"
 	"math/big"
-	"os"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func makeReceipt(addr common.Address) *types.Receipt {
@@ -43,16 +41,10 @@ func makeReceipt(addr common.Address) *types.Receipt {
 }
 
 func BenchmarkFilters(b *testing.B) {
-	dir, err := ioutil.TempDir("", "filtertest")
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	db := ethdb.MustOpen(dir)
+	db := ethdb.NewTestKV(b)
 	defer db.Close()
 	var (
-		backend = &testBackend{db: db}
+		backend = &testBackend{db: ethdb.NewObjectDatabase(db)}
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = common.BytesToAddress([]byte("jeff"))
@@ -61,7 +53,7 @@ func BenchmarkFilters(b *testing.B) {
 	)
 
 	genesis := core.GenesisBlockForTesting(db, addr1, big.NewInt(1000000))
-	chain, receipts, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 100010, func(i int, gen *core.BlockGen) {
+	chain, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 100010, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 2403:
 			receipt := makeReceipt(addr1)
@@ -81,17 +73,22 @@ func BenchmarkFilters(b *testing.B) {
 	if err != nil {
 		b.Fatalf("generate chain: %v", err)
 	}
-	for i, block := range chain {
-		if err := rawdb.WriteBlockDeprecated(context.Background(), db, block); err != nil {
-			panic(err)
+	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		for i, block := range chain.Blocks {
+			if err := rawdb.WriteBlock(tx, block); err != nil {
+				panic(err)
+			}
+			if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+				panic(err)
+			}
+			rawdb.WriteHeadBlockHash(tx, block.Hash())
+			if err := rawdb.WriteReceipts(tx, block.NumberU64(), chain.Receipts[i]); err != nil {
+				panic(err)
+			}
 		}
-		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
-			panic(err)
-		}
-		rawdb.WriteHeadBlockHash(db, block.Hash())
-		if err := rawdb.WriteReceipts(db, block.NumberU64(), receipts[i]); err != nil {
-			panic(err)
-		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
 	}
 	b.ResetTimer()
 

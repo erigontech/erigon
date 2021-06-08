@@ -3,7 +3,7 @@ package remotedbserver
 import (
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type RpcEventType uint64

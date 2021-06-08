@@ -31,19 +31,19 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 const (
@@ -57,12 +57,12 @@ const (
 
 // Clique proof-of-authority protocol constants.
 var (
-	nonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
+	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
 	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 
-	diffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
+	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 )
 
@@ -128,12 +128,12 @@ var (
 	// be modified via out-of-range or non-contiguous headers.
 	errInvalidVotingChain = errors.New("invalid voting chain")
 
-	// errUnauthorizedSigner is returned if a header is signed by a non-authorized entity.
-	errUnauthorizedSigner = errors.New("unauthorized signer")
+	// ErrUnauthorizedSigner is returned if a header is signed by a non-authorized entity.
+	ErrUnauthorizedSigner = errors.New("unauthorized signer")
 
-	// errRecentlySigned is returned if a header is signed by an authorized entity
+	// ErrRecentlySigned is returned if a header is signed by an authorized entity
 	// that already signed a header recently, thus is temporarily not allowed to.
-	errRecentlySigned = errors.New("recently signed")
+	ErrRecentlySigned = errors.New("recently signed")
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
@@ -174,7 +174,7 @@ type Clique struct {
 	chainConfig    *params.ChainConfig
 	config         *params.CliqueConfig   // Consensus engine configuration parameters
 	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
-	db             ethdb.Database         // Database to store and retrieve snapshot checkpoints
+	db             ethdb.RwKV             // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
@@ -186,14 +186,14 @@ type Clique struct {
 	lock   sync.RWMutex   // Protects the signer fields
 
 	// The fields below are for testing only
-	fakeDiff bool // Skip difficulty verifications
+	FakeDiff bool // Skip difficulty verifications
 
 	exitCh chan struct{}
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB ethdb.Database) *Clique {
+func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB ethdb.RwKV) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -275,8 +275,8 @@ func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
-func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error {
-	if len(block.Uncles()) > 0 {
+func (c *Clique) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+	if len(uncles) > 0 {
 		return errors.New("uncles not allowed")
 	}
 	return nil
@@ -286,7 +286,7 @@ func (c *Clique) VerifyUncles(_ consensus.ChainReader, block *types.Block) error
 // in the header satisfies the consensus protocol requirements.
 func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 
-	snap, err := c.snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 
 	number := header.Number.Uint64()
 	// Assemble the voting snapshot to check which votes make sense
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := c.Snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
@@ -321,7 +321,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		if len(addresses) > 0 {
 			header.Coinbase = addresses[rand.Intn(len(addresses))]
 			if c.proposals[header.Coinbase] {
-				copy(header.Nonce[:], nonceAuthVote)
+				copy(header.Nonce[:], NonceAuthVote)
 			} else {
 				copy(header.Nonce[:], nonceDropVote)
 			}
@@ -338,7 +338,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Extra = header.Extra[:ExtraVanity]
 
 	if number%c.config.Epoch == 0 {
-		for _, signer := range snap.signers() {
+		for _, signer := range snap.GetSigners() {
 			header.Extra = append(header.Extra, signer[:]...)
 		}
 	}
@@ -411,12 +411,12 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	c.lock.RUnlock()
 
 	// Bail out if we're unauthorized to sign a block
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := c.Snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
 	if _, authorized := snap.Signers[signer]; !authorized {
-		return errUnauthorizedSigner
+		return ErrUnauthorizedSigner
 	}
 	// If we're amongst the recent signers, wait for the next block
 	for seen, recent := range snap.Recents {
@@ -468,7 +468,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
 func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
 
-	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
+	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
 		return nil
 	}
@@ -477,7 +477,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, 
 
 func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 	if snap.inturn(snap.Number+1, signer) {
-		return new(big.Int).Set(diffInTurn)
+		return new(big.Int).Set(DiffInTurn)
 	}
 	return new(big.Int).Set(diffNoTurn)
 }
@@ -560,13 +560,11 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 
 	blockEncoded := dbutils.EncodeBlockNumber(latest)
 
-	var tx ethdb.Tx
-	if dbtx, err := c.db.Begin(context.Background(), ethdb.RO); err == nil {
-		defer dbtx.Rollback()
-		tx = dbtx.(ethdb.HasTx).Tx()
-	} else {
+	tx, err := c.db.BeginRo(context.Background())
+	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	cur, err1 := tx.Cursor(dbutils.CliqueSeparateBucket)
 	if err1 != nil {

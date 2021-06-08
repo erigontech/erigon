@@ -26,11 +26,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type Chain struct {
@@ -122,7 +122,7 @@ func loadChain(chainfile string, genesis string) (*Chain, error) {
 	if err = json.Unmarshal(chainConfig, &gen); err != nil {
 		return nil, err
 	}
-	gblock, _, err := gen.ToBlock(false)
+	gblock, _, err := gen.ToBlock()
 	if err != nil {
 		return nil, err
 	}

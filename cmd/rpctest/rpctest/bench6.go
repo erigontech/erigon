@@ -2,12 +2,12 @@ package rpctest
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/erigon/common"
 	"net/http"
 	"time"
 )
 
-func Bench6(turbogeth_url string) {
+func Bench6(erigon_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -18,7 +18,7 @@ func Bench6(turbogeth_url string) {
 {"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}
 `
 	var blockNumber EthBlockNumber
-	if err := post(client, turbogeth_url, fmt.Sprintf(template, req_id), &blockNumber); err != nil {
+	if err := post(client, erigon_url, fmt.Sprintf(template, req_id), &blockNumber); err != nil {
 		fmt.Printf("Could not get block number: %v\n", err)
 		return
 	}
@@ -36,7 +36,7 @@ func Bench6(turbogeth_url string) {
 {"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}
 `
 		var b EthBlockByNumber
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, bn, req_id), &b); err != nil {
+		if err := post(client, erigon_url, fmt.Sprintf(template, bn, req_id), &b); err != nil {
 			fmt.Printf("Could not retrieve block %d: %v\n", bn, err)
 			return
 		}
@@ -54,9 +54,9 @@ func Bench6(turbogeth_url string) {
 {"jsonrpc":"2.0","method":"eth_getTransactionReceipt","params":["%s"],"id":%d}
 `
 			var receipt EthReceipt
-			if err := post(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id), &receipt); err != nil {
+			if err := post(client, erigon_url, fmt.Sprintf(template, tx.Hash, req_id), &receipt); err != nil {
 				fmt.Printf("Count not get receipt: %s: %v\n", tx.Hash, err)
-				print(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id))
+				print(client, erigon_url, fmt.Sprintf(template, tx.Hash, req_id))
 				return
 			}
 			if receipt.Error != nil {

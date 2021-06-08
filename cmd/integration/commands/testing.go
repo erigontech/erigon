@@ -11,11 +11,11 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	proto_sentry "github.com/ledgerwatch/turbo-geth/gointerfaces/sentry"
-	proto_testing "github.com/ledgerwatch/turbo-geth/gointerfaces/testing"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
+	proto_testing "github.com/ledgerwatch/erigon/gointerfaces/testing"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -40,7 +40,7 @@ func init() {
 
 var cmdTestCore = &cobra.Command{
 	Use:   "test_core",
-	Short: "Test server for testing core of turbo-geth or equivalent component",
+	Short: "Test server for testing core of Erigon or equivalent component",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
 

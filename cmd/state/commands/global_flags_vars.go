@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/paths"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +39,7 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 	must(cmd.MarkFlagDirname("snapshot.dir"))
 
-	cmd.Flags().StringVar(&database, "database", "", "lmdb|mdbx")
+	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 }
 
 func withStatsfile(cmd *cobra.Command) {

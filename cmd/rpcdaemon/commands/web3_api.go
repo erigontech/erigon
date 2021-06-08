@@ -3,9 +3,9 @@ package commands
 import (
 	"context"
 
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 // Web3API provides interfaces for the web3_ RPC commands
@@ -16,11 +16,11 @@ type Web3API interface {
 
 type Web3APIImpl struct {
 	*BaseAPI
-	ethBackend core.ApiBackend
+	ethBackend services.ApiBackend
 }
 
 // NewWeb3APIImpl returns Web3APIImpl instance
-func NewWeb3APIImpl(ethBackend core.ApiBackend) *Web3APIImpl {
+func NewWeb3APIImpl(ethBackend services.ApiBackend) *Web3APIImpl {
 	return &Web3APIImpl{
 		BaseAPI:    &BaseAPI{},
 		ethBackend: ethBackend,

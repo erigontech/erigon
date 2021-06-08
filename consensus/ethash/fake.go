@@ -5,10 +5,10 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/consensus"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 type FakeEthash struct {
@@ -83,25 +83,25 @@ func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *typ
 	return nil
 }
 
-func (f *FakeEthash) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
-	if len(block.Uncles()) > maxUncles {
+func (f *FakeEthash) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+	if len(uncles) > maxUncles {
 		return errTooManyUncles
 	}
-	if len(block.Uncles()) == 0 {
+	if len(uncles) == 0 {
 		return nil
 	}
 
-	uncles, ancestors := getUncles(chain, block)
+	uncleBlocks, ancestors := getUncles(chain, header)
 
-	for _, uncle := range block.Uncles() {
-		if err := f.VerifyUncle(chain, block, uncle, uncles, ancestors, true); err != nil {
+	for _, uncle := range uncles {
+		if err := f.VerifyUncle(chain, header, uncle, uncleBlocks, ancestors, true); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Block, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
+func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
 	err := f.Ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, false)
 	if err != nil {
 		return err
@@ -165,6 +165,6 @@ func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []
 	return nil
 }
 
-func (f *FullFakeEthash) VerifyUncles(_ consensus.ChainReader, _ *types.Block) error {
+func (f *FullFakeEthash) VerifyUncles(_ consensus.ChainReader, _ *types.Header, _ []*types.Header) error {
 	return nil
 }

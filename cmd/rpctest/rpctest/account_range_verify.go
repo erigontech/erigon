@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
+func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool, database string) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
 		log.Fatal(err)
@@ -30,9 +30,14 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockFr
 			log.Fatal(err)
 		}
 	}
-
-	resultsKV := ethdb.NewLMDB().Path(tmpDataDir).MustOpen()
-	gethKV := ethdb.NewLMDB().Path(gethDataDir).MustOpen()
+	var resultsKV, gethKV ethdb.RwKV
+	if database == "lmdb" {
+		resultsKV = ethdb.NewLMDB().Path(tmpDataDir).MustOpen()
+		gethKV = ethdb.NewLMDB().Path(gethDataDir).MustOpen()
+	} else {
+		resultsKV = ethdb.NewMDBX().Path(tmpDataDir).MustOpen()
+		gethKV = ethdb.NewMDBX().Path(gethDataDir).MustOpen()
+	}
 	resultsDB := ethdb.NewObjectDatabase(resultsKV)
 	gethResultsDB := ethdb.NewObjectDatabase(gethKV)
 
@@ -97,7 +102,7 @@ func CompareAccountRange(tgURL, gethURL, tmpDataDir, gethDataDir string, blockFr
 			next = ar.Result.Next
 		}
 	}
-	err = f(tgURL, resultsDB)
+	err = f(erigonURL, resultsDB)
 	if err != nil {
 		log.Fatal(err)
 	}

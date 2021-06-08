@@ -1,31 +1,23 @@
 package headerdownload
 
 import (
-	"context"
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestInserter1(t *testing.T) {
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
+	_, tx := ethdb.NewTestTx(t)
 	// Set up parent difficulty
-	if err := rawdb.WriteTd(db, common.Hash{}, 4, big.NewInt(0)); err != nil {
+	if err := rawdb.WriteTd(tx, common.Hash{}, 4, big.NewInt(0)); err != nil {
 		t.Fatalf("write parent diff: %v", err)
 	}
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatalf("begin transaction: %v", err)
-	}
-	defer tx.Rollback()
-	batch := tx.NewBatch()
-	hi := NewHeaderInserter("headers", batch, big.NewInt(0), 0)
-	if err := hi.FeedHeader(&types.Header{Number: big.NewInt(5), Difficulty: big.NewInt(1)}, 5); err != nil {
+	hi := NewHeaderInserter("headers", big.NewInt(0), 0)
+	if err := hi.FeedHeader(tx, &types.Header{Number: big.NewInt(5), Difficulty: big.NewInt(1)}, 5); err != nil {
 		t.Errorf("feed empty header: %v", err)
 	}
 }

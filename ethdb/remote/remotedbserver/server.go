@@ -10,16 +10,14 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/remote"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/txpool"
-	"github.com/ledgerwatch/turbo-geth/gointerfaces/types"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/metrics"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
@@ -30,24 +28,24 @@ const MaxTxTTL = 30 * time.Second
 
 // KvServiceAPIVersion - use it to track changes in API
 // 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
-var KvServiceAPIVersion = types.VersionReply{Major: 1, Minor: 1, Patch: 0}
+// 1.2.0 - Added separated services for mining and txpool methods
+// 2.0.0 - Rename all buckets
+var KvServiceAPIVersion = &types.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv ethdb.RwKV
+	kv   ethdb.RwKV
+	mdbx bool
 }
 
-func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashApi *ethash.API, addr string, rateLimit uint32, creds *credentials.TransportCredentials, events *Events, gitCommit string) (*grpc.Server, error) {
+func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, miningServer *MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
 	}
 
-	kv2Srv := NewKvServer(kv)
-	ethBackendSrv := NewEthBackendServer(eth, events, ethashApi, gitCommit)
-	txPoolServer := NewTxPoolServer(context.Background(), txPool)
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
@@ -84,7 +82,8 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashAp
 	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	txpool.RegisterTxpoolServer(grpcServer, txPoolServer)
-	remote.RegisterKVServer(grpcServer, kv2Srv)
+	txpool.RegisterMiningServer(grpcServer, miningServer)
+	remote.RegisterKVServer(grpcServer, kv)
 
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -99,28 +98,31 @@ func StartGrpc(kv ethdb.RwKV, eth core.EthBackend, txPool *core.TxPool, ethashAp
 	return grpcServer, nil
 }
 
-func NewKvServer(kv ethdb.RwKV) *KvServer {
-	return &KvServer{kv: kv}
+func NewKvServer(kv ethdb.RwKV, mdbx bool) *KvServer {
+	return &KvServer{kv: kv, mdbx: mdbx}
 }
 
-// GetInterfaceVersion returns the service-side interface version number
+// Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
-	if KvServiceAPIVersion.Major > dbutils.DBSchemaVersion.Major {
-		return &KvServiceAPIVersion, nil
+	var dbSchemaVersion *types.VersionReply
+	if s.mdbx {
+		dbSchemaVersion = &dbutils.DBSchemaVersionMDBX
+	} else {
+		dbSchemaVersion = &dbutils.DBSchemaVersionLMDB
 	}
-	if dbutils.DBSchemaVersion.Major > KvServiceAPIVersion.Major {
-		return &dbutils.DBSchemaVersion, nil
+	if KvServiceAPIVersion.Major > dbSchemaVersion.Major {
+		return KvServiceAPIVersion, nil
 	}
-	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
-		return &KvServiceAPIVersion, nil
+	if dbSchemaVersion.Major > KvServiceAPIVersion.Major {
+		return dbSchemaVersion, nil
 	}
-	if dbutils.DBSchemaVersion.Minor > KvServiceAPIVersion.Minor {
-		return &dbutils.DBSchemaVersion, nil
+	if KvServiceAPIVersion.Minor > dbSchemaVersion.Minor {
+		return KvServiceAPIVersion, nil
 	}
-	if KvServiceAPIVersion.Minor > dbutils.DBSchemaVersion.Minor {
-		return &KvServiceAPIVersion, nil
+	if dbSchemaVersion.Minor > KvServiceAPIVersion.Minor {
+		return dbSchemaVersion, nil
 	}
-	return &dbutils.DBSchemaVersion, nil
+	return dbSchemaVersion, nil
 }
 
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {

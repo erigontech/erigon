@@ -1,20 +1,22 @@
 package migrations
 
 import (
+	"context"
 	"errors"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/etl"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
-	migrations = []Migration{
+	require, db := require.New(t), ethdb.NewTestDB(t)
+	m := []Migration{
 		{
 			"one",
 			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
@@ -29,31 +31,38 @@ func TestApplyWithInit(t *testing.T) {
 		},
 	}
 
-	migrator := NewMigrator()
-	migrator.Migrations = migrations
-	err := migrator.Apply(db, "")
+	migrator := NewMigrator(ethdb.Chain)
+	migrator.Migrations = m
+	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
+	var applied map[string][]byte
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied, err = AppliedMigrations(tx, false)
+		require.NoError(err)
 
-	applied, err := AppliedMigrations(db, false)
+		_, ok := applied[m[0].Name]
+		require.True(ok)
+		_, ok = applied[m[1].Name]
+		require.True(ok)
+		return nil
+	})
 	require.NoError(err)
-
-	_, ok := applied[migrations[0].Name]
-	require.True(ok)
-	_, ok = applied[migrations[1].Name]
-	require.True(ok)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
-
-	applied2, err := AppliedMigrations(db, false)
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied2, err := AppliedMigrations(tx, false)
+		require.NoError(err)
+		require.Equal(applied, applied2)
+		return nil
+	})
 	require.NoError(err)
-	require.Equal(applied, applied2)
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
-	migrations = []Migration{
+	require, db := require.New(t), ethdb.NewTestDB(t)
+	m := []Migration{
 		{
 			"one",
 			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
@@ -68,35 +77,45 @@ func TestApplyWithoutInit(t *testing.T) {
 			},
 		},
 	}
-	err := db.Put(dbutils.Migrations, []byte(migrations[0].Name), []byte{1})
+	err := db.Put(dbutils.Migrations, []byte(m[0].Name), []byte{1})
 	require.NoError(err)
 
-	migrator := NewMigrator()
-	migrator.Migrations = migrations
-	err = migrator.Apply(db, "")
+	migrator := NewMigrator(ethdb.Chain)
+	migrator.Migrations = m
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
-	applied, err := AppliedMigrations(db, false)
-	require.NoError(err)
+	var applied map[string][]byte
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied, err = AppliedMigrations(tx, false)
+		require.NoError(err)
 
-	require.Equal(2, len(applied))
-	_, ok := applied[migrations[1].Name]
-	require.True(ok)
-	_, ok = applied[migrations[0].Name]
-	require.True(ok)
+		require.Equal(2, len(applied))
+		_, ok := applied[m[1].Name]
+		require.True(ok)
+		_, ok = applied[m[0].Name]
+		require.True(ok)
+		return nil
+	})
+	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
-	applied2, err := AppliedMigrations(db, false)
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied2, err := AppliedMigrations(tx, false)
+		require.NoError(err)
+		require.Equal(applied, applied2)
+		return nil
+	})
 	require.NoError(err)
-	require.Equal(applied, applied2)
+
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
-	migrations = []Migration{
+	require, db := require.New(t), ethdb.NewTestDB(t)
+	m := []Migration{
 		{
 			"one",
 			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
@@ -111,34 +130,42 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 			},
 		},
 	}
-	err := db.Put(dbutils.Migrations, []byte(migrations[1].Name), []byte{1}) // apply non-first migration
+	err := db.Put(dbutils.Migrations, []byte(m[1].Name), []byte{1}) // apply non-first migration
 	require.NoError(err)
 
-	migrator := NewMigrator()
-	migrator.Migrations = migrations
-	err = migrator.Apply(db, "")
+	migrator := NewMigrator(ethdb.Chain)
+	migrator.Migrations = m
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
 
-	applied, err := AppliedMigrations(db, false)
-	require.NoError(err)
+	var applied map[string][]byte
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied, err = AppliedMigrations(tx, false)
+		require.NoError(err)
 
-	require.Equal(2, len(applied))
-	_, ok := applied[migrations[1].Name]
-	require.True(ok)
-	_, ok = applied[migrations[0].Name]
-	require.True(ok)
+		require.Equal(2, len(applied))
+		_, ok := applied[m[1].Name]
+		require.True(ok)
+		_, ok = applied[m[0].Name]
+		require.True(ok)
+		return nil
+	})
+	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "")
+	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.NoError(err)
-
-	applied2, err := AppliedMigrations(db, false)
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied2, err := AppliedMigrations(tx, false)
+		require.NoError(err)
+		require.Equal(applied, applied2)
+		return nil
+	})
 	require.NoError(err)
-	require.Equal(applied, applied2)
 }
 
 func TestMarshalStages(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
+	require, db := require.New(t), ethdb.NewTestDB(t)
 
 	err := stages.SaveStageProgress(db, stages.Execution, 42)
 	require.NoError(err)
@@ -156,8 +183,8 @@ func TestMarshalStages(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
-	migrations = []Migration{
+	require, db := require.New(t), ethdb.NewTestDB(t)
+	m := []Migration{
 		{
 			Name: "repeated_name",
 			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
@@ -171,19 +198,24 @@ func TestValidation(t *testing.T) {
 			},
 		},
 	}
-	migrator := NewMigrator()
-	migrator.Migrations = migrations
-	err := migrator.Apply(db, "")
+	migrator := NewMigrator(ethdb.Chain)
+	migrator.Migrations = m
+	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
-	applied, err := AppliedMigrations(db, false)
+	var applied map[string][]byte
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied, err = AppliedMigrations(tx, false)
+		require.NoError(err)
+		require.Equal(0, len(applied))
+		return nil
+	})
 	require.NoError(err)
-	require.Equal(0, len(applied))
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), ethdb.NewMemDatabase()
-	migrations = []Migration{
+	require, db := require.New(t), ethdb.NewTestDB(t)
+	m := []Migration{
 		{
 			Name: "one",
 			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
@@ -191,12 +223,17 @@ func TestCommitCallRequired(t *testing.T) {
 			},
 		},
 	}
-	migrator := NewMigrator()
-	migrator.Migrations = migrations
-	err := migrator.Apply(db, "")
+	migrator := NewMigrator(ethdb.Chain)
+	migrator.Migrations = m
+	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
-	applied, err := AppliedMigrations(db, false)
+	var applied map[string][]byte
+	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+		applied, err = AppliedMigrations(tx, false)
+		require.NoError(err)
+		require.Equal(0, len(applied))
+		return nil
+	})
 	require.NoError(err)
-	require.Equal(0, len(applied))
 }

@@ -100,7 +100,7 @@ if err != nil {
 - No internal copies/allocations. It means: 1. app must copy keys/values before put to database. 2. Data after read from db - valid only during current transaction - copy it if plan use data after transaction Commit/Rollback.
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
 - Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `LmdbCursor` and `LmdbDupSortCursor` classes satisfy it. 
-  If your are not familiar with "DupSort" concept, please read [indices.md](./../docs/programmers_guide/indices.md) first.
+  If your are not familiar with "DupSort" concept, please read [dupsort.md](./../docs/programmers_guide/dupsort.md) first.
 
 
 - If Cursor returns err!=nil then key SHOULD be != nil (can be []byte{} for example). 
@@ -135,14 +135,14 @@ Install all database tools: `make db-tools` - tools with prefix `mdb_` is for
 lmdb, `lmdbgo_` is for lmdb written in go, `mdbx_` is for mdbx.
 
 ```
-./build/bin/mdbx_dump -a <datadir>/tg/chaindata | lz4 > dump.lz4
-lz4 -d < dump.lz4 | ./build/bin/mdbx_load -an <datadir>/tg/chaindata
+./build/bin/mdbx_dump -a <datadir>/erigon/chaindata | lz4 > dump.lz4
+lz4 -d < dump.lz4 | ./build/bin/mdbx_load -an <datadir>/erigon/chaindata
 ```
 
 ## How to get table checksum
 
 ```
-./build/bin/mdbx_dump -s table_name <datadir>/tg/chaindata | tail -n +4 | sha256sum # tail here is for excluding header 
+./build/bin/mdbx_dump -s table_name <datadir>/erigon/chaindata | tail -n +4 | sha256sum # tail here is for excluding header 
 
 Header example:
 VERSION=3

@@ -2,10 +2,13 @@ package commands
 
 import (
 	"context"
+	"errors"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/hexutil"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"google.golang.org/grpc/status"
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.
@@ -15,12 +18,26 @@ func (api *APIImpl) Coinbase(ctx context.Context) (common.Address, error) {
 
 // Hashrate implements eth_hashrate. Returns the number of hashes per second that the node is mining with.
 func (api *APIImpl) Hashrate(ctx context.Context) (uint64, error) {
-	return api.ethBackend.GetHashRate(ctx)
+	repl, err := api.mining.HashRate(ctx, &txpool.HashRateRequest{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return 0, errors.New(s.Message())
+		}
+		return 0, err
+	}
+	return repl.HashRate, err
 }
 
 // Mining returns an indication if this node is currently mining.
 func (api *APIImpl) Mining(ctx context.Context) (bool, error) {
-	return api.ethBackend.Mining(ctx)
+	repl, err := api.mining.Mining(ctx, &txpool.MiningRequest{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return false, errors.New(s.Message())
+		}
+		return false, err
+	}
+	return repl.Enabled && repl.Running, err
 }
 
 // GetWork returns a work package for external miner.
@@ -31,14 +48,33 @@ func (api *APIImpl) Mining(ctx context.Context) (bool, error) {
 //   result[2] - 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
 //   result[3] - hex encoded block number
 func (api *APIImpl) GetWork(ctx context.Context) ([4]string, error) {
-	return api.ethBackend.GetWork(ctx)
+	var res [4]string
+	repl, err := api.mining.GetWork(ctx, &txpool.GetWorkRequest{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return res, errors.New(s.Message())
+		}
+		return res, err
+	}
+	res[0] = repl.HeaderHash
+	res[1] = repl.SeedHash
+	res[2] = repl.Target
+	res[3] = repl.BlockNumber
+	return res, nil
 }
 
 // SubmitWork can be used by external miner to submit their POW solution.
 // It returns an indication if the work was accepted.
 // Note either an invalid solution, a stale work a non-existent work will return false.
 func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error) {
-	return api.ethBackend.SubmitWork(ctx, nonce, powHash, digest)
+	repl, err := api.mining.SubmitWork(ctx, &txpool.SubmitWorkRequest{BlockNonce: nonce[:], PowHash: powHash.Bytes(), Digest: digest.Bytes()})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return false, errors.New(s.Message())
+		}
+		return false, err
+	}
+	return repl.Ok, nil
 }
 
 // SubmitHashrate can be used for remote miners to submit their hash rate.
@@ -47,5 +83,12 @@ func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powH
 //
 // It accepts the miner hash rate and an identifier which must be unique
 func (api *APIImpl) SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error) {
-	return api.ethBackend.SubmitHashRate(ctx, hashRate, id)
+	repl, err := api.mining.SubmitHashRate(ctx, &txpool.SubmitHashRateRequest{Rate: uint64(hashRate), Id: id.Bytes()})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return false, errors.New(s.Message())
+		}
+		return false, err
+	}
+	return repl.Ok, nil
 }

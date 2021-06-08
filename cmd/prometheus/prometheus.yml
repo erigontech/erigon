@@ -4,14 +4,14 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
-  - job_name: turbo-geth # example, how to connect prometheus to TG
+  - job_name: erigon # example, how to connect prometheus to Erigon
     metrics_path: /debug/metrics/prometheus
     scheme: http
     static_configs:
       - targets:
-          - turbo-geth:6060 # If TG runned by default docker-compose, then it's available on `turbo-geth` host.
-          - turbo-geth:6061
-          - turbo-geth:6062
+          - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
+          - erigon:6061
+          - erigon:6062
           - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
           - host.docker.internal:6061
           - host.docker.internal:6062
@@ -22,14 +22,14 @@ scrape_configs:
           - 192.168.255.138:6061
           - 192.168.255.138:6062
 
-  - job_name: turbo-geth2 # this job collecting metrics in OpenMetrics format
+  - job_name: erigon2 # this job collecting metrics in OpenMetrics format
     metrics_path: /debug/metrics/prometheus2
     scheme: http
     static_configs:
       - targets:
-          - turbo-geth:6060
-          - turbo-geth:6061
-          - turbo-geth:6062
+          - erigon:6060
+          - erigon:6061
+          - erigon:6062
           - host.docker.internal:6060
           - host.docker.internal:6061
           - host.docker.internal:6062

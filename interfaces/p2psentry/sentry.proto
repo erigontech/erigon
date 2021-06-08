@@ -8,26 +8,53 @@ package sentry;
 option go_package = "./sentry;sentry";
 
 enum MessageId {
+  // ======= eth 65 protocol ===========
+
+  STATUS_65 = 0;
+  GET_BLOCK_HEADERS_65 = 1;
+  BLOCK_HEADERS_65 = 2;
+  BLOCK_HASHES_65 = 3;
+  GET_BLOCK_BODIES_65 = 4;
+  BLOCK_BODIES_65 = 5;
+  GET_NODE_DATA_65 = 6;
+  NODE_DATA_65 = 7;
+  GET_RECEIPTS_65 = 8;
+  RECEIPTS_65 = 9;
+  NEW_BLOCK_HASHES_65 = 10;
+  NEW_BLOCK_65 = 11;
+  TRANSACTIONS_65 = 12;
+  NEW_POOLED_TRANSACTION_HASHES_65 = 13;
+  GET_POOLED_TRANSACTIONS_65 = 14;
+  POOLED_TRANSACTIONS_65 = 15;
+
+
+  // ======= eth 66 protocol ===========
+
   // eth64 announcement messages (no id)
-  NewBlockHashes = 0;
-  NewBlock = 1;
-  Transactions = 2;
+  STATUS_66 = 17;
+  NEW_BLOCK_HASHES_66 = 18;
+  NEW_BLOCK_66 = 19;
+  TRANSACTIONS_66 = 20;
 
   // eth65 announcement messages (no id)
-  NewPooledTransactionHashes = 3;
+  NEW_POOLED_TRANSACTION_HASHES_66 = 21;
 
   // eth66 messages with request-id
-  GetBlockHeaders = 4;
-  GetBlockBodies = 5;
-  GetNodeData = 6;
-  GetReceipts = 7;
-  GetPooledTransactions = 8;
-  BlockHeaders = 9;
-  BlockBodies = 10;
-  NodeData = 11;
-  Receipts = 12;
-  PooledTransactions = 13;
+  GET_BLOCK_HEADERS_66 = 22;
+  GET_BLOCK_BODIES_66 = 23;
+  GET_NODE_DATA_66 = 24;
+  GET_RECEIPTS_66 = 25;
+  GET_POOLED_TRANSACTIONS_66 = 26;
+  BLOCK_HEADERS_66 = 27;
+  BLOCK_BODIES_66 = 28;
+  NODE_DATA_66 = 29;
+  RECEIPTS_66 = 30;
+  POOLED_TRANSACTIONS_66 = 31;
 
+
+
+  // ======= eth 67 protocol ===========
+  // ...
 }
 
 message OutboundMessageData {
@@ -50,9 +77,9 @@ message SendMessageToRandomPeersRequest {
   uint64 max_peers = 2;
 }
 
-message SentPeers { repeated types.H512 peers = 1; }
+message SentPeers {repeated types.H512 peers = 1;}
 
-enum PenaltyKind { Kick = 0; }
+enum PenaltyKind {Kick = 0;}
 
 message PenalizePeerRequest {
   types.H512 peer_id = 1;
@@ -83,6 +110,19 @@ message StatusData {
   uint64 max_block = 5;
 }
 
+enum Protocol {
+  ETH65 = 0;
+  ETH66 = 1;
+}
+
+message SetStatusReply {
+  Protocol protocol = 1;
+}
+
+message MessagesRequest {
+ repeated MessageId ids = 1;
+}
+
 service Sentry {
   rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);
   rpc PeerMinBlock(PeerMinBlockRequest) returns (google.protobuf.Empty);
@@ -91,9 +131,6 @@ service Sentry {
   rpc SendMessageToRandomPeers(SendMessageToRandomPeersRequest)
       returns (SentPeers);
   rpc SendMessageToAll(OutboundMessageData) returns (SentPeers);
-  rpc SetStatus(StatusData) returns (google.protobuf.Empty);
-  rpc ReceiveMessages(google.protobuf.Empty) returns (stream InboundMessage);
-  rpc ReceiveUploadMessages(google.protobuf.Empty)
-      returns (stream InboundMessage);
-  rpc ReceiveTxMessages(google.protobuf.Empty) returns (stream InboundMessage);
+  rpc SetStatus(StatusData) returns (SetStatusReply);
+  rpc Messages(MessagesRequest) returns (stream InboundMessage);
 }

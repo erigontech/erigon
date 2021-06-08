@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/btree"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 // Implements ethdb.Getter for Tx
@@ -52,6 +51,17 @@ func (m *roTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func
 	}
 	defer c.Close()
 	return Walk(c, startkey, fixedbits, walker)
+}
+
+func (m *roTxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *roTxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
+}
+func (m *roTxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return m.tx.ForAmount(bucket, prefix, amount, walker)
 }
 
 func (m *roTxDb) BeginGetter(ctx context.Context) (GetterTx, error) {
@@ -241,17 +251,6 @@ func (m *TxDb) Has(bucket string, key []byte) (bool, error) {
 	return v != nil, nil
 }
 
-func (m *TxDb) DiskSize(ctx context.Context) (common.StorageSize, error) {
-	if m.db == nil {
-		return 0, nil
-	}
-	sz, err := m.db.(HasStats).DiskSize(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return common.StorageSize(sz), nil
-}
-
 func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
 	return 0, MultiPut(m.tx.(RwTx), tuples...)
 }
@@ -280,6 +279,17 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 		}
 	}()
 	return Walk(c, startkey, fixedbits, walker)
+}
+func (m *TxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *TxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
+}
+
+func (m *TxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return m.tx.ForAmount(bucket, prefix, amount, walker)
 }
 
 func (m *TxDb) CommitAndBegin(ctx context.Context) error {

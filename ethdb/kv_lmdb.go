@@ -5,18 +5,19 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/lmdb-go/lmdb"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/prometheus/tsdb/fileutil"
 )
 
@@ -96,7 +97,7 @@ func DefaultBucketConfigs(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg 
 	return defaultBuckets
 }
 
-func (opts LmdbOpts) Open() (kv RwKV, err error) {
+func (opts LmdbOpts) Open() (kv *LmdbKV, err error) {
 	env, err := lmdb.NewEnv()
 	if err != nil {
 		return nil, err
@@ -113,10 +114,7 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 	var logger log.Logger
 	if opts.inMem {
 		logger = log.New("lmdb", "inMem")
-		opts.path, err = ioutil.TempDir(os.TempDir(), "lmdb")
-		if err != nil {
-			return nil, err
-		}
+		opts.path = testKVPath()
 	} else {
 		logger = log.New("lmdb", path.Base(opts.path))
 	}
@@ -185,14 +183,15 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 		db.buckets[name] = cfg
 	}
 
+	buckets := bucketSlice(db.buckets)
 	// Open or create buckets
 	if opts.flags&lmdb.Readonly != 0 {
 		tx, innerErr := db.BeginRo(context.Background())
 		if innerErr != nil {
 			return nil, innerErr
 		}
-		for name, cfg := range db.buckets {
-			if cfg.IsDeprecated {
+		for _, name := range buckets {
+			if db.buckets[name].IsDeprecated {
 				continue
 			}
 			if err = tx.(BucketMigrator).CreateBucket(name); err != nil {
@@ -205,8 +204,8 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 		}
 	} else {
 		if err := db.Update(context.Background(), func(tx RwTx) error {
-			for name, cfg := range db.buckets {
-				if cfg.IsDeprecated {
+			for _, name := range buckets {
+				if db.buckets[name].IsDeprecated {
 					continue
 				}
 				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
@@ -221,9 +220,9 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 
 	// Configure buckets and open deprecated buckets
 	if err := env.View(func(tx *lmdb.Txn) error {
-		for name, cfg := range db.buckets {
+		for _, name := range buckets {
 			// Open deprecated buckets if they exist, don't create
-			if !cfg.IsDeprecated {
+			if !db.buckets[name].IsDeprecated {
 				continue
 			}
 			dbi, createErr := tx.OpenDBI(name, 0)
@@ -263,7 +262,7 @@ func (opts LmdbOpts) Open() (kv RwKV, err error) {
 	return db, nil
 }
 
-func (opts LmdbOpts) MustOpen() RwKV {
+func (opts LmdbOpts) MustOpen() *LmdbKV {
 	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open lmdb: %w", err))
@@ -322,7 +321,10 @@ func (db *LmdbKV) DiskSize(_ context.Context) (uint64, error) {
 }
 
 func (db *LmdbKV) CollectMetrics() {
-	fileInfo, _ := os.Stat(path.Join(db.opts.path, "data.mdb"))
+	fileInfo, err := os.Stat(path.Join(db.opts.path, "data.mdb"))
+	if err != nil {
+		return // ignore error
+	}
 	dbSize.Update(fileInfo.Size())
 }
 
@@ -409,7 +411,65 @@ func (tx *lmdbTx) Comparator(bucket string) dbutils.CmpFunc {
 	return chooseComparator(tx.tx, lmdb.DBI(b.DBI), b)
 }
 
-// All buckets stored as keys of un-named bucket
+func (tx *lmdbTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *lmdbTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *lmdbTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
+}
+
+// All buckets stored as keys of un-named bucketw
 func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	var res []string
 	rawTx := tx.tx
@@ -421,7 +481,10 @@ func (tx *lmdbTx) ExistingBuckets() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	for k, _, _ := c.Get(nil, nil, lmdb.First); k != nil; k, _, _ = c.Get(nil, nil, lmdb.Next) {
+	for k, _, err := c.Get(nil, nil, lmdb.First); k != nil; k, _, err = c.Get(nil, nil, lmdb.Next) {
+		if err != nil {
+			return nil, err
+		}
 		res = append(res, string(k))
 	}
 	c.Close()
@@ -596,7 +659,7 @@ func (tx *lmdbTx) Commit() error {
 	tx.closeCursors()
 
 	commitTimer := time.Now()
-	defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
+	//defer dbCommitBigBatchTimer.UpdateSince(commitTimer)
 
 	if err := tx.tx.Commit(); err != nil {
 		return err
@@ -662,6 +725,24 @@ func (tx *lmdbTx) Put(bucket string, k, v []byte) error {
 	}
 
 	return tx.tx.Put(lmdb.DBI(b.DBI), k, v, 0)
+}
+
+func (tx *lmdbTx) Append(bucket string, k, v []byte) error {
+	c, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return c.Append(k, v)
+}
+
+func (tx *lmdbTx) AppendDup(bucket string, k, v []byte) error {
+	c, err := tx.RwCursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return c.AppendDup(k, v)
 }
 
 func (tx *lmdbTx) Delete(bucket string, k, v []byte) error {
@@ -748,7 +829,10 @@ func (tx *lmdbTx) Has(bucket string, key []byte) (bool, error) {
 }
 
 func (tx *lmdbTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	c, _ := tx.RwCursor(dbutils.Sequence)
+	c, err := tx.RwCursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
@@ -770,7 +854,10 @@ func (tx *lmdbTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 }
 
 func (tx *lmdbTx) ReadSequence(bucket string) (uint64, error) {
-	c, _ := tx.Cursor(dbutils.Sequence)
+	c, err := tx.Cursor(dbutils.Sequence)
+	if err != nil {
+		return 0, err
+	}
 	defer c.Close()
 	_, v, err := c.SeekExact([]byte(bucket))
 	if err != nil && !lmdb.IsNotFound(err) {
@@ -817,8 +904,7 @@ func (tx *lmdbTx) RwCursor(bucket string) (RwCursor, error) {
 }
 
 func (tx *lmdbTx) Cursor(bucket string) (Cursor, error) {
-	c, _ := tx.RwCursor(bucket)
-	return c, nil
+	return tx.RwCursor(bucket)
 }
 
 func (tx *lmdbTx) stdCursor(bucket string) (RwCursor, error) {
@@ -1448,4 +1534,15 @@ func (c *LmdbDupSortCursor) CountDuplicates() (uint64, error) {
 		return 0, fmt.Errorf("in CountDuplicates: %w", err)
 	}
 	return res, nil
+}
+
+func bucketSlice(b dbutils.BucketsCfg) []string {
+	buckets := make([]string, 0, len(b))
+	for name := range b {
+		buckets = append(buckets, name)
+	}
+	sort.Slice(buckets, func(i, j int) bool {
+		return strings.Compare(buckets[i], buckets[j]) < 0
+	})
+	return buckets
 }

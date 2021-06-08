@@ -21,8 +21,9 @@
 #error "C++11 or better is required"
 #endif
 
-#if (defined(_WIN32) || defined(_WIN64)) && MDBX_AVOID_CRT
-#error "CRT is required for C++ API, the MDBX_AVOID_CRT option must be disabled"
+#if (defined(_WIN32) || defined(_WIN64)) && MDBX_WITHOUT_MSVC_CRT
+#error                                                                         \
+    "CRT is required for C++ API, the MDBX_WITHOUT_MSVC_CRT option must be disabled"
 #endif /* Windows */
 
 #ifndef __has_include
@@ -207,7 +208,9 @@ using filehandle = ::mdbx_filehandle_t;
 #if defined(DOXYGEN) ||                                                        \
     (defined(__cpp_lib_filesystem) && __cpp_lib_filesystem >= 201703L &&       \
      (!defined(__MAC_OS_X_VERSION_MIN_REQUIRED) ||                             \
-      __MAC_OS_X_VERSION_MIN_REQUIRED >= 101500))
+      __MAC_OS_X_VERSION_MIN_REQUIRED >= 101500) &&                            \
+     (!defined(__IPHONE_OS_VERSION_MIN_REQUIRED) ||                            \
+      __IPHONE_OS_VERSION_MIN_REQUIRED >= 130100))
 #define MDBX_STD_FILESYSTEM_PATH
 using path = ::std::filesystem::path;
 #elif defined(_WIN32) || defined(_WIN64)
@@ -1649,8 +1652,18 @@ struct LIBMDBX_API_TYPE map_handle {
                               map_handle::state state) noexcept;
     info(const info &) noexcept = default;
     info &operator=(const info &) noexcept = default;
-    MDBX_CXX11_CONSTEXPR ::mdbx::key_mode key_mode() const noexcept;
-    MDBX_CXX11_CONSTEXPR ::mdbx::value_mode value_mode() const noexcept;
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+    MDBX_CXX11_CONSTEXPR
+#else
+    inline
+#endif
+    ::mdbx::key_mode key_mode() const noexcept;
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+    MDBX_CXX11_CONSTEXPR
+#else
+    inline
+#endif
+    ::mdbx::value_mode value_mode() const noexcept;
   };
 };
 
@@ -1813,8 +1826,11 @@ public:
     env::operate_options options;
 
     MDBX_CXX11_CONSTEXPR operate_parameters() noexcept {}
-    MDBX_env_flags_t make_flags(bool accede = true, ///< \copydoc MDBX_ACCEDE
-                                bool use_subdirectory = false) const;
+    MDBX_env_flags_t
+    make_flags(bool accede = true, ///< \copydoc MDBX_ACCEDE
+               bool use_subdirectory =
+                   false ///< use subdirectory to place the DB files
+    ) const;
     static env::mode mode_from_flags(MDBX_env_flags_t) noexcept;
     static env::durability durability_from_flags(MDBX_env_flags_t) noexcept;
     inline static env::reclaiming_options
@@ -2490,6 +2506,9 @@ public:
   /// increase in the length of the value will be twice as slow, since it will
   /// require splitting already filled pages.
   ///
+  /// \param [in] map   A map handle to append
+  /// \param [in] key   A key to be append
+  /// \param [in] value A value to store with the key
   /// \param [in] multivalue_order_preserved
   /// If `multivalue_order_preserved == true` then the same rules applied for
   /// to pages of nested b+tree of multimap's values.
@@ -3254,13 +3273,17 @@ MDBX_CXX11_CONSTEXPR map_handle::info::info(map_handle::flags flags,
                                             map_handle::state state) noexcept
     : flags(flags), state(state) {}
 
-MDBX_CXX11_CONSTEXPR ::mdbx::key_mode
-map_handle::info::key_mode() const noexcept {
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+MDBX_CXX11_CONSTEXPR
+#endif
+::mdbx::key_mode map_handle::info::key_mode() const noexcept {
   return ::mdbx::key_mode(flags & (MDBX_REVERSEKEY | MDBX_INTEGERKEY));
 }
 
-MDBX_CXX11_CONSTEXPR ::mdbx::value_mode
-map_handle::info::value_mode() const noexcept {
+#if CONSTEXPR_ENUM_FLAGS_OPERATIONS
+MDBX_CXX11_CONSTEXPR
+#endif
+::mdbx::value_mode map_handle::info::value_mode() const noexcept {
   return ::mdbx::value_mode(flags & (MDBX_DUPSORT | MDBX_REVERSEDUP |
                                      MDBX_DUPFIXED | MDBX_INTEGERDUP));
 }

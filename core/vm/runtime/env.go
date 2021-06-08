@@ -17,8 +17,8 @@
 package runtime
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 func NewEnv(cfg *Config) *vm.EVM {
@@ -30,6 +30,7 @@ func NewEnv(cfg *Config) *vm.EVM {
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		GetHash:     cfg.GetHashFn,
+		CheckTEVM:   cfg.CheckTEVM,
 		Coinbase:    cfg.Coinbase,
 		BlockNumber: cfg.BlockNumber.Uint64(),
 		Time:        cfg.Time.Uint64(),

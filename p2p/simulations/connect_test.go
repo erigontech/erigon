@@ -19,9 +19,9 @@ package simulations
 import (
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/node"
-	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/p2p/simulations/adapters"
+	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
 )
 
 func newTestNetwork(t *testing.T, nodeCount int) (*Network, []enode.ID) {
@@ -59,6 +59,7 @@ func newTestNetwork(t *testing.T, nodeCount int) (*Network, []enode.ID) {
 }
 
 func TestConnectToLastNode(t *testing.T) {
+	t.Skip("need test for p2p sentry")
 	net, ids := newTestNetwork(t, 10)
 	defer net.Shutdown()
 
@@ -84,6 +85,7 @@ func TestConnectToLastNode(t *testing.T) {
 }
 
 func TestConnectToRandomNode(t *testing.T) {
+	t.Skip("need test for p2p sentry")
 	net, ids := newTestNetwork(t, 10)
 	defer net.Shutdown()
 
@@ -107,6 +109,7 @@ func TestConnectToRandomNode(t *testing.T) {
 }
 
 func TestConnectNodesFull(t *testing.T) {
+	t.Skip("need test for p2p sentry")
 	tests := []struct {
 		name      string
 		nodeCount int
@@ -134,6 +137,7 @@ func TestConnectNodesFull(t *testing.T) {
 }
 
 func TestConnectNodesChain(t *testing.T) {
+	t.Skip("need test for p2p sentry")
 	net, ids := newTestNetwork(t, 10)
 	defer net.Shutdown()
 
@@ -146,6 +150,7 @@ func TestConnectNodesChain(t *testing.T) {
 }
 
 func TestConnectNodesRing(t *testing.T) {
+	t.Skip("need test for p2p sentry")
 	net, ids := newTestNetwork(t, 10)
 	defer net.Shutdown()
 
@@ -158,6 +163,7 @@ func TestConnectNodesRing(t *testing.T) {
 }
 
 func TestConnectNodesStar(t *testing.T) {
+	t.Skip("need test for p2p sentry")
 	net, ids := newTestNetwork(t, 10)
 	defer net.Shutdown()
 

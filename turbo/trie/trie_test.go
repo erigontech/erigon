@@ -20,24 +20,18 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"math/rand"
-	"os"
 	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/turbo/shards"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func init() {
@@ -101,7 +95,7 @@ func TestRandomCases(t *testing.T) {
 		{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000011")}, // step 17
 		{op: 5, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 18
 		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 19
-		// FIXME: fix these testcases for turbo-geth
+		// FIXME: fix these testcases for Erigon
 		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000014")},           // step 20
 		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000015")},           // step 21
 		//{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000016")},         // step 22
@@ -194,7 +188,7 @@ func runRandTest(rt randTest) bool {
 			newtr := New(hash)
 			tr = newtr
 		case opItercheckhash:
-			// FIXME: restore for turbo-geth
+			// FIXME: restore for Erigon
 			/*
 				checktr := New(common.Hash{})
 				it := NewIterator(tr.NodeIterator(nil))
@@ -213,51 +207,6 @@ func runRandTest(rt randTest) bool {
 		}
 	}
 	return true
-}
-
-func BenchmarkGet(b *testing.B)      { benchGet(b, false) }
-func BenchmarkGetDB(b *testing.B)    { benchGet(b, true) }
-func BenchmarkUpdateBE(b *testing.B) { benchUpdate(b, binary.BigEndian) }
-func BenchmarkUpdateLE(b *testing.B) { benchUpdate(b, binary.LittleEndian) }
-
-const benchElemCount = 20000
-
-func benchGet(b *testing.B, commit bool) {
-	trie := new(Trie)
-	var tmpdir string
-	var tmpdb ethdb.Database
-	if commit {
-		tmpdir, tmpdb = tempDB()
-		trie = New(common.Hash{})
-	}
-	k := make([]byte, 32)
-	for i := 0; i < benchElemCount; i++ {
-		binary.LittleEndian.PutUint64(k, uint64(i))
-		trie.Update(k, k)
-	}
-	binary.LittleEndian.PutUint64(k, benchElemCount/2)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		trie.Get(k)
-	}
-	b.StopTimer()
-
-	if commit {
-		tmpdb.Close()
-		os.RemoveAll(tmpdir)
-	}
-}
-
-func benchUpdate(b *testing.B, e binary.ByteOrder) *Trie {
-	trie := newEmpty()
-	k := make([]byte, 32)
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		e.PutUint64(k, uint64(i))
-		trie.Update(k, k)
-	}
-	return trie
 }
 
 // Benchmarks the trie hashing. Since the trie caches the result of any operation,
@@ -293,14 +242,6 @@ func BenchmarkHash(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	trie.Hash()
-}
-
-func tempDB() (string, ethdb.Database) {
-	dir, err := ioutil.TempDir("", "trie-bench")
-	if err != nil {
-		panic(fmt.Sprintf("can't create temporary directory: %v", err))
-	}
-	return dir, ethdb.MustOpen(dir)
 }
 
 func TestDeepHash(t *testing.T) {
@@ -791,26 +732,3 @@ func TestNextSubtreeHex(t *testing.T) {
 //		t.Fatal(err)
 //	}
 //}
-
-func TestCollectRanges(t *testing.T) {
-	sc := shards.NewStateCache(32, 64*1024)
-	sc.SetAccountHashesRead(common.FromHex("00"), 0b11, 0b11, 0b11, []common.Hash{{}, {}})
-	sc.SetAccountHashesRead(common.FromHex("02"), 0b10011, 0b10011, 0b10011, []common.Hash{{}, {}, {}})
-	sc.SetAccountHashesRead(common.FromHex("0200"), 0b1111, 0b1111, 0b1111, []common.Hash{{}, {}, {}, {}})
-	sc.SetAccountHashesRead(common.FromHex("0201"), 0b11, 0b11, 0b11, []common.Hash{{}, {}})
-	sc.SetAccountHashesRead(common.FromHex("03"), 0b11, 0b11, 0b11, []common.Hash{{}, {}})
-	ranges, err := collectMissedAccTrie(func(prefix []byte) (bool, []byte) {
-		if bytes.Equal(prefix, common.FromHex("02")) {
-			return false, nil
-		}
-		if bytes.Equal(prefix, common.FromHex("0200")) {
-			return false, nil
-		}
-		if bytes.Equal(prefix, common.FromHex("020000")) {
-			return false, nil
-		}
-		return true, nil
-	}, []byte{}, sc, nil)
-	require.NoError(t, err)
-	require.Equal(t, fmt.Sprintf("%x", ranges[0]), "020000")
-}

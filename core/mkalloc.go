@@ -34,8 +34,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type allocItem struct{ Addr, Balance *big.Int }

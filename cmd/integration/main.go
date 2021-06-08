@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/cmd/integration/commands"
-	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/integration/commands"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 )
 
 func main() {

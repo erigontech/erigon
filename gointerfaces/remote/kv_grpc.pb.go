@@ -4,7 +4,7 @@ package remote
 
 import (
 	context "context"
-	types "github.com/ledgerwatch/turbo-geth/gointerfaces/types"
+	types "github.com/ledgerwatch/erigon/gointerfaces/types"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -24,6 +24,7 @@ type KVClient interface {
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error)
 	// Tx exposes read-only transactions for the key-value store
 	Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error)
+	ReceiveStateChanges(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (KV_ReceiveStateChangesClient, error)
 }
 
 type kVClient struct {
@@ -74,6 +75,38 @@ func (x *kVTxClient) Recv() (*Pair, error) {
 	return m, nil
 }
 
+func (c *kVClient) ReceiveStateChanges(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (KV_ReceiveStateChangesClient, error) {
+	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[1], "/remote.KV/ReceiveStateChanges", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &kVReceiveStateChangesClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type KV_ReceiveStateChangesClient interface {
+	Recv() (*StateChange, error)
+	grpc.ClientStream
+}
+
+type kVReceiveStateChangesClient struct {
+	grpc.ClientStream
+}
+
+func (x *kVReceiveStateChangesClient) Recv() (*StateChange, error) {
+	m := new(StateChange)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // KVServer is the server API for KV service.
 // All implementations must embed UnimplementedKVServer
 // for forward compatibility
@@ -82,6 +115,7 @@ type KVServer interface {
 	Version(context.Context, *emptypb.Empty) (*types.VersionReply, error)
 	// Tx exposes read-only transactions for the key-value store
 	Tx(KV_TxServer) error
+	ReceiveStateChanges(*emptypb.Empty, KV_ReceiveStateChangesServer) error
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -94,6 +128,9 @@ func (UnimplementedKVServer) Version(context.Context, *emptypb.Empty) (*types.Ve
 }
 func (UnimplementedKVServer) Tx(KV_TxServer) error {
 	return status.Errorf(codes.Unimplemented, "method Tx not implemented")
+}
+func (UnimplementedKVServer) ReceiveStateChanges(*emptypb.Empty, KV_ReceiveStateChangesServer) error {
+	return status.Errorf(codes.Unimplemented, "method ReceiveStateChanges not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -152,6 +189,27 @@ func (x *kVTxServer) Recv() (*Cursor, error) {
 	return m, nil
 }
 
+func _KV_ReceiveStateChanges_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(emptypb.Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(KVServer).ReceiveStateChanges(m, &kVReceiveStateChangesServer{stream})
+}
+
+type KV_ReceiveStateChangesServer interface {
+	Send(*StateChange) error
+	grpc.ServerStream
+}
+
+type kVReceiveStateChangesServer struct {
+	grpc.ServerStream
+}
+
+func (x *kVReceiveStateChangesServer) Send(m *StateChange) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // KV_ServiceDesc is the grpc.ServiceDesc for KV service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -170,6 +228,11 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _KV_Tx_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "ReceiveStateChanges",
+			Handler:       _KV_ReceiveStateChanges_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "remote/kv.proto",

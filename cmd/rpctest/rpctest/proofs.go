@@ -3,16 +3,10 @@ package rpctest
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/turbo/trie"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 func Proofs(chaindata string, url string, block uint64) {
@@ -64,6 +58,7 @@ func Proofs(chaindata string, url string, block uint64) {
 			panic(err1)
 		}
 	}
+	/* TODO: migrate to usage cursors api - and to not use preimages
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -72,7 +67,6 @@ func Proofs(chaindata string, url string, block uint64) {
 	level := 0
 	diffKeys := [][]byte{{}}
 	var newDiffKeys [][]byte
-
 	for len(diffKeys) > 0 && level < 6 {
 
 		fmt.Printf("================================================\n")
@@ -168,4 +162,5 @@ func Proofs(chaindata string, url string, block uint64) {
 	for _, diffKey := range diffKeys {
 		fmt.Printf("%x\n", diffKey)
 	}
+	*/
 }

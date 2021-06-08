@@ -30,11 +30,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // Keys in the node database.
@@ -63,6 +63,8 @@ const (
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
 	dbVersion        = 9
 )
+
+var UseMDBX = true
 
 var (
 	errInvalidIP = errors.New("invalid IP")
@@ -95,19 +97,37 @@ var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB() (*DB, error) {
-	db, err := ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
-	if err != nil {
-		return nil, err
+	db := &DB{quit: make(chan struct{})}
+	var err error
+	if UseMDBX {
+		db.kv, err = ethdb.NewMDBX().InMem().Label(ethdb.Sentry).WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		db.kv, err = ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return &DB{kv: db, quit: make(chan struct{})}, nil
+	return db, nil
 }
 
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	kv, err := ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
-	if err != nil {
-		return nil, err
+	var kv ethdb.RwKV
+	var err error
+	if UseMDBX {
+		kv, err = ethdb.NewMDBX().Path(path).Label(ethdb.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		kv, err = ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+		if err != nil {
+			return nil, err
+		}
 	}
 	// The nodes contained in the cache correspond to a certain protocol version.
 	// Flush all nodes if the version doesn't match.
@@ -580,6 +600,10 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 
 // close flushes and closes the database files.
 func (db *DB) Close() {
+	if db.quit == nil {
+		return
+	}
 	close(db.quit)
+	db.quit = nil
 	db.kv.Close()
 }

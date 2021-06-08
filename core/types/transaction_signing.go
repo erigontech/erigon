@@ -23,11 +23,11 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/u256"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/crypto/secp256k1"
-	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/secp256k1"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
@@ -37,11 +37,14 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	var signer Signer
 	var chainId uint256.Int
 	if config.ChainID != nil {
-		chainId.SetFromBig(config.ChainID)
+		overflow := chainId.SetFromBig(config.ChainID)
+		if overflow {
+			panic(fmt.Errorf("chainID higher than 2^256-1"))
+		}
 	}
 	signer.unprotected = true
 	switch {
-	case config.IsAleut(blockNumber) || config.IsBaikal(blockNumber):
+	case config.IsLondon(blockNumber):
 		// All transaction types are still supported
 		signer.protected = true
 		signer.accesslist = true
@@ -82,11 +85,14 @@ func MakeFrontierSigner() *Signer {
 func LatestSigner(config *params.ChainConfig) *Signer {
 	var signer Signer
 	signer.unprotected = true
-	chainId, _ := uint256.FromBig(config.ChainID)
+	chainId, overflow := uint256.FromBig(config.ChainID)
+	if overflow {
+		panic(fmt.Errorf("chainID higher than 2^256-1"))
+	}
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
 	if config.ChainID != nil {
-		if config.AleutBlock != nil {
+		if config.LondonBlock != nil {
 			signer.dynamicfee = true
 		}
 		if config.BerlinBlock != nil {
@@ -112,7 +118,10 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 	if chainID == nil {
 		return &signer
 	}
-	chainId, _ := uint256.FromBig(chainID)
+	chainId, overflow := uint256.FromBig(chainID)
+	if overflow {
+		panic(fmt.Errorf("chainID higher than 2^256-1"))
+	}
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
 	signer.protected = true
