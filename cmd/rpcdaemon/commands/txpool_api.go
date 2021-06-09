@@ -55,19 +55,15 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		addr := common.BytesToAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].Type {
 		case proto_txpool.AllReply_PENDING:
-			list, ok := pending[addr]
-			if !ok {
-				list = make([]types.Transaction, 0, 4)
-				pending[addr] = list
+			if _, ok := pending[addr]; !ok {
+				pending[addr] = make([]types.Transaction, 0, 4)
 			}
-			list = append(list, txn)
+			queued[addr] = append(queued[addr], txn)
 		case proto_txpool.AllReply_QUEUED:
-			list, ok := queued[addr]
-			if !ok {
-				list = make([]types.Transaction, 0, 4)
-				queued[addr] = list
+			if _, ok := queued[addr]; !ok {
+				queued[addr] = make([]types.Transaction, 0, 4)
 			}
-			list = append(list, txn)
+			queued[addr] = append(queued[addr], txn)
 		}
 	}
 
