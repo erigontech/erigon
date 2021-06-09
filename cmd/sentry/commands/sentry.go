@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"crypto/ecdsa"
 	"fmt"
 	"os"
 	"path"
@@ -9,14 +10,15 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/p2p/netutil"
+	node2 "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
-)
-
-var (
-	GitCommit, GitBranch string
 )
 
 var (
@@ -82,8 +84,42 @@ var rootCmd = &cobra.Command{
 			p = eth.ETH65
 		}
 
-		nodeConfig := node.NewNodeConfig(node.Params{GitCommit: GitCommit, GitBranch: GitBranch})
-		return download.Sentry(nodeConfig.NodeName(), datadir, natSetting, port, sentryAddr, staticPeers, discoveryDNS, nodiscover, netRestrict, uint(p))
+		p2pConfig := node.DefaultConfig.P2P
+		p2pConfig.NoDiscovery = nodiscover
+		if netRestrict != "" {
+			p2pConfig.NetRestrict = new(netutil.Netlist)
+			p2pConfig.NetRestrict.Add(netRestrict)
+		}
+		if staticPeers != nil {
+			if err := utils.SetStaticPeers(&p2pConfig, staticPeers); err != nil {
+				return err
+			}
+		}
+		serverKey := nodeKey(path.Join(datadir, "erigon", "nodekey"))
+		natif, err := nat.Parse(natSetting)
+		if err != nil {
+			return fmt.Errorf("invalid nat option %s: %v", natSetting, err)
+		}
+		p2pConfig.NAT = natif
+		p2pConfig.PrivateKey = serverKey
+
+		var enodeDBPath string
+		switch p {
+		case eth.ETH65:
+			enodeDBPath = path.Join(datadir, "nodes", "eth65")
+		case eth.ETH66:
+			enodeDBPath = path.Join(datadir, "nodes", "eth66")
+		default:
+			return fmt.Errorf("unknown protocol: %v", protocol)
+		}
+
+		nodeConfig := node2.NewNodeConfig(node2.Params{})
+		p2pConfig.Name = nodeConfig.NodeName()
+		p2pConfig.Logger = log.New()
+		p2pConfig.NodeDatabase = enodeDBPath
+		p2pConfig.ListenAddr = fmt.Sprintf(":%d", port)
+
+		return download.Sentry(datadir, sentryAddr, discoveryDNS, &p2pConfig, uint(p))
 	},
 }
 
@@ -94,4 +130,19 @@ func Execute() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func nodeKey(keyfile string) *ecdsa.PrivateKey {
+	if key, err := crypto.LoadECDSA(keyfile); err == nil {
+		return key
+	}
+	// No persistent key found, generate and store a new one.
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
+	}
+	if err := crypto.SaveECDSA(keyfile, key); err != nil {
+		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
+	}
+	return key
 }

@@ -680,16 +680,24 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 	urls := SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
-	for _, url := range urls {
-		if url != "" {
-			node, err := enode.Parse(enode.ValidSchemes, url)
-			if err != nil {
-				log.Error("Static peer URL invalid", "enode", url, "err", err)
-				continue
-			}
-			cfg.StaticNodes = append(cfg.StaticNodes, node)
-		}
+	err := SetStaticPeers(cfg, urls)
+	if err != nil {
+		log.Error("setStaticPeers", "err", err)
 	}
+}
+
+func SetStaticPeers(cfg *p2p.Config, urls []string) error {
+	for _, url := range urls {
+		if url == "" {
+			continue
+		}
+		node, err := enode.Parse(enode.ValidSchemes, url)
+		if err != nil {
+			return fmt.Errorf("static peer URL invalid: %s, %w", url, err)
+		}
+		cfg.StaticNodes = append(cfg.StaticNodes, node)
+	}
+	return nil
 }
 
 // setListenAddress creates a TCP listening address string from set command
