@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package txpool;
+
+option go_package = "./txpool;txpool";
+
+message OnPendingBlockRequest {}
+message OnPendingBlockReply {
+  bytes rplBlock = 1;
+}
+
+message OnMinedBlockRequest {}
+message OnMinedBlockReply {
+  bytes rplBlock = 1;
+}
+
+message OnPendingLogsRequest {}
+message OnPendingLogsReply {
+  bytes rplLogs = 1;
+}
+
+
+message GetWorkRequest {}
+
+message GetWorkReply {
+  string headerHash = 1; // 32 bytes hex encoded current block header pow-hash
+  string seedHash = 2; // 32 bytes hex encoded seed hash used for DAG
+  string target = 3;  // 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
+  string blockNumber = 4; // hex encoded block number
+}
+
+message SubmitWorkRequest {
+  bytes blockNonce = 1;
+  bytes powHash   = 2;
+  bytes digest = 3;
+}
+
+message SubmitWorkReply {
+  bool ok = 1;
+}
+
+message SubmitHashRateRequest {
+  uint64 rate = 1;
+  bytes id = 2;
+}
+message SubmitHashRateReply {
+  bool ok = 1;
+}
+
+message HashRateRequest {}
+message HashRateReply {
+  uint64 hashRate = 1;
+}
+
+message MiningRequest {}
+message MiningReply {
+  bool enabled = 1;
+  bool running = 2;
+}
+
+service Mining {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  // subscribe to pending blocks event
+  rpc OnPendingBlock(OnPendingBlockRequest) returns (stream OnPendingBlockReply);
+  // subscribe to mined blocks event
+  rpc OnMinedBlock(OnMinedBlockRequest) returns (stream OnMinedBlockReply);
+  // subscribe to pending blocks event
+  rpc OnPendingLogs(OnPendingLogsRequest) returns (stream OnPendingLogsReply);
+
+
+  // GetWork returns a work package for external miner.
+  //
+  // The work package consists of 3 strings:
+  //   result[0] - 32 bytes hex encoded current block header pow-hash
+  //   result[1] - 32 bytes hex encoded seed hash used for DAG
+  //   result[2] - 32 bytes hex encoded boundary condition ("target"), 2^256/difficulty
+  //   result[3] - hex encoded block number
+  rpc GetWork(GetWorkRequest) returns (GetWorkReply);
+
+  // SubmitWork can be used by external miner to submit their POW solution.
+  // It returns an indication if the work was accepted.
+  // Note either an invalid solution, a stale work a non-existent work will return false.
+  rpc SubmitWork(SubmitWorkRequest) returns (SubmitWorkReply);
+
+  // SubmitHashRate can be used for remote miners to submit their hash rate.
+  // This enables the node to report the combined hash rate of all miners
+  // which submit work through this node.
+  //
+  // It accepts the miner hash rate and an identifier which must be unique
+  // between nodes.
+  rpc SubmitHashRate(SubmitHashRateRequest) returns (SubmitHashRateReply);
+
+  // HashRate returns the current hashrate for local CPU miner and remote miner.
+  rpc HashRate(HashRateRequest) returns (HashRateReply);
+
+  // Mining returns an indication if this node is currently mining and it's mining configuration
+  rpc Mining(MiningRequest) returns (MiningReply);
+}
