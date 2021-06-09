@@ -558,7 +558,7 @@ var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, Me
 // setNodeKey creates a node key from set command line flags, either loading it
 // from a file or as a specified hex value. If neither flags were provided, this
 // method returns nil and an emphemeral key is to be generated.
-func setNodeKey(ctx *cli.Context, cfg *p2p.Config) {
+func setNodeKey(ctx *cli.Context, cfg *p2p.Config, dataDir string) {
 	var (
 		hex  = ctx.GlobalString(NodeKeyHexFlag.Name)
 		file = ctx.GlobalString(NodeKeyFileFlag.Name)
@@ -578,6 +578,8 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config) {
 			Fatalf("Option %q: %v", NodeKeyHexFlag.Name, err)
 		}
 		cfg.PrivateKey = key
+	default:
+		cfg.PrivateKey = nodeKey(path.Join(dataDir, "erigon", "nodekey"))
 	}
 }
 
@@ -815,7 +817,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
-	setNodeKey(ctx, cfg)
+	setNodeKey(ctx, cfg, nodeName, dataDir)
 	setNAT(ctx, cfg)
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)
