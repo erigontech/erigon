@@ -176,7 +176,6 @@ func (h Header) EncodingSize() int {
 
 func (h Header) EncodeRLP(w io.Writer) error {
 	// Precompute the size of the encoding
-	//encodingSize := 0
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
