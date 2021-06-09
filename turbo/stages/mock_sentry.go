@@ -221,6 +221,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			batchSize,
 		),
 		stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
+		stagedsync.StageHeadersSnapshotGenCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
@@ -378,7 +379,9 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		}
 	}
 	// Check if the latest header was imported or rolled back
-	if rawdb.ReadHeader(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
+	if td, tdErr := rawdb.ReadTd(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()); tdErr != nil {
+		return tdErr
+	} else if td == nil {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil

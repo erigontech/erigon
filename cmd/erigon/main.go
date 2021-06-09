@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/log"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
@@ -31,17 +30,12 @@ func main() {
 
 func runErigon(cliCtx *cli.Context) {
 	// creating staged sync with all default parameters
-	sync := stagedsync.New(
-		stagedsync.DefaultStages(),
-		stagedsync.DefaultUnwindOrder(),
-		stagedsync.OptionalParameters{},
-	)
 
 	ctx, _ := utils.RootContext()
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", gitBranch, "git_tag", gitTag, "git_commit", gitCommit)
-	eri := node.New(cliCtx, sync, node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
+	eri := node.New(cliCtx, node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
 	eri.SetP2PListenFunc(func(network, addr string) (net.Listener, error) {
 		var lc net.ListenConfig
 		return lc.Listen(ctx, network, addr)

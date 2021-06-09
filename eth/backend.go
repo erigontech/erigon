@@ -397,6 +397,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 		bodyDownloadTimeoutSeconds,
 		backend.downloadServer,
 		tmpdir,
+		snapshotsDir,
 		backend.txPool,
 		backend.txPoolP2PServer,
 	)

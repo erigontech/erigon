@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -121,9 +122,9 @@ func lastSnapshot(db ethdb.RwKV) (uint64, error) {
 
 	lastEnc, err := tx.GetOne(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
 	if err != nil {
-		if !errors.Is(err, ethdb.ErrKeyNotFound) {
-			log.Error("can't check last snapshot", "err", err)
-		}
+		return 0, fmt.Errorf("failed check last clique snapshot: %d", err)
+	}
+	if len(lastEnc) == 0 {
 		return 0, ErrNotFound
 	}
 
