@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -372,14 +373,16 @@ func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Add
 		ct.tos[to] = false
 	}
 
-	if !created && create && ct.hasTEVM != nil {
-		has, err := ct.hasTEVM(codeHash)
-		if !has {
-			ct.tos[to] = true
-		}
+	if !created && create {
+		if !accounts.IsEmptyCodeHash(codeHash) && ct.hasTEVM != nil {
+			has, err := ct.hasTEVM(codeHash)
+			if !has {
+				ct.tos[to] = true
+			}
 
-		if err != nil {
-			log.Warn("while CaptureStart", "error", err)
+			if err != nil {
+				log.Warn("while CaptureStart", "error", err)
+			}
 		}
 	}
 	return nil

@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -61,28 +62,24 @@ func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock u
 	defer c.Close()
 
 	var (
-		codeHash          common.Hash
-		codeHashBytes     []byte
-		contractAddr      common.Address
-		contractAddrBytes []byte
-		addrHash          common.Hash
-		inc               []byte
-		evmContract       []byte
-		transpiledCode    []byte
-		ok                bool
+		codeHash       common.Hash
+		codeHashBytes  []byte
+		addr           common.Address
+		addrBytes      []byte
+		evmContract    []byte
+		transpiledCode []byte
+		ok             bool
 	)
+
+	stateReader := state.NewPlainStateReader(batch)
 
 	excludedAddress := common.Address{}
 	excludedAddress[len(excludedAddress)-1] = 1
 	empty := common.Address{}
-	emptyHash := common.Hash{}
 
 	observedAddresses := map[common.Address]struct{}{
 		empty:           {},
 		excludedAddress: {},
-	}
-	excludedHashes := map[common.Hash]struct{}{
-		emptyHash: {},
 	}
 	codeHashKey := make([]byte, common.HashLength+dbutils.NumberLength)
 
@@ -116,72 +113,67 @@ func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock u
 			continue
 		}
 
-		contractAddrBytes = addrStatus[:len(addrStatus)-1]
-		contractAddr = common.BytesToAddress(contractAddrBytes)
+		addrBytes = addrStatus[:len(addrStatus)-1]
+		addr = common.BytesToAddress(addrBytes)
 
-		_, ok = observedAddresses[contractAddr]
+		_, ok = observedAddresses[addr]
 		if ok {
 			continue
 		}
-		observedAddresses[contractAddr] = struct{}{}
+		observedAddresses[addr] = struct{}{}
 
-		inc, err = batch.GetOne(dbutils.IncarnationMapBucket, contractAddrBytes)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			fmt.Println("===-CONTINUE-0.0", addrStatus[len(addrStatus)-1], addrStatus[len(addrStatus)-1]&4, common.BytesToAddress(addrStatus[:len(addrStatus)-1]).String(), common.BytesToHash(codeHashBytes).String())
+		acc, err := stateReader.ReadAccountData(addr)
+		if err != nil {
+			if errors.Is(err, ethdb.ErrKeyNotFound) {
+				continue
+			}
+			return fmt.Errorf("can't read account by address %q: %w", addr, err)
+		}
+		if acc == nil {
 			continue
 		}
-		if err != nil {
-			return fmt.Errorf("can't read code incarnation bucket by address %q: %w", contractAddr, err)
-		}
 
-		addrHash, err = common.HashData(contractAddrBytes)
-		if err != nil {
-			return fmt.Errorf("can't get address hash from address %q: %w", contractAddr, err)
-		}
-
-		copy(codeHashKey[:common.HashLength], addrHash[:])
-		copy(codeHashKey[common.HashLength:], inc)
-
-		codeHashBytes, err = batch.GetOne(dbutils.ContractCodeBucket, codeHashKey)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			fmt.Println("===-CONTINUE-0", addrStatus[len(addrStatus)-1], addrStatus[len(addrStatus)-1]&4, common.BytesToAddress(addrStatus[:len(addrStatus)-1]).String(), common.BytesToHash(codeHashBytes).String())
+		codeHash = acc.CodeHash
+		if ok := accounts.IsEmptyCodeHash(codeHash); ok {
 			continue
 		}
-		if err != nil {
-			return fmt.Errorf("can't read code bucket by address %q: %w", contractAddr, err)
-		}
 
-		codeHash = common.BytesToHash(codeHashBytes)
-		_, ok := excludedHashes[codeHash]
-		if ok {
-			fmt.Println("===-CONTINUE-1", addrStatus[len(addrStatus)-1], addrStatus[len(addrStatus)-1]&4, contractAddr, common.BytesToHash(codeHashBytes).String())
-			continue
+		codeHashBytes, err = batch.GetOne(dbutils.CodeBucket, codeHashKey)
+		if err != nil {
+			if errors.Is(err, ethdb.ErrKeyNotFound) {
+				continue
+			}
+			return fmt.Errorf("can't read code bucket by address %q: %w", addr, err)
 		}
 
 		// check if we already have TEVM code
 		ok, err = batch.Has(dbutils.ContractTEVMCodeBucket, codeHashBytes)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return fmt.Errorf("cannot check TEVM code %q: %w", common.BytesToHash(codeHashBytes), err)
+		if err != nil {
+			if errors.Is(err, ethdb.ErrKeyNotFound) {
+				continue
+			}
+			return fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
 		}
 		if ok {
-			fmt.Println("===-CONTINUE-2", addrStatus[len(addrStatus)-1], addrStatus[len(addrStatus)-1]&4, common.BytesToAddress(addrStatus[:len(addrStatus)-1]).String(), common.BytesToHash(codeHashBytes).String())
 			continue
 		}
 
 		// load the contract code. don't use batch to prevent a data race on creating a new batch variable.
 		evmContract, err = batch.GetOne(dbutils.CodeBucket, codeHashBytes)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			continue
-		}
 		if err != nil {
+			if errors.Is(err, ethdb.ErrKeyNotFound) {
+				continue
+			}
 			return fmt.Errorf("can't read pending code translations: %w", err)
 		}
 
 		// call a transpiler
 		transpiledCode, err = transpileCode(evmContract)
 		if err != nil {
-			return fmt.Errorf("contract %q cannot be translated: %w",
-				common.BytesToHash(codeHashBytes).String(), err)
+			if errors.Is(err, ethdb.ErrKeyNotFound) {
+				continue
+			}
+			return fmt.Errorf("contract %q cannot be translated: %w", common.BytesToHash(codeHashBytes).String(), err)
 		}
 
 		// store TEVM contract code
@@ -190,8 +182,6 @@ func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock u
 			return fmt.Errorf("cannot store TEVM code %q: %w", common.BytesToHash(codeHashBytes), err)
 		}
 
-		fmt.Println("===-", addrStatus[len(addrStatus)-1], addrStatus[len(addrStatus)-1]&4, common.BytesToAddress(addrStatus[:len(addrStatus)-1]).String(), common.BytesToHash(codeHashBytes).String())
-
 		stageProgress++
 
 		currentSize := batch.BatchSize()
@@ -199,24 +189,20 @@ func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock u
 
 		if updateProgress {
 			if err = batch.Commit(); err != nil {
-				return fmt.Errorf("cannot commit the batch of translations on %q: %w",
-					common.BytesToHash(codeHashBytes), err)
+				return fmt.Errorf("cannot commit the batch of translations on %q: %w", codeHash, err)
 			}
 
 			if !useExternalTx {
 				if err = s.Update(tx, stageProgress); err != nil {
-					return fmt.Errorf("cannot update the stage status on %q: %w",
-						common.BytesToHash(codeHashBytes), err)
+					return fmt.Errorf("cannot update the stage status on %q: %w", codeHash, err)
 				}
 				if err = tx.Commit(); err != nil {
-					return fmt.Errorf("cannot commit the external transation on %q: %w",
-						common.BytesToHash(codeHashBytes), err)
+					return fmt.Errorf("cannot commit the external transation on %q: %w", codeHash, err)
 				}
 
 				tx, err = cfg.db.BeginRw(context.Background())
 				if err != nil {
-					return fmt.Errorf("cannot begin the batch transaction on %q: %w",
-						common.BytesToHash(codeHashBytes), err)
+					return fmt.Errorf("cannot begin the batch transaction on %q: %w", codeHash, err)
 				}
 
 				// TODO: This creates stacked up deferrals
@@ -253,8 +239,6 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 }
 
 func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
-	os.Exit(1)
-
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error

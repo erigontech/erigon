@@ -160,6 +160,11 @@ func HeadersForward(
 				// if this is not an initial cycle, we need to react quickly when new headers are coming in
 				break
 			}
+			if headerInserter.GetHighest() >= 1_750_000 {
+				fmt.Println("!!!!!!!!!!!! DEBUG - DONE STAGE 1")
+				break
+			}
+
 			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
 			if inSync {
 				break

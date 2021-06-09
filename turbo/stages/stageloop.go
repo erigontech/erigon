@@ -321,11 +321,9 @@ func NewStagedSync2(
 			pruningDistance,
 			batchSize,
 			nil,
-			nil,
-			nil,
 			controlServer.ChainConfig,
 			controlServer.Engine,
-			&vm.Config{NoReceipts: !sm.Receipts},
+			&vm.Config{NoReceipts: !sm.Receipts, EnableTEMV: sm.TEVM},
 			tmpdir,
 		),
 		stagedsync.StageTranspileCfg(

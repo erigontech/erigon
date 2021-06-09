@@ -68,8 +68,6 @@ func StageExecuteBlocksCfg(
 	writeTEVM bool,
 	pruningDistance uint64,
 	BatchSize datasize.ByteSize,
-	ReaderBuilder StateReaderBuilder,
-	WriterBuilder StateWriterBuilder,
 	ChangeSetHook ChangeSetHook,
 	chainConfig *params.ChainConfig,
 	engine consensus.Engine,
@@ -171,7 +169,7 @@ func executeBlock(
 				v[common.AddressLength] |= 2
 			}
 			// TEVM marking still untranslated contracts
-			if cfg.vmConfig.TEMV {
+			if cfg.vmConfig.EnableTEMV {
 				if created = callTracer.tos[addr]; created {
 					v[common.AddressLength] |= 4
 				}
@@ -281,7 +279,7 @@ Loop:
 
 		var checkTEVMCode func(contractHash common.Hash) (bool, error)
 
-		if cfg.vmConfig.TEMV {
+		if cfg.vmConfig.EnableTEMV {
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 

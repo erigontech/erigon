@@ -142,7 +142,7 @@ var (
 
 	//TEVMCodeBucket -
 	//key - contract code hash
-	//value - contract EVTM code
+	//value - contract TEVM code
 	ContractTEVMCodeBucket = "TEVMCode"
 )
 

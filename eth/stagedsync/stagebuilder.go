@@ -264,8 +264,6 @@ func DefaultStages() StageBuilders {
 					world.storageMode.TEVM,
 					0,
 					world.BatchSize,
-					world.stateReaderBuilder,
-					world.stateWriterBuilder,
 					nil,
 					world.ChainConfig,
 					world.Engine,

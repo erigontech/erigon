@@ -32,7 +32,7 @@ type OptionalParameters struct {
 	StateWriterBuilder StateWriterBuilder
 
 	SnapshotDir      string
-	TorrnetClient    *snapshotsync.Client
+	TorrentClient    *snapshotsync.Client
 	SnapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
@@ -76,7 +76,7 @@ func (stagedSync *StagedSync) Prepare(
 	if vmConfig == nil {
 		vmConfig = &vm.Config{}
 	}
-	vmConfig.TEMV = storageMode.TEVM
+	vmConfig.EnableTEMV = storageMode.TEVM
 
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
@@ -99,7 +99,7 @@ func (stagedSync *StagedSync) Prepare(
 			InitialCycle:       initialCycle,
 			mining:             miningConfig,
 			snapshotsDir:       stagedSync.params.SnapshotDir,
-			btClient:           stagedSync.params.TorrnetClient,
+			btClient:           stagedSync.params.TorrentClient,
 			SnapshotBuilder:    stagedSync.params.SnapshotMigrator,
 			Accumulator:        accumulator,
 		},
@@ -125,7 +125,7 @@ func (stagedSync *StagedSync) Prepare(
 }
 
 func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
-	stagedSync.params.TorrnetClient = client
+	stagedSync.params.TorrentClient = client
 	stagedSync.params.SnapshotDir = snapshotsDir
 	stagedSync.params.SnapshotMigrator = snapshotMigrator
 }
