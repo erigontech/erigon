@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -66,7 +65,7 @@ type Genesis struct {
 	Mixhash    common.Hash         `json:"mixHash"`
 	Coinbase   common.Address      `json:"coinbase"`
 	Alloc      GenesisAlloc        `json:"alloc"      gencodec:"required"`
-	Seal       []rlp.RawValue      `json:"seal"`
+	Seal       [][]byte            `json:"seal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -590,8 +589,9 @@ func DefaultSokolGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:    params.SokolChainConfig,
 		Timestamp: 0x0,
-		Seal: []rlp.RawValue{
-			hexutil.MustDecode("0xb8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		Seal: [][]byte{
+			common.FromHex(""),
+			common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		},
 		GasLimit:   0x663BE0,
 		Difficulty: big.NewInt(0x20000),

@@ -88,7 +88,7 @@ type Header struct {
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFee"`
 	Eip1559     bool           // to avoid relying on BaseFee != nil for that
-	Seal        []rlp.RawValue // AuRa POA network field
+	Seal        [][]byte       // AuRa POA network field
 	WithSeal    bool           // to avoid relying on Seal != nil for that
 }
 
@@ -96,12 +96,24 @@ func (h Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
+	var sealListLen int
 	if h.WithSeal {
-		encodingSize++
 		for i := range h.Seal {
-			//encodingSize++
-			encodingSize += len(h.Seal[i])
+			sealListLen++
+			switch len(h.Seal[i]) {
+			case 0:
+			case 1:
+				if h.Seal[i][0] >= 128 {
+					sealListLen++
+				}
+			default:
+				if len(h.Seal[i]) >= 56 {
+					sealListLen += (bits.Len(uint(len(h.Seal[i]))) + 7) / 8
+				}
+				sealListLen += len(h.Seal[i])
+			}
 		}
+		encodingSize += sealListLen
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
@@ -166,12 +178,25 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	// Precompute the size of the encoding
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
+
+	var sealListLen int
 	if h.WithSeal {
-		encodingSize++
 		for i := range h.Seal {
-			//encodingSize++
-			encodingSize += len(h.Seal[i])
+			sealListLen++
+			switch len(h.Seal[i]) {
+			case 0:
+			case 1:
+				if h.Seal[i][0] >= 128 {
+					sealListLen++
+				}
+			default:
+				if len(h.Seal[i]) >= 56 {
+					sealListLen += (bits.Len(uint(len(h.Seal[i]))) + 7) / 8
+				}
+				sealListLen += len(h.Seal[i])
+			}
 		}
+		encodingSize += sealListLen
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
@@ -351,12 +376,8 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.WithSeal {
-		b[0] = 128
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
 		for i := range h.Seal {
-			if _, err := w.Write(h.Seal[i]); err != nil {
+			if err := EncodeString(h.Seal[i], w, b[:]); err != nil {
 				return err
 			}
 		}
@@ -482,7 +503,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	if h.WithSeal {
 		h.WithSeal = true
-		for b, err = s.Raw(); err == nil; b, err = s.Raw() {
+		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
 			h.Seal = append(h.Seal, make(rlp.RawValue, len(b)))
 			copy(h.Seal[len(h.Seal)-1][:], b)
 		}
@@ -963,7 +984,7 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.Extra, h.Extra)
 	}
 	if len(h.Seal) > 0 {
-		cpy.Seal = make([]rlp.RawValue, len(h.Seal))
+		cpy.Seal = make([][]byte, len(h.Seal))
 		for i := range h.Seal {
 			cpy.Seal[i] = common.CopyBytes(h.Seal[i])
 		}
