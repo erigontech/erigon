@@ -13,7 +13,7 @@ import (
 
 // BlockReward returns the block reward for this block
 // func (api *ErigonImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-//	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+//	tx, err := api.db.Begin(ctx, ethdb.RO)
 //	if err != nil {
 //		return Issuance{}, err
 //	}
@@ -24,7 +24,7 @@ import (
 
 // UncleReward returns the uncle reward for this block
 // func (api *ErigonImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-//	tx, err := api.dbReader.Begin(ctx, ethdb.RO)
+//	tx, err := api.db.Begin(ctx, ethdb.RO)
 //	if err != nil {
 //		return Issuance{}, err
 //	}

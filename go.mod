@@ -64,7 +64,7 @@ require (
 	golang.org/x/sys v0.0.0-20210420205809-ac73e9fd8988
 	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
 	golang.org/x/tools v0.0.0-20210106214847-113979e3529a
-	google.golang.org/grpc v1.36.0
+	google.golang.org/grpc v1.37.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
 	google.golang.org/protobuf v1.26.0
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
