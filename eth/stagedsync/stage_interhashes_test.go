@@ -125,20 +125,23 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	encoded := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(encoded)
 
-	hash1 := common.HexToHash("0x0f56100000000000000000000000000000000000000000000000000000000000")
+	hash1 := common.HexToHash("0x30af561000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash1[:], encoded))
 
-	hash2 := common.HexToHash("0x0f56900000000000000000000000000000000000000000000000000000000000")
+	hash2 := common.HexToHash("0x30af569000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash2[:], encoded))
 
-	hash3 := common.HexToHash("0x0f65000000000000000000000000000000000000000000000000000000000000")
+	hash3 := common.HexToHash("0x30af650000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash3[:], encoded))
 
-	hash4 := common.HexToHash("0x0f6f000000000000000000000000000000000000000000000000000000000000")
+	hash4 := common.HexToHash("0x30af6f0000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash4[:], encoded))
 
-	hash5 := common.HexToHash("0x0f8f000000000000000000000000000000000000000000000000000000000000")
+	hash5 := common.HexToHash("0x30af8f0000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash5[:], encoded))
+
+	hash6 := common.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
+	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash6[:], encoded))
 
 	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
@@ -153,12 +156,19 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	})
 	assert.Nil(t, err)
 
-	assert.Equal(t, 1, len(accountTrie))
+	assert.Equal(t, 2, len(accountTrie))
 
-	hasState, hasTree, hasHash, hashes, rootHash := trie.UnmarshalTrieNode(accountTrie[string(common.FromHex("000f"))])
-	assert.Equal(t, uint16(0b101100000), hasState)
-	assert.Equal(t, uint16(0b000000000), hasTree)
-	assert.Equal(t, uint16(0b001000000), hasHash)
-	assert.Equal(t, common.HashLength, len(hashes))
-	assert.Equal(t, 0, len(rootHash))
+	hasState1, hasTree1, hasHash1, hashes, rootHash1 := trie.UnmarshalTrieNode(accountTrie[string(common.FromHex("03"))])
+	assert.Equal(t, uint16(0b11), hasState1)
+	assert.Equal(t, uint16(0b01), hasTree1)
+	assert.Equal(t, uint16(0b00), hasHash1)
+	assert.Equal(t, 0, len(hashes))
+	assert.Equal(t, 0, len(rootHash1))
+
+	hasState2, hasTree2, hasHash2, hashes2, rootHash2 := trie.UnmarshalTrieNode(accountTrie[string(common.FromHex("03000a0f"))])
+	assert.Equal(t, uint16(0b101100000), hasState2)
+	assert.Equal(t, uint16(0b000000000), hasTree2)
+	assert.Equal(t, uint16(0b001000000), hasHash2)
+	assert.Equal(t, common.HashLength, len(hashes2))
+	assert.Equal(t, 0, len(rootHash2))
 }
