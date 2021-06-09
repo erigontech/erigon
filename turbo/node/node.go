@@ -69,7 +69,7 @@ func New(
 	prepareBuckets(optionalParams.CustomBuckets)
 	prepare(ctx)
 
-	nodeConfig := NewNodeConfig(optionalParams)
+	nodeConfig := NewNodeConfig()
 	utils.SetNodeConfig(ctx, nodeConfig)
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 
@@ -101,7 +101,7 @@ func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
 	return ethConfig
 }
 
-func NewNodeConfig(p Params) *node.Config {
+func NewNodeConfig() *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {

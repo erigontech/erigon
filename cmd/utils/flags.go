@@ -29,6 +29,7 @@ import (
 	"text/tabwriter"
 	"text/template"
 
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -698,6 +699,60 @@ func SetStaticPeers(cfg *p2p.Config, urls []string) error {
 		cfg.StaticNodes = append(cfg.StaticNodes, node)
 	}
 	return nil
+}
+
+func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, port, protocol uint) (*p2p.Config, error) {
+	var enodeDBPath string
+	switch protocol {
+	case eth.ETH65:
+		enodeDBPath = path.Join(datadir, "nodes", "eth65")
+	case eth.ETH66:
+		enodeDBPath = path.Join(datadir, "nodes", "eth66")
+	default:
+		return nil, fmt.Errorf("unknown protocol: %v", protocol)
+	}
+	serverKey := nodeKey(path.Join(datadir, "erigon", "nodekey"))
+
+	cfg := &p2p.Config{
+		ListenAddr:   fmt.Sprintf(":%d", port),
+		MaxPeers:     100,
+		NAT:          nat.Any(),
+		NoDiscovery:  nodiscover,
+		PrivateKey:   serverKey,
+		Name:         nodeName,
+		Logger:       log.New(),
+		NodeDatabase: enodeDBPath,
+	}
+	if netRestrict != "" {
+		cfg.NetRestrict = new(netutil.Netlist)
+		cfg.NetRestrict.Add(netRestrict)
+	}
+	if staticPeers != nil {
+		if err := SetStaticPeers(cfg, staticPeers); err != nil {
+			return nil, err
+		}
+	}
+	natif, err := nat.Parse(natSetting)
+	if err != nil {
+		return nil, fmt.Errorf("invalid nat option %s: %v", natSetting, err)
+	}
+	cfg.NAT = natif
+	return cfg, nil
+}
+
+func nodeKey(keyfile string) *ecdsa.PrivateKey {
+	if key, err := crypto.LoadECDSA(keyfile); err == nil {
+		return key
+	}
+	// No persistent key found, generate and store a new one.
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
+	}
+	if err := crypto.SaveECDSA(keyfile, key); err != nil {
+		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
+	}
+	return key
 }
 
 // setListenAddress creates a TCP listening address string from set command
