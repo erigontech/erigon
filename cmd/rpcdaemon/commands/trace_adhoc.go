@@ -697,10 +697,16 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		// Get a new instance of the EVM.
 		msg := args.ToMessage(api.gasCap)
 
+		useParent := false
 		if header == nil {
 			header = parentHeader
+			useParent = true
 		}
 		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx)
+		if useParent {
+			blockCtx.GasLimit = math.MaxUint64
+			blockCtx.MaxGasLimit = true
+		}
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
