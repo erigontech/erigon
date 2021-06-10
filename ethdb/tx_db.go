@@ -3,11 +3,9 @@ package ethdb
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 )
 
 // Implements ethdb.Getter for Tx
@@ -53,6 +51,17 @@ func (m *roTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func
 	}
 	defer c.Close()
 	return Walk(c, startkey, fixedbits, walker)
+}
+
+func (m *roTxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *roTxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
+}
+func (m *roTxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return m.tx.ForAmount(bucket, prefix, amount, walker)
 }
 
 func (m *roTxDb) BeginGetter(ctx context.Context) (GetterTx, error) {
@@ -271,6 +280,17 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 	}()
 	return Walk(c, startkey, fixedbits, walker)
 }
+func (m *TxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *TxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
+}
+
+func (m *TxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return m.tx.ForAmount(bucket, prefix, amount, walker)
+}
 
 func (m *TxDb) CommitAndBegin(ctx context.Context) error {
 	err := m.Commit()
@@ -287,10 +307,6 @@ func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
 }
 
 func (m *TxDb) Commit() error {
-	if metrics.Enabled {
-		defer dbCommitBigBatchTimer.UpdateSince(time.Now())
-	}
-
 	if m.tx == nil {
 		return fmt.Errorf("second call .Commit() on same transaction")
 	}

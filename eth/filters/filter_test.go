@@ -41,10 +41,10 @@ func makeReceipt(addr common.Address) *types.Receipt {
 }
 
 func BenchmarkFilters(b *testing.B) {
-	db := ethdb.MustOpen(b.TempDir())
+	db := ethdb.NewTestKV(b)
 	defer db.Close()
 	var (
-		backend = &testBackend{db: db}
+		backend = &testBackend{db: ethdb.NewObjectDatabase(db)}
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = common.BytesToAddress([]byte("jeff"))
@@ -53,7 +53,7 @@ func BenchmarkFilters(b *testing.B) {
 	)
 
 	genesis := core.GenesisBlockForTesting(db, addr1, big.NewInt(1000000))
-	chain, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db.RwKV(), 100010, func(i int, gen *core.BlockGen) {
+	chain, err := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 100010, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 2403:
 			receipt := makeReceipt(addr1)
@@ -73,17 +73,22 @@ func BenchmarkFilters(b *testing.B) {
 	if err != nil {
 		b.Fatalf("generate chain: %v", err)
 	}
-	for i, block := range chain.Blocks {
-		if err := rawdb.WriteBlockDeprecated(context.Background(), db, block); err != nil {
-			panic(err)
+	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		for i, block := range chain.Blocks {
+			if err := rawdb.WriteBlock(tx, block); err != nil {
+				panic(err)
+			}
+			if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+				panic(err)
+			}
+			rawdb.WriteHeadBlockHash(tx, block.Hash())
+			if err := rawdb.WriteReceipts(tx, block.NumberU64(), chain.Receipts[i]); err != nil {
+				panic(err)
+			}
 		}
-		if err := rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64()); err != nil {
-			panic(err)
-		}
-		rawdb.WriteHeadBlockHash(db, block.Hash())
-		if err := rawdb.WriteReceipts(db, block.NumberU64(), chain.Receipts[i]); err != nil {
-			panic(err)
-		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
 	}
 	b.ResetTimer()
 

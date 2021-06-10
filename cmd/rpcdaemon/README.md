@@ -12,6 +12,7 @@
     * [Trace transactions progress](#trace-transactions-progress)
     * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
     * [Server load too high](#server-load-too-high)
+    * [Batch requests](#batch-requests)
 - [For Developers](#for-developers)
     * [Code generation](#code-generation)
 
@@ -96,117 +97,118 @@ Also, there are [extensive instructions for using Postman](https://github.com/le
 
 The following table shows the current implementation status of Erigon's RPC daemon.
 
-| Command                                 | Avail   | Notes                                      |
-| --------------------------------------- | ------- | ------------------------------------------ |
-| web3_clientVersion                      | Yes     |                                            |
-| web3_sha3                               | Yes     |                                            |
-|                                         |         |                                            |
-| net_listening                           | HC      | (remote only hard coded returns true)      |
-| net_peerCount                           | HC      | (hard coded 25 - work continues on Sentry) |
-| net_version                             | Yes     | remote only                                |
-|                                         |         |                                            |
-| eth_blockNumber                         | Yes     |                                            |
-| eth_chainID                             | Yes     |                                            |
-| eth_protocolVersion                     | Yes     |                                            |
-| eth_syncing                             | Yes     |                                            |
-| eth_gasPrice                            | Yes     |                                            |
-|                                         |         |                                            |
-| eth_getBlockByHash                      | Yes     |                                            |
-| eth_getBlockByNumber                    | Yes     |                                            |
-| eth_getBlockTransactionCountByHash      | Yes     |                                            |
-| eth_getBlockTransactionCountByNumber    | Yes     |                                            |
-| eth_getUncleByBlockHashAndIndex         | Yes     |                                            |
-| eth_getUncleByBlockNumberAndIndex       | Yes     |                                            |
-| eth_getUncleCountByBlockHash            | Yes     |                                            |
-| eth_getUncleCountByBlockNumber          | Yes     |                                            |
-|                                         |         |                                            |
-| eth_getTransactionByHash                | Yes     |                                            |
-| eth_getRawTransactionByHash             | Yes     |                                            |
-| eth_getTransactionByBlockHashAndIndex   | Yes     |                                            |
-| eth_retRawTransactionByBlockHashAndIndex| Yes     |                                            |
-| eth_getTransactionByBlockNumberAndIndex | Yes     |                                            |
-| eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
-| eth_getTransactionReceipt               | Yes     |                                            |
-| eth_getBlockReceipts                    | Yes     |                                            |
-|                                         |         |                                            |
-| eth_estimateGas                         | Yes     |                                            |
-| eth_getBalance                          | Yes     |                                            |
-| eth_getCode                             | Yes     |                                            |
-| eth_getTransactionCount                 | Yes     |                                            |
-| eth_getStorageAt                        | Yes     |                                            |
-| eth_call                                | Yes     |                                            |
-|                                         |         |                                            |
-| eth_newFilter                           | -       | not yet implemented                        |
-| eth_newBlockFilter                      | -       | not yet implemented                        |
-| eth_newPendingTransactionFilter         | -       | not yet implemented                        |
-| eth_getFilterChanges                    | -       | not yet implemented                        |
-| eth_uninstallFilter                     | -       | not yet implemented                        |
-| eth_getLogs                             | Yes     |                                            |
-|                                         |         |                                            |
-| eth_accounts                            | No      | deprecated                                 |
-| eth_sendRawTransaction                  | Yes     | remote only                                |
-| eth_sendTransaction                     | -       | not yet implemented                        |
-| eth_sign                                | No      | deprecated                                 |
-| eth_signTransaction                     | -       | not yet implemented                        |
-| eth_signTypedData                       | -       | ????                                       |
-|                                         |         |                                            |
-| eth_getProof                            | -       | not yet implemented                        |
-|                                         |         |                                            |
-| eth_mining                              | Yes     | returns true if --mine flag provided       |
-| eth_coinbase                            | Yes     |                                            |
-| eth_hashrate                            | Yes     |                                            |
-| eth_submitHashrate                      | Yes     |                                            |
-| eth_getWork                             | Yes     |                                            |
-| eth_submitWork                          | Yes     |                                            |
-|                                         |         |                                            |
-| eth_subscribe                           | Limited | Websock Only - newHeads,                   |
-|                                         |         | newPendingTransaction                      |
-| eth_unsubscribe                         | Yes     | Websock Only                               |
-|                                         |         |                                            |
-| debug_accountRange                      | Yes     | Private Erigon debug module                |
-| debug_accountAt                         | Yes     | Private Erigon debug module                |
-| debug_getModifiedAccountsByNumber       | Yes     |                                            |
-| debug_getModifiedAccountsByHash         | Yes     |                                            |
-| debug_storageRangeAt                    | Yes     |                                            |
-| debug_traceTransaction                  | Yes     | Streaming (can handle huge results)        |
-| debug_traceCall                         | Yes     | Streaming (can handle huge results)        |
-|                                         |         |                                            |
-| trace_call                              | Yes     |                                            |
-| trace_callMany                          | Yes     |                                            |
-| trace_rawTransaction                    | -       | not yet implemented (come help!)           |
-| trace_replayBlockTransactions           | -       | not yet implemented (come help!)           |
-| trace_replayTransaction                 | -       | not yet implemented (come help!)           |
-| trace_block                             | Yes     |                                            |
-| trace_filter                            | Yes     | no pagination, but streaming               |
-| trace_get                               | Yes     |                                            |
-| trace_transaction                       | Yes     |                                            |
-|                                         |         |                                            |
-| eth_getCompilers                        | No      | deprecated                                 |
-| eth_compileLLL                          | No      | deprecated                                 |
-| eth_compileSolidity                     | No      | deprecated                                 |
-| eth_compileSerpent                      | No      | deprecated                                 |
-|                                         |         |                                            |
-| db_putString                            | No      | deprecated                                 |
-| db_getString                            | No      | deprecated                                 |
-| db_putHex                               | No      | deprecated                                 |
-| db_getHex                               | No      | deprecated                                 |
-|                                         |         |                                            |
-| shh_post                                | No      | deprecated                                 |
-| shh_version                             | No      | deprecated                                 |
-| shh_newIdentity                         | No      | deprecated                                 |
-| shh_hasIdentity                         | No      | deprecated                                 |
-| shh_newGroup                            | No      | deprecated                                 |
-| shh_addToGroup                          | No      | deprecated                                 |
-| shh_newFilter                           | No      | deprecated                                 |
-| shh_uninstallFilter                     | No      | deprecated                                 |
-| shh_getFilterChanges                    | No      | deprecated                                 |
-| shh_getMessages                         | No      | deprecated                                 |
-|                                         |         |                                            |
-| erigon_getHeaderByHash                  | Yes     | Erigon only                            |
-| erigon_getHeaderByNumber                | Yes     | Erigon only                            |
-| erigon_getLogsByHash                    | Yes     | Erigon only                            |
-| erigon_forks                            | Yes     | Erigon only                            |
-| erigon_issuance                         | Yes     | Erigon only                            |
+| Command                                    | Avail   | Notes                                      |
+| ------------------------------------------ | ------- | ------------------------------------------ |
+| web3_clientVersion                         | Yes     |                                            |
+| web3_sha3                                  | Yes     |                                            |
+|                                            |         |                                            |
+| net_listening                              | HC      | (remote only hard coded returns true)      |
+| net_peerCount                              | HC      | (hard coded 25 - work continues on Sentry) |
+| net_version                                | Yes     | remote only                                |
+|                                            |         |                                            |
+| eth_blockNumber                            | Yes     |                                            |
+| eth_chainID                                | Yes     |                                            |
+| eth_protocolVersion                        | Yes     |                                            |
+| eth_syncing                                | Yes     |                                            |
+| eth_gasPrice                               | Yes     |                                            |
+|                                            |         |                                            |
+| eth_getBlockByHash                         | Yes     |                                            |
+| eth_getBlockByNumber                       | Yes     |                                            |
+| eth_getBlockTransactionCountByHash         | Yes     |                                            |
+| eth_getBlockTransactionCountByNumber       | Yes     |                                            |
+| eth_getUncleByBlockHashAndIndex            | Yes     |                                            |
+| eth_getUncleByBlockNumberAndIndex          | Yes     |                                            |
+| eth_getUncleCountByBlockHash               | Yes     |                                            |
+| eth_getUncleCountByBlockNumber             | Yes     |                                            |
+|                                            |         |                                            |
+| eth_getTransactionByHash                   | Yes     |                                            |
+| eth_getRawTransactionByHash                | Yes     |                                            |
+| eth_getTransactionByBlockHashAndIndex      | Yes     |                                            |
+| eth_retRawTransactionByBlockHashAndIndex   | Yes     |                                            |
+| eth_getTransactionByBlockNumberAndIndex    | Yes     |                                            |
+| eth_retRawTransactionByBlockNumberAndIndex | Yes     |                                            |
+| eth_getTransactionReceipt                  | Yes     |                                            |
+| eth_getBlockReceipts                       | Yes     |                                            |
+|                                            |         |                                            |
+| eth_estimateGas                            | Yes     |                                            |
+| eth_getBalance                             | Yes     |                                            |
+| eth_getCode                                | Yes     |                                            |
+| eth_getTransactionCount                    | Yes     |                                            |
+| eth_getStorageAt                           | Yes     |                                            |
+| eth_call                                   | Yes     |                                            |
+| eth_callBundle                             | Yes     |                                            |
+|                                            |         |                                            |
+| eth_newFilter                              | -       | not yet implemented                        |
+| eth_newBlockFilter                         | -       | not yet implemented                        |
+| eth_newPendingTransactionFilter            | -       | not yet implemented                        |
+| eth_getFilterChanges                       | -       | not yet implemented                        |
+| eth_uninstallFilter                        | -       | not yet implemented                        |
+| eth_getLogs                                | Yes     |                                            |
+|                                            |         |                                            |
+| eth_accounts                               | No      | deprecated                                 |
+| eth_sendRawTransaction                     | Yes     | remote only                                |
+| eth_sendTransaction                        | -       | not yet implemented                        |
+| eth_sign                                   | No      | deprecated                                 |
+| eth_signTransaction                        | -       | not yet implemented                        |
+| eth_signTypedData                          | -       | ????                                       |
+|                                            |         |                                            |
+| eth_getProof                               | -       | not yet implemented                        |
+|                                            |         |                                            |
+| eth_mining                                 | Yes     | returns true if --mine flag provided       |
+| eth_coinbase                               | Yes     |                                            |
+| eth_hashrate                               | Yes     |                                            |
+| eth_submitHashrate                         | Yes     |                                            |
+| eth_getWork                                | Yes     |                                            |
+| eth_submitWork                             | Yes     |                                            |
+|                                            |         |                                            |
+| eth_subscribe                              | Limited | Websock Only - newHeads,                   |
+|                                            |         | newPendingTransaction                      |
+| eth_unsubscribe                            | Yes     | Websock Only                               |
+|                                            |         |                                            |
+| debug_accountRange                         | Yes     | Private Erigon debug module                |
+| debug_accountAt                            | Yes     | Private Erigon debug module                |
+| debug_getModifiedAccountsByNumber          | Yes     |                                            |
+| debug_getModifiedAccountsByHash            | Yes     |                                            |
+| debug_storageRangeAt                       | Yes     |                                            |
+| debug_traceTransaction                     | Yes     | Streaming (can handle huge results)        |
+| debug_traceCall                            | Yes     | Streaming (can handle huge results)        |
+|                                            |         |                                            |
+| trace_call                                 | Yes     |                                            |
+| trace_callMany                             | Yes     |                                            |
+| trace_rawTransaction                       | -       | not yet implemented (come help!)           |
+| trace_replayBlockTransactions              | -       | not yet implemented (come help!)           |
+| trace_replayTransaction                    | -       | not yet implemented (come help!)           |
+| trace_block                                | Yes     |                                            |
+| trace_filter                               | Yes     | no pagination, but streaming               |
+| trace_get                                  | Yes     |                                            |
+| trace_transaction                          | Yes     |                                            |
+|                                            |         |                                            |
+| eth_getCompilers                           | No      | deprecated                                 |
+| eth_compileLLL                             | No      | deprecated                                 |
+| eth_compileSolidity                        | No      | deprecated                                 |
+| eth_compileSerpent                         | No      | deprecated                                 |
+|                                            |         |                                            |
+| db_putString                               | No      | deprecated                                 |
+| db_getString                               | No      | deprecated                                 |
+| db_putHex                                  | No      | deprecated                                 |
+| db_getHex                                  | No      | deprecated                                 |
+|                                            |         |                                            |
+| shh_post                                   | No      | deprecated                                 |
+| shh_version                                | No      | deprecated                                 |
+| shh_newIdentity                            | No      | deprecated                                 |
+| shh_hasIdentity                            | No      | deprecated                                 |
+| shh_newGroup                               | No      | deprecated                                 |
+| shh_addToGroup                             | No      | deprecated                                 |
+| shh_newFilter                              | No      | deprecated                                 |
+| shh_uninstallFilter                        | No      | deprecated                                 |
+| shh_getFilterChanges                       | No      | deprecated                                 |
+| shh_getMessages                            | No      | deprecated                                 |
+|                                            |         |                                            |
+| erigon_getHeaderByHash                     | Yes     | Erigon only                                |
+| erigon_getHeaderByNumber                   | Yes     | Erigon only                                |
+| erigon_getLogsByHash                       | Yes     | Erigon only                                |
+| erigon_forks                               | Yes     | Erigon only                                |
+| erigon_issuance                            | Yes     | Erigon only                                |
 
 This table is constantly updated. Please visit again.
 
@@ -361,10 +363,6 @@ and hide others. That is possible with `rpc.accessList` flag.
 
 Now only these two methods are available.
 
-### Trace transactions progress
-
-There are still many open issues with the Erigon tracing routines. Please see [this issue](https://github.com/ledgerwatch/erigon/issues/1119#issuecomment-699028019) for the current open / known issues related to tracing.
-
 ### Clients getting timeout, but server load is low
 
 In this case: increase default rate-limit - 
@@ -379,6 +377,19 @@ Increase it - if your 'hot data' is small or have much RAM or see "request timeo
 ### Server load too high 
 
 Reduce `--private.api.ratelimit` 
+
+### Read DB directly without Json-RPC/Graphql
+
+[./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
+
+### Batch requests 
+
+Currently batch requests are spawn multiple goroutines and process all sub-requests in parallel. 
+But to limit impact of 1 huge batch to other users - max amount of goroutines hardcoded to 50.
+If submit 1 batch with 200 requests - RPCDaemon will spawn 50 goroutines and will use them to process 200 requests.
+We can make it configurable if your use-case need it. 
+
+But if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will processed sequentially (on 1 goroutine).
 
 ## For Developers
 

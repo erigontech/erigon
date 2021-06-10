@@ -22,11 +22,11 @@ import (
 
 // Common big integers often used
 var (
-	Num0  = uint256.NewInt().SetUint64(0)
-	Num1  = uint256.NewInt().SetUint64(1)
-	Num2  = uint256.NewInt().SetUint64(2)
-	Num8  = uint256.NewInt().SetUint64(8)
-	Num27 = uint256.NewInt().SetUint64(27)
-	Num32 = uint256.NewInt().SetUint64(32)
-	Num35 = uint256.NewInt().SetUint64(35)
+	Num0  = uint256.NewInt(0)
+	Num1  = uint256.NewInt(1)
+	Num2  = uint256.NewInt(2)
+	Num8  = uint256.NewInt(8)
+	Num27 = uint256.NewInt(27)
+	Num32 = uint256.NewInt(32)
+	Num35 = uint256.NewInt(35)
 )

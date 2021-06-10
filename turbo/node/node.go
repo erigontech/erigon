@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
@@ -67,7 +66,6 @@ type Params struct {
 // * optionalParams - additional parameters for running a node.
 func New(
 	ctx *cli.Context,
-	sync *stagedsync.StagedSync,
 	optionalParams Params,
 ) *ErigonNode {
 	prepareBuckets(optionalParams.CustomBuckets)
@@ -81,8 +79,6 @@ func New(
 	enode.UseMDBX = nodeConfig.MDBX
 	core.UseMDBX = nodeConfig.MDBX
 	ethConfig := makeEthConfig(ctx, node)
-
-	ethConfig.StagedSync = sync
 
 	ethereum := RegisterEthService(node, ethConfig, optionalParams.GitCommit)
 

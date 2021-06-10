@@ -353,7 +353,7 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	acc := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
-		Balance:     *uint256.NewInt().SetUint64(200),
+		Balance:     *uint256.NewInt(200),
 		Root:        EmptyRoot,
 		CodeHash:    emptyState,
 	}

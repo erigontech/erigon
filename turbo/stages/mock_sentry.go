@@ -3,7 +3,10 @@ package stages
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
+	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"testing"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -52,18 +56,19 @@ type MockSentry struct {
 	Key           *ecdsa.PrivateKey
 	Address       common.Address
 	Genesis       *types.Block
-	sentryClient  remote.SentryClient
+	SentryClient  remote.SentryClient
 	PeerId        *ptypes.H512
 	ReceiveWg     sync.WaitGroup
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 
-	streams  map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
-	streamWg sync.WaitGroup
+	streams      map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
+	StreamWg     sync.WaitGroup
+	sentMessages []*proto_sentry.OutboundMessageData
 }
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) (errs []error) {
-	ms.streamWg.Wait()
+	ms.StreamWg.Wait()
 	for _, stream := range ms.streams[req.Id] {
 		if err := stream.Send(req); err != nil {
 			errs = append(errs, err)
@@ -78,17 +83,24 @@ func (ms *MockSentry) PenalizePeer(context.Context, *proto_sentry.PenalizePeerRe
 func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageByMinBlock(context.Context, *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageById(context.Context, *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageById(_ context.Context, r *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToRandomPeers(context.Context, *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToAll(context.Context, *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToAll(_ context.Context, r *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
+}
+func (ms *MockSentry) SentMessage(i int) *proto_sentry.OutboundMessageData {
+	return ms.sentMessages[i]
 }
 func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	return &proto_sentry.SetStatusReply{Protocol: proto_sentry.Protocol_ETH66}, nil
@@ -97,10 +109,11 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 	if ms.streams == nil {
 		ms.streams = map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer{}
 	}
+
 	for _, id := range req.Ids {
 		ms.streams[id] = append(ms.streams[id], stream)
 	}
-	ms.streamWg.Done()
+	ms.StreamWg.Done()
 	select {
 	case <-ms.Ctx.Done():
 		return nil
@@ -113,12 +126,27 @@ func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *
 	return MockWithGenesisStorageMode(t, gspec, key, ethdb.DefaultStorageMode)
 }
 
+func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	return MockWithEverything(t, gspec, key, ethdb.DefaultStorageMode, engine)
+}
+
 func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode) *MockSentry {
+	return MockWithEverything(t, gspec, key, sm, ethash.NewFaker())
+}
+
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode, engine consensus.Engine) *MockSentry {
+	var tmpdir string
+	if t != nil {
+		tmpdir = t.TempDir()
+	} else {
+		tmpdir = os.TempDir()
+	}
 	mock := &MockSentry{
 		t:           t,
 		DB:          ethdb.NewTestKV(t),
-		tmpdir:      t.TempDir(),
-		Engine:      ethash.NewFaker(),
+		tmpdir:      tmpdir,
+		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
 	}
@@ -141,15 +169,18 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {
 	}
 	blockDowloadTimeout := 10
-	txCacher := core.NewTxSenderCacher(1)
 	txPoolConfig := core.DefaultTxPoolConfig
 	txPoolConfig.Journal = ""
 	txPoolConfig.StartOnInit = true
-	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, ethdb.NewObjectDatabase(mock.DB), txCacher)
+	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
 	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
 	txPoolP2PServer, err := txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
 	if err != nil {
-		t.Fatal(err)
+		if t != nil {
+			t.Fatal(err)
+		} else {
+			panic(err)
+		}
 	}
 	fetchTx := func(PeerId string, hashes []common.Hash) error {
 		txPoolP2PServer.SendTxsRequest(context.TODO(), PeerId, hashes)
@@ -158,18 +189,26 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 
 	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.SetupGenesisBlock(ethdb.NewObjectDatabase(mock.DB), gspec, sm.History)
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, sm.History)
 	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
-		t.Fatal(err)
+		if t != nil {
+			t.Fatal(err)
+		} else {
+			panic(err)
+		}
 	}
 
-	blockDownloaderWindow := 128
+	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.sentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
-	sentries := []remote.SentryClient{mock.sentryClient}
+	mock.SentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
+	sentries := []remote.SentryClient{mock.SentryClient}
 	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
-		t.Fatal(err)
+		if t != nil {
+			t.Fatal(err)
+		} else {
+			panic(err)
+		}
 	}
 	mock.Sync = NewStagedSync(mock.Ctx, sm,
 		stagedsync.StageHeadersCfg(
@@ -182,6 +221,7 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 			batchSize,
 		),
 		stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
+		stagedsync.StageHeadersSnapshotGenCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
@@ -222,8 +262,9 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 		stagedsync.StageCallTracesCfg(mock.DB, 0, batchSize, mock.tmpdir, mock.ChainConfig, mock.Engine),
 		stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
-			mock.streamWg.Add(1)
-			go txpool.RecvTxMessageLoop(mock.Ctx, mock.sentryClient, mock.downloader, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			mock.StreamWg.Add(1)
+			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			mock.StreamWg.Wait()
 			txPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
@@ -252,13 +293,19 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 	)
 
 	mock.PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
-	mock.streamWg.Add(1)
-	go download.RecvMessageLoop(mock.Ctx, mock.sentryClient, mock.downloader, &mock.ReceiveWg)
-	t.Cleanup(func() {
-		mock.cancel()
-		txPool.Stop()
-		txPoolP2PServer.TxFetcher.Stop()
-	})
+	mock.StreamWg.Add(1)
+	go download.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Wait()
+	mock.StreamWg.Add(1)
+	go download.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Wait()
+	if t != nil {
+		t.Cleanup(func() {
+			mock.cancel()
+			txPool.Stop()
+			txPoolP2PServer.TxFetcher.Stop()
+		})
+	}
 	return mock
 }
 
@@ -326,10 +373,18 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	notifier := &remotedbserver.Events{}
-	initialCycle := true
+	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead); err != nil {
-		return err
+	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
+		if !errors.Is(err, common.ErrStopped) {
+			return err
+		}
+	}
+	// Check if the latest header was imported or rolled back
+	if td, tdErr := rawdb.ReadTd(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()); tdErr != nil {
+		return tdErr
+	} else if td == nil {
+		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
 }

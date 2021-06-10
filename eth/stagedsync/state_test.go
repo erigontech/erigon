@@ -1,10 +1,10 @@
 package stagedsync
 
 import (
-	"context"
 	"errors"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
@@ -42,11 +42,8 @@ func TestStateStagesSuccess(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewTestDB(t)
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -88,11 +85,8 @@ func TestStateDisabledStages(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewTestDB(t)
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -137,11 +131,8 @@ func TestStateRepeatedStage(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db := ethdb.NewTestDB(t)
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -184,11 +175,8 @@ func TestStateErroredStage(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	db := ethdb.NewTestDB(t)
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.Equal(t, expectedErr, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -198,7 +186,6 @@ func TestStateErroredStage(t *testing.T) {
 }
 
 func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -246,7 +233,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					return u.UnwindTo(1500, tx)
+					return u.UnwindTo(1500, tx, common.Hash{})
 				}
 				s.Done()
 				return nil
@@ -275,10 +262,8 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -303,7 +288,6 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 }
 
 func TestStateUnwind(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -346,7 +330,7 @@ func TestStateUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx)
+					err := u.UnwindTo(500, tx, common.Hash{})
 					if err != nil {
 						return err
 					}
@@ -379,10 +363,8 @@ func TestStateUnwind(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -408,7 +390,6 @@ func TestStateUnwind(t *testing.T) {
 }
 
 func TestStateUnwindEmptyUnwinder(t *testing.T) {
-	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -447,7 +428,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx)
+					err := u.UnwindTo(500, tx, common.Hash{})
 					if err != nil {
 						return err
 					}
@@ -464,10 +445,8 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -493,7 +472,6 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 
 func TestStateSyncDoTwice(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
-	db := ethdb.NewTestDB(t)
 
 	s := []*Stage{
 		{
@@ -523,10 +501,8 @@ func TestStateSyncDoTwice(t *testing.T) {
 	}
 
 	state := NewState(s)
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
 	state = NewState(s)
@@ -584,13 +560,10 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 			},
 		},
 	}
-	db := ethdb.NewTestDB(t)
 
 	state := NewState(s)
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.Equal(t, expectedErr, err)
 
 	expectedErr = nil
@@ -608,7 +581,6 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	// interrupt a stage that is too big to fit in one batch,
 	// so the db is in inconsitent state, so we have to restart with that
-	db := ethdb.NewTestDB(t)
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	interrupted := false
@@ -654,7 +626,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx)
+					err := u.UnwindTo(500, tx, common.Hash{})
 					if err != nil {
 						return err
 					}
@@ -676,10 +648,8 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	tx, err := db.RwKV().BeginRw(context.Background())
-	assert.NoError(t, err)
-	defer tx.Rollback()
-	err = state.Run(db, tx)
+	db, tx := ethdb.NewTestTx(t)
+	err := state.Run(db, tx)
 	assert.Error(t, errInterrupted, err)
 
 	state = NewState(s)

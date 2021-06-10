@@ -42,7 +42,7 @@ func TestHeaderPrefix(t *testing.T) {
 	})
 	require.NoError(err)
 
-	migrator := NewMigrator()
+	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = []Migration{headerPrefixToSeparateBuckets}
 	err = migrator.Apply(db, t.TempDir(), debug.TestDB() == "mdbx")
 	require.NoError(err)

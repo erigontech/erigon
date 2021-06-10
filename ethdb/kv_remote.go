@@ -252,6 +252,8 @@ func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, err
 func (tx *remoteTx) ReadSequence(bucket string) (uint64, error) {
 	panic("not implemented yet")
 }
+func (tx *remoteTx) Append(bucket string, k, v []byte) error    { panic("no write methods") }
+func (tx *remoteTx) AppendDup(bucket string, k, v []byte) error { panic("no write methods") }
 
 func (tx *remoteTx) Commit() error {
 	panic("remote db is read-only")
@@ -317,6 +319,25 @@ func (tx *remoteTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []b
 		if err := walker(k, v); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (tx *remoteTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		amount--
 	}
 	return nil
 }

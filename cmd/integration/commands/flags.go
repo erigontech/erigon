@@ -27,7 +27,6 @@ var (
 	migration          string
 	integritySlow      bool
 	integrityFast      bool
-	silkwormPath       string
 	file               string
 	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
 	storageMode        string
@@ -123,11 +122,6 @@ func withIntegrityChecks(cmd *cobra.Command) {
 
 func withMigration(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&migration, "migration", "", "action to apply to given migration")
-}
-
-func withSilkworm(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&silkwormPath, "silkworm", "", "file path of libsilkworm_erigon_api.so")
-	must(cmd.MarkFlagFilename("silkworm"))
 }
 
 func withTxTrace(cmd *cobra.Command) {

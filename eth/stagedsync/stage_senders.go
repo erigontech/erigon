@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -48,7 +49,7 @@ func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig, tmpdir string)
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBlock uint64, quitCh <-chan struct{}) error {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, quitCh <-chan struct{}) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -126,16 +127,16 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBl
 
 	collectorSenders := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
-	errCh := make(chan error)
+	errCh := make(chan senderRecoveryError)
 	go func() {
 		defer close(errCh)
 		for j := range out {
 			if j.err != nil {
-				errCh <- j.err
+				errCh <- senderRecoveryError{err: j.err, blockNumber: j.blockNumber, blockHash: j.blockHash}
 				return
 			}
 			if err := common.Stopped(quitCh); err != nil {
-				errCh <- j.err
+				errCh <- senderRecoveryError{err: j.err}
 				return
 			}
 			select {
@@ -148,7 +149,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBl
 			binary.BigEndian.PutUint32(k, uint32(j.index))
 			index := int(binary.BigEndian.Uint32(k))
 			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
-				errCh <- j.err
+				errCh <- senderRecoveryError{err: j.err}
 				return
 			}
 		}
@@ -181,38 +182,58 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBl
 		body := rawdb.ReadBody(tx, blockHash, blockNumber)
 
 		select {
-		case err := <-errCh:
-			if err != nil {
-				return err
+		case recoveryErr := <-errCh:
+			if recoveryErr.err != nil {
+				if recoveryErr.blockHash == (common.Hash{}) {
+					return recoveryErr.err
+				}
 			}
-		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, index: int(blockNumber - s.BlockNumber - 1)}:
+		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, blockHash: blockHash, index: int(blockNumber - s.BlockNumber - 1)}:
 		}
 	}
 
 	close(jobs)
 	wg.Wait()
 	close(out)
-	for err := range errCh {
-		if err != nil {
-			return err
+	var minBlockNum uint64 = math.MaxUint64
+	var minBlockHash common.Hash
+	var minBlockErr error
+	for recoveryErr := range errCh {
+		if recoveryErr.err != nil {
+			if recoveryErr.blockHash == (common.Hash{}) {
+				return recoveryErr.err
+			}
+			if recoveryErr.blockNumber < minBlockNum {
+				minBlockNum = recoveryErr.blockNumber
+				minBlockHash = recoveryErr.blockHash
+				minBlockErr = recoveryErr.err
+			}
 		}
 	}
-
-	if err := collectorSenders.Load(logPrefix, tx,
-		dbutils.Senders,
-		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			Quit: quitCh,
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+	if minBlockErr != nil {
+		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
+		if to > s.BlockNumber {
+			if err = u.UnwindTo(minBlockNum-1, tx, minBlockHash); err != nil {
+				return err
+			}
+		}
+		s.Done()
+	} else {
+		if err := collectorSenders.Load(logPrefix, tx,
+			dbutils.Senders,
+			etl.IdentityLoadFunc,
+			etl.TransformArgs{
+				Quit: quitCh,
+				LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+					return []interface{}{"block", binary.BigEndian.Uint64(k)}
+				},
 			},
-		},
-	); err != nil {
-		return err
-	}
-
-	if err := s.DoneAndUpdate(tx, to); err != nil {
-		return err
+		); err != nil {
+			return err
+		}
+		if err = s.DoneAndUpdate(tx, to); err != nil {
+			return err
+		}
 	}
 
 	if !useExternalTx {
@@ -223,10 +244,17 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, tx ethdb.RwTx, toBl
 	return nil
 }
 
+type senderRecoveryError struct {
+	err         error
+	blockNumber uint64
+	blockHash   common.Hash
+}
+
 type senderRecoveryJob struct {
 	body        *types.Body
 	key         []byte
 	blockNumber uint64
+	blockHash   common.Hash
 	index       int
 	senders     []byte
 	err         error

@@ -4,11 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-func OpenDatabase(path string, inmem bool, mdbx bool) *ethdb.ObjectDatabase {
-	return ethdb.NewObjectDatabase(openKV(path, inmem, mdbx))
-}
-
-func openKV(path string, inmem bool, mdbx bool) ethdb.RwKV {
+func OpenDatabase(path string, inmem bool, mdbx bool) ethdb.RwKV {
 	if mdbx {
 		opts := ethdb.NewMDBX()
 		if inmem {

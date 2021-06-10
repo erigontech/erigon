@@ -1,8 +1,10 @@
-Run Grafana and Prometheus: `docker-compose up prometheus grafana`
+Add flag `--metrics` to Erigon or any other process (add `--metrics.addr` if need).
+
+Add hosts to collecting metrics in: `./cmd/prometheus/prometheus.yml`
+
+Run Grafana and Prometheus: `docker-compose up -d prometheus grafana` or `make prometheus`
 
 Go to: [localhost:3000](localhost:3000), admin/admin
-
-List of hosts and ports to collecting metrics is in: `./cmd/prometheus/prometheus.yml`
 
 Env variables:
 

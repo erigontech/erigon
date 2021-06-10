@@ -14,13 +14,17 @@ import (
 
 var _ WriterWithChangeSets = (*PlainStateWriter)(nil)
 
+type plainStateWriterDB interface {
+	ethdb.Putter
+	ethdb.Deleter
+}
 type PlainStateWriter struct {
-	db          ethdb.Database
+	db          plainStateWriterDB
 	csw         *ChangeSetWriter
 	accumulator *shards.Accumulator
 }
 
-func NewPlainStateWriter(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) *PlainStateWriter {
+func NewPlainStateWriter(db plainStateWriterDB, changeSetsDB ethdb.RwTx, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
 		db:  db,
 		csw: NewChangeSetWriterPlain(changeSetsDB, blockNumber),

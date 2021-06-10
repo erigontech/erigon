@@ -66,7 +66,7 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	env := vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	var (
 		startGas uint64 = 10000
-		value           = uint256.NewInt()
+		value           = uint256.NewInt(0)
 	)
 	contract := vm.NewContract(account{}, account{}, value, startGas, false, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
@@ -164,7 +164,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 		BlockNumber: 1,
 		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 	}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
-	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(), 0, false, false)
+	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false, false)
 
 	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
 	timeout := errors.New("stahp")

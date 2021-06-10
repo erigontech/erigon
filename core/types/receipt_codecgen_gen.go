@@ -6,12 +6,11 @@ package types
 
 import (
 	"errors"
+	pkg1_common "github.com/ledgerwatch/erigon/common"
+	codec1978 "github.com/ugorji/go/codec"
 	pkg2_big "math/big"
 	"runtime"
 	"strconv"
-
-	pkg1_common "github.com/ledgerwatch/erigon/common"
-	codec1978 "github.com/ugorji/go/codec"
 )
 
 const (
@@ -64,7 +63,9 @@ func (x *Receipt) CodecEncodeSelf(e *codec1978.Encoder) {
 			yy2arr2 := z.EncBasicHandle().StructToArray
 			_ = yy2arr2
 			const yyr2 bool = false // struct tag has 'toArray'
-			z.EncWriteArrayStart(3)
+			z.EncWriteArrayStart(4)
+			z.EncWriteArrayElem()
+			r.EncodeUint(uint64(x.Type))
 			z.EncWriteArrayElem()
 			if x.PostState == nil {
 				r.EncodeNil()
@@ -128,6 +129,8 @@ func (x *Receipt) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 		yys3 := z.StringView(r.DecodeStringAsBytes())
 		z.DecReadMapElemValue()
 		switch yys3 {
+		case "Type":
+			x.Type = (uint8)(z.C.UintV(r.DecodeUint64(), 8))
 		case "1":
 			x.PostState = r.DecodeBytes(([]byte)(x.PostState), false)
 		case "2":
@@ -144,62 +147,74 @@ func (x *Receipt) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
-	var yyj8 int
-	var yyb8 bool
-	var yyhl8 bool = l >= 0
-	yyj8++
-	if yyhl8 {
-		yyb8 = yyj8 > l
+	var yyj9 int
+	var yyb9 bool
+	var yyhl9 bool = l >= 0
+	yyj9++
+	if yyhl9 {
+		yyb9 = yyj9 > l
 	} else {
-		yyb8 = z.DecCheckBreak()
+		yyb9 = z.DecCheckBreak()
 	}
-	if yyb8 {
+	if yyb9 {
+		z.DecReadArrayEnd()
+		return
+	}
+	z.DecReadArrayElem()
+	x.Type = (uint8)(z.C.UintV(r.DecodeUint64(), 8))
+	yyj9++
+	if yyhl9 {
+		yyb9 = yyj9 > l
+	} else {
+		yyb9 = z.DecCheckBreak()
+	}
+	if yyb9 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.PostState = r.DecodeBytes(([]byte)(x.PostState), false)
-	yyj8++
-	if yyhl8 {
-		yyb8 = yyj8 > l
+	yyj9++
+	if yyhl9 {
+		yyb9 = yyj9 > l
 	} else {
-		yyb8 = z.DecCheckBreak()
+		yyb9 = z.DecCheckBreak()
 	}
-	if yyb8 {
+	if yyb9 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.Status = (uint64)(r.DecodeUint64())
-	yyj8++
-	if yyhl8 {
-		yyb8 = yyj8 > l
+	yyj9++
+	if yyhl9 {
+		yyb9 = yyj9 > l
 	} else {
-		yyb8 = z.DecCheckBreak()
+		yyb9 = z.DecCheckBreak()
 	}
-	if yyb8 {
+	if yyb9 {
 		z.DecReadArrayEnd()
 		return
 	}
 	z.DecReadArrayElem()
 	x.CumulativeGasUsed = (uint64)(r.DecodeUint64())
 	for {
-		yyj8++
-		if yyhl8 {
-			yyb8 = yyj8 > l
+		yyj9++
+		if yyhl9 {
+			yyb9 = yyj9 > l
 		} else {
-			yyb8 = z.DecCheckBreak()
+			yyb9 = z.DecCheckBreak()
 		}
-		if yyb8 {
+		if yyb9 {
 			break
 		}
 		z.DecReadArrayElem()
-		z.DecStructFieldNotFound(yyj8-1, "")
+		z.DecStructFieldNotFound(yyj9-1, "")
 	}
 }
 
 func (x *Receipt) IsCodecEmpty() bool {
-	return !(len(x.PostState) != 0 && x.Status != 0 && x.CumulativeGasUsed != 0 && true)
+	return !(x.Type != 0 && len(x.PostState) != 0 && x.Status != 0 && x.CumulativeGasUsed != 0 && true)
 }
 
 func (x Receipts) CodecEncodeSelf(e *codec1978.Encoder) {

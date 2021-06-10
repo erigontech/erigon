@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
-	toml "github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -151,7 +151,7 @@ type CliqueServerImpl struct {
 	genesis     *core.Genesis
 	chainConfig *params.ChainConfig
 	c           *clique.Clique
-	db          ethdb.Database
+	db          ethdb.RwKV
 }
 
 func NewCliqueServer(_ context.Context) *CliqueServerImpl {

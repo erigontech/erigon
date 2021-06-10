@@ -33,6 +33,7 @@ func NewStagedSync(
 	sm ethdb.StorageMode,
 	headers stagedsync.HeadersCfg,
 	blockHashes stagedsync.BlockHashesCfg,
+	snapshotHeaderGen stagedsync.HeadersSnapshotGenCfg,
 	bodies stagedsync.BodiesCfg,
 	senders stagedsync.SendersCfg,
 	exec stagedsync.ExecuteBlockCfg,
@@ -48,7 +49,7 @@ func NewStagedSync(
 	test bool,
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
-		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
+		stagedsync.ReplacementStages(ctx, sm, headers, blockHashes, snapshotHeaderGen, bodies, senders, exec, trans, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
 		stagedsync.ReplacementUnwindOrder(),
 		stagedsync.OptionalParameters{},
 	)
@@ -82,7 +83,7 @@ func StageLoop(
 		if !initialCycle && stateStream {
 			accumulator = &shards.Accumulator{}
 		}
-		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator, updateHead); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, chainConfig, notifier, initialCycle, accumulator, updateHead, sync.GetSnapshotMigratorFinal()); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -109,6 +110,7 @@ func StageLoopStep(
 	initialCycle bool,
 	accumulator *shards.Accumulator,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	// avoid crash because Erigon's core does many things -
 	defer func() {
@@ -172,7 +174,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(ethdb.NewObjectDatabase(db), tx)
+	err = st.Run(db, tx)
 	if err != nil {
 		return err
 	}
@@ -203,6 +205,13 @@ func StageLoopStep(
 	if headTd, err = rawdb.ReadTd(rotx, headHash, head); err != nil {
 		return err
 	}
+
+	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
+		err = snapshotMigratorFinal(rotx)
+		if err != nil {
+			log.Error("snapshot migration failed", "err", err)
+		}
+	}
 	rotx.Rollback()
 	headTd256 := new(uint256.Int)
 	overflow := headTd256.SetFromBig(headTd)
@@ -215,6 +224,7 @@ func StageLoopStep(
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -274,6 +284,7 @@ func NewStagedSync2(
 	bodyDownloadTimeout int,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
+	snapshotsDir string,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
 ) (*stagedsync.StagedSync, error) {
@@ -293,6 +304,7 @@ func NewStagedSync2(
 			batchSize,
 		),
 		stagedsync.StageBlockHashesCfg(db, tmpdir),
+		stagedsync.StageHeadersSnapshotGenCfg(db, snapshotsDir),
 		stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,

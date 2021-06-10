@@ -59,6 +59,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 	}
 
 	var expectedRootHash common.Hash
+	var headerHash common.Hash
 	if cfg.checkRoot {
 		var hash common.Hash
 		hash, err = rawdb.ReadCanonicalHash(tx, to)
@@ -67,6 +68,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 		}
 		syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 		expectedRootHash = syncHeadHeader.Root
+		headerHash = syncHeadHeader.Hash()
 	}
 
 	logPrefix := s.state.LogPrefix()
@@ -86,15 +88,15 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 
 	if err == nil {
 		if cfg.checkRoot && root != expectedRootHash {
+			log.Error(fmt.Sprintf("[%s] Wrong trie root: %x, expected (from header): %x", logPrefix, root, expectedRootHash))
 			if to > s.BlockNumber {
-				log.Warn("Unwinding due to incorrect root hash", "to", s.BlockNumber)
-				if err = u.UnwindTo(s.BlockNumber, tx); err != nil {
+				log.Warn("Unwinding due to incorrect root hash", "to", to-1)
+				if err = u.UnwindTo(to-1, tx, headerHash); err != nil {
 					return trie.EmptyRoot, err
 				}
 			}
-			return trie.EmptyRoot, fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, root, expectedRootHash)
-		}
-		if err = s.DoneAndUpdate(tx, to); err != nil {
+			s.Done()
+		} else if err = s.DoneAndUpdate(tx, to); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {

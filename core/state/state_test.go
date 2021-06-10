@@ -45,11 +45,11 @@ var _ = checker.Suite(&StateSuite{})
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
 	obj1 := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt().SetUint64(22))
+	obj1.AddBalance(uint256.NewInt(22))
 	obj2 := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj3 := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt().SetUint64(44))
+	obj3.SetBalance(uint256.NewInt(44))
 
 	// write some of them to the trie
 	ctx := context.TODO()
@@ -133,8 +133,8 @@ func (s *StateSuite) TestNull(c *checker.C) {
 func (s *StateSuite) TestSnapshot(c *checker.C) {
 	stateobjaddr := toAddr([]byte("aa"))
 	var storageaddr common.Hash
-	data1 := uint256.NewInt().SetUint64(42)
-	data2 := uint256.NewInt().SetUint64(43)
+	data1 := uint256.NewInt(42)
+	data2 := uint256.NewInt(43)
 
 	// snapshot the genesis state
 	genesis := s.state.Snapshot()
@@ -178,15 +178,15 @@ func TestSnapshot2(t *testing.T) {
 	stateobjaddr1 := toAddr([]byte("so1"))
 	var storageaddr common.Hash
 
-	data0 := uint256.NewInt().SetUint64(17)
-	data1 := uint256.NewInt().SetUint64(18)
+	data0 := uint256.NewInt(17)
+	data1 := uint256.NewInt(18)
 
 	state.SetState(stateobjaddr0, &storageaddr, *data0)
 	state.SetState(stateobjaddr1, &storageaddr, *data1)
 
 	// db, trie are already non-empty values
 	so0 := state.getStateObject(stateobjaddr0)
-	so0.SetBalance(uint256.NewInt().SetUint64(42))
+	so0.SetBalance(uint256.NewInt(42))
 	so0.SetNonce(43)
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
 	so0.suicided = false
@@ -206,7 +206,7 @@ func TestSnapshot2(t *testing.T) {
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)
-	so1.SetBalance(uint256.NewInt().SetUint64(52))
+	so1.SetBalance(uint256.NewInt(52))
 	so1.SetNonce(53)
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
 	so1.suicided = true
@@ -286,17 +286,17 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 
 func TestDump(t *testing.T) {
 	_, tx := ethdb.NewTestTx(t)
-	w := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 0)
-	state := New(NewPlainStateReader(ethdb.NewRoTxDb(tx)))
+	w := NewPlainStateWriter(tx, tx, 0)
+	state := New(NewPlainStateReader(tx))
 
 	// generate a few entries
 	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	obj1.AddBalance(uint256.NewInt().SetUint64(22))
+	obj1.AddBalance(uint256.NewInt(22))
 	obj2 := state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
 	obj2.setIncarnation(1)
 	obj3 := state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	obj3.SetBalance(uint256.NewInt().SetUint64(44))
+	obj3.SetBalance(uint256.NewInt(44))
 
 	// write some of them to the trie
 	ctx := context.TODO()
@@ -314,7 +314,7 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blockWriter := NewPlainStateWriter(ethdb.WrapIntoTxDB(tx), tx, 1)
+	blockWriter := NewPlainStateWriter(tx, tx, 1)
 	err = state.CommitBlock(ctx, blockWriter)
 	if err != nil {
 		t.Fatal(err)

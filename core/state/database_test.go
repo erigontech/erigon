@@ -109,7 +109,7 @@ func TestCreate2Revive(t *testing.T) {
 			}
 			block.AddTx(tx)
 		case 2:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -281,7 +281,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		case 2:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -298,7 +298,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			block.AddTx(tx)
 		case 4:
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -314,7 +314,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			}
 			block.AddTx(tx)
 			// Trigger self-destruct
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), create2address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -813,12 +813,12 @@ func TestReproduceCrash(t *testing.T) {
 	// 1. Setting storageKey 1 to a non-zero value
 	// 2. Setting storageKey 2 to a non-zero value
 	// 3. Setting both storageKey1 and storageKey2 to zero values
-	value0 := uint256.NewInt()
+	value0 := uint256.NewInt(0)
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	storageKey1 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541")
-	value1 := uint256.NewInt().SetUint64(0x016345785d8a0000)
+	value1 := uint256.NewInt(0x016345785d8a0000)
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
-	value2 := uint256.NewInt().SetUint64(0x58c00a51)
+	value2 := uint256.NewInt(0x58c00a51)
 
 	db := ethdb.NewTestDB(t)
 	tsw := state.NewPlainStateWriter(db, nil, 0)
@@ -835,13 +835,13 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
@@ -1094,7 +1094,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1129,7 +1129,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt().SetUint64(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1208,7 +1208,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, oldCode)
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %w", err)
 	}
@@ -1250,7 +1250,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1284,7 +1284,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
 	intraBlockState.SetCode(contract, code)
-	intraBlockState.AddBalance(contract, uint256.NewInt().SetUint64(1000000000))
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
@@ -1476,7 +1476,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var key0 common.Hash
 	var check0 uint256.Int
 	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(2)) != 0 {
+	if check0.Cmp(uint256.NewInt(2)) != 0 {
 		t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
 	}
 
@@ -1491,7 +1491,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(1)) != 0 {
+	if check0.Cmp(uint256.NewInt(1)) != 0 {
 		t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
 	}
 
@@ -1506,7 +1506,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	st.GetState(phoenixAddress, &key0, &check0)
-	if check0.Cmp(uint256.NewInt().SetUint64(0)) != 0 {
+	if check0.Cmp(uint256.NewInt(0)) != 0 {
 		t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
 	}
 }

@@ -30,6 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
+const MaxGoroutinesPerBatchRequest = 50
+
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
 // handler is not safe for concurrent use. Message handling never blocks indefinitely
 // because RPCs are processed on background goroutines launched by handler.
@@ -119,10 +121,51 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 	}
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
+		allMethodsAreThreadSafe := true // only if all methods in batch are pass next criteria
+		for i := range calls {
+			if calls[i].isSubscribe() {
+				allMethodsAreThreadSafe = false
+				break
+			}
+			cb := h.reg.callback(calls[i].Method)
+			if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
+				allMethodsAreThreadSafe = false
+				break
+			}
+		}
+
 		answers := make([]*jsonrpcMessage, 0, len(msgs))
-		for _, msg := range calls {
-			if answer := h.handleCallMsg(cp, msg, stream); answer != nil {
-				answers = append(answers, answer)
+		if allMethodsAreThreadSafe {
+			// All goroutines will place results right to this array. Because requests order must match reply orders.
+			answersWithNils := make([]*jsonrpcMessage, len(msgs))
+			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
+			boundedConcurrency := make(chan struct{}, MaxGoroutinesPerBatchRequest)
+			defer close(boundedConcurrency)
+			wg := sync.WaitGroup{}
+			wg.Add(len(msgs))
+			for i := range calls {
+				boundedConcurrency <- struct{}{}
+				go func(i int) {
+					defer func() {
+						wg.Done()
+						<-boundedConcurrency
+					}()
+
+					answersWithNils[i] = h.handleCallMsg(cp, calls[i], stream)
+				}(i)
+			}
+			wg.Wait()
+			for _, answer := range answersWithNils {
+				if answer != nil {
+					answers = append(answers, answer)
+				}
+			}
+		} else {
+			answers = make([]*jsonrpcMessage, 0, len(msgs))
+			for _, msg := range calls {
+				if answer := h.handleCallMsg(cp, msg, stream); answer != nil {
+					answers = append(answers, answer)
+				}
 			}
 		}
 		h.addSubscriptions(cp.notifiers)

@@ -167,7 +167,7 @@ type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDif
 
 type HeaderDownload struct {
 	lock               sync.RWMutex
-	badHeaders         map[common.Hash]struct{}
+	BadHeaders         map[common.Hash]struct{}
 	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
 	preverifiedHashes  map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
 	preverifiedHeight  uint64                   // Block height corresponding to the last preverified hash
@@ -203,7 +203,7 @@ func NewHeaderDownload(
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
-		badHeaders:         make(map[common.Hash]struct{}),
+		BadHeaders:         make(map[common.Hash]struct{}),
 		anchors:            make(map[common.Hash]*Anchor),
 		persistedLinkLimit: persistentLinkLimit,
 		linkLimit:          linkLimit - persistentLinkLimit,
@@ -258,6 +258,7 @@ type HeaderInserter struct {
 	prevHeight       uint64
 	newCanonical     bool
 	unwindPoint      uint64
+	unwind           bool
 	highest          uint64
 	highestHash      common.Hash
 	highestTimestamp uint64

@@ -149,6 +149,8 @@ func makeP2PServer(
 		urls = params.RinkebyBootnodes
 	case params.CalaverasGenesisHash:
 		urls = params.CalaverasBootnodes
+	case params.SokolGenesisHash:
+		urls = params.SokolBootnodes
 	}
 	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {
@@ -425,7 +427,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2pListenAddr string, protocol uint) (*SentryServerImpl, error) {
+func grpcSentryServer(ctx context.Context, nodeName, datadir string, sentryAddr string, p2pListenAddr string, protocol uint) (*SentryServerImpl, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
@@ -476,7 +478,7 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 		return nil, fmt.Errorf("unknown protocol: %d", protocol)
 	}
 
-	sentryServer := NewSentryServer(ctx, path.Join(datadir, "erigon", "nodekey"), dbDir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, protocol)
+	sentryServer := NewSentryServer(ctx, nodeName, path.Join(datadir, "erigon", "nodekey"), dbDir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, protocol)
 	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
@@ -489,9 +491,10 @@ func grpcSentryServer(ctx context.Context, datadir string, sentryAddr string, p2
 	return sentryServer, nil
 }
 
-func NewSentryServer(ctx context.Context, nodeKeyFile, dbPath, p2pListenAddr string, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, protocol uint) *SentryServerImpl {
+func NewSentryServer(ctx context.Context, nodeName, nodeKeyFile, dbPath, p2pListenAddr string, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, protocol uint) *SentryServerImpl {
 	ss := &SentryServerImpl{
 		ctx:           ctx,
+		nodeName:      nodeName,
 		nodeKeyFile:   nodeKeyFile,
 		dbPath:        dbPath,
 		p2pListenAddr: p2pListenAddr,
@@ -590,13 +593,13 @@ func p2pServer(ctx context.Context,
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discoveryDNS []string, nodiscover bool, netRestrict string, protocol uint) error {
+func Sentry(nodeName, datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discoveryDNS []string, nodiscover bool, netRestrict string, protocol uint) error {
 	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
 	ctx := rootContext()
 
-	sentryServer, err := grpcSentryServer(ctx, datadir, sentryAddr, fmt.Sprintf(":%d", port), protocol)
+	sentryServer, err := grpcSentryServer(ctx, nodeName, datadir, sentryAddr, fmt.Sprintf(":%d", port), protocol)
 	if err != nil {
 		return err
 	}
