@@ -108,7 +108,7 @@ func TestGenerateChain(t *testing.T) {
 	if !uint256.NewInt(10000).Eq(st.GetBalance(addr2)) {
 		t.Errorf("wrong balance of addr2: %s", st.GetBalance(addr2))
 	}
-	if fmt.Sprintf("%s", st.GetBalance(addr3)) != "19687500000000001000" {
+	if fmt.Sprintf("%s", st.GetBalance(addr3)) != "19687500000000001000" { //nolint
 		t.Errorf("wrong balance of addr3: %s", st.GetBalance(addr3))
 	}
 }

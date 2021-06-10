@@ -368,7 +368,7 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
 		}
-		if err != nil {
+		if err != nil || !ok {
 			// doesn't have TEVM code
 			continue
 		}
