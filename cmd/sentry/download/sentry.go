@@ -125,7 +125,7 @@ func makeP2PServer(
 			p2pConfig.BootstrapNodes = append(p2pConfig.BootstrapNodes, node)
 		}
 	}
-
+	p2pConfig.BootstrapNodesV5 = p2pConfig.BootstrapNodes
 	p2pConfig.Protocols = []p2p.Protocol{protocol}
 	return &p2p.Server{Config: p2pConfig}, nil
 }
