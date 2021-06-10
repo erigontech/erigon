@@ -751,7 +751,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
-func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
+func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	setNodeKey(ctx, cfg)
 	setNAT(ctx, cfg)
 	setListenAddress(ctx, cfg)
@@ -760,6 +760,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 	setStaticPeers(ctx, cfg)
 
 	ethPeers := cfg.MaxPeers
+	cfg.Name = nodeName
 	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
 
 	if ctx.GlobalIsSet(MaxPendingPeersFlag.Name) {
@@ -792,9 +793,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
 
 // SetNodeConfig applies node-related command line flags to the config.
 func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
-	SetP2PConfig(ctx, &cfg.P2P)
-	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
+	setNodeUserIdent(ctx, cfg)
+	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.DataDir)
 }
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
