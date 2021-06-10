@@ -512,7 +512,11 @@ func opDifficulty(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 }
 
 func opGasLimit(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	callContext.stack.Push(new(uint256.Int).SetUint64(interpreter.evm.Context.GasLimit))
+	if interpreter.evm.Context.MaxGasLimit {
+		callContext.stack.Push(new(uint256.Int).SetAllOne())
+	} else {
+		callContext.stack.Push(new(uint256.Int).SetUint64(interpreter.evm.Context.GasLimit))
+	}
 	return nil, nil
 }
 
