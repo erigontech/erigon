@@ -1256,7 +1256,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 		if err != nil {
 			t.Fatal(err, v)
 		}
-		fmt.Println(k, bfs.BaseTxId, bfs.TxAmount)
+
 		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
 			t.Fatal(err)
@@ -1408,7 +1408,7 @@ func TestPruneBlocks(t *testing.T) {
 	}
 
 	bodySnapshotPath := path.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1504,7 +1504,7 @@ func TestPruneBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1603,4 +1603,144 @@ func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) { //nolint: deadcode
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+
+/**
+todo
+1) тест на миграции блоков и хедеров
+2) тест на синхронную миграцию
+2.1) Вызовыы
+3) тест на асинхронную миграцию
+4)
+ */
+
+
+
+
+func TestBodySnapshotSyncMigration(t *testing.T) {
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	var err error
+	dir := t.TempDir()
+
+	defer func() {
+		if err != nil {
+			t.Log(err, dir)
+		}
+		err = os.RemoveAll(dir)
+		if err != nil {
+			t.Log(err)
+		}
+	}()
+	snapshotsDir := path.Join(dir, "snapshots")
+	err = os.Mkdir(snapshotsDir, os.ModePerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	btCli, err := New(snapshotsDir, true, "12345123451234512345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	btCli.trackers = [][]string{}
+
+	sb := &SnapshotMigrator{
+		snapshotsDir: snapshotsDir,
+		replaceChan:  make(chan struct{}),
+		useMdbx:      true,
+	}
+
+	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	quit := make(chan struct{})
+	defer func() {
+		close(quit)
+	}()
+
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer tx.Rollback()
+	dataTo := uint64(11)
+	err = GenerateBodyData(tx, 0, dataTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyFullBodiesData(t, tx, dataTo)
+	err = tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writeStep := func(currentSnapshotBlock uint64) {
+		writeTX, writeErr := db.BeginRw(context.Background())
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		defer writeTX.Rollback()
+		writeErr = sb.SyncStages(currentSnapshotBlock, db, writeTX)
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+
+		writeErr = writeTX.Commit()
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+
+	StageSyncStep := func(currentSnapshotBlock uint64) {
+		t.Helper()
+		rotx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Error(err)
+		}
+		defer rotx.Rollback()
+
+		err = sb.AsyncStages(currentSnapshotBlock, db, rotx, btCli, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rotx.Rollback()
+	}
+	StageSyncStep(10)
+	for !sb.Replaced() {
+		//wait until all txs of old snapshot closed
+	}
+	writeStep(10)
+
+	for atomic.LoadUint64(&sb.started) > 0 {
+		roTx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = sb.Final(roTx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roTx.Rollback()
+		time.Sleep(time.Millisecond * 100)
+	}
+
+	StageSyncStep(10)
+	for !sb.Replaced() {
+		//wait until all txs of old snapshot closed
+	}
+	writeStep(10)
+
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.BodiesCurrentSnapshot)==10 {
+		roTx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = sb.Final(roTx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roTx.Rollback()
+		time.Sleep(time.Millisecond * 100)
+	}
+	t.Log()
 }
