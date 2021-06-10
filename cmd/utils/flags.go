@@ -596,32 +596,37 @@ func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
 	}
 }
 
+func bootNodesByChain(chain string) []string {
+	switch chain {
+	case params.RopstenChainName:
+		return params.RopstenBootnodes
+	case params.RinkebyChainName:
+		return params.RinkebyBootnodes
+	case params.GoerliChainName:
+		return params.GoerliBootnodes
+	case params.ErigonMineName:
+		return params.ErigonBootnodes
+	case params.CalaverasChainName:
+		return params.CalaverasBootnodes
+	case params.SokolChainName:
+		return params.SokolBootnodes
+	}
+	return nil
+}
+
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
+	if cfg.BootstrapNodes != nil {
+		return // already set, don't apply defaults.
+	}
+
 	urls := params.MainnetBootnodes
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case params.RopstenChainName:
-			urls = params.RopstenBootnodes
-		case params.RinkebyChainName:
-			urls = params.RinkebyBootnodes
-		case params.GoerliChainName:
-			urls = params.GoerliBootnodes
-		case params.ErigonMineName:
-			urls = params.ErigonBootnodes
-		case params.CalaverasChainName:
-			urls = params.CalaverasBootnodes
-		case params.SokolChainName:
-			urls = params.SokolBootnodes
-		default:
-			if cfg.BootstrapNodes != nil {
-				return // already set, don't apply defaults.
-			}
-		}
+		urls = bootNodesByChain(chain)
 	}
 
 	cfg.BootstrapNodes = make([]*enode.Node, 0, len(urls))
@@ -644,26 +649,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
-
 		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case params.RopstenChainName:
-			urls = params.RopstenBootnodes
-		case params.RinkebyChainName:
-			urls = params.RinkebyBootnodes
-		case params.GoerliChainName:
-			urls = params.GoerliBootnodes
-		case params.ErigonMineName:
-			urls = params.ErigonBootnodes
-		case params.CalaverasChainName:
-			urls = params.CalaverasBootnodes
-		case params.SokolChainName:
-			urls = params.SokolBootnodes
-		default:
-			if cfg.BootstrapNodesV5 != nil {
-				return // already set, don't apply defaults.
-			}
-		}
+		urls = bootNodesByChain(chain)
 	}
 
 	cfg.BootstrapNodesV5 = make([]*enode.Node, 0, len(urls))
@@ -704,7 +691,7 @@ func SetStaticPeers(cfg *p2p.Config, urls []string) error {
 	return nil
 }
 
-func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, port, protocol uint) (*p2p.Config, error) {
+func NewP2PConfig(nodiscover bool, datadir, chain, netRestrict, natSetting, nodeName string, staticPeers []string, port, protocol uint) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH65:
@@ -726,6 +713,17 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 		Logger:       log.New(),
 		NodeDatabase: enodeDBPath,
 	}
+	for _, url := range bootNodesByChain(chain) {
+		if url != "" {
+			node, err := enode.Parse(enode.ValidSchemes, url)
+			if err != nil {
+				return nil, fmt.Errorf("bootstrap URL invalid, enode: %s, err: %s\n", url, err)
+			}
+			cfg.BootstrapNodes = append(cfg.BootstrapNodes, node)
+		}
+	}
+	cfg.BootstrapNodesV5 = cfg.BootstrapNodes
+
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
 		cfg.NetRestrict.Add(netRestrict)

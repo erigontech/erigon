@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/params"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,7 @@ var (
 	nodiscover   bool // disable sentry's discovery mechanism
 	protocol     string
 	netRestrict  string // CIDR to restrict peering to
+	chain        string
 )
 
 func init() {
@@ -47,6 +49,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)
 	rootCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
 	rootCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
+	rootCmd.Flags().StringVar(&chain, "chain", params.MainnetChainName, "Name of the testnet to join")
 	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
@@ -79,7 +82,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		nodeConfig := node2.NewNodeConfig()
-		p2pConfig, err := utils.NewP2PConfig(nodiscover, datadir, netRestrict, natSetting, nodeConfig.NodeName(), staticPeers, uint(port), uint(p))
+		p2pConfig, err := utils.NewP2PConfig(nodiscover, chain, datadir, netRestrict, natSetting, nodeConfig.NodeName(), staticPeers, uint(port), uint(p))
 		if err != nil {
 			return err
 		}
