@@ -352,7 +352,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return nil, err
 		}
 
-		server66 := download.NewSentryServer(backend.downloadV2Ctx,
+		server66 := download.NewSentryServer(backend.downloadV2Ctx, stack.Config().P2P.Name,
 			path.Join(stack.Config().DataDir, "erigon", "nodekey"),
 			path.Join(stack.Config().DataDir, "nodes", "eth66"),
 			stack.Config().P2P.ListenAddr, d66, readNodeInfo, eth.ETH66)
@@ -363,7 +363,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			if err != nil {
 				return nil, err
 			}
-			server65 := download.NewSentryServer(backend.downloadV2Ctx,
+			server65 := download.NewSentryServer(backend.downloadV2Ctx, stack.Config().P2P.Name,
 				path.Join(stack.Config().DataDir, "erigon", "nodekey"),
 				path.Join(stack.Config().DataDir, "nodes", "eth65"),
 				stack.Config().P2P.ListenAddr65, d65, readNodeInfo, eth.ETH65)
