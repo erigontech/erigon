@@ -8,7 +8,6 @@ var (
 	// Following vars are injected through the build flags (see Makefile)
 	gitCommit string
 	gitBranch string
-	gitTag    string
 )
 
 func main() {
