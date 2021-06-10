@@ -506,7 +506,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(nodeName, datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint) error {
+func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint) error {
 	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
