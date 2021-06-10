@@ -105,6 +105,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	if txErr != nil {
 		return txErr
 	}
+	defer tx.Rollback()
 
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
