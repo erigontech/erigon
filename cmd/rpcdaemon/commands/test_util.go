@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
