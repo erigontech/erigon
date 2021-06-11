@@ -720,7 +720,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
-		MaxPeers:     25,
+		MaxPeers:     100,
 		NAT:          nat.Any(),
 		NoDiscovery:  nodiscover,
 		PrivateKey:   serverKey,
