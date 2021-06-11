@@ -363,7 +363,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	}
 	if g.Config != nil && (g.Config.IsLondon(0)) {
 		head.Eip1559 = true
-		if g.BaseFee == nil {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
