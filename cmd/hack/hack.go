@@ -1788,6 +1788,43 @@ func readCallTraces(chaindata string, block uint64) error {
 	return nil
 }
 
+func fixTd(chaindata string) error {
+	kv := ethdb.MustOpenKV(chaindata)
+	defer kv.Close()
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	/*
+		c, err1 := tx.RwCursor(dbutils.HeaderTDBucket)
+		if err1 != nil {
+			return err1
+		}
+		defer c.Close()
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], 12612529)
+		k, v, err2 := c.Seek(key[:])
+		if err2 != nil {
+			return err2
+		}
+		fmt.Printf("%x => %x\n", k, v)
+		binary.BigEndian.PutUint64(key[:], 12612530)
+		k, v, err2 = c.Seek(key[:])
+		if err2 != nil {
+			return err2
+		}
+		fmt.Printf("%x => %x\n", k, v)
+	*/
+	if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b18ba71dc3f8047188f20e0eb01deee8fca4e3de871b3787262d8537915d3a3d0a"), common.FromHex("0x8a0585dd10ba73a663293e")); err != nil {
+		return err
+	}
+	if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b29d597fef9c8bc3a552312eaf444222740edd807ae5f7e640de186d00ab11e8ea"), common.FromHex("0x8a0585dd2bfd0960ce6fdd")); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func main() {
 	flag.Parse()
 
@@ -1926,6 +1963,9 @@ func main() {
 
 	case "readCallTraces":
 		err = readCallTraces(*chaindata, uint64(*block))
+
+	case "fixTd":
+		err = fixTd(*chaindata)
 	}
 
 	if err != nil {
