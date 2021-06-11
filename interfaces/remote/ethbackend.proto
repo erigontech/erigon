@@ -18,7 +18,7 @@ service ETHBACKEND {
   // ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
   rpc ProtocolVersion(ProtocolVersionRequest) returns (ProtocolVersionReply);
 
-  // ClientVersion returns the Ethereum client version string using node name convention (e.g. Erigon/v2021.03.2-alpha/Linux).
+  // ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
   rpc ClientVersion(ClientVersionRequest) returns (ClientVersionReply);
 
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeReply);

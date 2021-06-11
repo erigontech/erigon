@@ -9,7 +9,6 @@ import (
 
 func TestGetTransactionReceipt(t *testing.T) {
 	db := createTestKV(t)
-	defer db.Close()
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {

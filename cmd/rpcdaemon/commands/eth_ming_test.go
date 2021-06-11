@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"math/big"
 	"testing"
 	"time"
@@ -14,10 +13,9 @@ import (
 )
 
 func TestPendingBlock(t *testing.T) {
-	conn := createTestGrpcConn()
-	defer conn.Close()
+	ctx, conn := createTestGrpcConn(t)
 	mining := txpool.NewMiningClient(conn)
-	ff := filters.New(context.Background(), nil, nil, mining)
+	ff := filters.New(ctx, nil, nil, mining)
 	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
@@ -40,10 +38,9 @@ func TestPendingBlock(t *testing.T) {
 }
 
 func TestPendingLogs(t *testing.T) {
-	conn := createTestGrpcConn()
-	defer conn.Close()
+	ctx, conn := createTestGrpcConn(t)
 	mining := txpool.NewMiningClient(conn)
-	ff := filters.New(context.Background(), nil, nil, mining)
+	ff := filters.New(ctx, nil, nil, mining)
 	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)
 	expect := []byte{211}
 

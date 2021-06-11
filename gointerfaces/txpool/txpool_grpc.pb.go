@@ -29,6 +29,8 @@ type TxpoolClient interface {
 	Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error)
+	// returns all transactions from tx pool
+	All(ctx context.Context, in *AllRequest, opts ...grpc.CallOption) (*AllReply, error)
 	// subscribe to new transactions add event
 	OnAdd(ctx context.Context, in *OnAddRequest, opts ...grpc.CallOption) (Txpool_OnAddClient, error)
 }
@@ -71,6 +73,15 @@ func (c *txpoolClient) Add(ctx context.Context, in *AddRequest, opts ...grpc.Cal
 func (c *txpoolClient) Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error) {
 	out := new(TransactionsReply)
 	err := c.cc.Invoke(ctx, "/txpool.Txpool/Transactions", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *txpoolClient) All(ctx context.Context, in *AllRequest, opts ...grpc.CallOption) (*AllReply, error) {
+	out := new(AllReply)
+	err := c.cc.Invoke(ctx, "/txpool.Txpool/All", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +133,8 @@ type TxpoolServer interface {
 	Add(context.Context, *AddRequest) (*AddReply, error)
 	// preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
 	Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error)
+	// returns all transactions from tx pool
+	All(context.Context, *AllRequest) (*AllReply, error)
 	// subscribe to new transactions add event
 	OnAdd(*OnAddRequest, Txpool_OnAddServer) error
 	mustEmbedUnimplementedTxpoolServer()
@@ -142,6 +155,9 @@ func (UnimplementedTxpoolServer) Add(context.Context, *AddRequest) (*AddReply, e
 }
 func (UnimplementedTxpoolServer) Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Transactions not implemented")
+}
+func (UnimplementedTxpoolServer) All(context.Context, *AllRequest) (*AllReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method All not implemented")
 }
 func (UnimplementedTxpoolServer) OnAdd(*OnAddRequest, Txpool_OnAddServer) error {
 	return status.Errorf(codes.Unimplemented, "method OnAdd not implemented")
@@ -231,6 +247,24 @@ func _Txpool_Transactions_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Txpool_All_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AllRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TxpoolServer).All(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/txpool.Txpool/All",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TxpoolServer).All(ctx, req.(*AllRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Txpool_OnAdd_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(OnAddRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -274,6 +308,10 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Transactions",
 			Handler:    _Txpool_Transactions_Handler,
+		},
+		{
+			MethodName: "All",
+			Handler:    _Txpool_All_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
