@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/params"
 	"io/ioutil"
 	"os"
 	"path"
@@ -14,9 +13,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/params"
+
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -129,6 +131,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 	if async {
 		go func() {
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
+			defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
 				//return fmt.Errorf("begin err: %w", err)

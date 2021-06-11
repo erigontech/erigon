@@ -27,6 +27,7 @@ import (
 	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
+	"github.com/ledgerwatch/erigon/common/debug"
 )
 
 const (
@@ -178,6 +179,7 @@ func discoverUPnP() Interface {
 // is sent into out. If no service matched, nil is sent.
 func discover(out chan<- *upnp, target string, matcher func(goupnp.ServiceClient) *upnp) {
 	devs, err := goupnp.DiscoverDevices(target)
+	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
 	if err != nil {
 		out <- nil
 		return

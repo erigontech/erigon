@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 
+	_debug "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -59,6 +60,7 @@ func StartNode(stack *node.Node) {
 		Fatalf("Error starting protocol stack: %v", err)
 	}
 	go func() {
+		defer func() { _debug.RecoverStackTraceNoExit(nil, recover()) }()
 		sigc := make(chan os.Signal, 1)
 		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 		defer signal.Stop(sigc)

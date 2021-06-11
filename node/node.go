@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
@@ -120,6 +121,9 @@ func New(conf *Config) (*Node, error) {
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
 	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
 	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
+	// Check for uncaught crashes from the previous boot and notify the user if
+	// there are any
+	debug.CheckForCrashes()
 
 	return node, nil
 }
@@ -262,6 +266,7 @@ func (n *Node) stopServices(running []Lifecycle) error {
 	if len(failure.Services) > 0 {
 		return failure
 	}
+	debug.ArchiveReportedCrashes()
 	return nil
 }
 

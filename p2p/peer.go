@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
@@ -272,6 +273,7 @@ loop:
 
 func (p *Peer) pingLoop() {
 	ping := time.NewTimer(pingInterval)
+	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
 	defer p.wg.Done()
 	defer ping.Stop()
 	for {
@@ -289,6 +291,7 @@ func (p *Peer) pingLoop() {
 }
 
 func (p *Peer) readLoop(errc chan<- error) {
+	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
 	defer p.wg.Done()
 	for {
 		msg, err := p.rw.ReadMsg()
@@ -390,6 +393,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
 		go func() {
+			defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
 			defer p.wg.Done()
 			err := proto.Run(p, rw)
 			if err == nil {
