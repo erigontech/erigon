@@ -17,6 +17,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/stretchr/testify/require"
 )
 
 func testSentryServer(db ethdb.KVGetter, genesis *core.Genesis, genesisHash common.Hash) *SentryServerImpl {
@@ -61,8 +62,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
-		dbNoFork  = ethdb.NewTestDB(t)
-		dbProFork = ethdb.NewTestDB(t)
+		dbNoFork  = ethdb.NewTestKV(t)
+		dbProFork = ethdb.NewTestKV(t)
 
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
@@ -71,7 +72,18 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		genesisProFork = gspecProFork.MustCommit(dbProFork)
 	)
 
-	s1, s2 := testSentryServer(dbNoFork, gspecNoFork, genesisNoFork.Hash()), testSentryServer(dbProFork, gspecProFork, genesisProFork.Hash())
+	var s1, s2 *SentryServerImpl
+
+	err := dbNoFork.Update(context.Background(), func(tx ethdb.RwTx) error {
+		s1 = testSentryServer(tx, gspecNoFork, genesisNoFork.Hash())
+		return nil
+	})
+	require.NoError(t, err)
+	err = dbProFork.Update(context.Background(), func(tx ethdb.RwTx) error {
+		s2 = testSentryServer(tx, gspecProFork, genesisProFork.Hash())
+		return nil
+	})
+	require.NoError(t, err)
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	p2pNoFork, p2pProFork := p2p.MsgPipe()

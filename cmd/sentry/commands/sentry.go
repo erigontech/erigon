@@ -11,7 +11,12 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
+)
+
+var (
+	GitCommit, GitBranch string
 )
 
 var (
@@ -77,7 +82,8 @@ var rootCmd = &cobra.Command{
 			p = eth.ETH65
 		}
 
-		return download.Sentry(datadir, natSetting, port, sentryAddr, staticPeers, discoveryDNS, nodiscover, netRestrict, uint(p))
+		nodeConfig := node.NewNodeConfig(node.Params{GitCommit: GitCommit, GitBranch: GitBranch})
+		return download.Sentry(nodeConfig.NodeName(), datadir, natSetting, port, sentryAddr, staticPeers, discoveryDNS, nodiscover, netRestrict, uint(p))
 	},
 }
 

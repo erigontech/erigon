@@ -17,25 +17,26 @@
 // This file contains some shares testing functionality, common to  multiple
 // different files and modules being tested.
 
-package eth
+package eth_test
 
 import (
 	"crypto/rand"
 
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 // testPeer is a simulated peer to allow testing direct network calls.
 type testPeer struct {
-	*Peer
+	*eth.Peer
 
 	net p2p.MsgReadWriter // Network layer reader/writer to simulate remote messaging
 	app *p2p.MsgPipeRW    // Application layer reader/writer to simulate the local side
 }
 
 // newTestPeer creates a new peer registered at the given data backend.
-func newTestPeer(name string, version uint, backend Backend) (*testPeer, <-chan error) { //nolint:unparam
+func newTestPeer(name string, version uint, backend eth.Backend) (*testPeer, <-chan error) { //nolint:unparam
 	// Create a message pipe to communicate through
 	app, net := p2p.MsgPipe()
 
@@ -44,11 +45,11 @@ func newTestPeer(name string, version uint, backend Backend) (*testPeer, <-chan 
 	//nolint:errcheck
 	rand.Read(id[:])
 
-	peer := NewPeer(version, p2p.NewPeer(id, name, nil), net, backend.TxPool())
+	peer := eth.NewPeer(version, p2p.NewPeer(id, name, nil), net, backend.TxPool())
 	errc := make(chan error, 1)
 	go func() {
-		errc <- backend.RunPeer(peer, func(peer *Peer) error {
-			return Handle(backend, peer)
+		errc <- backend.RunPeer(peer, func(peer *eth.Peer) error {
+			return eth.Handle(backend, peer)
 		})
 	}()
 	return &testPeer{app: app, net: net, Peer: peer}, errc

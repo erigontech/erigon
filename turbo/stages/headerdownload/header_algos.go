@@ -54,7 +54,7 @@ func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.He
 	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
 	for i, header := range msg {
 		headerHash := header.Hash()
-		if _, bad := hd.badHeaders[headerHash]; bad {
+		if _, bad := hd.BadHeaders[headerHash]; bad {
 			return nil, BadBlockPenalty, nil
 		}
 		if _, duplicate := dedupMap[headerHash]; duplicate {
@@ -100,7 +100,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	headerHash := header.Hash()
-	if _, bad := hd.badHeaders[headerHash]; bad {
+	if _, bad := hd.BadHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
 	return []*ChainSegment{{HeadersRaw: [][]byte{headerRaw}, Headers: []*types.Header{header}}}, NoPenalty, nil
@@ -561,7 +561,9 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
 		if !link.preverified {
-			if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
+			if _, bad := hd.BadHeaders[link.hash]; bad {
+				skip = true
+			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
 				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -571,8 +573,10 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 				} else {
 					skip = true
 				}
-			} else if hd.seenAnnounces.Pop(link.hash) {
-				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
+			} else {
+				if hd.seenAnnounces.Pop(link.hash) {
+					hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
+				}
 			}
 		}
 		if _, ok := hd.links[link.hash]; ok {
@@ -737,6 +741,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint
+			hi.unwind = true
 		}
 		// This makes sure we end up chosing the chain with the max total difficulty
 		hi.localTd.Set(td)
@@ -769,6 +774,10 @@ func (hi *HeaderInserter) GetHighestTimestamp() uint64 {
 
 func (hi *HeaderInserter) UnwindPoint() uint64 {
 	return hi.unwindPoint
+}
+
+func (hi *HeaderInserter) Unwind() bool {
+	return hi.unwind
 }
 
 func (hi *HeaderInserter) BestHeaderChanged() bool {

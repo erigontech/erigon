@@ -12,6 +12,7 @@
     * [Trace transactions progress](#trace-transactions-progress)
     * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
     * [Server load too high](#server-load-too-high)
+    * [Batch requests](#batch-requests)
 - [For Developers](#for-developers)
     * [Code generation](#code-generation)
 
@@ -364,10 +365,6 @@ and hide others. That is possible with `rpc.accessList` flag.
 
 Now only these two methods are available.
 
-### Trace transactions progress
-
-There are still many open issues with the Erigon tracing routines. Please see [this issue](https://github.com/ledgerwatch/erigon/issues/1119#issuecomment-699028019) for the current open / known issues related to tracing.
-
 ### Clients getting timeout, but server load is low
 
 In this case: increase default rate-limit - 
@@ -382,6 +379,19 @@ Increase it - if your 'hot data' is small or have much RAM or see "request timeo
 ### Server load too high 
 
 Reduce `--private.api.ratelimit` 
+
+### Read DB directly without Json-RPC/Graphql
+
+[./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
+
+### Batch requests 
+
+Currently batch requests are spawn multiple goroutines and process all sub-requests in parallel. 
+But to limit impact of 1 huge batch to other users - max amount of goroutines hardcoded to 50.
+If submit 1 batch with 200 requests - RPCDaemon will spawn 50 goroutines and will use them to process 200 requests.
+We can make it configurable if your use-case need it. 
+
+But if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will processed sequentially (on 1 goroutine).
 
 ## For Developers
 

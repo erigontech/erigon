@@ -101,7 +101,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func executeBlockWithGo(
+func executeBlock(
 	block *types.Block,
 	tx ethdb.RwTx,
 	batch ethdb.Database,
@@ -221,7 +221,7 @@ func newStateReaderWriter(
 	return stateReader, stateWriter
 }
 
-func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -261,6 +261,7 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 	logTime := time.Now()
 
 	var stoppedErr error
+Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
@@ -297,8 +298,13 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 			checkTEVMCode = nil
 		}
 
-		if err = executeBlockWithGo(block, tx, batch, cfg, writeChangesets, accumulator, readerWriterWrapper, checkTEVMCode); err != nil {
-			return err
+		stageProgress = blockNum
+		if err = executeBlock(block, tx, batch, cfg, writeChangesets, accumulator, readerWriterWrapper, checkTEVMCode); err != nil {
+			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
+			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
+				return unwindErr
+			}
+			break Loop
 		}
 
 		// TEVM marking new contracts sub-stage
@@ -329,8 +335,6 @@ func SpawnExecuteBlocksStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit 
 				}
 			}
 		}
-
-		stageProgress = blockNum
 
 		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if updateProgress {

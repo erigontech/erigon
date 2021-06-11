@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -142,10 +141,17 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 			} else {
 				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
-					var doubleHash DoubleHash
-					copy(doubleHash[:], header.UncleHash.Bytes())
-					copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
-					bd.requestedMap[doubleHash] = blockNum
+					// Perhaps we already have this block
+					block = rawdb.ReadBlock(db, hash, blockNum)
+					if block == nil {
+						var doubleHash DoubleHash
+						copy(doubleHash[:], header.UncleHash.Bytes())
+						copy(doubleHash[common.HashLength:], header.TxHash.Bytes())
+						bd.requestedMap[doubleHash] = blockNum
+					} else {
+						bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
+						request = false
+					}
 				} else {
 					bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{}
 					request = false
@@ -217,7 +223,7 @@ func (rt RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(rt[i]) //nolint:errcheck
 }
 
-func (bd *BodyDownload) doDeliverBodies(verifyUnclesFunc VerifyUnclesFunc) (err error) {
+func (bd *BodyDownload) doDeliverBodies() (err error) {
 Loop:
 	for {
 		var delivery Delivery
@@ -229,7 +235,7 @@ Loop:
 		}
 
 		reqMap := make(map[uint64]*BodyRequest)
-		txs, uncles, lenOfP2PMessage, peerID := delivery.txs, delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
+		txs, uncles, lenOfP2PMessage, _ := delivery.txs, delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
 		var delivered, undelivered int
 
 		for i := range txs {
@@ -246,7 +252,6 @@ Loop:
 				undelivered++
 				continue
 			}
-			header := bd.deliveriesH[blockNum-bd.requestedLow]
 			req := bd.requests[blockNum-bd.requestedLow]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {
@@ -254,10 +259,6 @@ Loop:
 				}
 			}
 			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
-
-			if err = verifyUnclesFunc(peerID, header, uncles[i]); err != nil {
-				return err
-			}
 
 			bd.deliveriesB[blockNum-bd.requestedLow] = &types.RawBody{Transactions: txs[i], Uncles: uncles[i]}
 			bd.delivered.Add(blockNum)
@@ -289,10 +290,6 @@ func (bd *BodyDownload) DeliverySize(delivered float64, wasted float64) {
 // It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
 // bodies), second is internal runtime error (like network error or db error)
 func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Header, r consensus.ChainReader) (headerdownload.Penalty, error) {
-	// Check whether the block's known, and if not, that it's linkable
-	if r.HasBlock(header.Hash(), header.Number.Uint64()) {
-		return headerdownload.BadBlockPenalty, core.ErrKnownBlock
-	}
 
 	// Header validity is known at this point, check the uncles and transactions
 	//header := block.Header()
@@ -308,8 +305,8 @@ func (bd *BodyDownload) VerifyUncles(header *types.Header, uncles []*types.Heade
 	return headerdownload.NoPenalty, nil
 }
 
-func (bd *BodyDownload) GetDeliveries(verifyUnclesFunc VerifyUnclesFunc) ([]*types.Header, []*types.RawBody, error) {
-	err := bd.doDeliverBodies(verifyUnclesFunc) // TODO: join this 2 funcs and simplify
+func (bd *BodyDownload) GetDeliveries() ([]*types.Header, []*types.RawBody, error) {
+	err := bd.doDeliverBodies() // TODO: join this 2 funcs and simplify
 	if err != nil {
 		return nil, nil, err
 	}

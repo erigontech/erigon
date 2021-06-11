@@ -286,10 +286,16 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 
 			if err := tx.ClearBucket(dbutils.HashedAccountsBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+				return nil, nil, fmt.Errorf("clear HashedAccountsBucket bucket: %w", err)
 			}
 			if err := tx.ClearBucket(dbutils.HashedStorageBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedState bucket: %w", err)
+				return nil, nil, fmt.Errorf("clear HashedStorageBucket bucket: %w", err)
+			}
+			if err := tx.ClearBucket(dbutils.TrieOfAccountsBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfAccountsBucket bucket: %w", err)
+			}
+			if err := tx.ClearBucket(dbutils.TrieOfStorageBucket); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfStorageBucket bucket: %w", err)
 			}
 			c, err := tx.Cursor(dbutils.PlainStateBucket)
 			if err != nil {
@@ -331,8 +337,15 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			c.Close()
 			if GenerateTrace {
-				fmt.Printf("State after %d================\n", i)
+				fmt.Printf("State after %d================\n", b.header.Number)
 				if err := tx.ForEach(dbutils.HashedAccountsBucket, nil, func(k, v []byte) error {
+					fmt.Printf("%x: %x\n", k, v)
+					return nil
+				}); err != nil {
+					return nil, nil, fmt.Errorf("print state: %w", err)
+				}
+				fmt.Printf("..................\n")
+				if err := tx.ForEach(dbutils.HashedStorageBucket, nil, func(k, v []byte) error {
 					fmt.Printf("%x: %x\n", k, v)
 					return nil
 				}); err != nil {
@@ -400,6 +413,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
 		header.Eip1559 = true
 	}
+	//header.WithSeal = debug.HeadersSeal()
 
 	return header
 }

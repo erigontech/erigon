@@ -53,6 +53,17 @@ func (m *roTxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func
 	return Walk(c, startkey, fixedbits, walker)
 }
 
+func (m *roTxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *roTxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
+}
+func (m *roTxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return m.tx.ForAmount(bucket, prefix, amount, walker)
+}
+
 func (m *roTxDb) BeginGetter(ctx context.Context) (GetterTx, error) {
 	return &roTxDb{tx: m.tx, top: false}, nil
 }
@@ -268,6 +279,17 @@ func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([
 		}
 	}()
 	return Walk(c, startkey, fixedbits, walker)
+}
+func (m *TxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForEach(bucket, fromPrefix, walker)
+}
+
+func (m *TxDb) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	return m.tx.ForPrefix(bucket, prefix, walker)
+}
+
+func (m *TxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	return m.tx.ForAmount(bucket, prefix, amount, walker)
 }
 
 func (m *TxDb) CommitAndBegin(ctx context.Context) error {
