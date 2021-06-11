@@ -46,6 +46,8 @@ func StageTranspileCfg(
 }
 
 func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
+	// panics! tx == nil
+
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Execution)
 	if errStart != nil {
 		return errStart
