@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/blend/go-sdk/db"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -46,12 +45,60 @@ func StageTranspileCfg(
 	}
 }
 
-func transpileBatch(logPrefix string, s *StageState, lastKey []byte, lastValue []byte, toBlock uint64, cfg TranspileCfg, tx ethdb.RwTx, observedAddresses map[common.Address]struct{}, observedCodeHashes map[common.Hash]struct{}, quitCh <-chan struct{}) ([]byte, []byte, error) {
+func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
+	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Execution)
+	if errStart != nil {
+		return errStart
+	}
+
+	var to = prevStageProgress
+	if toBlock > 0 {
+		to = min(prevStageProgress, toBlock)
+	}
+
+	if to <= s.BlockNumber {
+		s.Done()
+		return nil
+	}
+
+	stageProgress := uint64(0)
+	logTime := time.Now()
+
+	logPrefix := s.state.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Contract translation", logPrefix), "from", s.BlockNumber, "to", to)
+
+	var lastValue []byte
+	var err error
+	lastKey := dbutils.EncodeBlockNumber(s.BlockNumber + 1)
+
+	excludedAddress := common.Address{}
+	excludedAddress[len(excludedAddress)-1] = 1
+	empty := common.Address{}
+
+	observedAddresses := map[common.Address]struct{}{
+		empty:           {},
+		excludedAddress: {},
+	}
+	observedCodeHashes := map[common.Hash]struct{}{}
+
+	for lastKey != nil {
+		lastKey, lastValue, stageProgress, logTime, err = transpileBatch(logPrefix, s, lastKey, lastValue, to, cfg, tx, observedAddresses, observedCodeHashes, stageProgress, logTime, quit)
+		if err != nil {
+			return err
+		}
+	}
+
+	s.Done()
+
+	return nil
+}
+
+func transpileBatch(logPrefix string, s *StageState, blockKey []byte, addressStatus []byte, toBlock uint64, cfg TranspileCfg, tx ethdb.RwTx, observedAddresses map[common.Address]struct{}, observedCodeHashes map[common.Hash]struct{}, stageProgress uint64, logTime time.Time, quitCh <-chan struct{}) ([]byte, []byte, uint64, time.Time, error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err := cfg.db.BeginRw(context.Background())
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, time.Time{}, err
 		}
 		defer tx.Rollback()
 	}
@@ -62,12 +109,14 @@ func transpileBatch(logPrefix string, s *StageState, lastKey []byte, lastValue [
 	// read contracts pending for translation
 	c, err := tx.CursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, time.Time{}, err
 	}
 	defer c.Close()
 
-	stateReader := state.NewPlainStateReader(batch)
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
+	stateReader := state.NewPlainStateReader(batch)
 
 	var (
 		codeHash       common.Hash
@@ -79,40 +128,56 @@ func transpileBatch(logPrefix string, s *StageState, lastKey []byte, lastValue [
 		evmContract    []byte
 		transpiledCode []byte
 		ok             bool
+		currentSize    int
+		updateProgress bool
 	)
 
-	var k, addrStatus []byte
-	for c.SeekBothExact(lastKey, lastValue); err == nil; k, addrStatus, err = c.Next() {
+	prevContract := stageProgress
+
+	if len(addressStatus) == 0 {
+		blockKey, addressStatus, err = c.SeekExact(blockKey)
 		if err != nil {
-			return nil, nil, fmt.Errorf("can't read pending code translations: %w", err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
+		}
+	} else {
+		blockKey, addressStatus, err = c.SeekBothExact(blockKey, addressStatus)
+		if err != nil {
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
+		}
+	}
+
+	for ; err == nil; blockKey, addressStatus, err = c.Next() {
+		if err != nil {
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
 		}
 		if err = common.Stopped(quitCh); err != nil {
-			return nil, nil, fmt.Errorf("can't read pending code translations: %w", err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
 		}
 
 		select {
 		case <-logEvery.C:
-			logBlock, logTime = logTEVMProgress(logPrefix, logBlock, logTime, stageProgress)
+			prevContract, logTime = logTEVMProgress(logPrefix, prevContract, logTime, stageProgress)
+
 			if hasTx, ok := tx.(ethdb.HasTx); ok {
 				hasTx.Tx().CollectMetrics()
 			}
 		default:
 		}
 
-		block, err = dbutils.DecodeBlockNumber(k)
+		block, err = dbutils.DecodeBlockNumber(blockKey)
 		if err != nil {
-			return nil, nil, fmt.Errorf("can't read pending code translations: %w", err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
 		}
 
 		if block > toBlock {
 			break
 		}
 
-		if addrStatus[len(addrStatus)-1]&4 == 0 {
+		if addressStatus[len(addressStatus)-1]&4 == 0 {
 			continue
 		}
 
-		addrBytes = addrStatus[:len(addrStatus)-1]
+		addrBytes = addressStatus[:len(addressStatus)-1]
 		addr = common.BytesToAddress(addrBytes)
 
 		_, ok = observedAddresses[addr]
@@ -126,7 +191,7 @@ func transpileBatch(logPrefix string, s *StageState, lastKey []byte, lastValue [
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			return nil, nil, fmt.Errorf("can't read account by address %q: %w", addr, err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read account by address %q: %w", addr, err)
 		}
 		if acc == nil {
 			continue
@@ -147,7 +212,7 @@ func transpileBatch(logPrefix string, s *StageState, lastKey []byte, lastValue [
 		// check if we already have TEVM code
 		ok, err = batch.Has(dbutils.ContractTEVMCodeBucket, codeHashBytes)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-			return nil, nil, fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
 		}
 		if ok && err == nil {
 			// already has TEVM code
@@ -160,7 +225,7 @@ func transpileBatch(logPrefix string, s *StageState, lastKey []byte, lastValue [
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			return nil, nil, fmt.Errorf("can't read pending code translations: %w", err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
 		}
 		if len(evmContract) == 0 {
 			continue
@@ -173,63 +238,57 @@ func transpileBatch(logPrefix string, s *StageState, lastKey []byte, lastValue [
 				log.Warn("cannot find EVM contract", "address", addr, "hash", codeHash)
 				continue
 			}
-			return nil, nil, fmt.Errorf("contract %q cannot be translated: %w", codeHash, err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("contract %q cannot be translated: %w", codeHash, err)
 		}
 
 		// store TEVM contract code
 		err = batch.Put(dbutils.ContractTEVMCodeBucket, codeHashBytes, transpiledCode)
 		if err != nil {
-			return nil, nil, fmt.Errorf("cannot store TEVM code %q: %w", codeHash, err)
+			return nil, nil, 0, time.Time{}, fmt.Errorf("cannot store TEVM code %q: %w", codeHash, err)
 		}
 
 		stageProgress++
 
-		currentSize := batch.BatchSize()
-		updateProgress := currentSize >= int(cfg.batchSize)
+		currentSize = batch.BatchSize()
+		updateProgress = currentSize >= int(cfg.batchSize)
 
 		if updateProgress {
-			if err = batch.Commit(); err != nil {
-				return fmt.Errorf("cannot commit the batch of translations on %q: %w", codeHash, err)
-			}
-
-			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return fmt.Errorf("cannot update the stage status on %q: %w", codeHash, err)
-				}
-				if err = tx.Commit(); err != nil {
-					return fmt.Errorf("cannot commit the external transation on %q: %w", codeHash, err)
-				}
-
-				k, hash = common.CopyBytes(k), common.CopyBytes(hash)
-				_, err = c.SeekBothRange(k, hash)
-				if err != nil {
-					return err
-				}
-			}
-
-			stageTranspileGauge.Inc(int64(currentSize))
+			// should exit any execute single Commit
+			break
 		}
 	}
 
-	k, addrStatus, err = c.Current()
-	lastKey, lastValue = common.CopyBytes(k), common.CopyBytes(addrStatus) // data valid only until end of tx - copy it
+	blockKey, addressStatus, err = c.Current()
+	if err != nil {
+		return nil, nil, 0, time.Time{}, fmt.Errorf("cannot get current key: %w", err)
+	}
 
-	if err = s.Update(tx, stageProgress); err != nil {
-		return fmt.Errorf("cannot update the stage status on %q: %w", codeHash, err)
+	block, err = dbutils.DecodeBlockNumber(blockKey)
+	if err != nil {
+		return nil, nil, 0, time.Time{}, fmt.Errorf("can't get latest processed block %v: %w", blockKey, err)
+	}
+
+	if err = s.Update(batch, block); err != nil {
+		return nil, nil, 0, time.Time{}, fmt.Errorf("cannot update the stage status on %q: %w", codeHash, err)
+	}
+
+	blockKey, addressStatus = common.CopyBytes(blockKey), common.CopyBytes(addressStatus) // data valid only until end of tx - copy it
+
+	if err = batch.Commit(); err != nil {
+		return nil, nil, 0, time.Time{}, fmt.Errorf("cannot commit the batch of translations on %q: %w", codeHash, err)
 	}
 
 	if !useExternalTx {
-		tx.Commit()
+		if err = tx.Commit(); err != nil {
+			return nil, nil, 0, time.Time{}, fmt.Errorf("cannot commit the external transation on %q: %w", codeHash, err)
+		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", toBlock, "contracts", stageProgress)
-
-	return lastKey, lastValue, nil
-	// ============= DEBUG ==============
+	stageTranspileGauge.Inc(int64(currentSize))
 
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", toBlock, "contracts", stageProgress)
 
-	return  nil, nil, nil
+	return blockKey, addressStatus, stageProgress, logTime, nil
 }
 
 func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, currentContract uint64) (uint64, time.Time) {
@@ -246,58 +305,6 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 	log.Info(fmt.Sprintf("[%s] Translated contracts", logPrefix), logpairs...)
 
 	return currentContract, currentTime
-}
-
-func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Execution)
-	if errStart != nil {
-		return errStart
-	}
-
-	var to = prevStageProgress
-	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
-	}
-
-	if to <= s.BlockNumber {
-		s.Done()
-		return nil
-	}
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	stageProgress := uint64(0)
-	logBlock := stageProgress
-	logTime := time.Now()
-
-	logPrefix := s.state.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Contract translation", logPrefix), "from", s.BlockNumber, "to", to)
-
-	var lastValue []byte
-	var err error
-	lastKey := dbutils.EncodeBlockNumber(s.BlockNumber + 1)
-
-	excludedAddress := common.Address{}
-	excludedAddress[len(excludedAddress)-1] = 1
-	empty := common.Address{}
-
-	observedAddresses := map[common.Address]struct{}{
-		empty:           {},
-		excludedAddress: {},
-	}
-	observedCodeHashes := map[common.Hash]struct{}{}
-
-	for lastKey != nil  {
-		lastKey, lastValue, err = transpileBatch(logPrefix, s, lastKey, lastValue, to, cfg, observedAddresses, observedCodeHashes, quit) // start tx, open batch, open cursor, commit tx if need - but doesn't reopen anything
-		if err != nil {
-			return err
-		}
-	}
-
-	s.Done()
-
-	return nil
 }
 
 func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan struct{}, cfg TranspileCfg) error {
