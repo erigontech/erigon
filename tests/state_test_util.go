@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -196,8 +197,8 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	statedb := state.New(state.NewDbStateReader(tx))
-	w := state.NewDbStateWriter(tx, writeBlockNr)
+	statedb := state.New(state.NewPlainStateReader(tx))
+	w := state.NewPlainStateWriter(tx, nil, writeBlockNr)
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -233,10 +234,6 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 		statedb.RevertToSnapshot(snapshot)
 	}
 
-	// Commit block
-	if err = statedb.FinalizeTx(ctx, w); err != nil {
-		return nil, common.Hash{}, err
-	}
 	// And _now_ get the state root
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
@@ -250,6 +247,45 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	if err = statedb.CommitBlock(ctx, w); err != nil {
 		return nil, common.Hash{}, err
 	}
+	// Generate hashed state
+	c, err := kvtx.RwCursor(dbutils.PlainStateBucket)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, common.Hash{}, fmt.Errorf("interate over plain state: %w", err)
+		}
+		var newK []byte
+		if len(k) == common.AddressLength {
+			newK = make([]byte, common.HashLength)
+		} else {
+			newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+		}
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(k[:common.AddressLength])
+		//nolint:errcheck
+		h.Sha.Read(newK[:common.HashLength])
+		if len(k) > common.AddressLength {
+			copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+			h.Sha.Reset()
+			//nolint:errcheck
+			h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+			//nolint:errcheck
+			h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+			if err = tx.Put(dbutils.HashedStorageBucket, newK, common.CopyBytes(v)); err != nil {
+				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
+			}
+		} else {
+			if err = tx.Put(dbutils.HashedAccountsBucket, newK, common.CopyBytes(v)); err != nil {
+				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
+			}
+		}
+	}
+	c.Close()
 
 	root, err := trie.CalcRoot("", kvtx)
 	if err != nil {
@@ -264,7 +300,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 }
 
 func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
+	r := state.NewPlainStateReader(db)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -282,10 +318,10 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(ctx, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(ctx, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
 	return statedb, nil
