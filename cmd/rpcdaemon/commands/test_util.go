@@ -61,6 +61,12 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 
 	var err error
 	var tokenContract *contracts.Token
+	// Generate empty chain to have some orphaned blocks for tests
+	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, block *core.BlockGen) {
 		var (
@@ -184,6 +190,9 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 		t.Fatal(err)
 	}
 
+	if err = m.InsertChain(orphanedChain); err != nil {
+		t.Fatal(err)
+	}
 	if err = m.InsertChain(chain); err != nil {
 		t.Fatal(err)
 	}

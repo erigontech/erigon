@@ -387,6 +387,18 @@ So just using CMake or GNU Make in your habitual manner and feel free to
 fill an issue or make pull request in the case something will be
 unexpected or broken down.
 
+### Common important details
+
+#### Build reproducibility
+By default _libmdbx_ track build time via `MDBX_BUILD_TIMESTAMP` build option and macro.
+So for a [reproducible builds](https://en.wikipedia.org/wiki/Reproducible_builds) you should predefine/override it to known fixed string value. For instance:
+
+ - for reproducible build with make: `make MDBX_BUILD_TIMESTAMP=unknown ` ...
+ - or during configure by CMake: `cmake -DMDBX_BUILD_TIMESTAMP:STRING=unknown ` ...
+
+Of course, in addition to this, your toolchain must ensure the reproducibility of builds.
+For more information please refer to [reproducible-builds.org](https://reproducible-builds.org/).
+
 #### DSO/DLL unloading and destructors of Thread-Local-Storage objects
 When building _libmdbx_ as a shared library or use static _libmdbx_ as a
 part of another dynamic library, it is advisable to make sure that your
@@ -479,7 +491,7 @@ Please refer to the [official guide](https://developer.android.com/studio/projec
 
 ### iOS
 To build _libmdbx_ for iOS, we recommend using CMake with the
-"[toolchain file](https://cmake.org/cmake/help/latest/variable/CMAKE_TOOLCHAIN_FILE.html)"
+["toolchain file"](https://cmake.org/cmake/help/latest/variable/CMAKE_TOOLCHAIN_FILE.html)
 from the [ios-cmake](https://github.com/leetal/ios-cmake) project.
 
 <!-- section-end -->
