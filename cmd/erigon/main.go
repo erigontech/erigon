@@ -7,16 +7,10 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/urfave/cli"
-)
-
-var (
-	// Following vars are injected through the build flags (see Makefile)
-	gitCommit string
-	gitBranch string
-	gitTag    string
 )
 
 func main() {
@@ -34,8 +28,8 @@ func runErigon(cliCtx *cli.Context) {
 	ctx, _ := utils.RootContext()
 
 	// initializing the node and providing the current git commit there
-	log.Info("Build info", "git_branch", gitBranch, "git_tag", gitTag, "git_commit", gitCommit)
-	eri := node.New(cliCtx, node.Params{GitCommit: gitCommit, GitBranch: gitBranch})
+	log.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	eri := node.New(cliCtx, node.Params{})
 	eri.SetP2PListenFunc(func(network, addr string) (net.Listener, error) {
 		var lc net.ListenConfig
 		return lc.Listen(ctx, network, addr)

@@ -114,7 +114,7 @@ type Ethereum struct {
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereum, error) {
+func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -263,7 +263,7 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 	}
 
 	kvRPC := remotedbserver.NewKvServer(backend.chainKV, stack.Config().MDBX)
-	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events, gitCommit)
+	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events)
 	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
 	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
 
@@ -352,21 +352,20 @@ func New(stack *node.Node, config *ethconfig.Config, gitCommit string) (*Ethereu
 			return nil, err
 		}
 
-		server66 := download.NewSentryServer(backend.downloadV2Ctx, stack.Config().P2P.Name,
-			path.Join(stack.Config().DataDir, "erigon", "nodekey"),
-			path.Join(stack.Config().DataDir, "nodes", "eth66"),
-			stack.Config().P2P.ListenAddr, d66, readNodeInfo, eth.ETH66)
+		cfg66 := stack.Config().P2P
+		cfg66.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth66")
+		server66 := download.NewSentryServer(backend.downloadV2Ctx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
 		if stack.Config().P2P.Eth65Enabled {
+			cfg65 := stack.Config().P2P
+			cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
 			d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
 			if err != nil {
 				return nil, err
 			}
-			server65 := download.NewSentryServer(backend.downloadV2Ctx, stack.Config().P2P.Name,
-				path.Join(stack.Config().DataDir, "erigon", "nodekey"),
-				path.Join(stack.Config().DataDir, "nodes", "eth65"),
-				stack.Config().P2P.ListenAddr65, d65, readNodeInfo, eth.ETH65)
+			cfg65.ListenAddr = cfg65.ListenAddr65
+			server65 := download.NewSentryServer(backend.downloadV2Ctx, d65, readNodeInfo, &cfg65, eth.ETH65)
 			backend.sentryServers = append(backend.sentryServers, server65)
 			backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 		}
