@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	chaindata          string
-	database           string
+	chaindata string
+	//database           string
 	databaseVerbosity  int
 	snapshotMode       string
 	snapshotDir        string
@@ -23,7 +23,6 @@ var (
 	reset              bool
 	bucket             string
 	datadir            string
-	mapSizeStr         string
 	migration          string
 	integritySlow      bool
 	integrityFast      bool
@@ -91,14 +90,12 @@ func withDatadir2(cmd *cobra.Command) {
 	cmd.Flags().String(utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
-	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 }
 
 func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
-	cmd.Flags().StringVar(&mapSizeStr, "lmdb.mapSize", "", "map size for LMDB")
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
@@ -107,7 +104,6 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 	must(cmd.MarkFlagDirname("snapshot.dir"))
 
-	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 }
 

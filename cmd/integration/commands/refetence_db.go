@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 	"github.com/spf13/cobra"
 )
 
@@ -71,34 +70,6 @@ var cmdCompareStates = &cobra.Command{
 	},
 }
 
-var cmdLmdbToMdbx = &cobra.Command{
-	Use:   "lmdb_to_mdbx",
-	Short: "copy data from '--chaindata' to '--chaindata.to'",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
-		err := lmdbToMdbx(ctx, chaindata, toChaindata)
-		if err != nil {
-			log.Error(err.Error())
-			return err
-		}
-		return nil
-	},
-}
-
-var cmdLmdbToLmdb = &cobra.Command{
-	Use:   "lmdb_to_lmdb",
-	Short: "copy data from '--chaindata' to '--chaindata.to'",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
-		err := lmdbToLmdb(ctx, chaindata, toChaindata)
-		if err != nil {
-			log.Error(err.Error())
-			return err
-		}
-		return nil
-	},
-}
-
 var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
@@ -139,18 +110,6 @@ func init() {
 	withBucket(cmdCompareStates)
 
 	rootCmd.AddCommand(cmdCompareStates)
-
-	withDatadir(cmdLmdbToMdbx)
-	withToChaindata(cmdLmdbToMdbx)
-	withBucket(cmdLmdbToMdbx)
-
-	rootCmd.AddCommand(cmdLmdbToMdbx)
-
-	withDatadir(cmdLmdbToLmdb)
-	withToChaindata(cmdLmdbToLmdb)
-	withBucket(cmdLmdbToLmdb)
-
-	rootCmd.AddCommand(cmdLmdbToLmdb)
 
 	withDatadir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
@@ -400,20 +359,6 @@ MainLoop:
 	}
 
 	return nil
-}
-
-func lmdbToMdbx(ctx context.Context, from, to string) error {
-	_ = os.RemoveAll(to)
-	src := ethdb.NewLMDB().Path(from).MustOpen()
-	dst := ethdb.NewMDBX().Path(to).MustOpen()
-	return kv2kv(ctx, src, dst)
-}
-
-func lmdbToLmdb(ctx context.Context, from, to string) error {
-	_ = os.RemoveAll(to)
-	src := ethdb.NewLMDB().Path(from).Flags(func(flags uint) uint { return (flags | lmdb.Readonly) ^ lmdb.NoReadahead }).MustOpen()
-	dst := ethdb.NewLMDB().Path(to).MustOpen()
-	return kv2kv(ctx, src, dst)
 }
 
 func mdbxToMdbx(ctx context.Context, from, to string) error {
