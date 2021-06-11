@@ -298,6 +298,11 @@ func RecvTxMessage(ctx context.Context,
 		eth.ToProto[eth.ETH66][eth.PooledTransactionsMsg],
 	}}, grpc.WaitForReady(true))
 	if err != nil {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 			return
 		}
@@ -310,6 +315,11 @@ func RecvTxMessage(ctx context.Context,
 
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}

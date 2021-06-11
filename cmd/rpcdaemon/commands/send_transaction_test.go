@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
 	"math/big"
 	"testing"
@@ -19,14 +18,10 @@ import (
 )
 
 func TestSendRawTransaction(t *testing.T) {
-	t.Skip("Flaky test")
-	db, err := createTestKV()
-	require.NoError(t, err)
-	defer db.Close()
-	conn := createTestGrpcConn()
-	defer conn.Close()
+	db := createTestKV(t)
+	ctx, conn := createTestGrpcConn(t)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := filters.New(context.Background(), nil, txPool, nil)
+	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	api := NewEthAPI(NewBaseApi(ff), db, nil, txPool, nil, 5000000)
 
 	// Call GetTransactionReceipt for un-protected transaction
@@ -34,7 +29,7 @@ func TestSendRawTransaction(t *testing.T) {
 	expect := uint64(40)
 	txn := transaction(expect, 1000000, testKey)
 	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
+	err := txn.MarshalBinary(buf)
 	require.NoError(t, err)
 
 	txsCh := make(chan []types.Transaction, 1)
@@ -42,12 +37,12 @@ func TestSendRawTransaction(t *testing.T) {
 	id := api.filters.SubscribePendingTxs(txsCh)
 	defer api.filters.UnsubscribePendingTxs(id)
 
-	_, err = api.SendRawTransaction(context.Background(), buf.Bytes())
+	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(t, err)
 	select {
 	case got := <-txsCh:
 		require.Equal(t, expect, got[0].GetNonce())
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 		t.Fatalf("timeout waiting for  expected notification")
 	}
 }

@@ -44,8 +44,8 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		"queued":  make(map[string]map[string]*RPCTransaction),
 	}
 
-	pending := make(map[common.Address][]types.Transaction, 16)
-	queued := make(map[common.Address][]types.Transaction, 16)
+	pending := make(map[common.Address][]types.Transaction, 8)
+	queued := make(map[common.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
 		stream := rlp.NewStream(bytes.NewReader(reply.Txs[i].RlpTx), 0)
 		txn, err := types.DecodeTransaction(stream)
@@ -58,7 +58,8 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 			if _, ok := pending[addr]; !ok {
 				pending[addr] = make([]types.Transaction, 0, 4)
 			}
-			queued[addr] = append(queued[addr], txn)
+			fmt.Printf("pe: %#v\n", pending)
+			pending[addr] = append(pending[addr], txn)
 		case proto_txpool.AllReply_QUEUED:
 			if _, ok := queued[addr]; !ok {
 				queued[addr] = make([]types.Transaction, 0, 4)

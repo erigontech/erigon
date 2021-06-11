@@ -3,9 +3,9 @@ package commands
 import (
 	"context"
 	"encoding/binary"
-	"log"
 	"math/big"
 	"net"
+	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -27,9 +27,9 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func createTestDb() (ethdb.Database, error) {
+func createTestKV(t *testing.T) ethdb.RwKV {
 	// Configure and generate a sample block chain
-	db := ethdb.NewMemDatabase()
+	db := ethdb.NewTestDB(t)
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -53,7 +53,7 @@ func createTestDb() (ethdb.Database, error) {
 	// Create intermediate hash bucket since it is mandatory now
 	_, genesis, err := core.SetupGenesisBlock(db, gspec, true)
 	if err != nil {
-		return nil, err
+		t.Fatalf("create test db: %v", err)
 	}
 
 	engine := ethash.NewFaker()
@@ -70,30 +70,30 @@ func createTestDb() (ethdb.Database, error) {
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
 	chain, err := core.GenerateChain(gspec.Config, genesis, engine, db.RwKV(), 10, func(i int, block *core.BlockGen) {
 		var (
-			tx  types.Transaction
+			txn types.Transaction
 			txs []types.Transaction
 		)
 
 		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number().Uint64())
 		switch i {
 		case 0:
-			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
-			err = contractBackend.SendTransaction(ctx, tx)
+			txn, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
 		case 1:
-			tx, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
-			err = contractBackend.SendTransaction(ctx, tx)
+			txn, err = types.SignTx(types.NewTransaction(1, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
 		case 2:
-			_, tx, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
+			_, txn, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
 		case 3:
-			tx, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(10))
+			txn, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(10))
 		case 4:
-			tx, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
+			txn, err = tokenContract.Transfer(transactOpts2, address, big.NewInt(3))
 		case 5:
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
@@ -101,116 +101,112 @@ func createTestDb() (ethdb.Database, error) {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
-				err = contractBackend.SendTransaction(ctx, tx)
+				err = contractBackend.SendTransaction(ctx, txn)
 				if err != nil {
 					panic(err)
 				}
-				txs = append(txs, tx)
+				txs = append(txs, txn)
 				nonce++
 			}
 		case 6:
-			_, tx, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
+			_, txn, tokenContract, err = contracts.DeployToken(transactOpts, contractBackend, address1)
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
-			tx, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
+			txs = append(txs, txn)
+			txn, err = tokenContract.Mint(transactOpts1, address2, big.NewInt(100))
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
 			var toAddr common.Address
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				tx, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
+				txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 				if err != nil {
 					panic(err)
 				}
-				txs = append(txs, tx)
+				txs = append(txs, txn)
 			}
 		case 7:
 			var toAddr common.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
-			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}
-			err = contractBackend.SendTransaction(ctx, tx)
+			err = contractBackend.SendTransaction(ctx, txn)
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 			binary.BigEndian.PutUint64(toAddr[:], 12)
-			tx, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
+			txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 		case 8:
-			_, tx, poly, err = contracts.DeployPoly(transactOpts, contractBackend)
+			_, txn, poly, err = contracts.DeployPoly(transactOpts, contractBackend)
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 		case 9:
-			tx, err = poly.DeployAndDestruct(transactOpts, big.NewInt(0))
+			txn, err = poly.DeployAndDestruct(transactOpts, big.NewInt(0))
 			if err != nil {
 				panic(err)
 			}
-			txs = append(txs, tx)
+			txs = append(txs, txn)
 		}
 
 		if err != nil {
 			panic(err)
 		}
-		if txs == nil && tx != nil {
-			txs = append(txs, tx)
+		if txs == nil && txn != nil {
+			txs = append(txs, txn)
 		}
 
-		for _, tx := range txs {
-			block.AddTx(tx)
+		for _, txn := range txs {
+			block.AddTx(txn)
 		}
 		contractBackend.Commit()
 	}, true)
 	if err != nil {
-		return nil, err
+		t.Fatalf("create test db: %v", err)
 	}
 
 	if _, err = stagedsync.InsertBlocksInStages(db, ethdb.DefaultStorageMode, gspec.Config, &vm.Config{}, engine, chain.Blocks, true /* rootCheck */); err != nil {
-		return nil, err
+		t.Fatalf("create test db: %v", err)
 	}
 
-	return db, nil
+	return db.RwKV()
 }
 
-func createTestKV() (ethdb.RwKV, error) {
-	db, err := createTestDb()
+type IsMiningMock struct{}
 
-	if err != nil {
-		return nil, err
-	}
+func (*IsMiningMock) IsMining() bool { return false }
 
-	return db.(ethdb.HasRwKV).RwKV(), nil
-}
+func createTestGrpcConn(t *testing.T) (context.Context, *grpc.ClientConn) { //nolint
+	ctx, cancel := context.WithCancel(context.Background())
 
-func createTestGrpcConn() *grpc.ClientConn { //nolint
-	ctx := context.Background()
-
+	ethashApi := ethash.NewFaker().APIs(nil)[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, mock.NewTestTxPool()))
+	txpool.RegisterMiningServer(server, remotedbserver.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
 		go func() {
 			if err := server.Serve(listener); err != nil {
-				log.Fatal(err)
+				panic(err)
 			}
 		}()
 		return func(context.Context, string) (net.Conn, error) {
@@ -220,7 +216,11 @@ func createTestGrpcConn() *grpc.ClientConn { //nolint
 
 	conn, err := grpc.DialContext(ctx, "", grpc.WithInsecure(), grpc.WithContextDialer(dialer()))
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
-	return conn
+	t.Cleanup(func() {
+		cancel()
+		conn.Close()
+	})
+	return ctx, conn
 }
