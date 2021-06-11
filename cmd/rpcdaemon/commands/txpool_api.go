@@ -58,7 +58,6 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 			if _, ok := pending[addr]; !ok {
 				pending[addr] = make([]types.Transaction, 0, 4)
 			}
-			fmt.Printf("pe: %#v\n", pending)
 			pending[addr] = append(pending[addr], txn)
 		case proto_txpool.AllReply_QUEUED:
 			if _, ok := queued[addr]; !ok {
