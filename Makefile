@@ -118,7 +118,7 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
-	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
+	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 mdbx:
 	@echo "Building mdbx"
@@ -141,14 +141,7 @@ mdbx-dbg:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes' make mdbx-static.o
 
 test: mdbx
-	TEST_DB=mdbx $(GOTEST) --timeout 15m
-
-test-lmdb:
-	TEST_DB=lmdb $(GOTEST)
-
-
-test-mdbx:
-	TEST_DB=mdbx $(GOTEST) --timeout 20m
+	$(GOTEST) --timeout 15m
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
