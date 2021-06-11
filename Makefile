@@ -112,7 +112,7 @@ db-tools: mdbx
 	@echo "Building bb-tools"
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_drop mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_drop $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
 
-	cd ethdb/mdbx/dist/ && make tools
+	cd ethdb/mdbx/dist/ && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_copy $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
