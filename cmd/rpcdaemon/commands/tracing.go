@@ -21,7 +21,7 @@ import (
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
 func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
-	tx, err := api.dbReader.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 }
 
 func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
-	dbtx, err := api.dbReader.BeginRo(ctx)
+	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}

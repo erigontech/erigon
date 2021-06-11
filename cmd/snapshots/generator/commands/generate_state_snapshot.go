@@ -66,8 +66,11 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			}
 		}).Path(snapshotPath).MustOpen()
 	}
-	sndb := ethdb.NewObjectDatabase(snkv)
-	mt := sndb.NewBatch()
+	writeTx, err := snkv.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer writeTx.Rollback()
 
 	tx, err := kv.BeginRo(context.Background())
 	if err != nil {
@@ -93,13 +96,6 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			select {
 			case <-ctx.Done():
 				return false, errors.New("interrupted")
-			case <-commitEvery.C:
-				ttt := time.Now()
-				innerErr := mt.CommitAndBegin(context.Background())
-				if innerErr != nil {
-					return false, innerErr
-				}
-				fmt.Println("Committed", time.Since(ttt))
 			default:
 			}
 		}
@@ -119,7 +115,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 				j := 0
 				innerErr := state.WalkAsOfStorage(tx2, common.BytesToAddress(k), acc.Incarnation, common.Hash{}, toBlock+1, func(k1, k2 []byte, vv []byte) (bool, error) {
 					j++
-					innerErr1 := mt.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
+					innerErr1 := writeTx.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
 					if innerErr1 != nil {
 						return false, innerErr1
 					}
@@ -145,10 +141,10 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 					if err1 != nil {
 						return false, err1
 					}
-					if err1 = mt.Put(dbutils.CodeBucket, codeHash, code); err1 != nil {
+					if err1 = writeTx.Put(dbutils.CodeBucket, codeHash, code); err1 != nil {
 						return false, err1
 					}
-					if err1 = mt.Put(dbutils.PlainContractCodeBucket, storagePrefix, codeHash); err1 != nil {
+					if err1 = writeTx.Put(dbutils.PlainContractCodeBucket, storagePrefix, codeHash); err1 != nil {
 						return false, err1
 					}
 				}
@@ -156,7 +152,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 		}
 		newAcc := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(newAcc)
-		innerErr := mt.Put(dbutils.PlainStateBucket, common.CopyBytes(k), newAcc)
+		innerErr := writeTx.Put(dbutils.PlainStateBucket, common.CopyBytes(k), newAcc)
 		if innerErr != nil {
 			return false, innerErr
 		}
@@ -166,7 +162,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	if err != nil {
 		return err
 	}
-	err = mt.Commit()
+	err = writeTx.Commit()
 	if err != nil {
 		return err
 	}

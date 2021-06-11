@@ -344,7 +344,7 @@ Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Scrip
 $Erigon.Commit  = [string]@(git.exe rev-list -1 HEAD)
 $Erigon.Branch  = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Tag     = [string]@(git.exe describe --tags)
-$Erigon.Build   = "go build -v -trimpath -ldflags ""-X main.gitCommit=$($Erigon.Commit) -X main.gitBranch=$($Erigon.Branch) -X main.gitTag=$($Erigon.Tag)"""
+$Erigon.Build   = "go build -v -trimpath -ldflags ""-X github.com/ledgerwatch/erigon/params.GitCommit=$($Erigon.Commit) -X github.com/ledgerwatch/erigon/params.GitBranch=$($Erigon.Branch) -X github.com/ledgerwatch/erigon/params.GitTag=$($Erigon.Tag)"""
 $Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:GO111MODULE = "on"
 

@@ -4,14 +4,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/commands"
 )
 
-var (
-	// Following vars are injected through the build flags (see Makefile)
-	gitCommit string
-	gitBranch string
-)
+// generate the messages
 
 func main() {
-	commands.GitCommit = gitCommit
-	commands.GitCommit = gitBranch
 	commands.Execute()
 }

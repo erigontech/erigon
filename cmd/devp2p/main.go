@@ -30,12 +30,10 @@ import (
 
 var (
 	// Git information set by linker when building with ci.go.
-	gitCommit string
-	gitDate   string
-	app       = &cli.App{
+	app = &cli.App{
 		Name:        filepath.Base(os.Args[0]),
 		Usage:       "go-ethereum devp2p tool",
-		Version:     params.VersionWithCommit(gitCommit, gitDate),
+		Version:     params.VersionWithCommit(params.GitCommit, ""),
 		Writer:      os.Stdout,
 		HideVersion: true,
 	}

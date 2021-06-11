@@ -13,20 +13,16 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-func Get(tx Tx, bucket string, key []byte) ([]byte, error) {
-	var dat []byte
+func Get(tx KVGetter, bucket string, key []byte) ([]byte, error) {
 	v, err := tx.GetOne(bucket, key)
 	if err != nil {
 		return nil, err
 	}
-	if v != nil {
-		dat = make([]byte, len(v))
-		copy(dat, v)
-	}
-	if dat == nil {
+	if len(v) == 0 {
 		return nil, ErrKeyNotFound
 	}
-	return dat, err
+
+	return v, nil
 }
 
 func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
@@ -140,31 +136,27 @@ func testKVPath() string {
 }
 
 // todo: return TEVM code and use it
-func GetCheckTEVM(db KVGetter) func(codeHash common.Hash) (bool, error) {
+func GetCheckTEVM(db KVGetter) func(contractHash common.Hash) (bool, error) {
 	checked := map[common.Hash]struct{}{}
 	var ok bool
 
-	return func(codeHash common.Hash) (bool, error) {
-		if _, ok = checked[codeHash]; ok {
+	return func(contractHash common.Hash) (bool, error) {
+		if contractHash == (common.Hash{}) {
 			return true, nil
 		}
 
-		ok, err := db.Has(dbutils.ContractTEVMCodeStatusBucket, codeHash.Bytes())
-		if !errors.Is(err, ErrKeyNotFound) {
-			return false, err
+		if _, ok = checked[contractHash]; ok {
+			return true, nil
 		}
 
-		if ok {
-			return false, ErrKeyNotFound
-		}
-
-		ok, err = db.Has(dbutils.ContractTEVMCodeBucket, codeHash.Bytes())
-		if !errors.Is(err, ErrKeyNotFound) {
-			return false, err
+		ok, err := db.Has(dbutils.ContractTEVMCodeBucket, contractHash.Bytes())
+		if err != nil && !errors.Is(err, ErrKeyNotFound) {
+			return false, fmt.Errorf("can't check TEVM bucket by contract %q hash: %w",
+				contractHash.String(), err)
 		}
 
 		if !ok {
-			checked[codeHash] = struct{}{}
+			checked[contractHash] = struct{}{}
 		}
 
 		return ok, nil

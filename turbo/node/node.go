@@ -55,8 +55,6 @@ func (eri *ErigonNode) run() {
 //
 // NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
-	GitCommit     string
-	GitBranch     string
 	CustomBuckets dbutils.BucketsCfg
 }
 
@@ -71,7 +69,7 @@ func New(
 	prepareBuckets(optionalParams.CustomBuckets)
 	prepare(ctx)
 
-	nodeConfig := NewNodeConfig(optionalParams)
+	nodeConfig := NewNodeConfig()
 	utils.SetNodeConfig(ctx, nodeConfig)
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 
@@ -80,7 +78,7 @@ func New(
 	core.UseMDBX = nodeConfig.MDBX
 	ethConfig := makeEthConfig(ctx, node)
 
-	ethereum := RegisterEthService(node, ethConfig, optionalParams.GitCommit)
+	ethereum := RegisterEthService(node, ethConfig)
 
 	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
 
@@ -88,8 +86,8 @@ func New(
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, gitCommit string) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg, gitCommit)
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) *eth.Ethereum {
+	backend, err := eth.New(stack, cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -103,10 +101,10 @@ func makeEthConfig(ctx *cli.Context, node *node.Node) *ethconfig.Config {
 	return ethConfig
 }
 
-func NewNodeConfig(p Params) *node.Config {
+func NewNodeConfig() *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
-	if commit := p.GitCommit; commit != "" {
+	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit, "")
 	} else {
 		nodeConfig.Version = params.Version

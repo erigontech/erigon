@@ -36,6 +36,7 @@ type Config struct {
 	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts              bool   // Do not calculate receipts
 	ReadOnly                bool   // Do no perform any block finalisation
+	EnableTEMV              bool   // true if execution with TEVM enable flag
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }

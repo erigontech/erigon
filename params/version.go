@@ -20,6 +20,13 @@ import (
 	"fmt"
 )
 
+var (
+	// Following vars are injected through the build flags (see Makefile)
+	GitCommit string
+	GitBranch string
+	GitTag    string
+)
+
 // see https://calver.org
 const (
 	VersionMajor    = 2021    // Major version component of the current release
