@@ -110,7 +110,6 @@ tracker:
 
 db-tools: mdbx
 	@echo "Building bb-tools"
-	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_drop mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_drop $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
 
 	cd ethdb/mdbx/dist/ && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
@@ -119,7 +118,7 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
-	@echo "Run \"$(GOBIN)/lmdb_stat -h\" to get info about lmdb file."
+	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 mdbx:
 	@echo "Building mdbx"
@@ -138,14 +137,7 @@ mdbx-dbg:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes' make mdbx-static.o
 
 test: mdbx
-	TEST_DB=mdbx $(GOTEST) --timeout 15m
-
-test-lmdb:
-	TEST_DB=lmdb $(GOTEST)
-
-
-test-mdbx:
-	TEST_DB=mdbx $(GOTEST) --timeout 20m
+	$(GOTEST) --timeout 15m
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml

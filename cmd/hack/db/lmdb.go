@@ -336,7 +336,7 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...f
 	}
 	defer os.RemoveAll(dir)
 	var kv ethdb.RwKV
-	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
+	kv, err = ethdb.NewMDBX().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return bucketsCfg
 	}).Open()
 	if err != nil {

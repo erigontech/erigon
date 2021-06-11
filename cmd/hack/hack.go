@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 )
 
 var (
@@ -344,25 +343,6 @@ func bucketStats(chaindata string) error {
 
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 	switch kv := ethDb.(type) {
-	case *ethdb.LmdbKV:
-		type LmdbStat interface {
-			BucketStat(name string) (*lmdb.Stat, error)
-		}
-		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
-			for _, bucket := range bucketList {
-				bs, statErr := tx.(LmdbStat).BucketStat(bucket)
-				tool.Check(statErr)
-				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
-					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
-			}
-
-			bs, statErr := tx.(LmdbStat).BucketStat("freelist")
-			tool.Check(statErr)
-			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
-			return nil
-		}); err != nil {
-			panic(err)
-		}
 	case *ethdb.MdbxKV:
 		type MdbxStat interface {
 			BucketStat(name string) (*mdbx.Stat, error)
