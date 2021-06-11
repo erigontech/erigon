@@ -241,8 +241,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			0,
 			batchSize,
 			nil,
-			nil,
-			nil,
 			mock.ChainConfig,
 			mock.Engine,
 			&vm.Config{NoReceipts: !sm.Receipts},

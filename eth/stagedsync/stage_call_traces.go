@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -351,20 +352,39 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 }
 
 type CallTracer struct {
-	froms map[common.Address]struct{}
-	tos   map[common.Address]struct{}
+	froms   map[common.Address]struct{}
+	tos     map[common.Address]bool // address -> isCreated
+	hasTEVM func(contractHash common.Hash) (bool, error)
 }
 
-func NewCallTracer() *CallTracer {
+func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTracer {
 	return &CallTracer{
-		froms: make(map[common.Address]struct{}),
-		tos:   make(map[common.Address]struct{}),
+		froms:   make(map[common.Address]struct{}),
+		tos:     make(map[common.Address]bool),
+		hasTEVM: hasTEVM,
 	}
 }
 
-func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
+func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
 	ct.froms[from] = struct{}{}
-	ct.tos[to] = struct{}{}
+
+	created, ok := ct.tos[to]
+	if !ok {
+		ct.tos[to] = false
+	}
+
+	if !created && create {
+		if !accounts.IsEmptyCodeHash(codeHash) && ct.hasTEVM != nil {
+			has, err := ct.hasTEVM(codeHash)
+			if !has {
+				ct.tos[to] = true
+			}
+
+			if err != nil {
+				log.Warn("while CaptureStart", "error", err)
+			}
+		}
+	}
 	return nil
 }
 func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
@@ -378,7 +398,7 @@ func (ct *CallTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t tim
 }
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 	ct.froms[from] = struct{}{}
-	ct.tos[to] = struct{}{}
+	ct.tos[to] = false
 }
 func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
 	return nil
