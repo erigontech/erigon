@@ -750,7 +750,9 @@ endif(MDBX_INSTALL_STATIC)
 ################################################################################
 
 # collect options & build info
-string(TIMESTAMP MDBX_BUILD_TIMESTAMP UTC)
+if(NOT DEFINED MDBX_BUILD_TIMESTAMP)
+  string(TIMESTAMP MDBX_BUILD_TIMESTAMP UTC)
+endif()
 set(MDBX_BUILD_FLAGS ${CMAKE_C_FLAGS})
 if(MDBX_BUILD_CXX)
   set(MDBX_BUILD_FLAGS ${CMAKE_CXX_FLAGS})

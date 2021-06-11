@@ -112,7 +112,7 @@ db-tools: mdbx
 	@echo "Building bb-tools"
 	go mod vendor; cd vendor/github.com/ledgerwatch/lmdb-go/dist; make clean mdb_stat mdb_copy mdb_dump mdb_drop mdb_load; cp mdb_stat $(GOBIN); cp mdb_copy $(GOBIN); cp mdb_dump $(GOBIN); cp mdb_drop $(GOBIN); cp mdb_load $(GOBIN); cd ../../../../..; rm -rf vendor
 
-	cd ethdb/mdbx/dist/ && make tools
+	cd ethdb/mdbx/dist/ && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_copy $(GOBIN)
 	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
@@ -124,13 +124,9 @@ db-tools: mdbx
 mdbx:
 	@echo "Building mdbx"
 	@cd ethdb/mdbx/dist/ \
-		&& make clean && make config.h \
+		&& make clean && MDBX_BUILD_TIMESTAMP=unknown make config.h \
 		&& echo '#define MDBX_DEBUG 0' >> config.h \
 		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
-		&& mv config.h config2.h \
-		&& tail -n +2 config2.h > config.h  \
-		&& rm -f config2.h \
-		&& cat config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
 
 mdbx-dbg:
