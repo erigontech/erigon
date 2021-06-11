@@ -96,6 +96,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			select {
 			case <-ctx.Done():
 				return false, errors.New("interrupted")
+			default:
 			}
 		}
 		if len(k) != 20 {
