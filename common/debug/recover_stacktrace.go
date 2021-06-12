@@ -27,7 +27,7 @@ func prettyTime() string {
 func CheckForCrashes() {
 	ex, _ := os.Executable()
 	binPath := filepath.Dir(ex)
-	crashReportDir := binPath[:len(binPath)-10] + "/crashreports/"
+	crashReportDir := path.Join(binPath[:len(binPath)-10], "crashreports")
 	f, err := os.Open(crashReportDir)
 	if err != nil {
 		log.Error(err.Error())
