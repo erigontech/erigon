@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -38,7 +39,7 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 	var prevHeader *types.Header
 	var lastHeader uint64
 
-	go func() {
+	common.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -48,7 +49,7 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 			}
 			time.Sleep(time.Second * 10)
 		}
-	}()
+	})
 	snKV, err := snapshotsync.OpenHeadersSnapshot(snapshotPath, database == "mdbx")
 	if err != nil {
 		return err

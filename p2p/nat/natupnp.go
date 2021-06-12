@@ -27,7 +27,7 @@ import (
 	"github.com/huin/goupnp"
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 const (
@@ -145,27 +145,33 @@ func (n *upnp) withRateLimit(fn func() error) error {
 func discoverUPnP() Interface {
 	found := make(chan *upnp, 2)
 	// IGDv1
-	go discover(found, internetgateway1.URN_WANConnectionDevice_1, func(sc goupnp.ServiceClient) *upnp {
-		switch sc.Service.ServiceType {
-		case internetgateway1.URN_WANIPConnection_1:
-			return &upnp{service: "IGDv1-IP1", client: &internetgateway1.WANIPConnection1{ServiceClient: sc}}
-		case internetgateway1.URN_WANPPPConnection_1:
-			return &upnp{service: "IGDv1-PPP1", client: &internetgateway1.WANPPPConnection1{ServiceClient: sc}}
-		}
-		return nil
-	})
+	common.StartGoRoutine(func() {
+		discover(found, internetgateway1.URN_WANConnectionDevice_1, func(sc goupnp.ServiceClient) *upnp {
+			switch sc.Service.ServiceType {
+			case internetgateway1.URN_WANIPConnection_1:
+				return &upnp{service: "IGDv1-IP1", client: &internetgateway1.WANIPConnection1{ServiceClient: sc}}
+			case internetgateway1.URN_WANPPPConnection_1:
+				return &upnp{service: "IGDv1-PPP1", client: &internetgateway1.WANPPPConnection1{ServiceClient: sc}}
+			}
+			return nil
+		})
+	}, common.RecoverStackTrace(nil, true, recover()))
+
 	// IGDv2
-	go discover(found, internetgateway2.URN_WANConnectionDevice_2, func(sc goupnp.ServiceClient) *upnp {
-		switch sc.Service.ServiceType {
-		case internetgateway2.URN_WANIPConnection_1:
-			return &upnp{service: "IGDv2-IP1", client: &internetgateway2.WANIPConnection1{ServiceClient: sc}}
-		case internetgateway2.URN_WANIPConnection_2:
-			return &upnp{service: "IGDv2-IP2", client: &internetgateway2.WANIPConnection2{ServiceClient: sc}}
-		case internetgateway2.URN_WANPPPConnection_1:
-			return &upnp{service: "IGDv2-PPP1", client: &internetgateway2.WANPPPConnection1{ServiceClient: sc}}
-		}
-		return nil
-	})
+	common.StartGoRoutine(func() {
+		discover(found, internetgateway2.URN_WANConnectionDevice_2, func(sc goupnp.ServiceClient) *upnp {
+			switch sc.Service.ServiceType {
+			case internetgateway2.URN_WANIPConnection_1:
+				return &upnp{service: "IGDv2-IP1", client: &internetgateway2.WANIPConnection1{ServiceClient: sc}}
+			case internetgateway2.URN_WANIPConnection_2:
+				return &upnp{service: "IGDv2-IP2", client: &internetgateway2.WANIPConnection2{ServiceClient: sc}}
+			case internetgateway2.URN_WANPPPConnection_1:
+				return &upnp{service: "IGDv2-PPP1", client: &internetgateway2.WANPPPConnection1{ServiceClient: sc}}
+			}
+			return nil
+		})
+	}, common.RecoverStackTrace(nil, true, recover()))
+
 	for i := 0; i < cap(found); i++ {
 		if c := <-found; c != nil {
 			return c
@@ -178,7 +184,6 @@ func discoverUPnP() Interface {
 // advertised services of each device. The first non-nil service found
 // is sent into out. If no service matched, nil is sent.
 func discover(out chan<- *upnp, target string, matcher func(goupnp.ServiceClient) *upnp) {
-	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	devs, err := goupnp.DiscoverDevices(target)
 	if err != nil {
 		out <- nil

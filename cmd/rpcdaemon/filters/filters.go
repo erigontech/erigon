@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
@@ -50,7 +51,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
 	}
 
-	go func() {
+	common.Go(func() {
 		if ethBackend == nil {
 			return
 		}
@@ -78,10 +79,10 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				time.Sleep(time.Second)
 			}
 		}
-	}()
+	})
 
 	if txPool != nil {
-		go func() {
+		common.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -104,8 +105,8 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					time.Sleep(time.Second)
 				}
 			}
-		}()
-		go func() {
+		})
+		common.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -128,8 +129,8 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					time.Sleep(time.Second)
 				}
 			}
-		}()
-		go func() {
+		})
+		common.Go(func() {
 			for {
 				select {
 				case <-ctx.Done():
@@ -152,7 +153,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					time.Sleep(time.Second)
 				}
 			}
-		}()
+		})
 	}
 
 	return ff

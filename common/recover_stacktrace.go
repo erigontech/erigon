@@ -1,9 +1,8 @@
-package debug
+package common
 
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -27,7 +26,7 @@ func prettyTime() string {
 func CheckForCrashes() {
 	ex, _ := os.Executable()
 	binPath := filepath.Dir(ex)
-	crashReportDir := path.Join(binPath[:len(binPath)-10], "crashreports")
+	crashReportDir := filepath.Join(binPath[:len(binPath)-10], "crashreports")
 	f, err := os.Open(crashReportDir)
 	if err != nil {
 		log.Error(err.Error())
@@ -48,29 +47,18 @@ func CheckForCrashes() {
 	}
 }
 
-func RecoverStackTrace(err error, stopErigon bool, panicResult interface{}) error {
-	if panicResult != nil {
+func RecoverStackTrace(r interface{}) {
+	if r != nil {
 		stack := string(debug.Stack())
-		switch typed := panicResult.(type) {
-		case error:
-			err = fmt.Errorf("%w, trace: %s", typed, stack)
-		default:
-			err = fmt.Errorf("%+v, trace: %s", typed, stack)
-		}
 		WriteStackTraceOnPanic(stack)
-		if stopErigon && sigc != nil {
-			sigc <- syscall.SIGINT
-		} else {
-			return err
-		}
+		sigc <- syscall.SIGINT
 	}
-	return err
 }
 
 func WriteStackTraceOnPanic(stack string) {
 	ex, _ := os.Executable()
 	binPath := filepath.Dir(ex)
-	fileName := path.Join(binPath[:len(binPath)-10], "crashreports", prettyTime()+".txt")
+	fileName := filepath.Join(binPath[:len(binPath)-10], "crashreports", prettyTime()+".txt")
 	f, errFs := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if errFs != nil {
 		log.Error(errFs.Error())

@@ -18,7 +18,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -129,9 +128,8 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 		return nil
 	}
 	if async {
-		go func() {
+		common.Go(func() {
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
-			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
 				//return fmt.Errorf("begin err: %w", err)
@@ -143,7 +141,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			if innerErr != nil {
 				log.Error("Error ", "err", innerErr)
 			}
-		}()
+		})
 	} else {
 		return startStages(rwTX)
 	}

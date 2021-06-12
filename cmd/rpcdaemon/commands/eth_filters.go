@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/log"
@@ -46,9 +46,8 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 	rpcSub := notifier.CreateSubscription()
 
-	go func() {
+	common.Go(func() {
 		headers := make(chan *types.Header, 1)
-		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 		defer close(headers)
 		id := api.filters.SubscribeNewHeads(headers)
 		defer api.filters.UnsubscribeHeads(id)
@@ -64,7 +63,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 				return
 			}
 		}
-	}()
+	})
 
 	return rpcSub, nil
 }
@@ -78,9 +77,8 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 
 	rpcSub := notifier.CreateSubscription()
 
-	go func() {
+	common.Go(func() {
 		txsCh := make(chan []types.Transaction, 1)
-		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 		defer close(txsCh)
 		id := api.filters.SubscribePendingTxs(txsCh)
 		defer api.filters.UnsubscribePendingTxs(id)
@@ -98,7 +96,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 				return
 			}
 		}
-	}()
+	})
 
 	return rpcSub, nil
 }

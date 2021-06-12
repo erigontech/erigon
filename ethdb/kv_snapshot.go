@@ -126,7 +126,7 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 	}
 	s.mtx.Unlock()
 
-	go func() {
+	common.Go(func() {
 		wg := sync.WaitGroup{}
 		wg.Add(len(toClose))
 
@@ -139,7 +139,7 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 		}
 		wg.Wait()
 		done <- struct{}{}
-	}()
+	}, common.RecoverStackTrace(nil, true, recover()))
 }
 
 func (s *SnapshotKV) WriteDB() RwKV {

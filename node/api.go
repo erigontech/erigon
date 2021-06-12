@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	_debug "github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/internal/debug"
@@ -141,8 +141,7 @@ func (api *privateAdminAPI) PeerEvents(ctx context.Context) (*rpc.Subscription, 
 	}
 	rpcSub := notifier.CreateSubscription()
 
-	go func() {
-		defer func() { _debug.RecoverStackTrace(nil, true, recover()) }()
+	common.Go(func() {
 		events := make(chan *p2p.PeerEvent)
 		sub := server.SubscribeEvents(events)
 		defer sub.Unsubscribe()
@@ -159,7 +158,7 @@ func (api *privateAdminAPI) PeerEvents(ctx context.Context) (*rpc.Subscription, 
 				return
 			}
 		}
-	}()
+	}, common.RecoverStackTrace(nil, false, recover()))
 
 	return rpcSub, nil
 }

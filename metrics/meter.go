@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // Meters count events to produce exponentially-weighted moving average rates
@@ -55,7 +55,9 @@ func NewMeter() Meter {
 	arbiter.meters[m] = struct{}{}
 	if !arbiter.started {
 		arbiter.started = true
-		go arbiter.tick()
+		common.Go(func() {
+			arbiter.tick()
+		}, common.RecoverStackTrace(nil, true, recover()))
 	}
 	return m
 }
@@ -70,7 +72,9 @@ func NewMeterForced() Meter {
 	arbiter.meters[m] = struct{}{}
 	if !arbiter.started {
 		arbiter.started = true
-		go arbiter.tick()
+		common.Go(func() {
+			arbiter.tick()
+		}, common.RecoverStackTrace(nil, true, recover()))
 	}
 	return m
 }
@@ -291,7 +295,6 @@ var arbiter = meterArbiter{ticker: time.NewTicker(5 * time.Second), meters: make
 
 // Ticks meters on the scheduled interval
 func (ma *meterArbiter) tick() {
-	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	for range ma.ticker.C {
 		ma.tickMeters()
 	}

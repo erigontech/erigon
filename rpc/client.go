@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -221,7 +222,9 @@ func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry) *C
 		reqTimeout:  make(chan *requestOp),
 	}
 	if !isHTTP {
-		go c.dispatch(conn)
+		common.Go(func() {
+			c.dispatch(conn)
+		}, common.RecoverStackTrace(nil, true, recover()))
 	}
 	return c
 }
@@ -556,7 +559,9 @@ func (c *Client) dispatch(codec ServerCodec) {
 	}()
 
 	// Spawn the initial read loop.
-	go c.read(codec)
+	common.Go(func() {
+		c.read(codec)
+	}, common.RecoverStackTrace(nil, true, recover()))
 
 	for {
 		select {
@@ -588,7 +593,9 @@ func (c *Client) dispatch(codec ServerCodec) {
 				conn.close(errClientReconnected, lastOp)
 				c.drainRead()
 			}
-			go c.read(newcodec)
+			common.Go(func() {
+				c.read(newcodec)
+			}, common.RecoverStackTrace(nil, true, recover()))
 			reading = true
 			conn = c.newClientConn(newcodec)
 			// Re-register the in-flight request on the new handler

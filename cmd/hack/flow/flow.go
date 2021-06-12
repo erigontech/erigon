@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
 
@@ -72,8 +72,7 @@ func worker(code []byte) {
 
 	start := time.Now()
 
-	go func() {
-		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
+	common.Go(func() {
 		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
 		if cfg.Metrics.Valid {
 			proof := cfg.GenerateProof()
@@ -85,12 +84,11 @@ func worker(code []byte) {
 		}
 
 		mon <- 0
-	}()
+	})
 
 	oom := make(chan int, 1)
 
-	go func() {
-		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
+	common.Go(func() {
 		for {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -108,7 +106,7 @@ func worker(code []byte) {
 				oom <- 0
 			}
 		}
-	}()
+	})
 
 	select {
 	case <-mon:
@@ -179,34 +177,35 @@ func batchServer() {
 	fmt.Printf("Closing jobs\n")
 
 	for i := 0; i < numWorkers; i++ {
-		go func(id int) {
-			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
-			for job := range jobs {
-				enc := hex.EncodeToString(job.code)
-				cmd := exec.Command("./build/bin/hack",
-					"--action", "cfg",
-					"--mode", "worker",
-					"--quiet",
-					"--bytecode", enc)
+		common.Go(func() {
+			func(id int) {
+				for job := range jobs {
+					enc := hex.EncodeToString(job.code)
+					cmd := exec.Command("./build/bin/hack",
+						"--action", "cfg",
+						"--mode", "worker",
+						"--quiet",
+						"--bytecode", enc)
 
-				metrics := vm.CfgMetrics{}
-				out, oerr := cmd.Output()
-				if oerr == nil {
-					lines := strings.Split(string(out), "\n")
-					merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
-					if merr != nil {
-						fmt.Printf("Output:\n")
-						fmt.Printf("%v\n", string(out))
-						fmt.Printf("Bytecode:\n")
-						fmt.Printf("%v %v\n", id, hex.EncodeToString(job.code))
-						panic(merr)
+					metrics := vm.CfgMetrics{}
+					out, oerr := cmd.Output()
+					if oerr == nil {
+						lines := strings.Split(string(out), "\n")
+						merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
+						if merr != nil {
+							fmt.Printf("Output:\n")
+							fmt.Printf("%v\n", string(out))
+							fmt.Printf("Bytecode:\n")
+							fmt.Printf("%v %v\n", id, hex.EncodeToString(job.code))
+							panic(merr)
+						}
+					} else {
+						fmt.Println("Warning: Could not get output for " + hex.EncodeToString(job.code))
 					}
-				} else {
-					fmt.Println("Warning: Could not get output for " + hex.EncodeToString(job.code))
+					results <- &cfgJobResult{job, &metrics}
 				}
-				results <- &cfgJobResult{job, &metrics}
-			}
-		}(i)
+			}(i)
+		})
 	}
 
 	current := time.Now()

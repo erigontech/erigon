@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/debug"
+	. "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
@@ -229,8 +229,13 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 		reason     DiscReason // sent to the peer
 	)
 	p.wg.Add(2)
-	go p.readLoop(readErr)
-	go p.pingLoop()
+	Go(func() {
+		p.readLoop(readErr)
+	}, RecoverStackTrace(nil, true, recover()))
+
+	Go(func() {
+		p.pingLoop()
+	}, RecoverStackTrace(nil, true, recover()))
 
 	// Start all protocol handlers.
 	writeStart <- struct{}{}
@@ -272,7 +277,6 @@ loop:
 }
 
 func (p *Peer) pingLoop() {
-	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	ping := time.NewTimer(pingInterval)
 	defer p.wg.Done()
 	defer ping.Stop()
@@ -291,7 +295,6 @@ func (p *Peer) pingLoop() {
 }
 
 func (p *Peer) readLoop(errc chan<- error) {
-	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	defer p.wg.Done()
 	for {
 		msg, err := p.rw.ReadMsg()
@@ -311,7 +314,9 @@ func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
 		msg.Discard()
-		go SendItems(p.rw, pongMsg)
+		Go(func() {
+			SendItems(p.rw, pongMsg)
+		}, RecoverStackTrace(nil, true, recover()))
 	case msg.Code == discMsg:
 		var reason [1]DiscReason
 		// This is the last message. We don't need to discard or
@@ -392,8 +397,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.Info().Network.RemoteAddress, p.Info().Network.LocalAddress)
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
-		go func() {
-			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
+		Go(func() {
 			defer p.wg.Done()
 			err := proto.Run(p, rw)
 			if err == nil {
@@ -403,7 +407,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 				p.log.Trace(fmt.Sprintf("Protocol %s/%d failed", proto.Name, proto.Version), "err", err)
 			}
 			p.protoErr <- err
-		}()
+		}, RecoverStackTrace(nil, true, recover()))
 	}
 }
 

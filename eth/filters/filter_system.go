@@ -25,7 +25,6 @@ import (
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/event"
@@ -131,7 +130,9 @@ func NewEventSystem(backend Backend) *EventSystem {
 		log.Crit("Subscribe for event system failed")
 	}
 
-	go m.eventLoop()
+	common.Go(func() {
+		m.eventLoop()
+	}, common.RecoverStackTrace(nil, true, recover()))
 	return m
 }
 
@@ -362,7 +363,6 @@ func (es *EventSystem) eventLoop() {
 		es.rmLogsSub.Unsubscribe()
 		//es.pendingLogsSub.Unsubscribe()
 		es.chainSub.Unsubscribe()
-		debug.RecoverStackTrace(nil, true, recover())
 	}()
 
 	index := make(filterIndex)

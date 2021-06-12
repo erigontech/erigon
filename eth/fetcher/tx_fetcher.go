@@ -25,7 +25,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -335,7 +334,9 @@ func (f *TxFetcher) Drop(peer string) error {
 // Start boots up the announcement based synchroniser, accepting and processing
 // hash notifications and block fetches until termination requested.
 func (f *TxFetcher) Start() {
-	go f.loop()
+	common.Go(func() {
+		f.loop()
+	})
 }
 
 // Stop terminates the announcement based synchroniser, canceling all pending
@@ -345,7 +346,6 @@ func (f *TxFetcher) Stop() {
 }
 
 func (f *TxFetcher) loop() {
-	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	var (
 		waitTimer    = new(mclock.Timer)
 		timeoutTimer = new(mclock.Timer)
@@ -797,14 +797,16 @@ func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, 
 			f.requests[peer] = &txRequest{hashes: hashes, time: f.clock.Now()}
 			//txRequestOutMeter.Mark(int64(len(hashes)))
 
-			go func(peer string, hashes []common.Hash) {
-				// Try to fetch the transactions, but in case of a request
-				// failure (e.g. peer disconnected), reschedule the hashes.
-				if err := f.fetchTxs(peer, hashes); err != nil {
-					//txRequestFailMeter.Mark(int64(len(hashes)))
-					f.Drop(peer) //nolint:errcheck
-				}
-			}(peer, hashes)
+			common.Go(func() {
+				func(peer string, hashes []common.Hash) {
+					// Try to fetch the transactions, but in case of a request
+					// failure (e.g. peer disconnected), reschedule the hashes.
+					if err := f.fetchTxs(peer, hashes); err != nil {
+						//txRequestFailMeter.Mark(int64(len(hashes)))
+						f.Drop(peer) //nolint:errcheck
+					}
+				}(peer, hashes)
+			})
 		}
 	})
 	// If a new request was fired, schedule a timeout timer

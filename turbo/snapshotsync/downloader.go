@@ -16,7 +16,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"golang.org/x/sync/errgroup"
@@ -219,35 +218,36 @@ func (cli *Client) Download() {
 	torrents := cli.Cli.Torrents()
 	for i := range torrents {
 		t := torrents[i]
-		go func(t *torrent.Torrent) {
-			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
-			t.AllowDataDownload()
-			t.DownloadAll()
+		common.Go(func() {
+			func(t *torrent.Torrent) {
+				t.AllowDataDownload()
+				t.DownloadAll()
 
-			tt := time.Now()
-			prev := t.BytesCompleted()
-		dwn:
-			for {
-				if t.Info().TotalLength()-t.BytesCompleted() == 0 {
-					log.Info("Dowloaded", "snapshot", t.Name(), "t", time.Since(tt))
-					break dwn
-				} else {
-					stats := t.Stats()
-					log.Info("Downloading snapshot",
-						"snapshot", t.Name(),
-						"%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
-						"mb", t.BytesCompleted()/1024/1024,
-						"diff(kb)", (t.BytesCompleted()-prev)/1024,
-						"seeders", stats.ConnectedSeeders,
-						"active", stats.ActivePeers,
-						"total", stats.TotalPeers)
-					prev = t.BytesCompleted()
-					time.Sleep(time.Second * 10)
+				tt := time.Now()
+				prev := t.BytesCompleted()
+			dwn:
+				for {
+					if t.Info().TotalLength()-t.BytesCompleted() == 0 {
+						log.Info("Dowloaded", "snapshot", t.Name(), "t", time.Since(tt))
+						break dwn
+					} else {
+						stats := t.Stats()
+						log.Info("Downloading snapshot",
+							"snapshot", t.Name(),
+							"%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
+							"mb", t.BytesCompleted()/1024/1024,
+							"diff(kb)", (t.BytesCompleted()-prev)/1024,
+							"seeders", stats.ConnectedSeeders,
+							"active", stats.ActivePeers,
+							"total", stats.TotalPeers)
+						prev = t.BytesCompleted()
+						time.Sleep(time.Second * 10)
+
+					}
 
 				}
-
-			}
-		}(t)
+			}(t)
+		})
 	}
 	cli.Cli.WaitAll()
 

@@ -11,7 +11,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -119,19 +118,19 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	wg := new(sync.WaitGroup)
 	wg.Add(cfg.numOfGoroutines)
 	for i := 0; i < cfg.numOfGoroutines; i++ {
-		go func(threadNo int) {
-			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
-			defer wg.Done()
-			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
-		}(i)
+		common.Go(func() {
+			func(threadNo int) {
+				defer wg.Done()
+				// each goroutine gets it's own crypto context to make sure they are really parallel
+				recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
+			}(i)
+		})
 	}
 
 	collectorSenders := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 	errCh := make(chan senderRecoveryError)
-	go func() {
-		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
+	common.Go(func() {
 		defer close(errCh)
 		for j := range out {
 			if j.err != nil {
@@ -156,7 +155,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 				return
 			}
 		}
-	}()
+	})
 
 	bodiesC, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {

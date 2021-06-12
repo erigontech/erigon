@@ -25,7 +25,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -46,7 +45,6 @@ func (s durationSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // one large enough is detected.
 func checkClockDrift() {
 	drift, err := sntpDrift(ntpChecks)
-	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	if err != nil {
 		return
 	}
