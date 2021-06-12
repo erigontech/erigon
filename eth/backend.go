@@ -413,7 +413,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
 	go func() {
-		defer func() { debug.RecoverStackTrace(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -451,7 +451,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 const txChanSize int = 4096
 
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
-	defer func() { debug.RecoverStackTrace(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	if notifier == nil {
 		return
 	}
@@ -566,7 +566,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 	}
 
 	go func() {
-		defer func() { debug.RecoverStackTrace(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 		defer close(s.waitForMiningStop)
 		newTransactions := make(chan core.NewTxsEvent, txChanSize)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
@@ -672,6 +672,7 @@ func (s *Ethereum) Stop() error {
 
 //Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *download.ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
+	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	stages2.StageLoop(
 		ctx,
 		db,

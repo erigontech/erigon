@@ -138,7 +138,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
-			defer func() { debug.RecoverStackTrace(nil, recover()) }()
+			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 			defer wg.Done()
 			var index int64
 			for {

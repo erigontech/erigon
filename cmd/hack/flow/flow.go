@@ -73,7 +73,7 @@ func worker(code []byte) {
 	start := time.Now()
 
 	go func() {
-		defer func() { debug.RecoverStackTrace(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
 		if cfg.Metrics.Valid {
 			proof := cfg.GenerateProof()
@@ -90,7 +90,7 @@ func worker(code []byte) {
 	oom := make(chan int, 1)
 
 	go func() {
-		defer func() { debug.RecoverStackTrace(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 		for {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -180,7 +180,7 @@ func batchServer() {
 
 	for i := 0; i < numWorkers; i++ {
 		go func(id int) {
-			defer func() { debug.RecoverStackTrace(nil, recover()) }()
+			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 			for job := range jobs {
 				enc := hex.EncodeToString(job.code)
 				cmd := exec.Command("./build/bin/hack",

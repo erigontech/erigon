@@ -58,7 +58,7 @@ func NewTxSenderCacher(threads int) *TxSenderCacher {
 	for i := 0; i < threads; i++ {
 		cacher.wg.Add(1)
 		go func() {
-			defer func() { debug.RecoverStackTrace(nil, recover()) }()
+			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 			defer cacher.wg.Done()
 			cacher.cache()
 		}()

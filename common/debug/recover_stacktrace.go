@@ -6,35 +6,21 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ledgerwatch/erigon/log"
 )
 
+var sigc chan os.Signal
+
+func GetSigC(sig *chan os.Signal) {
+	sigc = *sig
+}
+
 func prettyTime() string {
 	time := fmt.Sprintf("%v", time.Now())
 	return strings.Replace(time[:19], " ", "-", 1)
-}
-
-func ArchiveReportedCrashes() {
-	ex, _ := os.Executable()
-	binPath := filepath.Dir(ex)
-	crashReportDir := binPath[:len(binPath)-10] + "/crashreports/"
-	f, err := os.Open(crashReportDir)
-	if err != nil {
-		log.Error(err.Error())
-		return
-	}
-	fileInfo, err := f.ReadDir(-1)
-	for _, v := range fileInfo {
-		if !v.IsDir() {
-			oldFilePath := fmt.Sprintf("%v%v", crashReportDir, v.Name())
-			newFilePath := fmt.Sprintf("%vold/%v", crashReportDir, v.Name())
-			os.Rename(oldFilePath, newFilePath)
-			return
-		}
-	}
-
 }
 
 func CheckForCrashes() {
@@ -49,7 +35,7 @@ func CheckForCrashes() {
 	fileInfo, err := f.ReadDir(-1)
 	for _, v := range fileInfo {
 		if !v.IsDir() {
-			msg := fmt.Sprintf("Crash From Previous Boot Detected. Find the stack trace in %v",
+			msg := fmt.Sprintf("Crashes From Previous Boots Detected. Find the stack trace in %v",
 				crashReportDir)
 			log.Warn(msg)
 			return
@@ -57,10 +43,9 @@ func CheckForCrashes() {
 	}
 }
 
-func RecoverStackTrace(err error, panicResult interface{}) error {
+func RecoverStackTrace(err error, stopErigon bool, panicResult interface{}) error {
 	if panicResult != nil {
-		panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-		stack := panicReplacer.Replace(string(debug.Stack()))
+		stack := string(debug.Stack())
 		switch typed := panicResult.(type) {
 		case error:
 			err = fmt.Errorf("%w, trace: %s", typed, stack)
@@ -68,7 +53,11 @@ func RecoverStackTrace(err error, panicResult interface{}) error {
 			err = fmt.Errorf("%+v, trace: %s", typed, stack)
 		}
 		WriteStackTraceOnPanic(stack)
-		return err
+		if stopErigon && sigc != nil {
+			sigc <- syscall.SIGINT
+		} else {
+			return err
+		}
 	}
 	return err
 }

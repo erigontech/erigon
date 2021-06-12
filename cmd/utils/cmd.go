@@ -60,9 +60,9 @@ func StartNode(stack *node.Node) {
 		Fatalf("Error starting protocol stack: %v", err)
 	}
 	go func() {
-		defer func() { _debug.RecoverStackTrace(nil, recover()) }()
 		sigc := make(chan os.Signal, 1)
 		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+		_debug.GetSigC(&sigc)
 		defer signal.Stop(sigc)
 
 		<-sigc

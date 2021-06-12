@@ -352,7 +352,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 	var progress uint64
 	for i := 0; i < threads; i++ {
 		go func(id int) {
-			defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 			defer pend.Done()
 
 			// Create a hasher to reuse between invocations

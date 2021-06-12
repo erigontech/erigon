@@ -543,7 +543,7 @@ func (srv *Server) setupLocalNode() error {
 		// do it in the background.
 		srv.loopWG.Add(1)
 		go func() {
-			defer func() { debug.RecoverStackTrace(nil, recover()) }()
+			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
 				srv.localnode.SetStaticIP(ip)
@@ -584,7 +584,7 @@ func (srv *Server) setupDiscovery() error {
 		if !realaddr.IP.IsLoopback() {
 			srv.loopWG.Add(1)
 			go func() {
-				defer func() { debug.RecoverStackTrace(nil, recover()) }()
+				defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 				srv.loopWG.Done()
 			}()
@@ -692,7 +692,7 @@ func (srv *Server) setupListening() error {
 		if !tcp.IP.IsLoopback() && srv.NAT != nil {
 			srv.loopWG.Add(1)
 			go func() {
-				defer func() { debug.RecoverStackTrace(nil, recover()) }()
+				defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p")
 				srv.loopWG.Done()
 			}()
@@ -715,7 +715,7 @@ func (srv *Server) doPeerOp(fn peerOpFunc) {
 
 // run is the main loop of the server.
 func (srv *Server) run() {
-	defer func() { debug.RecoverStackTrace(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	if srv.localnode.Node().TCP() > 0 {
 		err := ioutil.WriteFile(EnodeAddressFileName, []byte(srv.localnode.Node().URLv4()), 0600)
 		if err != nil {
@@ -858,7 +858,7 @@ func (srv *Server) addPeerChecks(peers map[enode.ID]*Peer, inboundCount int, c *
 // listenLoop runs in its own goroutine and accepts
 // inbound connections.
 func (srv *Server) listenLoop() {
-	defer func() { debug.RecoverStackTrace(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	srv.log.Debug("TCP listener up", "addr", srv.listener.Addr())
 
 	// The slots channel limits accepts of new connections.
@@ -922,7 +922,7 @@ func (srv *Server) listenLoop() {
 			srv.log.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
 		go func() {
-			defer func() { debug.RecoverStackTrace(nil, recover()) }()
+			defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 			srv.SetupConn(fd, inboundConn, nil)
 			slots <- struct{}{}
 		}()
@@ -1057,7 +1057,7 @@ func (srv *Server) launchPeer(c *conn) *Peer {
 
 // runPeer runs in its own goroutine for each peer.
 func (srv *Server) runPeer(p *Peer) {
-	defer func() { debug.RecoverStackTrace(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
 	if srv.newPeerHook != nil {
 		srv.newPeerHook(p)
 	}

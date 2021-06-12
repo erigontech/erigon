@@ -266,7 +266,6 @@ func (n *Node) stopServices(running []Lifecycle) error {
 	if len(failure.Services) > 0 {
 		return failure
 	}
-	debug.ArchiveReportedCrashes()
 	return nil
 }
 
