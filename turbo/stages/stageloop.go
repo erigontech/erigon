@@ -112,6 +112,7 @@ func StageLoopStep(
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	// avoid crash because Erigon's core does many things -
+	defer func() { debug.RecoverStackTrace(err, false, recover()) }()
 	var sm ethdb.StorageMode
 	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
