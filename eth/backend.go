@@ -216,6 +216,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		} else {
 			config.StorageMode = sm
 		}
+		log.Info("Effective", "storage mode", config.StorageMode)
 
 		return nil
 	}); err != nil {
