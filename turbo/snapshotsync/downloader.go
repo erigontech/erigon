@@ -220,7 +220,7 @@ func (cli *Client) Download() {
 	for i := range torrents {
 		t := torrents[i]
 		go func(t *torrent.Torrent) {
-			defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+			defer func() { debug.RecoverStackTrace(nil, recover()) }()
 			t.AllowDataDownload()
 			t.DownloadAll()
 

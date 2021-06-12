@@ -142,9 +142,9 @@ func (api *privateAdminAPI) PeerEvents(ctx context.Context) (*rpc.Subscription, 
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
+		defer func() { _debug.RecoverStackTrace(nil, recover()) }()
 		events := make(chan *p2p.PeerEvent)
 		sub := server.SubscribeEvents(events)
-		defer func() { _debug.RecoverStackTraceNoExit(nil, recover()) }()
 		defer sub.Unsubscribe()
 
 		for {

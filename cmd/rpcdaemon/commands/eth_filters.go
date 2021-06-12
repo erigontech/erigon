@@ -48,7 +48,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 	go func() {
 		headers := make(chan *types.Header, 1)
-		defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, recover()) }()
 		defer close(headers)
 		id := api.filters.SubscribeNewHeads(headers)
 		defer api.filters.UnsubscribeHeads(id)
@@ -80,7 +80,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 
 	go func() {
 		txsCh := make(chan []types.Transaction, 1)
-		defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, recover()) }()
 		defer close(txsCh)
 		id := api.filters.SubscribePendingTxs(txsCh)
 		defer api.filters.UnsubscribePendingTxs(id)

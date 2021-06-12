@@ -178,8 +178,8 @@ func discoverUPnP() Interface {
 // advertised services of each device. The first non-nil service found
 // is sent into out. If no service matched, nil is sent.
 func discover(out chan<- *upnp, target string, matcher func(goupnp.ServiceClient) *upnp) {
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	devs, err := goupnp.DiscoverDevices(target)
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
 	if err != nil {
 		out <- nil
 		return

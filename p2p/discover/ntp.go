@@ -46,7 +46,7 @@ func (s durationSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // one large enough is detected.
 func checkClockDrift() {
 	drift, err := sntpDrift(ntpChecks)
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	if err != nil {
 		return
 	}

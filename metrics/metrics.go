@@ -84,7 +84,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 	if !Enabled {
 		return
 	}
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	refreshFreq := int64(refresh / time.Second)
 
 	// Create the various data collectors

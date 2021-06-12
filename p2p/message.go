@@ -119,7 +119,7 @@ func Send(w MsgWriter, msgcode uint64, data interface{}) error {
 //    [e1, e2, e3]
 //
 func SendItems(w MsgWriter, msgcode uint64, elems ...interface{}) error {
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	return Send(w, msgcode, elems)
 }
 

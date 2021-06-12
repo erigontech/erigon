@@ -57,25 +57,7 @@ func CheckForCrashes() {
 	}
 }
 
-func RecoverStackTraceAndExit() {
-	ex, _ := os.Executable()
-	binPath := filepath.Dir(ex)
-	crashReportDir := binPath[:len(binPath)-10] + "/crashreports/"
-	if r := recover(); r != nil {
-		fileName := fmt.Sprintf("%v%v.txt", crashReportDir, prettyTime())
-		f, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE, 0644)
-		if err != nil {
-			log.Error(err.Error())
-		}
-		log.Error(string(debug.Stack())[:12])
-		f.WriteString(string(debug.Stack()))
-		f.Sync()
-		f.Close()
-		os.Exit(1)
-	}
-}
-
-func RecoverStackTraceNoExit(err error, panicResult interface{}) error {
+func RecoverStackTrace(err error, panicResult interface{}) error {
 	if panicResult != nil {
 		panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
 		stack := panicReplacer.Replace(string(debug.Stack()))

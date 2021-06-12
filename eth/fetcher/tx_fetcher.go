@@ -345,7 +345,7 @@ func (f *TxFetcher) Stop() {
 }
 
 func (f *TxFetcher) loop() {
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	var (
 		waitTimer    = new(mclock.Timer)
 		timeoutTimer = new(mclock.Timer)

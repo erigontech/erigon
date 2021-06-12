@@ -276,7 +276,7 @@ func (m *FairMix) deleteSource(s *mixSource) {
 
 // runSource reads a single source in a loop.
 func (m *FairMix) runSource(closed chan struct{}, s *mixSource) {
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	defer m.wg.Done()
 	defer close(s.next)
 	for s.it.Next() {

@@ -16,7 +16,7 @@ import (
 
 func main() {
 	// catch panics from main thread and log into a file
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	// creating a erigon-api app with all defaults
 	app := erigoncli.MakeApp(runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {

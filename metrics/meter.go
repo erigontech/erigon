@@ -291,7 +291,7 @@ var arbiter = meterArbiter{ticker: time.NewTicker(5 * time.Second), meters: make
 
 // Ticks meters on the scheduled interval
 func (ma *meterArbiter) tick() {
-	defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+	defer func() { debug.RecoverStackTrace(nil, recover()) }()
 	for range ma.ticker.C {
 		ma.tickMeters()
 	}

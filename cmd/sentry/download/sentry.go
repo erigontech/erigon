@@ -149,7 +149,7 @@ func handShake(
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	go func() {
-		defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, recover()) }()
 		s := &eth.StatusPacket{
 			ProtocolVersion: uint32(version),
 			NetworkID:       status.NetworkId,
@@ -377,7 +377,7 @@ func runPeer(
 func rootContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		defer func() { debug.RecoverStackTraceNoExit(nil, recover()) }()
+		defer func() { debug.RecoverStackTrace(nil, recover()) }()
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		defer signal.Stop(ch)
