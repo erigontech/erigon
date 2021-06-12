@@ -3,6 +3,7 @@ package debug
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -33,6 +34,10 @@ func CheckForCrashes() {
 		return
 	}
 	fileInfo, err := f.ReadDir(-1)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
 	for _, v := range fileInfo {
 		if !v.IsDir() {
 			msg := fmt.Sprintf("Crashes From Previous Boots Detected. Find the stack trace in %v",
@@ -65,11 +70,12 @@ func RecoverStackTrace(err error, stopErigon bool, panicResult interface{}) erro
 func WriteStackTraceOnPanic(stack string) {
 	ex, _ := os.Executable()
 	binPath := filepath.Dir(ex)
-	crashReportDir := binPath[:len(binPath)-10] + "/crashreports/"
-	fileName := fmt.Sprintf("%v%v.txt", crashReportDir, prettyTime())
+	fileName := path.Join(binPath[:len(binPath)-10], "crashreports", prettyTime()+".txt")
 	f, errFs := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if errFs != nil {
 		log.Error(errFs.Error())
+		f.Close()
+		return
 	}
 	f.WriteString(stack)
 	f.Sync()
