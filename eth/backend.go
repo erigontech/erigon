@@ -411,7 +411,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	common.Go(func() {
 		SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 
 	common.Go(func() {
 		for {
@@ -429,7 +429,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return
 			}
 		}
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 
 	if err := backend.StartMining(context.Background(), backend.chainKV, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 		return nil, err
@@ -599,7 +599,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 				go func() { errc <- stages2.MiningStep(ctx, kv, mining) }()
 			}
 		}
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 
 	return nil
 }
@@ -630,7 +630,7 @@ func (s *Ethereum) Start() error {
 
 	common.Go(func() {
 		Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 	return nil
 }
 

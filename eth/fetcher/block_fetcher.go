@@ -224,7 +224,7 @@ func NewBlockFetcher(getHeader HeaderRetrievalFn, getBlock blockRetrievalFn, ver
 func (f *BlockFetcher) Start() {
 	common.Go(func() {
 		f.loop()
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 }
 
 // Stop terminates the announcement based synchroniser, canceling all pending
@@ -456,7 +456,7 @@ func (f *BlockFetcher) loop() {
 						//headerFetchMeter.Mark(1)
 						fetchHeader(hash) // Suboptimal, but protocol doesn't allow batch header retrievals
 					}
-				}, common.RecoverStackTrace(nil, true, recover()))
+				})
 			}
 			// Schedule the next fetch if blocks are still pending
 			f.rescheduleFetch(fetchTimer)

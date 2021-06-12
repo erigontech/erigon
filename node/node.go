@@ -27,7 +27,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
@@ -123,7 +123,7 @@ func New(conf *Config) (*Node, error) {
 	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
 	// Check for uncaught crashes from the previous boot and notify the user if
 	// there are any
-	debug.CheckForCrashes()
+	common.CheckForCrashes()
 
 	return node, nil
 }

@@ -145,7 +145,7 @@ func (n *upnp) withRateLimit(fn func() error) error {
 func discoverUPnP() Interface {
 	found := make(chan *upnp, 2)
 	// IGDv1
-	common.StartGoRoutine(func() {
+	common.Go(func() {
 		discover(found, internetgateway1.URN_WANConnectionDevice_1, func(sc goupnp.ServiceClient) *upnp {
 			switch sc.Service.ServiceType {
 			case internetgateway1.URN_WANIPConnection_1:
@@ -155,10 +155,10 @@ func discoverUPnP() Interface {
 			}
 			return nil
 		})
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 
 	// IGDv2
-	common.StartGoRoutine(func() {
+	common.Go(func() {
 		discover(found, internetgateway2.URN_WANConnectionDevice_2, func(sc goupnp.ServiceClient) *upnp {
 			switch sc.Service.ServiceType {
 			case internetgateway2.URN_WANIPConnection_1:
@@ -170,7 +170,7 @@ func discoverUPnP() Interface {
 			}
 			return nil
 		})
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 
 	for i := 0; i < cap(found); i++ {
 		if c := <-found; c != nil {

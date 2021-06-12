@@ -158,7 +158,7 @@ func (api *privateAdminAPI) PeerEvents(ctx context.Context) (*rpc.Subscription, 
 				return
 			}
 		}
-	}, common.RecoverStackTrace(nil, false, recover()))
+	})
 
 	return rpcSub, nil
 }

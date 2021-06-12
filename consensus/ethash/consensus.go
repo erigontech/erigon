@@ -29,7 +29,6 @@ import (
 	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	. "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -137,7 +136,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		Go(func() {
+		common.Go(func() {
 			defer wg.Done()
 			var index int64
 			for {
@@ -150,7 +149,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 					return
 				}
 			}
-		}, RecoverStackTrace(nil, true, recover()))
+		})
 	}
 
 	wg.Wait()

@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
-	. "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/event"
@@ -505,9 +504,9 @@ func (srv *Server) Start() (err error) {
 	srv.setupDialScheduler()
 
 	srv.loopWG.Add(1)
-	Go(func() {
+	common.Go(func() {
 		srv.run()
-	}, RecoverStackTrace(nil, true, recover()))
+	})
 	return nil
 }
 
@@ -544,12 +543,12 @@ func (srv *Server) setupLocalNode() error {
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.
 		srv.loopWG.Add(1)
-		Go(func() {
+		common.Go(func() {
 			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
 				srv.localnode.SetStaticIP(ip)
 			}
-		}, RecoverStackTrace(nil, true, recover()))
+		})
 	}
 	return nil
 }
@@ -584,10 +583,10 @@ func (srv *Server) setupDiscovery() error {
 	if srv.NAT != nil {
 		if !realaddr.IP.IsLoopback() {
 			srv.loopWG.Add(1)
-			Go(func() {
+			common.Go(func() {
 				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 				srv.loopWG.Done()
-			}, RecoverStackTrace(nil, true, recover()))
+			})
 		}
 	}
 	srv.localnode.SetFallbackUDP(realaddr.Port)
@@ -691,17 +690,17 @@ func (srv *Server) setupListening() error {
 		srv.localnode.Set(enr.TCP(tcp.Port))
 		if !tcp.IP.IsLoopback() && srv.NAT != nil {
 			srv.loopWG.Add(1)
-			Go(func() {
+			common.Go(func() {
 				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p")
 				srv.loopWG.Done()
-			}, RecoverStackTrace(nil, true, recover()))
+			})
 		}
 	}
 
 	srv.loopWG.Add(1)
-	Go(func() {
+	common.Go(func() {
 		srv.listenLoop()
-	}, RecoverStackTrace(nil, true, recover()))
+	})
 	return nil
 }
 
@@ -920,10 +919,10 @@ func (srv *Server) listenLoop() {
 			fd = newMeteredConn(fd, true, addr)
 			srv.log.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
-		Go(func() {
+		common.Go(func() {
 			srv.SetupConn(fd, inboundConn, nil)
 			slots <- struct{}{}
-		}, RecoverStackTrace(nil, true, recover()))
+		})
 	}
 }
 
@@ -1049,9 +1048,9 @@ func (srv *Server) launchPeer(c *conn) *Peer {
 		// to the peer.
 		p.events = &srv.peerFeed
 	}
-	Go(func() {
+	common.Go(func() {
 		srv.runPeer(p)
-	}, RecoverStackTrace(nil, true, recover()))
+	})
 	return p
 }
 

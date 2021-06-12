@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -16,7 +16,7 @@ import (
 
 func main() {
 	// catch panics from main thread and logs stack trace into a file
-	defer func() { debug.RecoverStackTrace(nil, true, recover()) }()
+	defer func() { common.RecoverStackTrace(recover()) }()
 	// creating a erigon-api app with all defaults
 	app := erigoncli.MakeApp(runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {

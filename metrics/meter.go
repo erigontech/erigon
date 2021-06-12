@@ -57,7 +57,7 @@ func NewMeter() Meter {
 		arbiter.started = true
 		common.Go(func() {
 			arbiter.tick()
-		}, common.RecoverStackTrace(nil, true, recover()))
+		})
 	}
 	return m
 }
@@ -74,7 +74,7 @@ func NewMeterForced() Meter {
 		arbiter.started = true
 		common.Go(func() {
 			arbiter.tick()
-		}, common.RecoverStackTrace(nil, true, recover()))
+		})
 	}
 	return m
 }

@@ -59,7 +59,7 @@ func NewTxSenderCacher(threads int) *TxSenderCacher {
 		common.Go(func() {
 			defer cacher.wg.Done()
 			cacher.cache()
-		}, common.RecoverStackTrace(nil, true, recover()))
+		})
 	}
 	return cacher
 }

@@ -38,7 +38,7 @@ func (s *Server) ServeListener(l net.Listener) error {
 		log.Trace("Accepted RPC connection", "conn", conn.RemoteAddr())
 		common.Go(func() {
 			s.ServeCodec(NewCodec(conn), 0)
-		}, common.RecoverStackTrace(nil, true, recover()))
+		})
 	}
 }
 

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
@@ -229,13 +229,13 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 		reason     DiscReason // sent to the peer
 	)
 	p.wg.Add(2)
-	Go(func() {
+	common.Go(func() {
 		p.readLoop(readErr)
-	}, RecoverStackTrace(nil, true, recover()))
+	})
 
-	Go(func() {
+	common.Go(func() {
 		p.pingLoop()
-	}, RecoverStackTrace(nil, true, recover()))
+	})
 
 	// Start all protocol handlers.
 	writeStart <- struct{}{}
@@ -314,9 +314,9 @@ func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
 		msg.Discard()
-		Go(func() {
+		common.Go(func() {
 			SendItems(p.rw, pongMsg)
-		}, RecoverStackTrace(nil, true, recover()))
+		})
 	case msg.Code == discMsg:
 		var reason [1]DiscReason
 		// This is the last message. We don't need to discard or
@@ -397,7 +397,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.Info().Network.RemoteAddress, p.Info().Network.LocalAddress)
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
-		Go(func() {
+		common.Go(func() {
 			defer p.wg.Done()
 			err := proto.Run(p, rw)
 			if err == nil {
@@ -407,7 +407,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 				p.log.Trace(fmt.Sprintf("Protocol %s/%d failed", proto.Name, proto.Version), "err", err)
 			}
 			p.protoErr <- err
-		}, RecoverStackTrace(nil, true, recover()))
+		})
 	}
 }
 
