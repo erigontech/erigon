@@ -29,17 +29,17 @@ func CheckForCrashes(datadir string) {
 	if _, err := os.Stat(crashReportDir); os.IsNotExist(err) {
 		os.Mkdir(crashReportDir, 0755)
 	} else if err != nil {
-		log.Error(err.Error())
+		log.Error("log_panig.go: CheckForCrashes", "error", err)
 		return
 	}
 	f, err := os.Open(crashReportDir)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error("log_panig.go: CheckForCrashes", "error", err)
 		return
 	}
 	fileInfo, err := f.ReadDir(-1)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error("log_panig.go: CheckForCrashes", "error", err)
 		return
 	}
 	for _, v := range fileInfo {
@@ -76,7 +76,7 @@ func WriteStackTraceOnPanic(stack string) {
 	fileName := filepath.Join(crashReportDir, prettyTime()+".txt")
 	f, errFs := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if errFs != nil {
-		log.Error(errFs.Error())
+		log.Error("log_panic.go:WriteStackTraceOnPanic", "error", errFs)
 		f.Close()
 		return
 	}
