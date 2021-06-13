@@ -56,7 +56,7 @@ func NewTxSenderCacher(threads int) *TxSenderCacher {
 
 	for i := 0; i < threads; i++ {
 		cacher.wg.Add(1)
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			defer cacher.wg.Done()
 			cacher.cache()
 		})

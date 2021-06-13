@@ -128,14 +128,14 @@ func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		t.tab.loop()
 	})
 	t.wg.Add(2)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		t.readLoop()
 	})
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		t.dispatch()
 	})
 	return t, nil

@@ -55,7 +55,7 @@ func NewMeter() Meter {
 	arbiter.meters[m] = struct{}{}
 	if !arbiter.started {
 		arbiter.started = true
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			arbiter.tick()
 		})
 	}
@@ -72,7 +72,7 @@ func NewMeterForced() Meter {
 	arbiter.meters[m] = struct{}{}
 	if !arbiter.started {
 		arbiter.started = true
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			arbiter.tick()
 		})
 	}

@@ -65,10 +65,10 @@ func (s *scheduler) run(sections chan uint64, dist chan *request, done chan []by
 
 	// Start the pipeline schedulers to forward between user -> distributor -> user
 	wg.Add(2)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		s.scheduleRequests(sections, dist, pend, quit, wg)
 	})
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		s.scheduleDeliveries(pend, done, quit, wg)
 	})
 }

@@ -181,10 +181,10 @@ func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupF
 	d.lastStatsLog = d.clock.Now()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.wg.Add(2)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		d.readNodes(it)
 	})
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		d.loop(it)
 	})
 	return d
@@ -464,7 +464,7 @@ func (d *dialScheduler) startDial(task *dialTask) {
 	hkey := string(task.dest.ID().Bytes())
 	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
 	d.dialing[task.dest.ID()] = task
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		task.run(d)
 		d.doneCh <- task
 	})

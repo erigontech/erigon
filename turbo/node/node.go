@@ -151,7 +151,7 @@ func prepare(ctx *cli.Context) {
 	}
 
 	// Start system runtime metrics collection
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		metrics.CollectProcessMetrics(10 * time.Second)
 	})
 }

@@ -133,7 +133,7 @@ func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentT
 					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
 				} else if parent != nil {
 					td = new(big.Int).Add(block.Difficulty(), parent)
-					common.Go(func() {
+					common.Go(func(args ...interface{}) {
 						blockPropagator(context.Background(), block, td)
 					})
 				} else {

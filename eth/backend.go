@@ -409,11 +409,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 	}
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 	})
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -564,7 +564,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 		}
 	}
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		defer close(s.waitForMiningStop)
 		newTransactions := make(chan core.NewTxsEvent, txChanSize)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
@@ -628,7 +628,7 @@ func (s *Ethereum) Start() error {
 		go download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
 	}
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	})
 	return nil

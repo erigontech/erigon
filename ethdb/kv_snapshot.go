@@ -126,7 +126,7 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 	}
 	s.mtx.Unlock()
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		wg := sync.WaitGroup{}
 		wg.Add(len(toClose))
 

@@ -141,7 +141,7 @@ func (api *privateAdminAPI) PeerEvents(ctx context.Context) (*rpc.Subscription, 
 	}
 	rpcSub := notifier.CreateSubscription()
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		events := make(chan *p2p.PeerEvent)
 		sub := server.SubscribeEvents(events)
 		defer sub.Unsubscribe()

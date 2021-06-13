@@ -222,7 +222,7 @@ func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry) *C
 		reqTimeout:  make(chan *requestOp),
 	}
 	if !isHTTP {
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			c.dispatch(conn)
 		})
 	}
@@ -559,7 +559,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 	}()
 
 	// Spawn the initial read loop.
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		c.read(codec)
 	})
 
@@ -593,7 +593,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 				conn.close(errClientReconnected, lastOp)
 				c.drainRead()
 			}
-			common.Go(func() {
+			common.Go(func(args ...interface{}) {
 				c.read(newcodec)
 			})
 			reading = true

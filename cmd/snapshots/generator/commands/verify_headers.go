@@ -39,7 +39,7 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 	var prevHeader *types.Header
 	var lastHeader uint64
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		for {
 			select {
 			case <-ctx.Done():

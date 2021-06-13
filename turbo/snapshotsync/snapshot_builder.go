@@ -128,7 +128,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 		return nil
 	}
 	if async {
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {

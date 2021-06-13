@@ -36,7 +36,7 @@ func (s *Server) ServeListener(l net.Listener) error {
 			return err
 		}
 		log.Trace("Accepted RPC connection", "conn", conn.RemoteAddr())
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			s.ServeCodec(NewCodec(conn), 0)
 		})
 	}

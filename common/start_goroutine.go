@@ -4,9 +4,9 @@ package common
 // RecoverStackTrace, it writes the stack trace to a file
 // on panic, cleans up gracefully and alerts the user
 //of the files location on next boot
-func Go(goroutine func()) {
+func Go(goroutine func(args ...interface{}), args ...interface{}) {
 	go func() {
 		defer func() { LogPanic(recover()) }()
-		goroutine()
+		goroutine(args...)
 	}()
 }

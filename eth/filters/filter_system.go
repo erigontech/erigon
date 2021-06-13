@@ -130,7 +130,7 @@ func NewEventSystem(backend Backend) *EventSystem {
 		log.Crit("Subscribe for event system failed")
 	}
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		m.eventLoop()
 	})
 	return m

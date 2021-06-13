@@ -112,7 +112,7 @@ func main() {
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	if natm != nil {
 		if !realaddr.IP.IsLoopback() {
-			common.Go(func() {
+			common.Go(func(args ...interface{}) {
 				nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 			})
 		}

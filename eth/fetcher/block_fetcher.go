@@ -222,7 +222,7 @@ func NewBlockFetcher(getHeader HeaderRetrievalFn, getBlock blockRetrievalFn, ver
 // Start boots up the announcement based synchroniser, accepting and processing
 // hash notifications and block fetches until termination requested.
 func (f *BlockFetcher) Start() {
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		f.loop()
 	})
 }
@@ -448,7 +448,7 @@ func (f *BlockFetcher) loop() {
 
 				// Create a closure of the fetch and schedule in on a new thread
 				fetchHeader, hashes := f.fetching[hashes[0]].fetchHeader, hashes
-				common.Go(func() {
+				common.Go(func(args ...interface{}) {
 					if f.fetchingHook != nil {
 						f.fetchingHook(hashes)
 					}

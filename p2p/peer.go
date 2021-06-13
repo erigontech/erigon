@@ -229,11 +229,11 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 		reason     DiscReason // sent to the peer
 	)
 	p.wg.Add(2)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		p.readLoop(readErr)
 	})
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		p.pingLoop()
 	})
 
@@ -314,7 +314,7 @@ func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
 		msg.Discard()
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			SendItems(p.rw, pongMsg)
 		})
 	case msg.Code == discMsg:
@@ -397,7 +397,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.Info().Network.RemoteAddress, p.Info().Network.LocalAddress)
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			defer p.wg.Done()
 			err := proto.Run(p, rw)
 			if err == nil {

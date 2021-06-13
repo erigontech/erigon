@@ -334,7 +334,7 @@ func (f *TxFetcher) Drop(peer string) error {
 // Start boots up the announcement based synchroniser, accepting and processing
 // hash notifications and block fetches until termination requested.
 func (f *TxFetcher) Start() {
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		f.loop()
 	})
 }
@@ -797,16 +797,16 @@ func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, 
 			f.requests[peer] = &txRequest{hashes: hashes, time: f.clock.Now()}
 			//txRequestOutMeter.Mark(int64(len(hashes)))
 
-			common.Go(func() {
-				func(peer string, hashes []common.Hash) {
-					// Try to fetch the transactions, but in case of a request
-					// failure (e.g. peer disconnected), reschedule the hashes.
-					if err := f.fetchTxs(peer, hashes); err != nil {
-						//txRequestFailMeter.Mark(int64(len(hashes)))
-						f.Drop(peer) //nolint:errcheck
-					}
-				}(peer, hashes)
-			})
+			common.Go(func(args ...interface{}) {
+				// Try to fetch the transactions, but in case of a request
+				// failure (e.g. peer disconnected), reschedule the hashes.
+				peer := args[0].(string)
+				hashes := args[1].([]common.Hash)
+				if err := f.fetchTxs(peer, hashes); err != nil {
+					//txRequestFailMeter.Mark(int64(len(hashes)))
+					f.Drop(peer) //nolint:errcheck
+				}
+			}, peer, hashes)
 		}
 	})
 	// If a new request was fired, schedule a timeout timer

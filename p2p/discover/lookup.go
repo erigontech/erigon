@@ -123,7 +123,7 @@ func (it *lookup) startQueries() bool {
 		if !it.asked[n.ID()] {
 			it.asked[n.ID()] = true
 			it.queries++
-			common.Go(func() {
+			common.Go(func(args ...interface{}) {
 				it.query(n, it.replyCh)
 			})
 		}

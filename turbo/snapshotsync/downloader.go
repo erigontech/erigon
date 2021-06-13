@@ -218,7 +218,8 @@ func (cli *Client) Download() {
 	torrents := cli.Cli.Torrents()
 	for i := range torrents {
 		t := torrents[i]
-		go func(t *torrent.Torrent) {
+		common.Go(func(args ...interface{}) {
+			t := args[0].(*torrent.Torrent)
 			t.AllowDataDownload()
 			t.DownloadAll()
 
@@ -245,7 +246,7 @@ func (cli *Client) Download() {
 				}
 
 			}
-		}(t)
+		}, t)
 	}
 	cli.Cli.WaitAll()
 

@@ -179,7 +179,7 @@ func (m *FairMix) AddSource(it Iterator) {
 	m.wg.Add(1)
 	source := &mixSource{it, make(chan *Node), m.timeout}
 	m.sources = append(m.sources, source)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		m.runSource(m.closed, source)
 	})
 }

@@ -72,7 +72,7 @@ func worker(code []byte) {
 
 	start := time.Now()
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
 		if cfg.Metrics.Valid {
 			proof := cfg.GenerateProof()
@@ -88,7 +88,7 @@ func worker(code []byte) {
 
 	oom := make(chan int, 1)
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		for {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -177,7 +177,8 @@ func batchServer() {
 	fmt.Printf("Closing jobs\n")
 
 	for i := 0; i < numWorkers; i++ {
-		go func(id int) {
+		common.Go(func(args ...interface{}) {
+			id := args[0].(int)
 			for job := range jobs {
 				enc := hex.EncodeToString(job.code)
 				cmd := exec.Command("./build/bin/hack",
@@ -203,7 +204,7 @@ func batchServer() {
 				}
 				results <- &cfgJobResult{job, &metrics}
 			}
-		}(i)
+		}, i)
 	}
 
 	current := time.Now()

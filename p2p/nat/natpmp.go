@@ -69,7 +69,7 @@ func discoverPMP() Interface {
 	found := make(chan *pmp, len(gws))
 	for i := range gws {
 		gw := gws[i]
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			c := natpmp.NewClient(gw)
 			if _, err := c.GetExternalAddress(); err != nil {
 				found <- nil

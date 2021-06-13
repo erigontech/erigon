@@ -300,7 +300,7 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		pool.scheduleReorgLoop()
 	})
 
@@ -317,7 +317,7 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 	}
 
 	pool.wg.Add(1)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		pool.loop()
 	})
 
@@ -1044,7 +1044,7 @@ func (pool *TxPool) scheduleReorgLoop() {
 		// Launch next background reorg if needed
 		if curDone == nil && launchNextRun {
 			// Run the background reorg and announcements
-			common.Go(func() {
+			common.Go(func(args ...interface{}) {
 				pool.runReorg(nextDone, dirtyAccounts, queuedEvents, reset)
 			})
 

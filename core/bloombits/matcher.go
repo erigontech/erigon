@@ -165,7 +165,7 @@ func (m *Matcher) Start(ctx context.Context, begin, end uint64, results chan uin
 
 	// Read the output from the result sink and deliver to the user
 	session.pend.Add(1)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		defer session.pend.Done()
 		defer close(results)
 
@@ -227,7 +227,7 @@ func (m *Matcher) run(begin, end uint64, buffer int, session *MatcherSession) ch
 	source := make(chan *partialMatches, buffer)
 
 	session.pend.Add(1)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		defer session.pend.Done()
 		defer close(source)
 
@@ -248,7 +248,7 @@ func (m *Matcher) run(begin, end uint64, buffer int, session *MatcherSession) ch
 	}
 	// Start the request distribution
 	session.pend.Add(1)
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		m.distributor(dist, session)
 	})
 
@@ -319,7 +319,7 @@ func (m *Matcher) subMatch(source chan *partialMatches, dist chan *request, bloo
 		}
 	}()
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		// Tear down the goroutine and terminate the final sink channel
 		defer session.pend.Done()
 		defer close(results)

@@ -229,7 +229,7 @@ func (tab *Table) loop() {
 	defer copyNodes.Stop()
 
 	// Start initial refresh.
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		tab.doRefresh(refreshDone)
 	})
 
@@ -240,7 +240,7 @@ loop:
 			tab.seedRand()
 			if refreshDone == nil {
 				refreshDone = make(chan struct{})
-				common.Go(func() {
+				common.Go(func(args ...interface{}) {
 					tab.doRefresh(refreshDone)
 				})
 			}
@@ -248,7 +248,7 @@ loop:
 			waiting = append(waiting, req)
 			if refreshDone == nil {
 				refreshDone = make(chan struct{})
-				common.Go(func() {
+				common.Go(func(args ...interface{}) {
 					tab.doRefresh(refreshDone)
 				})
 			}
@@ -259,14 +259,14 @@ loop:
 			waiting, refreshDone = nil, nil
 		case <-revalidate.C:
 			revalidateDone = make(chan struct{})
-			common.Go(func() {
+			common.Go(func(args ...interface{}) {
 				tab.doRevalidate(revalidateDone)
 			})
 		case <-revalidateDone:
 			revalidate.Reset(tab.nextRevalidateTime())
 			revalidateDone = nil
 		case <-copyNodes.C:
-			common.Go(func() {
+			common.Go(func(args ...interface{}) {
 				tab.copyLiveNodes()
 			})
 		case <-tab.closeReq:

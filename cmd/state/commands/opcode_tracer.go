@@ -413,7 +413,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		chanOpcodes = make(chan blockTxs, 10)
 		defer close(chanOpcodes)
 
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			var fops *os.File
 			var fopsWriter *bufio.Writer
 			var fopsEnc *gob.Encoder
@@ -463,7 +463,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		chanSegPrefix = make(chan segPrefix, 1024)
 		defer close(chanSegPrefix)
 
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			var f *os.File
 			var fWriter *bufio.Writer
 			var fwEnc *json.Encoder

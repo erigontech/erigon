@@ -46,7 +46,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 	rpcSub := notifier.CreateSubscription()
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		headers := make(chan *types.Header, 1)
 		defer close(headers)
 		id := api.filters.SubscribeNewHeads(headers)
@@ -77,7 +77,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 
 	rpcSub := notifier.CreateSubscription()
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		txsCh := make(chan []types.Transaction, 1)
 		defer close(txsCh)
 		id := api.filters.SubscribePendingTxs(txsCh)

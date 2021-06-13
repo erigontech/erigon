@@ -290,7 +290,7 @@ func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan str
 		return false, err1
 	}
 	// Wait for the signal to start reading
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		defer tx1.Rollback()
 		<-startCh
 		c, err := tx1.Cursor("t")
@@ -312,7 +312,7 @@ func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan str
 			}
 		}
 		errorCh <- nil
-	})
+	}, startCh, tx1, errorCh)
 	return false, nil
 }
 

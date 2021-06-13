@@ -51,7 +51,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
 	}
 
-	common.Go(func() {
+	common.Go(func(args ...interface{}) {
 		if ethBackend == nil {
 			return
 		}
@@ -82,7 +82,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 	})
 
 	if txPool != nil {
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			for {
 				select {
 				case <-ctx.Done():
@@ -106,7 +106,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				}
 			}
 		})
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			for {
 				select {
 				case <-ctx.Done():
@@ -130,7 +130,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				}
 			}
 		})
-		common.Go(func() {
+		common.Go(func(args ...interface{}) {
 			for {
 				select {
 				case <-ctx.Done():
