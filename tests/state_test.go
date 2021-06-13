@@ -56,6 +56,7 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stCreate2/create2collisionStorage.json`)
 	st.skipLoad(`^stExtCodeHash/dynamicAccountOverwriteEmpty.json`)
 	st.skipLoad(`^stSStoreTest/InitCollision.json`)
+	st.skipLoad(`^stEIP1559/typeTwoBerlin.json`)
 
 	// Expected failures:
 	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium/0`, "bug in test")
