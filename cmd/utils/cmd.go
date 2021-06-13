@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 
+	_debug "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -61,6 +62,7 @@ func StartNode(stack *node.Node) {
 	go func() {
 		sigc := make(chan os.Signal, 1)
 		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+		_debug.GetSigC(&sigc)
 		defer signal.Stop(sigc)
 
 		<-sigc

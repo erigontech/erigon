@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -414,6 +415,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		defer close(chanOpcodes)
 
 		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			var fops *os.File
 			var fopsWriter *bufio.Writer
 			var fopsEnc *gob.Encoder

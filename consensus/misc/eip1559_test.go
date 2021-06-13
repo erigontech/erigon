@@ -1,3 +1,19 @@
+// Copyright 2021 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
 package misc
 
 import (
@@ -52,20 +68,20 @@ func TestBlockGasLimits(t *testing.T) {
 	}{
 		// Transitions from non-london to london
 		{10000000, 4, 20000000, true},  // No change
-		{10000000, 4, 20019531, true},  // Upper limit
-		{10000000, 4, 20019532, false}, // Upper +1
+		{10000000, 4, 20019530, true},  // Upper limit
+		{10000000, 4, 20019531, false}, // Upper +1
 		{10000000, 4, 19980470, true},  // Lower limit
 		{10000000, 4, 19980469, false}, // Lower limit -1
 		// London to London
 		{20000000, 5, 20000000, true},
-		{20000000, 5, 20019531, true},  // Upper limit
-		{20000000, 5, 20019532, false}, // Upper limit +1
+		{20000000, 5, 20019530, true},  // Upper limit
+		{20000000, 5, 20019531, false}, // Upper limit +1
 		{20000000, 5, 19980470, true},  // Lower limit
 		{20000000, 5, 19980469, false}, // Lower limit -1
-		{40000000, 5, 40039063, true},  // Upper limit
-		{40000000, 5, 40039064, false}, // Upper limit +1
-		{40000000, 5, 39960938, true},  // lower limit
-		{40000000, 5, 39960937, false}, // Lower limit -1
+		{40000000, 5, 40039061, true},  // Upper limit
+		{40000000, 5, 40039062, false}, // Upper limit +1
+		{40000000, 5, 39960939, true},  // lower limit
+		{40000000, 5, 39960938, false}, // Lower limit -1
 	} {
 		parent := &types.Header{
 			GasUsed:  tc.pGasLimit / 2,
