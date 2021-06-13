@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -374,9 +373,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
-		if !errors.Is(err, common.ErrStopped) {
-			return err
-		}
+		return err
 	}
 	// Check if the latest header was imported or rolled back
 	if err = ms.DB.View(ms.Ctx, func(tx ethdb.Tx) error {
