@@ -14,8 +14,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
@@ -290,7 +290,8 @@ func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan str
 		return false, err1
 	}
 	// Wait for the signal to start reading
-	common.Go(func(args ...interface{}) {
+	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer tx1.Rollback()
 		<-startCh
 		c, err := tx1.Cursor("t")
@@ -312,7 +313,7 @@ func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan str
 			}
 		}
 		errorCh <- nil
-	}, startCh, tx1, errorCh)
+	}()
 	return false, nil
 }
 

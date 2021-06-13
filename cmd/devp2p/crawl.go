@@ -19,7 +19,7 @@ package main
 import (
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 )
@@ -69,10 +69,7 @@ func (c *crawler) run(timeout time.Duration) nodeSet {
 	)
 	defer timeoutTimer.Stop()
 	for _, it := range c.iters {
-		common.Go(func(args ...interface{}) {
-			it := args[1].(enode.Iterator)
-			c.runIterator(doneCh, it)
-		}, it)
+		go c.runIterator(doneCh, it)
 	}
 
 loop:
@@ -107,6 +104,7 @@ loop:
 }
 
 func (c *crawler) runIterator(done chan<- enode.Iterator, it enode.Iterator) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer func() { done <- it }()
 	for it.Next() {
 		select {

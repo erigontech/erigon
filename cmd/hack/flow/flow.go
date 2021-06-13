@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
 
@@ -72,7 +72,8 @@ func worker(code []byte) {
 
 	start := time.Now()
 
-	common.Go(func(args ...interface{}) {
+	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		cfg, _ := vm.GenCfg(code, maxAnlyCounterLimit, maxStackLen, maxStackCount, &metrics)
 		if cfg.Metrics.Valid {
 			proof := cfg.GenerateProof()
@@ -84,11 +85,12 @@ func worker(code []byte) {
 		}
 
 		mon <- 0
-	})
+	}()
 
 	oom := make(chan int, 1)
 
-	common.Go(func(args ...interface{}) {
+	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		for {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -106,7 +108,7 @@ func worker(code []byte) {
 				oom <- 0
 			}
 		}
-	})
+	}()
 
 	select {
 	case <-mon:
@@ -177,8 +179,8 @@ func batchServer() {
 	fmt.Printf("Closing jobs\n")
 
 	for i := 0; i < numWorkers; i++ {
-		common.Go(func(args ...interface{}) {
-			id := args[0].(int)
+		go func(id int) {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			for job := range jobs {
 				enc := hex.EncodeToString(job.code)
 				cmd := exec.Command("./build/bin/hack",
@@ -204,7 +206,7 @@ func batchServer() {
 				}
 				results <- &cfgJobResult{job, &metrics}
 			}
-		}, i)
+		}(i)
 	}
 
 	current := time.Now()

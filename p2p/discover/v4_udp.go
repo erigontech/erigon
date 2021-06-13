@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
@@ -149,17 +149,11 @@ func ListenV4(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 		return nil, err
 	}
 	t.tab = tab
-	common.Go(func(args ...interface{}) {
-		tab.loop()
-	})
+	go tab.loop()
 
 	t.wg.Add(2)
-	common.Go(func(args ...interface{}) {
-		t.loop()
-	})
-	common.Go(func(args ...interface{}) {
-		t.readLoop(cfg.Unhandled)
-	})
+	go t.loop()
+	go t.readLoop(cfg.Unhandled)
 	return t, nil
 }
 
@@ -426,6 +420,7 @@ func (t *UDPv4) handleReply(from enode.ID, fromIP net.IP, req v4wire.Packet) boo
 // loop runs in its own goroutine. it keeps track of
 // the refresh timer and the pending reply queue.
 func (t *UDPv4) loop() {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer t.wg.Done()
 
 	var (
@@ -535,6 +530,7 @@ func (t *UDPv4) write(toaddr *net.UDPAddr, toid enode.ID, what string, packet []
 // readLoop runs in its own goroutine. it handles incoming UDP packets.
 func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 	defer t.wg.Done()
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	if unhandled != nil {
 		defer close(unhandled)
 	}

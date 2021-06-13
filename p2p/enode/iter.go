@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 )
 
 // Iterator represents a sequence of nodes. The Next method moves to the next node in the
@@ -179,9 +179,7 @@ func (m *FairMix) AddSource(it Iterator) {
 	m.wg.Add(1)
 	source := &mixSource{it, make(chan *Node), m.timeout}
 	m.sources = append(m.sources, source)
-	common.Go(func(args ...interface{}) {
-		m.runSource(m.closed, source)
-	})
+	go m.runSource(m.closed, source)
 }
 
 // Close shuts down the mixer and all current sources.
@@ -278,6 +276,7 @@ func (m *FairMix) deleteSource(s *mixSource) {
 
 // runSource reads a single source in a loop.
 func (m *FairMix) runSource(closed chan struct{}, s *mixSource) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer m.wg.Done()
 	defer close(s.next)
 	for s.it.Next() {

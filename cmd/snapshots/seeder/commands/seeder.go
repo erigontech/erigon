@@ -95,7 +95,7 @@ func Seed(ctx context.Context, datadir string) error {
 		}
 	}
 
-	common.Go(func(args ...interface{}) {
+	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		for range ticker.C {
 			for _, t := range cl.Torrents() {
@@ -107,7 +107,7 @@ func Seed(ctx context.Context, datadir string) error {
 				return
 			}
 		}
-	})
+	}()
 
 	<-ctx.Done()
 	return nil

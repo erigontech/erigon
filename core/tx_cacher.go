@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -56,10 +57,11 @@ func NewTxSenderCacher(threads int) *TxSenderCacher {
 
 	for i := 0; i < threads; i++ {
 		cacher.wg.Add(1)
-		common.Go(func(args ...interface{}) {
+		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			defer cacher.wg.Done()
 			cacher.cache()
-		})
+		}()
 	}
 	return cacher
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth"
@@ -151,7 +150,5 @@ func prepare(ctx *cli.Context) {
 	}
 
 	// Start system runtime metrics collection
-	common.Go(func(args ...interface{}) {
-		metrics.CollectProcessMetrics(10 * time.Second)
-	})
+	go metrics.CollectProcessMetrics(10 * time.Second)
 }

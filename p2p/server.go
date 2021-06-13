@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/event"
@@ -504,9 +505,7 @@ func (srv *Server) Start() (err error) {
 	srv.setupDialScheduler()
 
 	srv.loopWG.Add(1)
-	common.Go(func(args ...interface{}) {
-		srv.run()
-	})
+	go srv.run()
 	return nil
 }
 
@@ -543,12 +542,13 @@ func (srv *Server) setupLocalNode() error {
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.
 		srv.loopWG.Add(1)
-		common.Go(func(args ...interface{}) {
+		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			defer srv.loopWG.Done()
 			if ip, err := srv.NAT.ExternalIP(); err == nil {
 				srv.localnode.SetStaticIP(ip)
 			}
-		})
+		}()
 	}
 	return nil
 }
@@ -583,10 +583,11 @@ func (srv *Server) setupDiscovery() error {
 	if srv.NAT != nil {
 		if !realaddr.IP.IsLoopback() {
 			srv.loopWG.Add(1)
-			common.Go(func(args ...interface{}) {
+			go func() {
+				defer func() { debug.LogPanic(nil, true, recover()) }()
 				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 				srv.loopWG.Done()
-			})
+			}()
 		}
 	}
 	srv.localnode.SetFallbackUDP(realaddr.Port)
@@ -690,17 +691,16 @@ func (srv *Server) setupListening() error {
 		srv.localnode.Set(enr.TCP(tcp.Port))
 		if !tcp.IP.IsLoopback() && srv.NAT != nil {
 			srv.loopWG.Add(1)
-			common.Go(func(args ...interface{}) {
+			go func() {
+				defer func() { debug.LogPanic(nil, true, recover()) }()
 				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p")
 				srv.loopWG.Done()
-			})
+			}()
 		}
 	}
 
 	srv.loopWG.Add(1)
-	common.Go(func(args ...interface{}) {
-		srv.listenLoop()
-	})
+	go srv.listenLoop()
 	return nil
 }
 
@@ -715,6 +715,7 @@ func (srv *Server) doPeerOp(fn peerOpFunc) {
 
 // run is the main loop of the server.
 func (srv *Server) run() {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	if srv.localnode.Node().TCP() > 0 {
 		err := ioutil.WriteFile(EnodeAddressFileName, []byte(srv.localnode.Node().URLv4()), 0600)
 		if err != nil {
@@ -857,6 +858,7 @@ func (srv *Server) addPeerChecks(peers map[enode.ID]*Peer, inboundCount int, c *
 // listenLoop runs in its own goroutine and accepts
 // inbound connections.
 func (srv *Server) listenLoop() {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	srv.log.Debug("TCP listener up", "addr", srv.listener.Addr())
 
 	// The slots channel limits accepts of new connections.
@@ -919,10 +921,11 @@ func (srv *Server) listenLoop() {
 			fd = newMeteredConn(fd, true, addr)
 			srv.log.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
-		common.Go(func(args ...interface{}) {
+		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			srv.SetupConn(fd, inboundConn, nil)
 			slots <- struct{}{}
-		})
+		}()
 	}
 }
 
@@ -1048,14 +1051,13 @@ func (srv *Server) launchPeer(c *conn) *Peer {
 		// to the peer.
 		p.events = &srv.peerFeed
 	}
-	common.Go(func(args ...interface{}) {
-		srv.runPeer(p)
-	})
+	go srv.runPeer(p)
 	return p
 }
 
 // runPeer runs in its own goroutine for each peer.
 func (srv *Server) runPeer(p *Peer) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	if srv.newPeerHook != nil {
 		srv.newPeerHook(p)
 	}

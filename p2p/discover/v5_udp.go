@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
@@ -128,16 +128,10 @@ func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	common.Go(func(args ...interface{}) {
-		t.tab.loop()
-	})
+	go t.tab.loop()
 	t.wg.Add(2)
-	common.Go(func(args ...interface{}) {
-		t.readLoop()
-	})
-	common.Go(func(args ...interface{}) {
-		t.dispatch()
-	})
+	go t.readLoop()
+	go t.dispatch()
 	return t, nil
 }
 
@@ -493,6 +487,7 @@ func (t *UDPv5) callDone(c *callV5) {
 // When that happens the call is simply re-sent to complete the handshake. We allow one
 // handshake attempt per call.
 func (t *UDPv5) dispatch() {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer t.wg.Done()
 
 	// Arm first read.
@@ -619,6 +614,7 @@ func (t *UDPv5) send(toID enode.ID, toAddr *net.UDPAddr, packet v5wire.Packet, c
 
 // readLoop runs in its own goroutine and reads packets from the network.
 func (t *UDPv5) readLoop() {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer t.wg.Done()
 
 	buf := make([]byte, maxPacketSize)

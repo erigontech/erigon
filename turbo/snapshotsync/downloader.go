@@ -16,6 +16,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"golang.org/x/sync/errgroup"
@@ -218,8 +219,8 @@ func (cli *Client) Download() {
 	torrents := cli.Cli.Torrents()
 	for i := range torrents {
 		t := torrents[i]
-		common.Go(func(args ...interface{}) {
-			t := args[0].(*torrent.Torrent)
+		go func(t *torrent.Torrent) {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			t.AllowDataDownload()
 			t.DownloadAll()
 
@@ -246,7 +247,7 @@ func (cli *Client) Download() {
 				}
 
 			}
-		}, t)
+		}(t)
 	}
 	cli.Cli.WaitAll()
 

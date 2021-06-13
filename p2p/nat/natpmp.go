@@ -23,7 +23,7 @@ import (
 	"time"
 
 	natpmp "github.com/jackpal/go-nat-pmp"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 )
 
 // natPMPClient adapts the NAT-PMP protocol implementation so it conforms to
@@ -69,14 +69,15 @@ func discoverPMP() Interface {
 	found := make(chan *pmp, len(gws))
 	for i := range gws {
 		gw := gws[i]
-		common.Go(func(args ...interface{}) {
+		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			c := natpmp.NewClient(gw)
 			if _, err := c.GetExternalAddress(); err != nil {
 				found <- nil
 			} else {
 				found <- &pmp{gw, c}
 			}
-		})
+		}()
 	}
 	// return the one that responds first.
 	// discovery needs to be quick, so we stop caring about

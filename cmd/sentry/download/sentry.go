@@ -20,6 +20,7 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/gointerfaces"
@@ -147,7 +148,8 @@ func handShake(
 
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
-	common.Go(func(args ...interface{}) {
+	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		s := &eth.StatusPacket{
 			ProtocolVersion: uint32(version),
 			NetworkID:       status.NetworkId,
@@ -157,7 +159,7 @@ func handShake(
 			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock),
 		}
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
-	})
+	}()
 	var readStatus = func() error {
 		forkFilter := forkid.NewFilterFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock)
 		networkID := status.NetworkId
@@ -374,7 +376,8 @@ func runPeer(
 
 func rootContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
-	common.Go(func(args ...interface{}) {
+	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		defer signal.Stop(ch)
@@ -386,7 +389,7 @@ func rootContext() context.Context {
 		}
 
 		cancel()
-	})
+	}()
 	return ctx
 }
 

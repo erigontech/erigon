@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
@@ -409,11 +410,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 	}
 
-	common.Go(func(args ...interface{}) {
-		SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
-	})
+	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
-	common.Go(func(args ...interface{}) {
+	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -429,7 +429,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return
 			}
 		}
-	})
+	}()
 
 	if err := backend.StartMining(context.Background(), backend.chainKV, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 		return nil, err
@@ -451,6 +451,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 const txChanSize int = 4096
 
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	if notifier == nil {
 		return
 	}
@@ -564,7 +565,8 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 		}
 	}
 
-	common.Go(func(args ...interface{}) {
+	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer close(s.waitForMiningStop)
 		newTransactions := make(chan core.NewTxsEvent, txChanSize)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
@@ -599,7 +601,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 				go func() { errc <- stages2.MiningStep(ctx, kv, mining) }()
 			}
 		}
-	})
+	}()
 
 	return nil
 }
@@ -628,9 +630,7 @@ func (s *Ethereum) Start() error {
 		go download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
 	}
 
-	common.Go(func(args ...interface{}) {
-		Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
-	})
+	go Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	return nil
 }
 
@@ -672,6 +672,7 @@ func (s *Ethereum) Stop() error {
 
 //Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *download.ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	stages2.StageLoop(
 		ctx,
 		db,

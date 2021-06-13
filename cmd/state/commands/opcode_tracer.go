@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -413,7 +414,8 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		chanOpcodes = make(chan blockTxs, 10)
 		defer close(chanOpcodes)
 
-		common.Go(func(args ...interface{}) {
+		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			var fops *os.File
 			var fopsWriter *bufio.Writer
 			var fopsEnc *gob.Encoder
@@ -452,7 +454,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				panic(fmt.Sprintf("Opcode channel not empty at the end: lo=%d", lo))
 			}
 
-		})
+		}()
 	}
 
 	var chanSegDump chan bblockDump
@@ -463,7 +465,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		chanSegPrefix = make(chan segPrefix, 1024)
 		defer close(chanSegPrefix)
 
-		common.Go(func(args ...interface{}) {
+		go func() {
 			var f *os.File
 			var fWriter *bufio.Writer
 			var fwEnc *json.Encoder
@@ -516,7 +518,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			if lsp > 0 || lsd > 0 {
 				panic(fmt.Sprintf("Bblock channels not empty at the end: sp=%d sd=%d", lsp, lsd))
 			}
-		})
+		}()
 	}
 
 	timeLastBlock := startTime

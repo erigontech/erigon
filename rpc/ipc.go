@@ -20,7 +20,6 @@ import (
 	"context"
 	"net"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 )
@@ -36,9 +35,7 @@ func (s *Server) ServeListener(l net.Listener) error {
 			return err
 		}
 		log.Trace("Accepted RPC connection", "conn", conn.RemoteAddr())
-		common.Go(func(args ...interface{}) {
-			s.ServeCodec(NewCodec(conn), 0)
-		})
+		go s.ServeCodec(NewCodec(conn), 0)
 	}
 }
 
