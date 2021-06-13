@@ -56,6 +56,7 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stCreate2/create2collisionStorage.json`)
 	st.skipLoad(`^stExtCodeHash/dynamicAccountOverwriteEmpty.json`)
 	st.skipLoad(`^stSStoreTest/InitCollision.json`)
+	st.skipLoad(`^stEIP1559/typeTwoBerlin.json`)
 
 	// Expected failures:
 	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium/0`, "bug in test")
@@ -99,7 +100,7 @@ func TestState(t *testing.T) {
 }
 
 // Transactions with gasLimit above this value will not get a VM trace on failure.
-const traceErrorLimit = 4000000000
+const traceErrorLimit = 400000
 
 func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	// Use config from command line arguments.

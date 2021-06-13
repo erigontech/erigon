@@ -15,6 +15,7 @@ import (
 
 var _ = (*genesisSpecMarshaling)(nil)
 
+// MarshalJSON marshals as JSON.
 func (g Genesis) MarshalJSON() ([]byte, error) {
 	type Genesis struct {
 		Config     *params.ChainConfig                         `json:"config"`
@@ -29,7 +30,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Number     math.HexOrDecimal64                         `json:"number"`
 		GasUsed    math.HexOrDecimal64                         `json:"gasUsed"`
 		ParentHash common.Hash                                 `json:"parentHash"`
-		BaseFee    *math.HexOrDecimal256                       `json:"baseFee"`
+		BaseFee    *big.Int                                    `json:"baseFee"`
 	}
 	var enc Genesis
 	enc.Config = g.Config
@@ -49,10 +50,11 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Number = math.HexOrDecimal64(g.Number)
 	enc.GasUsed = math.HexOrDecimal64(g.GasUsed)
 	enc.ParentHash = g.ParentHash
-	enc.BaseFee = (*math.HexOrDecimal256)(g.BaseFee)
+	enc.BaseFee = g.BaseFee
 	return json.Marshal(&enc)
 }
 
+// UnmarshalJSON unmarshals from JSON.
 func (g *Genesis) UnmarshalJSON(input []byte) error {
 	type Genesis struct {
 		Config     *params.ChainConfig                         `json:"config"`
@@ -67,7 +69,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Number     *math.HexOrDecimal64                        `json:"number"`
 		GasUsed    *math.HexOrDecimal64                        `json:"gasUsed"`
 		ParentHash *common.Hash                                `json:"parentHash"`
-		BaseFee    *math.HexOrDecimal256                       `json:"baseFee"`
+		BaseFee    *big.Int                                    `json:"baseFee"`
 	}
 	var dec Genesis
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -116,7 +118,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		g.ParentHash = *dec.ParentHash
 	}
 	if dec.BaseFee != nil {
-		g.BaseFee = (*big.Int)(dec.BaseFee)
+		g.BaseFee = dec.BaseFee
 	}
 	return nil
 }
