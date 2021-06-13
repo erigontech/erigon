@@ -136,7 +136,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		common.Go(func() {
+		go func() {
 			defer wg.Done()
 			var index int64
 			for {
@@ -149,7 +149,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 					return
 				}
 			}
-		})
+		}()
 	}
 
 	wg.Wait()

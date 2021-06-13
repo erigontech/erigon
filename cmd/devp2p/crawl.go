@@ -19,7 +19,6 @@ package main
 import (
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 )
@@ -69,10 +68,7 @@ func (c *crawler) run(timeout time.Duration) nodeSet {
 	)
 	defer timeoutTimer.Stop()
 	for _, it := range c.iters {
-		itCopy := it
-		common.Go(func() {
-			c.runIterator(doneCh, itCopy)
-		})
+		go c.runIterator(doneCh, it)
 	}
 
 loop:

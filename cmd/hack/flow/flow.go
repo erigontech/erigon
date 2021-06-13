@@ -177,36 +177,33 @@ func batchServer() {
 	fmt.Printf("Closing jobs\n")
 
 	for i := 0; i < numWorkers; i++ {
-		iCopy := i
-		common.Go(func() {
-			func(id int) {
-				for job := range jobs {
-					enc := hex.EncodeToString(job.code)
-					cmd := exec.Command("./build/bin/hack",
-						"--action", "cfg",
-						"--mode", "worker",
-						"--quiet",
-						"--bytecode", enc)
+		go func(id int) {
+			for job := range jobs {
+				enc := hex.EncodeToString(job.code)
+				cmd := exec.Command("./build/bin/hack",
+					"--action", "cfg",
+					"--mode", "worker",
+					"--quiet",
+					"--bytecode", enc)
 
-					metrics := vm.CfgMetrics{}
-					out, oerr := cmd.Output()
-					if oerr == nil {
-						lines := strings.Split(string(out), "\n")
-						merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
-						if merr != nil {
-							fmt.Printf("Output:\n")
-							fmt.Printf("%v\n", string(out))
-							fmt.Printf("Bytecode:\n")
-							fmt.Printf("%v %v\n", id, hex.EncodeToString(job.code))
-							panic(merr)
-						}
-					} else {
-						fmt.Println("Warning: Could not get output for " + hex.EncodeToString(job.code))
+				metrics := vm.CfgMetrics{}
+				out, oerr := cmd.Output()
+				if oerr == nil {
+					lines := strings.Split(string(out), "\n")
+					merr := json.Unmarshal([]byte(lines[len(lines)-1]), &metrics)
+					if merr != nil {
+						fmt.Printf("Output:\n")
+						fmt.Printf("%v\n", string(out))
+						fmt.Printf("Bytecode:\n")
+						fmt.Printf("%v %v\n", id, hex.EncodeToString(job.code))
+						panic(merr)
 					}
-					results <- &cfgJobResult{job, &metrics}
+				} else {
+					fmt.Println("Warning: Could not get output for " + hex.EncodeToString(job.code))
 				}
-			}(iCopy)
-		})
+				results <- &cfgJobResult{job, &metrics}
+			}
+		}(i)
 	}
 
 	current := time.Now()
