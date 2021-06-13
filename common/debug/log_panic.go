@@ -13,6 +13,7 @@ import (
 )
 
 var sigc chan os.Signal
+var crashReportDir string
 
 func GetSigC(sig *chan os.Signal) {
 	sigc = *sig
@@ -24,13 +25,18 @@ func prettyTime() string {
 }
 
 func CheckForCrashes() {
-	ex, err := os.Executable()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Warn(err.Error())
+		log.Error(err.Error())
 		return
 	}
-	binPath := filepath.Dir(ex)
-	crashReportDir := filepath.Join(binPath[:len(binPath)-10], "crashreports")
+	crashReportDir = filepath.Join(home, "erigon_crashreports")
+	if _, err = os.Stat(crashReportDir); os.IsNotExist(err) {
+		os.Mkdir(crashReportDir, 0755)
+	} else if err != nil {
+		log.Error(err.Error())
+		return
+	}
 	f, err := os.Open(crashReportDir)
 	if err != nil {
 		log.Error(err.Error())
@@ -46,6 +52,7 @@ func CheckForCrashes() {
 			msg := fmt.Sprintf("Crashes From Previous Boots Detected. Find the stack trace in %v",
 				crashReportDir)
 			log.Warn(msg)
+			f.Close()
 			return
 		}
 	}
@@ -71,13 +78,7 @@ func LogPanic(err error, stopErigon bool, panicResult interface{}) error {
 }
 
 func WriteStackTraceOnPanic(stack string) {
-	ex, err := os.Executable()
-	if err != nil {
-		log.Warn(err.Error())
-		return
-	}
-	binPath := filepath.Dir(ex)
-	fileName := filepath.Join(binPath[:len(binPath)-10], "crashreports", prettyTime()+".txt")
+	fileName := filepath.Join(crashReportDir, prettyTime()+".txt")
 	f, errFs := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	if errFs != nil {
 		log.Error(errFs.Error())
