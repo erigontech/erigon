@@ -1187,10 +1187,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func dumpAddresses(chaindata string) error {
+func dumpState(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("addresses")
+	f, err := os.Create("statedump")
 	if err != nil {
 		return err
 	}
@@ -1199,20 +1199,34 @@ func dumpAddresses(chaindata string) error {
 	defer w.Flush()
 	stAccounts := 0
 	stStorage := 0
+	var varintBuf [10]byte // Buffer for varint number
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.PlainStateBucket)
 		if err != nil {
 			return err
 		}
-		k, _, e := c.First()
-		for ; k != nil && e == nil; k, _, e = c.Next() {
+		k, v, e := c.First()
+		for ; k != nil && e == nil; k, v, e = c.Next() {
+			keyLen := binary.PutUvarint(varintBuf[:], uint64(len(k)))
+			if _, err = w.Write(varintBuf[:keyLen]); err != nil {
+				return err
+			}
+			if _, err = w.Write([]byte(k)); err != nil {
+				return err
+			}
+			valLen := binary.PutUvarint(varintBuf[:], uint64(len(v)))
+			if _, err = w.Write(varintBuf[:valLen]); err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				if _, err = w.Write(v); err != nil {
+					return err
+				}
+			}
 			if len(k) > 28 {
 				stStorage++
 			} else {
 				stAccounts++
-				if _, err1 := w.Write(k[:20]); err1 != nil {
-					return err1
-				}
 			}
 			if (stStorage+stAccounts)%100000 == 0 {
 				fmt.Printf("State records: %d\n", stStorage+stAccounts)
@@ -1921,8 +1935,8 @@ func main() {
 	case "snapSizes":
 		err = snapSizes(*chaindata)
 
-	case "dumpAddresses":
-		err = dumpAddresses(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata)
 
 	case "readCallTraces":
 		err = readCallTraces(*chaindata, uint64(*block))
