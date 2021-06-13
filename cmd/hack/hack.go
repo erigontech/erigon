@@ -1655,7 +1655,7 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	c, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {
 		return err
 	}
