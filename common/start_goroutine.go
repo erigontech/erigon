@@ -6,7 +6,7 @@ package common
 //of the files location on next boot
 func Go(goroutine func()) {
 	go func() {
-		defer func() { RecoverStackTrace(recover()) }()
+		defer func() { LogPanic(recover()) }()
 		goroutine()
 	}()
 }

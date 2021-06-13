@@ -132,7 +132,7 @@ func NewEventSystem(backend Backend) *EventSystem {
 
 	common.Go(func() {
 		m.eventLoop()
-	}, common.RecoverStackTrace(nil, true, recover()))
+	})
 	return m
 }
 

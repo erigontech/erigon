@@ -51,7 +51,7 @@ func CheckForCrashes() {
 	}
 }
 
-func RecoverStackTrace(r interface{}) {
+func LogPanic(r interface{}) {
 	if r != nil {
 		stack := string(debug.Stack())
 		WriteStackTraceOnPanic(stack)
