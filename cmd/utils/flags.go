@@ -827,9 +827,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	setBootstrapNodesV5(ctx, cfg)
 	setStaticPeers(ctx, cfg)
 
-	ethPeers := cfg.MaxPeers
-	cfg.Name = nodeName
-	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
+	if ctx.GlobalIsSet(MaxPeersFlag.Name) {
+		cfg.MaxPeers = ctx.GlobalInt(MaxPeersFlag.Name)
+	}
 
 	if ctx.GlobalIsSet(MaxPendingPeersFlag.Name) {
 		cfg.MaxPendingPeers = ctx.GlobalInt(MaxPendingPeersFlag.Name)
@@ -841,6 +841,10 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	if ctx.GlobalIsSet(DiscoveryV5Flag.Name) {
 		cfg.DiscoveryV5 = ctx.GlobalBool(DiscoveryV5Flag.Name)
 	}
+
+	ethPeers := cfg.MaxPeers
+	cfg.Name = nodeName
+	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
 
 	if netrestrict := ctx.GlobalString(NetrestrictFlag.Name); netrestrict != "" {
 		list, err := netutil.ParseNetlist(netrestrict)
