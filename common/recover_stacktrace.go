@@ -24,7 +24,11 @@ func prettyTime() string {
 }
 
 func CheckForCrashes() {
-	ex, _ := os.Executable()
+	ex, err := os.Executable()
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
 	binPath := filepath.Dir(ex)
 	crashReportDir := filepath.Join(binPath[:len(binPath)-10], "crashreports")
 	f, err := os.Open(crashReportDir)
@@ -56,7 +60,11 @@ func RecoverStackTrace(r interface{}) {
 }
 
 func WriteStackTraceOnPanic(stack string) {
-	ex, _ := os.Executable()
+	ex, err := os.Executable()
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
 	binPath := filepath.Dir(ex)
 	fileName := filepath.Join(binPath[:len(binPath)-10], "crashreports", prettyTime()+".txt")
 	f, errFs := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
