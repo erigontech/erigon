@@ -379,10 +379,11 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		}
 	}
 	// Check if the latest header was imported or rolled back
-	if td, tdErr := rawdb.ReadTd(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()); tdErr != nil {
-		return tdErr
-	} else if td == nil {
+	if rawdb.ReadHeader(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+	}
+	if _, bad := ms.downloader.Hd.BadHeaders[chain.TopBlock.Hash()]; bad {
+		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
 }

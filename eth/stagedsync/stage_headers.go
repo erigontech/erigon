@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"runtime"
 	"time"
@@ -260,7 +261,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
 				return err
 			}
-			rawdb.DeleteTd(tx, hash, blockHeight)
+			cfg.hd.BadHeaders[hash] = struct{}{}
 		}
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
@@ -285,14 +286,27 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		k = lastK
 		var maxTd big.Int
 		var maxHash common.Hash
+		var maxNum uint64 = math.MaxUint64
 		copy(maxHash[:], lastK[8:])
-		var maxNum uint64 = binary.BigEndian.Uint64(lastK[:8])
+		if _, bad := cfg.hd.BadHeaders[maxHash]; !bad {
+			maxNum = binary.BigEndian.Uint64(lastK[:8])
+		} else {
+			maxHash = common.Hash{}
+		}
 		if k != nil {
 			if err = rlp.DecodeBytes(v, &maxTd); err != nil {
 				return err
 			}
 		}
 		for ; err == nil && k != nil && len(k) == 40 && bytes.Equal(k[:8], lastK[:8]); k, v, err = tdCursor.Prev() {
+			if len(k) != 40 {
+				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
+			}
+			var hash common.Hash
+			copy(hash[:], k[8:])
+			if _, bad := cfg.hd.BadHeaders[hash]; bad {
+				continue
+			}
 			var td big.Int
 			if err = rlp.DecodeBytes(v, &td); err != nil {
 				return err
@@ -305,6 +319,13 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		}
 		if err != nil {
 			return err
+		}
+		if maxNum == math.MaxUint64 {
+			maxNum = 0
+			// Read genesis hash
+			if maxHash, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
+				return err
+			}
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
