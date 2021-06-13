@@ -1,11 +1,9 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"runtime"
 	"time"
@@ -275,30 +273,15 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			return cErr
 		}
 		defer tdCursor.Close()
-		var lastK, k, v []byte
-		lastK, v, err = tdCursor.Last()
+		var k, v []byte
+		k, v, err = tdCursor.Last()
 		if err != nil {
 			return err
 		}
-		if len(lastK) != 40 {
-			return fmt.Errorf("key in TD table has to be 40 bytes long: %x", lastK)
-		}
-		k = lastK
 		var maxTd big.Int
 		var maxHash common.Hash
-		var maxNum uint64 = math.MaxUint64
-		copy(maxHash[:], lastK[8:])
-		if _, bad := cfg.hd.BadHeaders[maxHash]; !bad {
-			maxNum = binary.BigEndian.Uint64(lastK[:8])
-		} else {
-			maxHash = common.Hash{}
-		}
-		if k != nil {
-			if err = rlp.DecodeBytes(v, &maxTd); err != nil {
-				return err
-			}
-		}
-		for ; err == nil && k != nil && len(k) == 40 && bytes.Equal(k[:8], lastK[:8]); k, v, err = tdCursor.Prev() {
+		var maxNum uint64 = 0
+		for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
 			if len(k) != 40 {
 				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 			}
@@ -320,8 +303,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		if err != nil {
 			return err
 		}
-		if maxNum == math.MaxUint64 {
-			maxNum = 0
+		if maxNum == 0 {
 			// Read genesis hash
 			if maxHash, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
 				return err
@@ -333,8 +315,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		if err = s.DoneAndUpdate(tx, maxNum); err != nil {
 			return err
 		}
-	}
-	if err = u.Skip(tx); err != nil {
+	} else if err = u.Skip(tx); err != nil {
 		return err
 	}
 	if !useExternalTx {
