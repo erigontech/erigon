@@ -30,12 +30,11 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
-	addrHashes := make([]common.Hash, 10)
 	blockWriter := NewPlainStateWriter(tx, tx, 1)
 	ctx := context.Background()
 	emptyAccount := accounts.NewAccount()
 	for i := range acc {
-		acc[i], addr[i], addrHashes[i] = randomAccount(t)
+		acc[i], addr[i] = randomAccount(t)
 		if err := blockWriter.UpdateAccountData(ctx, addr[i], &emptyAccount /* original */, acc[i]); err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +222,7 @@ func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainState
 	addrs := make([]common.Address, numOfAccounts)
 	ctx := context.Background()
 	for i := range accHistory {
-		accHistory[i], addrs[i], _ = randomAccount(t)
+		accHistory[i], addrs[i] = randomAccount(t)
 		accHistory[i].Balance = *uint256.NewInt(100)
 		accHistory[i].CodeHash = common.Hash{uint8(10 + i)}
 		accHistory[i].Root = common.Hash{uint8(10 + i)}
@@ -262,7 +261,7 @@ func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainState
 	return addrs, accState, accStateStorage, accHistory, accHistoryStateStorage
 }
 
-func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash) {
+func randomAccount(t *testing.T) (*accounts.Account, common.Address) {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -272,11 +271,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash
 	acc.Initialised = true
 	acc.Balance = *uint256.NewInt(uint64(rand.Int63()))
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	addrHash, err := common.HashData(addr.Bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &acc, addr, addrHash
+	return &acc, addr
 }
 
 /*
