@@ -1667,21 +1667,8 @@ func extractBodies(chaindata string, block uint64) error {
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
-		b, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
-		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
-		b, err = rlp.EncodeToBytes(header)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Header %d %x: %x\n", blockNumber, blockHash, b)
-		if blockNumber > block+5 {
-			break
-		}
+		_, baseTxId, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxId %d, txAmoint %d\n", blockNumber, blockHash, baseTxId, txAmount)
 	}
 	return nil
 }
