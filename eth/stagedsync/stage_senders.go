@@ -118,12 +118,13 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	wg := new(sync.WaitGroup)
 	wg.Add(cfg.numOfGoroutines)
 	for i := 0; i < cfg.numOfGoroutines; i++ {
+		iCopy := i
 		common.Go(func() {
 			func(threadNo int) {
 				defer wg.Done()
 				// each goroutine gets it's own crypto context to make sure they are really parallel
 				recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
-			}(i)
+			}(iCopy)
 		})
 	}
 

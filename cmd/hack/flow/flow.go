@@ -177,6 +177,7 @@ func batchServer() {
 	fmt.Printf("Closing jobs\n")
 
 	for i := 0; i < numWorkers; i++ {
+		iCopy := i
 		common.Go(func() {
 			func(id int) {
 				for job := range jobs {
@@ -204,7 +205,7 @@ func batchServer() {
 					}
 					results <- &cfgJobResult{job, &metrics}
 				}
-			}(i)
+			}(iCopy)
 		})
 	}
 

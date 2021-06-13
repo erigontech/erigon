@@ -69,8 +69,9 @@ func (c *crawler) run(timeout time.Duration) nodeSet {
 	)
 	defer timeoutTimer.Stop()
 	for _, it := range c.iters {
+		itCopy := it
 		common.Go(func() {
-			c.runIterator(doneCh, it)
+			c.runIterator(doneCh, itCopy)
 		})
 	}
 

@@ -218,29 +218,30 @@ func (cli *Client) Download() {
 	torrents := cli.Cli.Torrents()
 	for i := range torrents {
 		t := torrents[i]
+		tCopy := t
 		common.Go(func() {
 			func(t *torrent.Torrent) {
-				t.AllowDataDownload()
-				t.DownloadAll()
+				tCopy.AllowDataDownload()
+				tCopy.DownloadAll()
 
 				tt := time.Now()
-				prev := t.BytesCompleted()
+				prev := tCopy.BytesCompleted()
 			dwn:
 				for {
-					if t.Info().TotalLength()-t.BytesCompleted() == 0 {
-						log.Info("Dowloaded", "snapshot", t.Name(), "t", time.Since(tt))
+					if tCopy.Info().TotalLength()-tCopy.BytesCompleted() == 0 {
+						log.Info("Dowloaded", "snapshot", tCopy.Name(), "t", time.Since(tt))
 						break dwn
 					} else {
-						stats := t.Stats()
+						stats := tCopy.Stats()
 						log.Info("Downloading snapshot",
-							"snapshot", t.Name(),
-							"%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
-							"mb", t.BytesCompleted()/1024/1024,
-							"diff(kb)", (t.BytesCompleted()-prev)/1024,
+							"snapshot", tCopy.Name(),
+							"%", int(100*(float64(tCopy.BytesCompleted())/float64(tCopy.Info().TotalLength()))),
+							"mb", tCopy.BytesCompleted()/1024/1024,
+							"diff(kb)", (tCopy.BytesCompleted()-prev)/1024,
 							"seeders", stats.ConnectedSeeders,
 							"active", stats.ActivePeers,
 							"total", stats.TotalPeers)
-						prev = t.BytesCompleted()
+						prev = tCopy.BytesCompleted()
 						time.Sleep(time.Second * 10)
 
 					}
