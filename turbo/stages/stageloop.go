@@ -175,16 +175,16 @@ func StageLoopStep(
 	}
 
 	err = st.Run(db, tx)
-	if err != nil {
-		return err
-	}
-	if canRunCycleInOneTransaction {
+	if (err == nil || errors.Is(err, common.ErrStopped)) && canRunCycleInOneTransaction {
 		commitStart := time.Now()
 		errTx := tx.Commit()
 		if errTx != nil {
 			return errTx
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
+	}
+	if err != nil {
+		return err
 	}
 	var rotx ethdb.Tx
 	if rotx, err = db.BeginRo(ctx); err != nil {
