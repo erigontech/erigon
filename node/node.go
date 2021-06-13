@@ -123,7 +123,7 @@ func New(conf *Config) (*Node, error) {
 	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
 	// Check for uncaught crashes from the previous boot and notify the user if
 	// there are any
-	debug.CheckForCrashes()
+	debug.CheckForCrashes(conf.DataDir)
 
 	return node, nil
 }

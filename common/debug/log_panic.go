@@ -24,14 +24,9 @@ func prettyTime() string {
 	return strings.Replace(time[:19], " ", "-", 1)
 }
 
-func CheckForCrashes() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Error(err.Error())
-		return
-	}
-	crashReportDir = filepath.Join(home, "erigon_crashreports")
-	if _, err = os.Stat(crashReportDir); os.IsNotExist(err) {
+func CheckForCrashes(datadir string) {
+	crashReportDir = filepath.Join(datadir, "crashreports")
+	if _, err := os.Stat(crashReportDir); os.IsNotExist(err) {
 		os.Mkdir(crashReportDir, 0755)
 	} else if err != nil {
 		log.Error(err.Error())
