@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -374,15 +373,19 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
-		if !errors.Is(err, common.ErrStopped) {
-			return err
-		}
+		return err
 	}
 	// Check if the latest header was imported or rolled back
-	if td, tdErr := rawdb.ReadTd(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()); tdErr != nil {
-		return tdErr
-	} else if td == nil {
-		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+	if err = ms.DB.View(ms.Ctx, func(tx ethdb.Tx) error {
+		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
+			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if _, bad := ms.downloader.Hd.BadHeaders[chain.TopBlock.Hash()]; bad {
+		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
 }
