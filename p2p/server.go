@@ -165,8 +165,6 @@ type Config struct {
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
-	MDBX  bool
-	LMDB  bool
 }
 
 // Server manages all peer connections.

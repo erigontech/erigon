@@ -7,13 +7,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 
@@ -74,8 +72,6 @@ func New(
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 
 	node := makeConfigNode(nodeConfig)
-	enode.UseMDBX = nodeConfig.MDBX
-	core.UseMDBX = nodeConfig.MDBX
 	ethConfig := makeEthConfig(ctx, node)
 
 	ethereum := RegisterEthService(node, ethConfig)

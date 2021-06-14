@@ -9,8 +9,7 @@ import (
 )
 
 // DBSchemaVersion
-var DBSchemaVersionLMDB = types.VersionReply{Major: 1, Minor: 1, Patch: 0}
-var DBSchemaVersionMDBX = types.VersionReply{Major: 2, Minor: 1, Patch: 0}
+var DBSchemaVersion = types.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 // Buckets
 
@@ -28,7 +27,7 @@ PlainStateBucket logical layout:
 	  value - storage value(common.hash)
 
 Physical layout:
-	PlainStateBucket and HashedStorageBucket utilises DupSort feature of LMDB (store multiple values inside 1 key).
+	PlainStateBucket and HashedStorageBucket utilises DupSort feature of MDBX (store multiple values inside 1 key).
 -------------------------------------------------------------
 	   key              |            value
 -------------------------------------------------------------
@@ -215,7 +214,7 @@ const (
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
 	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
-	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
+	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (MDBX does copy-on-write).
 	//
 	// if last existing shard size merge it with delta
 	// if serialized size of delta > ShardLimit - break down to multiple shards

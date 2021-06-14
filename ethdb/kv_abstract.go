@@ -115,7 +115,7 @@ type RoKV interface {
 	CollectMetrics()
 }
 
-// KV low-level database interface - main target is - to provide common abstraction over top of LMDB and RemoteKV.
+// KV low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
 //
 // Common pattern for short-living transactions:
 //
@@ -178,13 +178,13 @@ type Tx interface {
 	StatelessReadTx
 
 	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
-	// If bucket was created with lmdb.DupSort flag, then cursor with interface CursorDupSort created
+	// If bucket was created with mdbx.DupSort flag, then cursor with interface CursorDupSort created
 	// Otherwise - object of interface Cursor created
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
 	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
 	Cursor(bucket string) (Cursor, error)
-	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has lmdb.DupSort flag
+	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
 	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error

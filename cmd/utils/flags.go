@@ -1071,7 +1071,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdbx bool) {
+func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
@@ -1080,7 +1080,6 @@ func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdb
 	} else {
 		cfg.DBPath = path.Join(datadir, "clique/db")
 	}
-	cfg.MDBX = mdbx
 }
 
 func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
@@ -1188,7 +1187,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, stack.Config().DataDir, cfg)
-	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
+	setClique(ctx, &cfg.Clique, stack.Config().DataDir)
 	setAuRa(ctx, &cfg.Aura, stack.Config().DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)

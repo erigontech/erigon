@@ -3031,10 +3031,10 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "lmdb_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_put_direct{quantile=\"$quantile\",instance=~\"$instance\"}",
           "instant": false,
           "interval": "",
-          "legendFormat": "lmdb_put_direct: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_put_direct: {{quantile}}, {{instance}}",
           "refId": "A"
         },
         {
@@ -3044,10 +3044,10 @@
           "refId": "C"
         },
         {
-          "expr": "lmdb_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_put_both_range{quantile=\"$quantile\",instance=~\"$instance\"}",
           "instant": false,
           "interval": "",
-          "legendFormat": "lmdb_put_both_range: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_put_both_range: {{quantile}}, {{instance}}",
           "refId": "B"
         },
         {
@@ -3057,10 +3057,10 @@
           "refId": "D"
         },
         {
-          "expr": "lmdb_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_seek_exact{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "lmdb_seek_exact: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_seek_exact: {{quantile}}, {{instance}}",
           "refId": "I"
         },
         {
@@ -3071,9 +3071,9 @@
           "refId": "J"
         },
         {
-          "expr": "lmdb_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_put_no_overwrite{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "lmdb_put_no_overwrite: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_put_no_overwrite: {{quantile}}, {{instance}}",
           "refId": "F"
         },
         {
@@ -3083,9 +3083,9 @@
           "refId": "E"
         },
         {
-          "expr": "lmdb_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_put_upsert{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "lmdb_put_upsert: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_put_upsert: {{quantile}}, {{instance}}",
           "refId": "G"
         },
         {
@@ -3095,9 +3095,9 @@
           "refId": "H"
         },
         {
-          "expr": "lmdb_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_put_current2{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "lmdb_put_current2: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_put_current2: {{quantile}}, {{instance}}",
           "refId": "K"
         },
         {
@@ -3109,7 +3109,7 @@
         {
           "expr": "mdbx_put_upsert2{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "lmdb_put_upsert2: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_put_upsert2: {{quantile}}, {{instance}}",
           "refId": "M"
         },
         {
@@ -3119,9 +3119,9 @@
           "refId": "N"
         },
         {
-          "expr": "lmdb_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_del_current{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "lmdb_put_current: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_put_current: {{quantile}}, {{instance}}",
           "refId": "O"
         },
         {
@@ -3131,10 +3131,10 @@
           "refId": "P"
         },
         {
-          "expr": "lmdb_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "expr": "mdbx_seek_exact2{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "lmdb_seek_exact2: {{quantile}}, {{instance}}",
+          "legendFormat": "mdbx_seek_exact2: {{quantile}}, {{instance}}",
           "refId": "Q"
         },
         {

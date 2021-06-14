@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
@@ -58,7 +58,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	var snKV ethdb.RwKV
-	snKV = ethdb.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | lmdb.Readonly }).WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
+	snKV = ethdb.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
 	defer snKV.Close()
 
 	snKV = ethdb.NewSnapshotKV().SnapshotDB([]string{dbutils.HeadersSnapshotInfoBucket, dbutils.HeadersBucket}, snKV).DB(db).Open()
