@@ -1797,32 +1797,32 @@ func fixTd(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
+	c, err1 := tx.RwCursor(dbutils.HeadersBucket)
+	if err1 != nil {
+		return err1
+	}
+	defer c.Close()
+	var k []byte
+	for k, _, err = c.First(); err == nil && k != nil; k, _, err = c.Next() {
+		hv, herr := tx.GetOne(dbutils.HeaderTDBucket, k)
+		if herr != nil {
+			return herr
+		}
+		if hv == nil {
+			fmt.Printf("Missing TD record for %d %x\n", k, hv)
+		}
+	}
+	if err != nil {
+		return err
+	}
 	/*
-		c, err1 := tx.RwCursor(dbutils.HeaderTDBucket)
-		if err1 != nil {
-			return err1
+		if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b18ba71dc3f8047188f20e0eb01deee8fca4e3de871b3787262d8537915d3a3d0a"), common.FromHex("0x8a0585dd10ba73a663293e")); err != nil {
+			return err
 		}
-		defer c.Close()
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], 12612529)
-		k, v, err2 := c.Seek(key[:])
-		if err2 != nil {
-			return err2
+		if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b29d597fef9c8bc3a552312eaf444222740edd807ae5f7e640de186d00ab11e8ea"), common.FromHex("0x8a0585dd2bfd0960ce6fdd")); err != nil {
+			return err
 		}
-		fmt.Printf("%x => %x\n", k, v)
-		binary.BigEndian.PutUint64(key[:], 12612530)
-		k, v, err2 = c.Seek(key[:])
-		if err2 != nil {
-			return err2
-		}
-		fmt.Printf("%x => %x\n", k, v)
 	*/
-	if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b18ba71dc3f8047188f20e0eb01deee8fca4e3de871b3787262d8537915d3a3d0a"), common.FromHex("0x8a0585dd10ba73a663293e")); err != nil {
-		return err
-	}
-	if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b29d597fef9c8bc3a552312eaf444222740edd807ae5f7e640de186d00ab11e8ea"), common.FromHex("0x8a0585dd2bfd0960ce6fdd")); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 
