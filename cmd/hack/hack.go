@@ -750,33 +750,35 @@ func printBranches(block uint64) {
 }
 
 func readAccount(chaindata string, account common.Address) error {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	var a accounts.Account
-	ok, err := rawdb.PlainReadAccount(db, account, &a)
+
+	tx, txErr := db.BeginRo(context.Background())
+	if txErr != nil {
+		return txErr
+	}
+	defer tx.Rollback()
+
+	a, err := state.NewPlainStateReader(tx).ReadAccountData(account)
 	if err != nil {
 		return err
-	} else if !ok {
+	} else if a == nil {
 		return fmt.Errorf("acc not found")
 	}
 	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
-	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.PlainStateBucket)
-		if err != nil {
-			return err
-		}
-		for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
-			if e != nil {
-				return e
-			}
-			if !bytes.HasPrefix(k, account.Bytes()) {
-				break
-			}
-			fmt.Printf("%x => %x\n", k, v)
-		}
-		return nil
-	}); err != nil {
+
+	c, err := tx.Cursor(dbutils.PlainStateBucket)
+	if err != nil {
 		return err
+	}
+	for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+		if e != nil {
+			return e
+		}
+		if !bytes.HasPrefix(k, account.Bytes()) {
+			break
+		}
+		fmt.Printf("%x => %x\n", k, v)
 	}
 	return nil
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -99,14 +98,15 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	}
 	defer plainState.Close()
 	for i, addr := range addrs {
-		acc := accounts.NewAccount()
-		if ok, err := rawdb.PlainReadAccount(tx, addr, &acc); err != nil {
+		acc, err := NewPlainStateReader(tx).ReadAccountData(addr)
+
+		if err != nil {
 			t.Fatal("error on get account", i, err)
-		} else if !ok {
+		} else if acc == nil {
 			t.Fatal("error on get account", i)
 		}
 
-		if !accState[i].Equals(&acc) {
+		if !accState[i].Equals(acc) {
 			spew.Dump("got", acc)
 			spew.Dump("expected", accState[i])
 			t.Fatal("Accounts not equals")
