@@ -402,14 +402,14 @@ func pruneDupSortedBucket(tx ethdb.RwTx, logPrefix string, name string, tableNam
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
-	speed := float64(currentBlock-prevBlock) / float64(interval/time.Second)
-	speedTx := uint64(float64(currentTx-prevTx) / float64(interval/time.Second))
+	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
+	speedTx := float64(currentTx-prevTx) / (float64(interval) / float64(time.Second))
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
 		"blk/second", speed,
-		"tx/second", fmt.Sprintf("%dK", int(speedTx)/1000),
+		"tx/second", speedTx,
 	}
 	if batch != nil {
 		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
