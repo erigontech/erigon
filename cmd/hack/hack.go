@@ -1868,6 +1868,9 @@ func advanceExec(chaindata string) error {
 		return err
 	}
 	log.Info("Stage exec", "changed to", stageExec)
+	if err = stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
+		return err
+	}
 	if err = tx.Commit(); err != nil {
 		return err
 	}
