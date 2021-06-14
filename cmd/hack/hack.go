@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -1802,27 +1803,46 @@ func fixTd(chaindata string) error {
 		return err1
 	}
 	defer c.Close()
-	var k []byte
-	for k, _, err = c.First(); err == nil && k != nil; k, _, err = c.Next() {
+	var k, v []byte
+	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
 		hv, herr := tx.GetOne(dbutils.HeaderTDBucket, k)
 		if herr != nil {
 			return herr
 		}
 		if hv == nil {
-			fmt.Printf("Missing TD record for %x\n", k)
+			fmt.Printf("Missing TD record for %x, fixing\n", k)
+			var header types.Header
+			if err = rlp.DecodeBytes(v, &header); err != nil {
+				return fmt.Errorf("decoding header from %x: %v", v, err)
+			}
+			if header.Number.Uint64() == 0 {
+				continue
+			}
+			var parentK [40]byte
+			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
+			copy(parentK[8:], header.ParentHash[:])
+			var parentTdRec []byte
+			if parentTdRec, err = tx.GetOne(dbutils.HeaderTDBucket, parentK[:]); err != nil {
+				return fmt.Errorf("reading parentTd Rec for %d: %v", header.Number.Uint64(), err)
+			}
+			var parentTd big.Int
+			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
+				return fmt.Errorf("decoding parent Td record for block %d, from %x: %v", header.Number.Uint64(), parentTdRec, err)
+			}
+			var td big.Int
+			td.Add(&parentTd, header.Difficulty)
+			var newHv []byte
+			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
+				return fmt.Errorf("encoding td record for block %d: %v", header.Number.Uint64(), err)
+			}
+			if err = tx.Put(dbutils.HeaderTDBucket, k, newHv); err != nil {
+				return err
+			}
 		}
 	}
 	if err != nil {
 		return err
 	}
-	/*
-		if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b18ba71dc3f8047188f20e0eb01deee8fca4e3de871b3787262d8537915d3a3d0a"), common.FromHex("0x8a0585dd10ba73a663293e")); err != nil {
-			return err
-		}
-		if err = tx.Put(dbutils.HeaderTDBucket, common.FromHex("0x0000000000c073b29d597fef9c8bc3a552312eaf444222740edd807ae5f7e640de186d00ab11e8ea"), common.FromHex("0x8a0585dd2bfd0960ce6fdd")); err != nil {
-			return err
-		}
-	*/
 	return tx.Commit()
 }
 
