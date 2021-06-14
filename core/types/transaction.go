@@ -489,7 +489,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		m.gasPrice.Set(gasPrice)
 	}
 	if tip != nil {
-		m.feeCap.Set(tip)
+		m.tip.Set(tip)
 	}
 	if feeCap != nil {
 		m.feeCap.Set(feeCap)

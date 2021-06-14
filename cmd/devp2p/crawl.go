@@ -19,6 +19,7 @@ package main
 import (
 	"time"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 )
@@ -103,6 +104,7 @@ loop:
 }
 
 func (c *crawler) runIterator(done chan<- enode.Iterator, it enode.Iterator) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer func() { done <- it }()
 	for it.Next() {
 		select {

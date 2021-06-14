@@ -1187,10 +1187,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func dumpAddresses(chaindata string) error {
+func dumpState(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("addresses")
+	f, err := os.Create("statedump")
 	if err != nil {
 		return err
 	}
@@ -1199,20 +1199,34 @@ func dumpAddresses(chaindata string) error {
 	defer w.Flush()
 	stAccounts := 0
 	stStorage := 0
+	var varintBuf [10]byte // Buffer for varint number
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.PlainStateBucket)
 		if err != nil {
 			return err
 		}
-		k, _, e := c.First()
-		for ; k != nil && e == nil; k, _, e = c.Next() {
+		k, v, e := c.First()
+		for ; k != nil && e == nil; k, v, e = c.Next() {
+			keyLen := binary.PutUvarint(varintBuf[:], uint64(len(k)))
+			if _, err = w.Write(varintBuf[:keyLen]); err != nil {
+				return err
+			}
+			if _, err = w.Write([]byte(k)); err != nil {
+				return err
+			}
+			valLen := binary.PutUvarint(varintBuf[:], uint64(len(v)))
+			if _, err = w.Write(varintBuf[:valLen]); err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				if _, err = w.Write(v); err != nil {
+					return err
+				}
+			}
 			if len(k) > 28 {
 				stStorage++
 			} else {
 				stAccounts++
-				if _, err1 := w.Write(k[:20]); err1 != nil {
-					return err1
-				}
 			}
 			if (stStorage+stAccounts)%100000 == 0 {
 				fmt.Printf("State records: %d\n", stStorage+stAccounts)
@@ -1641,7 +1655,7 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	c, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {
 		return err
 	}
@@ -1653,21 +1667,8 @@ func extractBodies(chaindata string, block uint64) error {
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
-		b, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
-		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
-		b, err = rlp.EncodeToBytes(header)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Header %d %x: %x\n", blockNumber, blockHash, b)
-		if blockNumber > block+5 {
-			break
-		}
+		_, baseTxId, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
 	}
 	return nil
 }
@@ -1958,8 +1959,8 @@ func main() {
 	case "snapSizes":
 		err = snapSizes(*chaindata)
 
-	case "dumpAddresses":
-		err = dumpAddresses(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata)
 
 	case "readCallTraces":
 		err = readCallTraces(*chaindata, uint64(*block))

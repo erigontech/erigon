@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/prque"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -327,6 +328,7 @@ func (f *BlockFetcher) loop() {
 	// Iterate the block fetching until a quit is requested
 	fetchTimer := time.NewTimer(0)
 	completeTimer := time.NewTimer(0)
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer fetchTimer.Stop()
 	defer completeTimer.Stop()
 
@@ -447,6 +449,7 @@ func (f *BlockFetcher) loop() {
 				// Create a closure of the fetch and schedule in on a new thread
 				fetchHeader, hashes := f.fetching[hashes[0]].fetchHeader, hashes
 				go func() {
+					defer func() { debug.LogPanic(nil, true, recover()) }()
 					if f.fetchingHook != nil {
 						f.fetchingHook(hashes)
 					}

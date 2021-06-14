@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -84,6 +85,7 @@ type stEnv struct {
 	GasLimit   uint64         `json:"currentGasLimit"   gencodec:"required"`
 	Number     uint64         `json:"currentNumber"     gencodec:"required"`
 	Timestamp  uint64         `json:"currentTimestamp"  gencodec:"required"`
+	BaseFee    *big.Int       `json:"currentBaseFee"  gencodec:"optional"`
 }
 
 type stEnvMarshaling struct {
@@ -92,26 +94,31 @@ type stEnvMarshaling struct {
 	GasLimit   math.HexOrDecimal64
 	Number     math.HexOrDecimal64
 	Timestamp  math.HexOrDecimal64
+	BaseFee    *math.HexOrDecimal256
 }
 
 //go:generate gencodec -type stTransaction -field-override stTransactionMarshaling -out gen_sttransaction.go
 
 type stTransaction struct {
-	GasPrice    *uint256.Int        `json:"gasPrice"`
-	Nonce       uint64              `json:"nonce"`
-	To          string              `json:"to"`
-	Data        []string            `json:"data"`
-	AccessLists []*types.AccessList `json:"accessLists,omitempty"`
-	GasLimit    []uint64            `json:"gasLimit"`
-	Value       []string            `json:"value"`
-	PrivateKey  []byte              `json:"secretKey"`
+	GasPrice             *big.Int            `json:"gasPrice"`
+	MaxFeePerGas         *big.Int            `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *big.Int            `json:"maxPriorityFeePerGas"`
+	Nonce                uint64              `json:"nonce"`
+	To                   string              `json:"to"`
+	Data                 []string            `json:"data"`
+	AccessLists          []*types.AccessList `json:"accessLists,omitempty"`
+	GasLimit             []uint64            `json:"gasLimit"`
+	Value                []string            `json:"value"`
+	PrivateKey           []byte              `json:"secretKey"`
 }
 
 type stTransactionMarshaling struct {
-	GasPrice   *math.HexOrDecimal256
-	Nonce      math.HexOrDecimal64
-	GasLimit   []math.HexOrDecimal64
-	PrivateKey hexutil.Bytes
+	GasPrice             *math.HexOrDecimal256
+	MaxFeePerGas         *math.HexOrDecimal256
+	MaxPriorityFeePerGas *math.HexOrDecimal256
+	Nonce                math.HexOrDecimal64
+	GasLimit             []math.HexOrDecimal64
+	PrivateKey           hexutil.Bytes
 }
 
 // GetChainConfig takes a fork definition and returns a chain config.
@@ -190,11 +197,20 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	statedb := state.New(state.NewDbStateReader(tx))
-	w := state.NewDbStateWriter(tx, writeBlockNr)
+	statedb := state.New(state.NewPlainStateReader(tx))
+	w := state.NewPlainStateWriter(tx, nil, writeBlockNr)
 
+	var baseFee *big.Int
+	if config.IsLondon(0) {
+		baseFee = t.json.Env.BaseFee
+		if baseFee == nil {
+			// Retesteth uses `0x10` for genesis baseFee. Therefore, it defaults to
+			// parent - 2 : 0xa as the basefee for 'this' context.
+			baseFee = big.NewInt(0x0a)
+		}
+	}
 	post := t.json.Post[subtest.Fork][subtest.Index]
-	msg, err := t.json.Tx.toMessage(post)
+	msg, err := t.json.Tx.toMessage(post, baseFee)
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
@@ -204,6 +220,10 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
 	context := core.NewEVMBlockContext(block.Header(), nil, nil, &t.json.Env.Coinbase, checkTEVM)
 	context.GetHash = vmTestBlockHash
+	if baseFee != nil {
+		context.BaseFee = new(uint256.Int)
+		context.BaseFee.SetFromBig(baseFee)
+	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 
 	// Execute the message.
@@ -214,10 +234,6 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 		statedb.RevertToSnapshot(snapshot)
 	}
 
-	// Commit block
-	if err = statedb.FinalizeTx(ctx, w); err != nil {
-		return nil, common.Hash{}, err
-	}
 	// And _now_ get the state root
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
@@ -231,6 +247,45 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	if err = statedb.CommitBlock(ctx, w); err != nil {
 		return nil, common.Hash{}, err
 	}
+	// Generate hashed state
+	c, err := kvtx.RwCursor(dbutils.PlainStateBucket)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, common.Hash{}, fmt.Errorf("interate over plain state: %w", err)
+		}
+		var newK []byte
+		if len(k) == common.AddressLength {
+			newK = make([]byte, common.HashLength)
+		} else {
+			newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+		}
+		h.Sha.Reset()
+		//nolint:errcheck
+		h.Sha.Write(k[:common.AddressLength])
+		//nolint:errcheck
+		h.Sha.Read(newK[:common.HashLength])
+		if len(k) > common.AddressLength {
+			copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+			h.Sha.Reset()
+			//nolint:errcheck
+			h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+			//nolint:errcheck
+			h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+			if err = tx.Put(dbutils.HashedStorageBucket, newK, common.CopyBytes(v)); err != nil {
+				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
+			}
+		} else {
+			if err = tx.Put(dbutils.HashedAccountsBucket, newK, common.CopyBytes(v)); err != nil {
+				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
+			}
+		}
+	}
+	c.Close()
 
 	root, err := trie.CalcRoot("", kvtx)
 	if err != nil {
@@ -245,7 +300,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 }
 
 func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
+	r := state.NewPlainStateReader(db)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -263,10 +318,10 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(ctx, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(ctx, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
 	return statedb, nil
@@ -284,7 +339,7 @@ func (t *StateTest) genesis(config *params.ChainConfig) *core.Genesis {
 	}
 }
 
-func (tx *stTransaction) toMessage(ps stPostState) (core.Message, error) {
+func (tx *stTransaction) toMessage(ps stPostState, baseFee *big.Int) (core.Message, error) {
 	// Derive sender from private key if present.
 	var from common.Address
 	if len(tx.PrivateKey) > 0 {
@@ -334,7 +389,37 @@ func (tx *stTransaction) toMessage(ps stPostState) (core.Message, error) {
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}
 
-	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, tx.GasPrice, nil, nil, data, accessList, true)
+	// If baseFee provided, set gasPrice to effectiveGasPrice.
+	gasPrice := tx.GasPrice
+	if baseFee != nil {
+		if tx.MaxFeePerGas == nil {
+			tx.MaxFeePerGas = gasPrice
+		}
+		if tx.MaxFeePerGas == nil {
+			tx.MaxFeePerGas = new(big.Int)
+		}
+		if tx.MaxPriorityFeePerGas == nil {
+			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
+		}
+		gasPrice = math.BigMin(new(big.Int).Add(tx.MaxPriorityFeePerGas, baseFee),
+			tx.MaxFeePerGas)
+	}
+	var gasPrice256, maxFee256, maxTip256 *uint256.Int
+	if gasPrice != nil {
+		gasPrice256 = new(uint256.Int)
+		gasPrice256.SetFromBig(gasPrice)
+	}
+	if tx.MaxFeePerGas != nil {
+		maxFee256 = new(uint256.Int)
+		maxFee256.SetFromBig(tx.MaxFeePerGas)
+	}
+	if tx.MaxPriorityFeePerGas != nil {
+		maxTip256 = new(uint256.Int)
+		maxTip256.SetFromBig(tx.MaxPriorityFeePerGas)
+	}
+
+	msg := types.NewMessage(from, to, tx.Nonce, value, gasLimit, gasPrice256,
+		maxFee256, maxTip256, data, accessList, true)
 	return msg, nil
 }
 
