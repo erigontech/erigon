@@ -27,7 +27,6 @@ const expectMdbxVersionMinor = 10
 
 type MdbxOpts struct {
 	inMem      bool
-	exclusive  bool
 	label      Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 	flags      uint
 	path       string
@@ -63,7 +62,7 @@ func (opts MdbxOpts) InMem() MdbxOpts {
 }
 
 func (opts MdbxOpts) Exclusive() MdbxOpts {
-	opts.exclusive = true
+	opts.flags = opts.flags | mdbx.Exclusive
 	return opts
 }
 

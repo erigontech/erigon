@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -570,6 +571,10 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	case file != "" && hex != "":
 		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
 	case file != "":
+		if err := os.MkdirAll(path.Dir(file), 0755); err != nil {
+			panic(err)
+		}
+
 		if key, err = crypto.LoadECDSA(file); err != nil {
 			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
 		}
@@ -746,6 +751,9 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 }
 
 func nodeKey(keyfile string) *ecdsa.PrivateKey {
+	if err := os.MkdirAll(path.Dir(keyfile), 0755); err != nil {
+		panic(err)
+	}
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key
 	}
