@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -480,17 +479,20 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 				recoverCodeHashPlain(&acc, tx, k)
 				var address common.Address
 				copy(address[:], k)
-				if err := cleanupContractCodeBucket(
-					logPrefix,
-					tx,
-					dbutils.PlainContractCodeBucket,
-					acc,
-					func(db ethdb.Tx, out *accounts.Account) (bool, error) {
-						return rawdb.PlainReadAccount(db, address, out)
-					},
-					func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
-				); err != nil {
-					return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
+
+				// cleanup contract code bucket
+				original, err := state.NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return fmt.Errorf("%s: read account for %x: %w", logPrefix, address, err)
+				}
+				if original != nil {
+					// clean up all the code incarnations original incarnation and the new one
+					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+						err = tx.Delete(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), nil)
+						if err != nil {
+							return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
+						}
+					}
 				}
 
 				newV := make([]byte, acc.EncodingLengthForStorage())
@@ -566,31 +568,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		}
 	}
 
-	return nil
-}
-
-func cleanupContractCodeBucket(
-	logPrefix string,
-	db ethdb.RwTx,
-	bucket string,
-	acc accounts.Account,
-	readAccountFunc func(ethdb.Tx, *accounts.Account) (bool, error),
-	getKeyForIncarnationFunc func(uint64) []byte,
-) error {
-	var original accounts.Account
-	got, err := readAccountFunc(db, &original)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return fmt.Errorf("%s: cleanupContractCodeBucket: %w", logPrefix, err)
-	}
-	if got {
-		// clean up all the code incarnations original incarnation and the new one
-		for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation), nil)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
