@@ -1809,7 +1809,7 @@ func fixTd(chaindata string) error {
 			return herr
 		}
 		if hv == nil {
-			fmt.Printf("Missing TD record for %d %x\n", k, hv)
+			fmt.Printf("Missing TD record for %x\n", k)
 		}
 	}
 	if err != nil {
