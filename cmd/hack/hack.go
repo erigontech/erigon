@@ -1846,6 +1846,34 @@ func fixTd(chaindata string) error {
 	return tx.Commit()
 }
 
+func advanceExec(chaindata string) error {
+	db := ethdb.MustOpenKV(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stageExec, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage exec", "progress", stageExec)
+	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec+1); err != nil {
+		return err
+	}
+	stageExec, err = stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage exec", "changed to", stageExec)
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -1987,6 +2015,9 @@ func main() {
 
 	case "fixTd":
 		err = fixTd(*chaindata)
+
+	case "advanceExec":
+		err = advanceExec(*chaindata)
 	}
 
 	if err != nil {
