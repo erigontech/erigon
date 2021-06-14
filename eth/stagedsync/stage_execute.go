@@ -283,7 +283,6 @@ Loop:
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
-		stageProgress = blockNum
 		if err = executeBlock(block, tx, batch, cfg, writeChangesets, accumulator, checkTEVMCode); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
 			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
@@ -291,6 +290,7 @@ Loop:
 			}
 			break Loop
 		}
+		stageProgress = blockNum
 
 		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if updateProgress {
