@@ -88,8 +88,6 @@ type Ethereum struct {
 
 	networkID uint64
 
-	p2pServer *p2p.Server
-
 	torrentClient *snapshotsync.Client
 
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
@@ -174,7 +172,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		p2pServer:            stack.Server(),
 		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
