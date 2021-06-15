@@ -32,8 +32,16 @@ message OnAddReply {
 
 message AllRequest {}
 message AllReply {
-  repeated bytes pendingTxsRlp = 1; // All currently processable transactions
-  repeated bytes queuedTxsRlp = 2;  // Queued but non-processable transactions
+  enum Type {
+    PENDING = 0; // All currently processable transactions
+    QUEUED = 1;  // Queued but non-processable transactions
+  }
+  message Tx {
+    Type type = 1;
+    bytes sender = 2;
+    bytes rlpTx = 3;
+  }
+  repeated Tx txs = 1;
 }
 
 service Txpool {

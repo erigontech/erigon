@@ -11,11 +11,15 @@ sentry = []
 remotekv = []
 snapshotsync = []
 txpool = []
+db = ["once_cell", "serde", "toml"]
 
 [dependencies]
 arrayref = "0.3"
 ethereum-types = { version = "0.11", default-features = false }
+once_cell = { version = "1", optional = true }
 prost = "0.7"
+serde = { version = "1", features = ["derive"], optional = true }
+toml = { version = "0.5", optional = true }
 tonic = "0.4"
 
 [build-dependencies]
