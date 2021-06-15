@@ -119,6 +119,9 @@ func newFilter(forks []uint64, genesis common.Hash, headfn func() uint64) Filter
 
 	// Create a validator that will filter out incompatible chains
 	return func(id ID) error {
+		if genesis == params.SokolGenesisHash {
+			return nil
+		}
 		// Run the fork checksum validation ruleset:
 		//   1. If local and remote FORK_CSUM matches, compare local head to FORK_NEXT.
 		//        The two nodes are in the same fork state currently. They might know
@@ -200,6 +203,10 @@ func checksumToBytes(hash uint32) [4]byte {
 
 // GatherForks gathers all the known forks and creates a sorted list out of them.
 func GatherForks(config *params.ChainConfig) []uint64 {
+	if config.ChainID.Uint64() == 77 {
+		return []uint64{6464300, 7026400, 12095200, 21050600}
+	}
+
 	// Gather all the fork block numbers via reflection
 	kind := reflect.TypeOf(params.ChainConfig{})
 	conf := reflect.ValueOf(config).Elem()

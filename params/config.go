@@ -292,11 +292,12 @@ var (
 		EIP158Block:         big.NewInt(0),
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(0),
-		//LondonBlock:         big.NewInt(0),
+		PetersburgBlock:     big.NewInt(6464300),
+
+		IstanbulBlock:    big.NewInt(12095200),
+		MuirGlacierBlock: nil,
+		BerlinBlock:      big.NewInt(21050600),
+		//LondonBlock:         big.NewInt(21050600),
 		Aura: &AuRaConfig{},
 	}
 

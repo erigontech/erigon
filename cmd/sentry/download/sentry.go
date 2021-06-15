@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net"
 	"os"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -32,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
@@ -138,6 +141,7 @@ func handShake(
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
+	startSync func(ctx context.Context, bestHash common.Hash, peerID string) error,
 ) error {
 	if status == nil {
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
@@ -196,6 +200,21 @@ func handShake(
 		if err1 = forkFilter(reply.ForkID); err1 != nil {
 			return fmt.Errorf("%v", err1)
 		}
+
+		td, overflow := uint256.FromBig(reply.TD)
+		if overflow {
+			return fmt.Errorf("reply.TD higher than 2^256-1")
+		}
+
+		startSyncWithThisPeer := startSync != nil &&
+			td.Cmp(gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)) >= 0
+
+		if startSyncWithThisPeer {
+			if err := startSync(ctx, reply.Head, peerID); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}
 	go func() {
@@ -216,6 +235,7 @@ func handShake(
 			return ctx.Err()
 		}
 	}
+
 	return nil
 }
 
@@ -469,15 +489,20 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				return nil
 			}
 			log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
-			if err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol); err != nil {
+
+			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, ss.startSync)
+			if err != nil {
 				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 			}
 			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+
 			peerInfo := &PeerInfo{
 				peer: peer,
 				rw:   rw,
 			}
 			ss.Peers.Store(peerID, peerInfo)
+			fmt.Printf("handshake! %s,%s\n", peerID, peer.Name())
+			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 			if err := runPeer(
 				ctx,
 				peerID,
@@ -489,6 +514,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			); err != nil {
 				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
+			log.Warn("del peer!!!!!!!!!!!:\n", "peerId", peerID)
 			ss.Peers.Delete(peerID)
 			return nil
 		},
@@ -538,6 +564,57 @@ type SentryServerImpl struct {
 	lock         sync.RWMutex
 	streams      map[proto_sentry.MessageId]*StreamsList
 	p2p          *p2p.Config
+}
+
+func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID string) error {
+	// TODO: support 66
+	switch ss.Protocol.Version {
+	case eth.ETH65:
+		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
+			Amount:  1,
+			Reverse: false,
+			Skip:    0,
+			Origin:  eth.HashOrNumber{Hash: bestHash},
+		})
+		if err != nil {
+			return fmt.Errorf("startSync encode packet failed: %v", err)
+		}
+
+		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_65,
+				Data: b,
+			},
+		}); err != nil {
+			return err
+		}
+
+	case eth.ETH66:
+		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
+			RequestId: rand.Uint64(),
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Amount:  1,
+				Reverse: false,
+				Skip:    0,
+				Origin:  eth.HashOrNumber{Hash: bestHash},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("startSync encode packet failed: %v", err)
+		}
+		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+				Data: b,
+			},
+		}); err != nil {
+			return err
+		}
+
+	}
+	return nil
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
