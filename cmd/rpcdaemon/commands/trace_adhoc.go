@@ -162,6 +162,7 @@ type OeTracer struct {
 	traceStack []*ParityTrace
 	lastTop    *ParityTrace
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
+	compat     bool // Bug for bug compatibility mode
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
@@ -180,7 +181,6 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		trResult.Address = new(common.Address)
 		copy(trResult.Address[:], to.Bytes())
 		trace.Result = trResult
-		fmt.Printf("Adding trace.Result: %+v\n", trace.Result)
 	} else {
 		trace.Result = &TraceResult{}
 		trace.Type = CALL
@@ -246,7 +246,11 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	ot.lastTop = topTrace
-	if (depth > 0 || topTrace.Type != CREATE) && err != nil {
+	ignoreError := false
+	if ot.compat {
+		ignoreError = depth == 0 && topTrace.Type == CREATE
+	}
+	if err != nil && !ignoreError {
 		switch err {
 		case vm.ErrInvalidJump:
 			topTrace.Error = "Bad jump destination"
@@ -266,7 +270,6 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 				topTrace.Error = err.Error()
 			}
 		}
-		//fmt.Printf("Error: %v\n", err)
 		topTrace.Result = nil
 	} else {
 		if len(output) > 0 {
@@ -528,6 +531,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 	var ot OeTracer
+	ot.compat = api.compatibility
 	if traceTypeTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
@@ -691,6 +695,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			}
 		}
 		var ot OeTracer
+		ot.compat = api.compatibility
 		if traceTypeTrace {
 			ot.r = traceResult
 			ot.traceAddr = []int{}

@@ -254,8 +254,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
 	}
 
-	fmt.Printf("allBlocks: [%d]\n", allBlocks.ToArray())
-
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		stream.WriteNil()
@@ -382,14 +380,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
 	switch action := pt.Action.(type) {
 	case *CallTraceAction:
-		fmt.Printf("CallTraceAction\n")
 		_, f := fromAddresses[action.From]
 		_, t := toAddresses[action.To]
 		if f || t {
 			return true
 		}
 	case *CreateTraceAction:
-		fmt.Printf("CreateTraceAction\n")
 		_, f := fromAddresses[action.From]
 		if f {
 			return true
@@ -404,7 +400,6 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 			}
 		}
 	case *SuicideTraceAction:
-		fmt.Printf("SuicideTraceAction\n")
 		_, f := fromAddresses[action.Address]
 		_, t := toAddresses[action.RefundAddress]
 		if f || t {
