@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
@@ -187,6 +188,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
+	} else if chainConfig.Aura != nil {
+		consensusConfig = &config.Aura
 	} else {
 		consensusConfig = &config.Ethash
 	}
@@ -413,6 +416,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -450,6 +454,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 const txChanSize int = 4096
 
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	if notifier == nil {
 		return
 	}
@@ -564,6 +569,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 	}
 
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer close(s.waitForMiningStop)
 		newTransactions := make(chan core.NewTxsEvent, txChanSize)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
@@ -672,6 +678,7 @@ func (s *Ethereum) Stop() error {
 
 //Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *download.ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	stages2.StageLoop(
 		ctx,
 		db,

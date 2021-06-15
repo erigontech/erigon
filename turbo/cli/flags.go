@@ -50,6 +50,12 @@ var (
 		Value: 500,
 	}
 
+	MaxPeersFlag = cli.IntFlag{
+		Name:  "maxpeers",
+		Usage: "Maximum number of network peers (network disabled if set to 0)",
+		Value: node.DefaultConfig.P2P.MaxPeers,
+	}
+
 	StorageModeFlag = cli.StringFlag{
 		Name: "storage-mode",
 		Usage: `Configures the storage mode of the app:
@@ -195,7 +201,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
-
 	setPrivateApi(ctx, cfg)
 	cfg.DatabaseVerbosity = ethdb.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
 
