@@ -4,6 +4,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common/debug"
 )
 
 // Meters count events to produce exponentially-weighted moving average rates
@@ -289,6 +291,7 @@ var arbiter = meterArbiter{ticker: time.NewTicker(5 * time.Second), meters: make
 
 // Ticks meters on the scheduled interval
 func (ma *meterArbiter) tick() {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	for range ma.ticker.C {
 		ma.tickMeters()
 	}

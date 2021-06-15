@@ -25,6 +25,7 @@ import (
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/event"
@@ -361,6 +362,7 @@ func (es *EventSystem) eventLoop() {
 		es.rmLogsSub.Unsubscribe()
 		//es.pendingLogsSub.Unsubscribe()
 		es.chainSub.Unsubscribe()
+		debug.LogPanic(nil, true, recover())
 	}()
 
 	index := make(filterIndex)

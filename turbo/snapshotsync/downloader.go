@@ -16,6 +16,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"golang.org/x/sync/errgroup"
@@ -219,6 +220,7 @@ func (cli *Client) Download() {
 	for i := range torrents {
 		t := torrents[i]
 		go func(t *torrent.Torrent) {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			t.AllowDataDownload()
 			t.DownloadAll()
 

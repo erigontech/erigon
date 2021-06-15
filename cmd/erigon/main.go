@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -14,6 +15,8 @@ import (
 )
 
 func main() {
+	// catch panics from main thread and logs stack trace into a file
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	// creating a erigon-api app with all defaults
 	app := erigoncli.MakeApp(runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
@@ -24,7 +27,6 @@ func main() {
 
 func runErigon(cliCtx *cli.Context) {
 	// creating staged sync with all default parameters
-
 	ctx, _ := utils.RootContext()
 
 	// initializing the node and providing the current git commit there
