@@ -292,15 +292,13 @@ var (
 		EIP158Block:         big.NewInt(0),
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(0),
-		//LondonBlock:         big.NewInt(0),
-		Clique: &CliqueConfig{
-			Period: 30,
-			Epoch:  30000,
-		},
+		PetersburgBlock:     big.NewInt(6464300),
+
+		IstanbulBlock:    big.NewInt(12095200),
+		MuirGlacierBlock: nil,
+		BerlinBlock:      big.NewInt(21050600),
+		//LondonBlock:         big.NewInt(21050600),
+		Aura: &AuRaConfig{},
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -452,6 +450,7 @@ type ChainConfig struct {
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
+	Aura   *AuRaConfig   `json:"aura,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -466,6 +465,12 @@ func (c *EthashConfig) String() string {
 type CliqueConfig struct {
 	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
 	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
+}
+
+// AuRaConfig is the consensus engine configs for proof-of-authority based sealing.
+type AuRaConfig struct {
+	DBPath   string
+	InMemory bool
 }
 
 // String implements the stringer interface, returning the consensus engine details.
