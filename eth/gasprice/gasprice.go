@@ -106,7 +106,7 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 
 // SuggestPrice returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
-// TODO: if called wants legacy tx SuggestedPrice, we need to add
+// NODE: if caller wants legacy tx SuggestedPrice, we need to add
 // baseFee to the returned bigInt
 func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	head, _ := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
@@ -217,11 +217,16 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 	blockTxs := block.Transactions()
 	plainTxs := make([]types.Transaction, len(blockTxs))
 	copy(plainTxs, blockTxs)
-	baseFee, overflow := uint256.FromBig(block.BaseFee())
-	if overflow {
-		err := errors.New("overflow in getBlockPrices, gasprice.go: baseFee > 2^256-1")
-		log.Error("gasprice.go: getBlockPrices", "error", err)
-		return err
+	var baseFee *uint256.Int
+	if block.BaseFee() == nil {
+		baseFee = nil
+	} else {
+		baseFee, overflow = uint256.FromBig(block.BaseFee())
+		if overflow {
+			err := errors.New("overflow in getBlockPrices, gasprice.go: baseFee > 2^256-1")
+			log.Error("gasprice.go: getBlockPrices", "error", err)
+			return err
+		}
 	}
 	txs := newTransactionsByGasPrice(plainTxs, baseFee)
 	heap.Init(&txs)
