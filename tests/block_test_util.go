@@ -62,9 +62,10 @@ type btJSON struct {
 }
 
 type btBlock struct {
-	BlockHeader  *btHeader
-	Rlp          string
-	UncleHeaders []*btHeader
+	BlockHeader     *btHeader
+	ExpectException string
+	Rlp             string
+	UncleHeaders    []*btHeader
 }
 
 //go:generate gencodec -type btHeader -field-override btHeaderMarshaling -out gen_btheader.go
@@ -175,7 +176,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
 func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
-	for _, b := range t.json.Blocks {
+	for bi, b := range t.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
 			if b.BlockHeader == nil {
@@ -198,7 +199,7 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 				return nil, cErr
 			}
 			if canonical == cb.Hash() {
-				return nil, fmt.Errorf("block insertion should have failed")
+				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
 		}
 		if b.BlockHeader == nil {
