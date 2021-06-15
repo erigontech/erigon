@@ -141,7 +141,7 @@ func handShake(
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
-	startSync func(ctx context.Context, bestHash common.Hash, peerID string) error,
+	startSync func(bestHash common.Hash) error,
 ) error {
 	if status == nil {
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
@@ -150,6 +150,7 @@ func handShake(
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 
+	ourTD := gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	go func() {
@@ -157,7 +158,7 @@ func handShake(
 		s := &eth.StatusPacket{
 			ProtocolVersion: uint32(version),
 			NetworkID:       status.NetworkId,
-			TD:              gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty).ToBig(),
+			TD:              ourTD.ToBig(),
 			Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 			Genesis:         genesisHash,
 			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock),
@@ -206,11 +207,9 @@ func handShake(
 			return fmt.Errorf("reply.TD higher than 2^256-1")
 		}
 
-		startSyncWithThisPeer := startSync != nil &&
-			td.Cmp(gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)) >= 0
-
+		startSyncWithThisPeer := td.Cmp(ourTD) >= 0 && startSync != nil
 		if startSyncWithThisPeer {
-			if err := startSync(ctx, reply.Head, peerID); err != nil {
+			if err := startSync(reply.Head); err != nil {
 				return err
 			}
 		}
@@ -490,19 +489,21 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			}
 			log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
 
-			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, ss.startSync)
+			peerInfo := &PeerInfo{
+				peer: peer,
+				rw:   rw,
+			}
+
+			defer ss.Peers.Delete(peerID)
+			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
+				ss.Peers.Store(peerID, peerInfo)
+				return ss.startSync(ctx, bestHash, peerID)
+			})
 			if err != nil {
 				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 			}
 			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
-			peerInfo := &PeerInfo{
-				peer: peer,
-				rw:   rw,
-			}
-			ss.Peers.Store(peerID, peerInfo)
-			fmt.Printf("handshake! %s,%s\n", peerID, peer.Name())
-			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 			if err := runPeer(
 				ctx,
 				peerID,
@@ -514,8 +515,6 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			); err != nil {
 				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
-			log.Warn("del peer!!!!!!!!!!!:\n", "peerId", peerID)
-			ss.Peers.Delete(peerID)
 			return nil
 		},
 		NodeInfo: func() interface{} {
@@ -567,7 +566,6 @@ type SentryServerImpl struct {
 }
 
 func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID string) error {
-	// TODO: support 66
 	switch ss.Protocol.Version {
 	case eth.ETH65:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
