@@ -45,11 +45,11 @@ func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint25
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
-	if gasFeeCap.Cmp(baseFee) == -1 {
+	if gasFeeCap.Lt(baseFee) {
 		return uint256.NewInt(0)
 	}
 	effectiveFee := gasFeeCap.Sub(gasFeeCap, baseFee)
-	if tx.GetTip().Cmp(effectiveFee) < 0 {
+	if tx.GetTip().Lt(effectiveFee) {
 		return tx.GetTip()
 	} else {
 		return effectiveFee

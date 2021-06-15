@@ -177,7 +177,7 @@ func (t transactionsByGasPrice) Swap(i, j int) { t.txs[i], t.txs[j] = t.txs[j], 
 func (t transactionsByGasPrice) Less(i, j int) bool {
 	tip1 := t.txs[i].GetEffectiveGasTip(t.baseFee)
 	tip2 := t.txs[j].GetEffectiveGasTip(t.baseFee)
-	return tip1.Cmp(tip2) < 0
+	return tip1.Lt(tip2)
 }
 
 // Push (part of heap.Interface) places a new link onto the end of queue
@@ -234,7 +234,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 	for txs.Len() > 0 {
 		tx := heap.Pop(&txs).(types.Transaction)
 		tip := tx.GetEffectiveGasTip(baseFee)
-		if ignoreUnder != nil && tip.Cmp(ignoreUnder) == -1 {
+		if ignoreUnder != nil && tip.Lt(ignoreUnder) {
 			continue
 		}
 		sender, _ := tx.GetSender()
