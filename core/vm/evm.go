@@ -18,6 +18,7 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -543,6 +544,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		if contract.UseGas(createDataGas) {
 			evm.IntraBlockState.SetCode(address, ret)
 		} else {
+			fmt.Printf("ErrCodeStoreOutOfGas: careateDataGas %d, len(ret) = %d\n", createDataGas, len(ret))
 			err = ErrCodeStoreOutOfGas
 		}
 	}
