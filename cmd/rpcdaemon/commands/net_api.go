@@ -49,8 +49,8 @@ func (api *NetAPIImpl) Version(ctx context.Context) (string, error) {
 	return strconv.FormatUint(res, 10), nil
 }
 
-// PeerCount implements net_peerCount. Returns number of peers currently connected to the client.
-// TODO: This routine currently returns a hard coded value of '25'
+// PeerCount implements net_peerCount. Returns number of peers currently
+// connected to the first sentry server.
 func (api *NetAPIImpl) PeerCount(ctx context.Context) (hexutil.Uint, error) {
 	if api.ethBackend == nil {
 		// We're running in --datadir mode or otherwise cannot get the backend

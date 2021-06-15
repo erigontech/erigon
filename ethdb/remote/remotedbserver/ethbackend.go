@@ -29,6 +29,7 @@ type EthBackendServer struct {
 type EthBackend interface {
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
+	NetPeerCount() (uint64, error)
 }
 
 func NewEthBackendServer(eth EthBackend, events *Events) *EthBackendServer {
@@ -57,6 +58,14 @@ func (s *EthBackendServer) NetVersion(_ context.Context, _ *remote.NetVersionReq
 		return &remote.NetVersionReply{}, err
 	}
 	return &remote.NetVersionReply{Id: id}, nil
+}
+
+func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCountRequest) (*remote.NetPeerCountReply, error) {
+	id, err := s.eth.NetPeerCount()
+	if err != nil {
+		return &remote.NetPeerCountReply{}, err
+	}
+	return &remote.NetPeerCountReply{Id: id}, nil
 }
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
