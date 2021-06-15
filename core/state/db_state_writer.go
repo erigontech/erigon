@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
@@ -87,7 +86,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err != nil {
 		return err
 	}
-	if err := rawdb.DeleteAccount(dsw.db, addrHash); err != nil {
+	if err := dsw.db.Delete(dbutils.HashedAccountsBucket, addrHash[:], nil); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
