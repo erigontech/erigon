@@ -207,7 +207,7 @@ func handShake(
 			return fmt.Errorf("reply.TD higher than 2^256-1")
 		}
 
-		startSyncWithThisPeer := td.Cmp(ourTD) >= 0 && startSync != nil
+		startSyncWithThisPeer := td.Cmp(ourTD) > 0 && startSync != nil
 		if startSyncWithThisPeer {
 			if err := startSync(reply.Head); err != nil {
 				return err
