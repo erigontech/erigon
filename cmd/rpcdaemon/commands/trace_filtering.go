@@ -390,7 +390,6 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 		if f {
 			return true
 		}
-		fmt.Printf("%+v\n", pt.Result)
 
 		if res, ok := pt.Result.(*CreateTraceResult); ok {
 			if res.Address != nil {
