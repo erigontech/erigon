@@ -612,7 +612,24 @@ func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
 func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
-	return uint64(s.sentryServers[0].P2pServer.PeerCount()), nil
+	// TODO (mempirate): Get peers for all sentries (internal and external)
+	// and return unique count
+	peers := make(map[string]interface{})
+	for _, ss := range s.sentryServers {
+		ss.Peers.Range(func(key, value interface{}) bool {
+			peerID := key.(string)
+			x, _ := ss.Peers.Load(peerID)
+			peerInfo, _ := x.(*download.PeerInfo)
+			if peerInfo == nil {
+				return true
+			}
+			peers[peerID] = peerInfo
+			return true
+		})
+	}
+
+	// TODO (mempirate): Loop over external sentries too
+	return uint64(len(peers)), nil
 }
 
 // Protocols returns all the currently configured
