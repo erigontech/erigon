@@ -107,6 +107,8 @@ Erigon has the following interfaces for the transaction pool
 - [txpool_control, proto](../txpool/txpool_control.proto)
 - [mining, proto](../txpool/mining.proto)
 
+See more about the architecture: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
+
 ## 4. Core
 
 Core is the passive part of the replicating state machine that is a blockchain. Core maintains its state and reacts to the protocol messages from the

@@ -1084,6 +1084,10 @@ func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdb
 	cfg.MDBX = mdbx
 }
 
+func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
+	cfg.DBPath = path.Join(datadir, "aura/db")
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
@@ -1186,6 +1190,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, stack.Config().DataDir, cfg)
 	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
+	setAuRa(ctx, &cfg.Aura, stack.Config().DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
