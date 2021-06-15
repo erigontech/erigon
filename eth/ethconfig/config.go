@@ -142,6 +142,7 @@ type Config struct {
 	Ethash ethash.Config
 
 	Clique params.SnapshotConfig
+	Aura   params.AuRaConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -203,6 +204,10 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 	case *params.SnapshotConfig:
 		if chainConfig.Clique != nil {
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, consensusCfg.MDBX))
+		}
+	case *params.AuRaConfig:
+		if chainConfig.Aura != nil {
+			eng = clique.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory, true))
 		}
 	}
 

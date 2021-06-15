@@ -188,6 +188,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
+	} else if chainConfig.Aura != nil {
+		consensusConfig = &config.Aura
 	} else {
 		consensusConfig = &config.Ethash
 	}
