@@ -143,9 +143,9 @@ func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
 
 // MinedBlockStreams - it's safe to use this class as non-pointer
 type MinedBlockStreams struct {
-	sync.Mutex
-	id    uint
 	chans map[uint]proto_txpool.Mining_OnMinedBlockServer
+	id    uint
+	sync.Mutex
 }
 
 func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (remove func()) {
@@ -188,9 +188,9 @@ func (s *MinedBlockStreams) remove(id uint) {
 
 // PendingBlockStreams - it's safe to use this class as non-pointer
 type PendingBlockStreams struct {
-	sync.Mutex
-	id    uint
 	chans map[uint]proto_txpool.Mining_OnPendingBlockServer
+	sync.Mutex
+	id uint
 }
 
 func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServer) (remove func()) {
@@ -233,9 +233,9 @@ func (s *PendingBlockStreams) remove(id uint) {
 
 // PendingLogsStreams - it's safe to use this class as non-pointer
 type PendingLogsStreams struct {
-	sync.Mutex
-	id    uint
 	chans map[uint]proto_txpool.Mining_OnPendingLogsServer
+	sync.Mutex
+	id uint
 }
 
 func (s *PendingLogsStreams) Add(stream proto_txpool.Mining_OnPendingLogsServer) (remove func()) {

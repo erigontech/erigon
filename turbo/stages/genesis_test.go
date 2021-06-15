@@ -134,11 +134,11 @@ func TestSetupGenesis(t *testing.T) {
 	)
 	oldcustomg.Config = &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
-		name       string
+		wantErr    error
 		fn         func(ethdb.RwKV) (*params.ChainConfig, *types.Block, error)
 		wantConfig *params.ChainConfig
+		name       string
 		wantHash   common.Hash
-		wantErr    error
 	}{
 		{
 			name: "genesis without ChainConfig",

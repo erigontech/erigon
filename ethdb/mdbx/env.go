@@ -120,13 +120,12 @@ type DBI C.MDBX_dbi
 // See MDBX_env.
 type Env struct {
 	_env *C.MDBX_env
+	ckey *C.MDBX_val
+	cval *C.MDBX_val
 
 	// closeLock is used to allow the Txn finalizer to check if the Env has
 	// been closed, so that it may know if it must abort.
 	closeLock sync.RWMutex
-
-	ckey *C.MDBX_val
-	cval *C.MDBX_val
 }
 
 // NewEnv allocates and initializes a new Env.

@@ -17,18 +17,18 @@ type UnwindFunc func(unwindState *UnwindState, state *StageState, tx ethdb.RwTx)
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {
-	// ID of the sync stage. Should not be empty and should be unique. It is recommended to prefix it with reverse domain to avoid clashes (`com.example.my-stage`).
-	ID stages.SyncStage
 	// Description is a string that is shown in the logs.
 	Description string
-	// Disabled defines if the stage is disabled. It sets up when the stage is build by its `StageBuilder`.
-	Disabled bool
 	// DisabledDescription shows in the log with a message if the stage is disabled. Here, you can show which command line flags should be provided to enable the page.
 	DisabledDescription string
 	// ExecFunc is called when the stage is executed. The main logic of the stage should be here. Should always end with `s.Done()` to allow going to the next stage. MUST NOT be nil!
 	ExecFunc ExecFunc
 	// UnwindFunc is called when the stage should be unwound. The unwind logic should be there. MUST NOT be nil!
 	UnwindFunc UnwindFunc
+	// ID of the sync stage. Should not be empty and should be unique. It is recommended to prefix it with reverse domain to avoid clashes (`com.example.my-stage`).
+	ID stages.SyncStage
+	// Disabled defines if the stage is disabled. It sets up when the stage is build by its `StageBuilder`.
+	Disabled bool
 }
 
 // StageState is the state of the stage.
