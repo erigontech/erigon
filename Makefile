@@ -137,7 +137,7 @@ mdbx-dbg:
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes' make mdbx-static.o
 
 test: mdbx
-	$(GOTEST) --timeout 15m
+	$(GOTEST) --timeout 30m
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
