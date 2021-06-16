@@ -111,27 +111,28 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
-	//withChaindata(stateStags)
 	withDatadir2(stateStags)
 	withReferenceChaindata(stateStags)
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
-	//withBatchSize(stateStags)
 	withIntegrityChecks(stateStags)
 	withMining(stateStags)
+	withChain(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
 	withDatadir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
+	withChain(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
 
 	withDatadir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
+	withChain(loopExecCmd)
 
 	rootCmd.AddCommand(loopExecCmd)
 }
