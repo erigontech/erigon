@@ -384,7 +384,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}); err != nil {
 		return err
 	}
-	if _, bad := ms.downloader.Hd.BadHeaders[chain.TopBlock.Hash()]; bad {
+	if _, bad := ms.downloader.Hd.badHeaders[chain.TopBlock.Hash()]; bad {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil

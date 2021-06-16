@@ -264,14 +264,14 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
 				return err
 			}
-			cfg.hd.BadHeaders[hash] = struct{}{}
+			cfg.hd.ReportBadHeader(hash)
 		}
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
 		}
 	}
 	if u.BadBlock != (common.Hash{}) {
-		cfg.hd.BadHeaders[u.BadBlock] = struct{}{}
+		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Find header with biggest TD
 		tdCursor, cErr := tx.Cursor(dbutils.HeaderTDBucket)
 		if cErr != nil {
@@ -292,7 +292,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			}
 			var hash common.Hash
 			copy(hash[:], k[8:])
-			if _, bad := cfg.hd.BadHeaders[hash]; bad {
+			if cfg.hd.IsBadHeader(hash) {
 				continue
 			}
 			var td big.Int
