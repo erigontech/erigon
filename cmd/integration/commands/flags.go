@@ -32,8 +32,6 @@ var (
 	chain              string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
 
-var networkID uint
-
 func must(err error) {
 	if err != nil {
 		panic(err)
