@@ -920,11 +920,14 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	if err != nil {
 		panic(err)
 	}
-	chain := f.String(ChainFlag.Name, ChainFlag.Value, ChainFlag.Usage)
+	chain, err := f.GetString(ChainFlag.Name)
+	if err != nil {
+		panic(err)
+	}
 	if dirname != "" {
 		cfg.DataDir = dirname
-	} else if chain != nil {
-		cfg.DataDir = DataDirForNetwork(cfg.DataDir, *chain)
+	} else {
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
 	}
 }
 

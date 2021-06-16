@@ -38,6 +38,16 @@ const (
 	SokolChainName     = "sokol"
 )
 
+var Networks = []*ChainConfig{
+	MainnetChainConfig,
+	RopstenChainConfig,
+	RinkebyChainConfig,
+	GoerliChainConfig,
+	ErigonChainConfig,
+	CalaverasChainConfig,
+	SokolChainConfig,
+}
+
 // Genesis hashes to enforce below configs on.
 var (
 	MainnetGenesisHash   = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
