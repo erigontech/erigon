@@ -256,7 +256,7 @@ func runPeer(
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()))
+				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()), "proto", protocol)
 				peerPrinted = true
 			}
 		}
@@ -501,6 +501,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			if err != nil {
 				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 			}
+			ss.Peers.Store(peerID, peerInfo) // TODO: This means potentially setting this twice, first time few lines above
 			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 			if err := runPeer(
