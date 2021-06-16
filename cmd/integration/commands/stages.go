@@ -367,7 +367,7 @@ func stageBodies(db ethdb.RwKV, ctx context.Context) error {
 
 func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, _, _, _, _, sync, _, _, _ := newSync(ctx, db)
+	_, _, chainConfig, _, _, sync, _, _, _ := newSync(ctx, db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -390,7 +390,7 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	ch := make(chan struct{})
 	defer close(ch)
 
-	cfg := stagedsync.StageSendersCfg(db, params.MainnetChainConfig, tmpdir)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
 		err = stagedsync.UnwindSendersStage(u, stage3, tx, cfg)
