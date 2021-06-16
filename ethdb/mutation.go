@@ -24,10 +24,10 @@ var (
 
 type mutation struct {
 	puts       *btree.BTree
-	mu         sync.RWMutex
-	searchItem MutationItem
-	size       int
 	db         Database
+	searchItem MutationItem
+	mu         sync.RWMutex
+	size       int
 }
 
 type MutationItem struct {

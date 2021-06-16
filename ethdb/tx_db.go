@@ -10,8 +10,8 @@ import (
 
 // Implements ethdb.Getter for Tx
 type roTxDb struct {
-	top bool
 	tx  Tx
+	top bool
 }
 
 func NewRoTxDb(tx Tx) *roTxDb {
@@ -90,8 +90,8 @@ func NewRwTxDb(tx Tx) *TxDb {
 type TxDb struct {
 	db      Database
 	tx      Tx
-	txFlags TxFlags
 	cursors map[string]Cursor
+	txFlags TxFlags
 	len     uint64
 }
 

@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
-	"github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -28,7 +27,6 @@ type Flags struct {
 	PrivateApiAddr       string
 	SingleNodeMode       bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	Datadir              string
-	Database             string
 	Chaindata            string
 	SnapshotDir          string
 	SnapshotMode         string
@@ -60,7 +58,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 	cfg := &Flags{}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
-	rootCmd.PersistentFlags().StringVar(&cfg.Database, "database", "mdbx", "lmdb|mdbx engines")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot.mode", "", `Configures the storage mode of the app(only for chaindata mode):
@@ -124,7 +121,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
+func checkDbCompatibility(db ethdb.RoKV) error {
 	// DB schema version compatibility check
 	var version []byte
 	var compatErr error
@@ -143,12 +140,7 @@ func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
-	var dbSchemaVersion *types.VersionReply
-	if mdbx {
-		dbSchemaVersion = &dbutils.DBSchemaVersionMDBX
-	} else {
-		dbSchemaVersion = &dbutils.DBSchemaVersionLMDB
-	}
+	dbSchemaVersion := &dbutils.DBSchemaVersion
 	if major != dbSchemaVersion.Major {
 		compatible = false
 	} else if minor != dbSchemaVersion.Minor {
@@ -168,27 +160,17 @@ func checkDbCompatibility(db ethdb.RoKV, mdbx bool) error {
 
 func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, nil, fmt.Errorf("either remote db or lmdb must be specified")
+		return nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
 		var rwKv ethdb.RwKV
-		var mdbx bool
-		if cfg.Database == "mdbx" {
-			rwKv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-			mdbx = true
-		} else {
-			rwKv, err = ethdb.NewLMDB().Path(cfg.Chaindata).Readonly().Open()
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-			mdbx = false
+		rwKv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
+		if err != nil {
+			return nil, nil, nil, nil, err
 		}
-		if compatErr := checkDbCompatibility(rwKv, mdbx); compatErr != nil {
+		if compatErr := checkDbCompatibility(rwKv); compatErr != nil {
 			return nil, nil, nil, nil, compatErr
 		}
 		kv = rwKv

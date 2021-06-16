@@ -86,9 +86,11 @@ func HeadersForward(
 	if err != nil {
 		return err
 	}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 	if hash == (common.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if err = fixCanonicalChain(logPrefix, headerProgress, headHash, tx); err != nil {
+		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx); err != nil {
 			return err
 		}
 		if !useExternalTx {
@@ -101,8 +103,6 @@ func HeadersForward(
 	}
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
 
 	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
 	if err != nil {
@@ -190,7 +190,7 @@ func HeadersForward(
 			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
 		}
 	} else if headerInserter.GetHighest() != 0 {
-		if err := fixCanonicalChain(logPrefix, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
+		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
 	}
@@ -209,12 +209,13 @@ func HeadersForward(
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx ethdb.StatelessRwTx) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx ethdb.StatelessRwTx) error {
 	if height == 0 {
 		return nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
+
 	var ch common.Hash
 	var err error
 	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
@@ -224,8 +225,12 @@ func fixCanonicalChain(logPrefix string, height uint64, hash common.Hash, tx eth
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
 			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
-		} else {
-			log.Debug("fix canonical", "ancestor", ancestorHeight, "hash", ancestorHash)
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Info("fix canonical", "ancestor", ancestorHeight, "hash", ancestorHash)
+		default:
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
@@ -259,14 +264,14 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
 				return err
 			}
-			cfg.hd.BadHeaders[hash] = struct{}{}
+			cfg.hd.ReportBadHeader(hash)
 		}
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
 		}
 	}
 	if u.BadBlock != (common.Hash{}) {
-		cfg.hd.BadHeaders[u.BadBlock] = struct{}{}
+		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Find header with biggest TD
 		tdCursor, cErr := tx.Cursor(dbutils.HeaderTDBucket)
 		if cErr != nil {
@@ -287,7 +292,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			}
 			var hash common.Hash
 			copy(hash[:], k[8:])
-			if _, bad := cfg.hd.BadHeaders[hash]; bad {
+			if cfg.hd.IsBadHeader(hash) {
 				continue
 			}
 			var td big.Int

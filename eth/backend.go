@@ -153,7 +153,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 		}
 
-		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir, stack.Config().MDBX)
+		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
 		if err != nil {
 			return nil, err
 		}
@@ -188,6 +188,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
+	} else if chainConfig.Aura != nil {
+		consensusConfig = &config.Aura
 	} else {
 		consensusConfig = &config.Ethash
 	}
@@ -238,7 +240,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if err != nil {
 			return nil, err
 		}
-		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash, stack.Config().MDBX)
+		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
 		err = mg.RemoveNonCurrentSnapshots()
 		if err != nil {
 			log.Error("Remove non current snapshot", "err", err)
@@ -264,7 +266,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver.NewKvServer(backend.chainKV, stack.Config().MDBX)
+	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
 	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events)
 	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
 	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
@@ -359,18 +361,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		server66 := download.NewSentryServer(backend.downloadV2Ctx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
-		if stack.Config().P2P.Eth65Enabled {
-			cfg65 := stack.Config().P2P
-			cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
-			d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-			if err != nil {
-				return nil, err
-			}
-			cfg65.ListenAddr = cfg65.ListenAddr65
-			server65 := download.NewSentryServer(backend.downloadV2Ctx, d65, readNodeInfo, &cfg65, eth.ETH65)
-			backend.sentryServers = append(backend.sentryServers, server65)
-			backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
+		cfg65 := stack.Config().P2P
+		cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
+		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+		if err != nil {
+			return nil, err
 		}
+		cfg65.ListenAddr = cfg65.ListenAddr65
+		server65 := download.NewSentryServer(backend.downloadV2Ctx, d65, readNodeInfo, &cfg65, eth.ETH65)
+		backend.sentryServers = append(backend.sentryServers, server65)
+		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 	}
 	blockDownloaderWindow := 65536
 	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)

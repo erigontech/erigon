@@ -42,9 +42,9 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	if err != nil {
 		return err
 	}
-	kv := ethdb.NewLMDB().Path(dbPath).MustOpen()
+	kv := ethdb.NewMDBX().Path(dbPath).MustOpen()
 
-	snKV := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}

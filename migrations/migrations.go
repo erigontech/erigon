@@ -143,7 +143,7 @@ func (m *Migrator) PendingMigrations(tx ethdb.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db ethdb.Database, datadir string, mdbx bool) error {
+func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
@@ -232,26 +232,16 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string, mdbx bool) error {
 	}
 	// Write DB schema version
 	var version [12]byte
-	if mdbx {
-		binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersionMDBX.Major)
-		binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersionMDBX.Minor)
-		binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersionMDBX.Patch)
-	} else {
-		binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersionLMDB.Major)
-		binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersionLMDB.Minor)
-		binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersionLMDB.Patch)
-	}
+	binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersion.Major)
+	binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersion.Minor)
+	binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersion.Patch)
 	if err := tx.Put(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionKey, version[:]); err != nil {
 		return fmt.Errorf("writing DB schema version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("committing DB version update: %w", err)
 	}
-	if mdbx {
-		log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersionMDBX.Major, dbutils.DBSchemaVersionMDBX.Minor, dbutils.DBSchemaVersionMDBX.Patch))
-	} else {
-		log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersionLMDB.Major, dbutils.DBSchemaVersionLMDB.Minor, dbutils.DBSchemaVersionLMDB.Patch))
-	}
+	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch))
 	return nil
 }
 

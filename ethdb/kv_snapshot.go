@@ -35,8 +35,8 @@ func NewSnapshotKV() snapshotOpts {
 }
 
 type snapshotData struct {
-	buckets  []string
 	snapshot RoKV
+	buckets  []string
 }
 type snapshotOpts struct {
 	db        RwKV
@@ -71,8 +71,8 @@ func (opts snapshotOpts) Open() *SnapshotKV {
 
 type SnapshotKV struct {
 	db        RwKV
-	mtx       sync.RWMutex
 	snapshots map[string]snapshotData
+	mtx       sync.RWMutex
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
@@ -290,12 +290,12 @@ func (s *snTX) CursorDupSort(bucket string) (CursorDupSort, error) {
 		return nil, err
 	}
 	return &snCursorDup{
+		dbc,
+		sncbc,
 		snCursor{
 			dbCursor: dbc,
 			snCursor: sncbc,
 		},
-		dbc,
-		sncbc,
 	}, nil
 }
 
@@ -750,9 +750,9 @@ func (s *snCursor) Close() {
 }
 
 type snCursorDup struct {
-	snCursor
 	dbCursorDup   CursorDupSort
 	sndbCursorDup CursorDupSort
+	snCursor
 }
 
 func (c *snCursorDup) SeekBothExact(key, value []byte) ([]byte, []byte, error) {

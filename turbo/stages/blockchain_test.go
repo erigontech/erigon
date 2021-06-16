@@ -1490,9 +1490,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	var nonce uint64
 
 	type expectation struct {
+		values   map[int]int
 		exist    bool
 		blocknum int
-		values   map[int]int
 	}
 	var current = &expectation{
 		exist:    true, // exists in genesis

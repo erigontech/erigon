@@ -48,16 +48,16 @@ type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNu
 
 type ExecuteBlockCfg struct {
 	db              ethdb.RwKV
-	writeReceipts   bool
-	writeCallTraces bool
-	writeTEVM       bool
-	pruningDistance uint64
 	batchSize       datasize.ByteSize
 	changeSetHook   ChangeSetHook
 	chainConfig     *params.ChainConfig
 	engine          consensus.Engine
 	vmConfig        *vm.Config
 	tmpdir          string
+	writeReceipts   bool
+	writeCallTraces bool
+	writeTEVM       bool
+	pruningDistance uint64
 }
 
 func StageExecuteBlocksCfg(

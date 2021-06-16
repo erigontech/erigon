@@ -16,20 +16,20 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 // This is not call graph, just show classes from low-level to high-level. 
 // And show which classes satisfy which interfaces.
 
-+-----------------------------------+   +-----------------------------------+   +-----------------------------------+ 
-|  github.com/ledgerwatch/lmdb-go   |   |  github.com/torquem-ch/mdbx-go    |   | google.golang.org/grpc.ClientConn |                    
-|  (app-agnostic LMDB go bindings)  |   |  (app-agnostic MDBX go bindings)  |   | (app-agnostic RPC and streaming)  |
-+-----------------------------------+   +-----------------------------------+   +-----------------------------------+
-                 |                                        |                                      |
-                 |                                        |                                      |
-                 v                                        v                                      v
-+-----------------------------------+   +-----------------------------------+   +-----------------------------------+
-|      ethdb/kv_lmdb.go             |   |       ethdb/kv_mdbx.go            |   |       ethdb/kv_remote.go          |                
-| (tg-specific LMDB implementaion)  |   |  (tg-specific MDBX implementaion) |   |   (tg-specific remote DB access)  |              
-+-----------------------------------+   +-----------------------------------+   +-----------------------------------+
-                 |                                        |                                      |
-                 |                                        |                                      |
-                 v                                        v                                      v
+                    +-----------------------------------+   +-----------------------------------+ 
+                    |  github.com/torquem-ch/mdbx-go    |   | google.golang.org/grpc.ClientConn |                    
+                    |  (app-agnostic MDBX go bindings)  |   | (app-agnostic RPC and streaming)  |
+                    +-----------------------------------+   +-----------------------------------+
+                                      |                                      |
+                                      |                                      |
+                                      v                                      v
+                    +-----------------------------------+   +-----------------------------------+
+                    |       ethdb/kv_mdbx.go            |   |       ethdb/kv_remote.go          |                
+                    |  (tg-specific MDBX implementaion) |   |   (tg-specific remote DB access)  |              
+                    +-----------------------------------+   +-----------------------------------+
+                                      |                                      |
+                                      |                                      |
+                                      v                                      v
             +----------------------------------------------------------------------------------------------+
             |                                       ethdb/kv_abstract.go                                   |  
             |         (Common KV interface. DB-friendly, disk-friendly, cpu-cache-friendly.                |
@@ -68,8 +68,8 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
 
 ## ethdb.AbstractKV design:
 
-- InMemory, ReadOnly: `NewLMDB().Flags(lmdb.ReadOnly).InMem().Open()`
-- MultipleDatabases, Customization: `NewLMDB().Path(path).WithBucketsConfig(config).Open()`
+- InMemory, ReadOnly: `NewMDBX().Flags(mdbx.ReadOnly).InMem().Open()`
+- MultipleDatabases, Customization: `NewMDBX().Path(path).WithBucketsConfig(config).Open()`
 
 
 - 1 Transaction object can be used only withing 1 goroutine.
@@ -99,7 +99,7 @@ if err != nil {
 
 - No internal copies/allocations. It means: 1. app must copy keys/values before put to database. 2. Data after read from db - valid only during current transaction - copy it if plan use data after transaction Commit/Rollback.
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
-- Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `LmdbCursor` and `LmdbDupSortCursor` classes satisfy it. 
+- Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `MdbxCursor` and `MdbxDupSortCursor` classes satisfy it. 
   If your are not familiar with "DupSort" concept, please read [dupsort.md](./../docs/programmers_guide/dupsort.md) first.
 
 
@@ -131,8 +131,7 @@ for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 
 ## How to dump/load table
 
-Install all database tools: `make db-tools` - tools with prefix `mdb_` is for 
-lmdb, `lmdbgo_` is for lmdb written in go, `mdbx_` is for mdbx.
+Install all database tools: `make db-tools`
 
 ```
 ./build/bin/mdbx_dump -a <datadir>/erigon/chaindata | lz4 > dump.lz4

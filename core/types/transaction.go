@@ -53,6 +53,7 @@ type Transaction interface {
 	GetNonce() uint64
 	GetPrice() *uint256.Int
 	GetTip() *uint256.Int
+	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
 	GetGas() uint64
