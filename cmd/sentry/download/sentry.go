@@ -98,7 +98,6 @@ func (pi *PeerInfo) Removed() bool {
 }
 
 func makeP2PServer(
-	ctx context.Context,
 	p2pConfig p2p.Config,
 	genesisHash common.Hash,
 	protocol p2p.Protocol,
@@ -828,7 +827,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			}
 		}
 
-		ss.P2pServer, err = makeP2PServer(ss.ctx, *ss.p2p, genesisHash, ss.Protocol)
+		ss.P2pServer, err = makeP2PServer(*ss.p2p, genesisHash, ss.Protocol)
 		if err != nil {
 			return reply, err
 		}

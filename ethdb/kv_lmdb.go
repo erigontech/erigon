@@ -382,12 +382,11 @@ type lmdbTx struct {
 
 type LmdbCursor struct {
 	tx         *lmdbTx
+	c          *lmdb.Cursor
 	bucketName string
+	prefix     []byte
 	dbi        lmdb.DBI
 	bucketCfg  dbutils.BucketConfigItem
-	prefix     []byte
-
-	c *lmdb.Cursor
 }
 
 func (db *LmdbKV) Env() *lmdb.Env {

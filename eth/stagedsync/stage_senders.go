@@ -256,10 +256,10 @@ type senderRecoveryError struct {
 type senderRecoveryJob struct {
 	body        *types.Body
 	key         []byte
-	blockNumber uint64
-	blockHash   common.Hash
-	index       int
 	senders     []byte
+	blockHash   common.Hash
+	blockNumber uint64
+	index       int
 	err         error
 }
 

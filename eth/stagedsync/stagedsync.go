@@ -16,8 +16,8 @@ type StagedSync struct {
 	PrefetchedBlocks *bodydownload.PrefetchedBlocks
 	stageBuilders    StageBuilders
 	unwindOrder      UnwindOrder
-	params           OptionalParameters
 	Notifier         ChainEventNotifier
+	params           OptionalParameters
 }
 
 // OptionalParameters contains any non-necessary parateres you can specify to fine-tune
