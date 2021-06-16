@@ -21,7 +21,7 @@ interface, another by opening Erigon's db in read-only mode while Erigon running
 using `RoKV` (stands for read-only) `kv_abstract.go` interface. Option 1 using `kv_remote.go` to implement `RoKV`,
 option 2 using - `kv_mdbx.go`
 
-Erigon using MDBX database. But any articles in internet about LMDB are also valid for MDBX.
+Erigon uses MDBX storage engine. But most information on the Internet about LMDB is also valid for MDBX.
 
 We have Go, Rust and C++ implementations of `RoKV` interface.
 

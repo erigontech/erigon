@@ -531,32 +531,17 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*ethdb.ObjectDat
 	dbPath := n.config.ResolvePath(name)
 
 	var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
-	if n.config.MDBX {
-		log.Info("Opening Database", "label", name, "type", "mdbx")
-		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-			opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-			if exclusive {
-				opts = opts.Exclusive()
-			}
-			kv, err1 := opts.Open()
-			if err1 != nil {
-				return nil, err1
-			}
-			return ethdb.NewObjectDatabase(kv), nil
+	log.Info("Opening Database", "label", name)
+	openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+		opts := ethdb.NewMDBX().Path(dbPath).DBVerbosity(n.config.DatabaseVerbosity)
+		if exclusive {
+			opts = opts.Exclusive()
 		}
-	} else {
-		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
-		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-			opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-			if exclusive {
-				opts = opts.Exclusive()
-			}
-			kv, err1 := opts.Open()
-			if err1 != nil {
-				return nil, err1
-			}
-			return ethdb.NewObjectDatabase(kv), nil
+		kv, err1 := opts.Open()
+		if err1 != nil {
+			return nil, err1
 		}
+		return ethdb.NewObjectDatabase(kv), nil
 	}
 	var err error
 	db, err = openFunc(false)
@@ -575,7 +560,7 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*ethdb.ObjectDat
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, datadir, n.config.MDBX); err != nil {
+		if err = migrator.Apply(db, datadir); err != nil {
 			return nil, err
 		}
 		db.Close()

@@ -48,7 +48,7 @@ func openDB(path string, applyMigrations bool) ethdb.RwKV {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = ethdb.NewObjectDatabase(openKV(label, path, true))
-			if err := migrations.NewMigrator(label).Apply(db, datadir, true); err != nil {
+			if err := migrations.NewMigrator(label).Apply(db, datadir); err != nil {
 				panic(err)
 			}
 			db.Close()

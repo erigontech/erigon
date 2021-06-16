@@ -351,7 +351,7 @@ var (
 		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
-	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "", false /* mdbx */)
+	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(1),
@@ -514,12 +514,11 @@ type SnapshotConfig struct {
 	InmemorySignatures int    // Number of recent block signatures to keep in memory
 	DBPath             string
 	InMemory           bool
-	MDBX               bool // Whether to use MDBX (true) or LMDB (false)
 }
 
 const cliquePath = "clique"
 
-func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string, mdbx bool) *SnapshotConfig {
+func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *SnapshotConfig {
 	if len(dbPath) == 0 {
 		dbPath = paths.DefaultDataDir()
 	}
@@ -530,7 +529,6 @@ func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemor
 		inmemorySignatures,
 		path.Join(dbPath, cliquePath),
 		inmemory,
-		mdbx,
 	}
 }
 

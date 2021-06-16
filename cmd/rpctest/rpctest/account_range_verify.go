@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool, database string) {
+func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
 		log.Fatal(err)
@@ -30,14 +30,8 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 			log.Fatal(err)
 		}
 	}
-	var resultsKV, gethKV ethdb.RwKV
-	if database == "lmdb" {
-		resultsKV = ethdb.NewLMDB().Path(tmpDataDir).MustOpen()
-		gethKV = ethdb.NewLMDB().Path(gethDataDir).MustOpen()
-	} else {
-		resultsKV = ethdb.NewMDBX().Path(tmpDataDir).MustOpen()
-		gethKV = ethdb.NewMDBX().Path(gethDataDir).MustOpen()
-	}
+	resultsKV := ethdb.NewMDBX().Path(tmpDataDir).MustOpen()
+	gethKV := ethdb.NewMDBX().Path(gethDataDir).MustOpen()
 	resultsDB := ethdb.NewObjectDatabase(resultsKV)
 	gethResultsDB := ethdb.NewObjectDatabase(gethKV)
 

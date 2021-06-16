@@ -124,5 +124,5 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	defer func() {
 		log.Info("Verify end", "t", time.Since(tt))
 	}()
-	return VerifyStateSnapshot(ctx, dbpath, snapshotPath, block, database)
+	return VerifyStateSnapshot(ctx, dbpath, snapshotPath, block)
 }
