@@ -23,6 +23,7 @@ import (
 func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
@@ -30,12 +31,14 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	// Retrieve the transaction and assemble its EVM context
 	txn, blockHash, _, txIndex := rawdb.ReadTransaction(tx, hash)
 	if txn == nil {
+		stream.WriteNil()
 		return fmt.Errorf("transaction %#x not found", hash)
 	}
 	getter := adapter.NewBlockGetter(tx)
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 
@@ -45,6 +48,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	checkTEVM := ethdb.GetCheckTEVM(tx)
 	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, getter, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 	// Trace the transaction and return
@@ -54,17 +58,20 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 	defer dbtx.Rollback()
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 
 	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 	var stateReader state.StateReader
@@ -75,6 +82,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if header == nil {
+		stream.WriteNil()
 		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	ibs := state.New(stateReader)
