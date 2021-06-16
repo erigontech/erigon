@@ -250,7 +250,7 @@ func runPeer(
 	peerPrinted := false
 	defer func() {
 		if peerPrinted {
-			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()))
+			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()), "proto", protocol)
 		}
 	}()
 	for {
