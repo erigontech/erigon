@@ -245,18 +245,20 @@ var cmdSetStorageMode = &cobra.Command{
 
 func init() {
 	withDatadir(cmdPrintStages)
+	withChain(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
-	//withChaindata(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
 	withDatadir(cmdStageSenders)
+	withChain(cmdStageSenders)
 
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withDatadir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
+	withChain(cmdStageBodies)
 
 	rootCmd.AddCommand(cmdStageBodies)
 
@@ -292,6 +294,7 @@ func init() {
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
+	withChain(cmdStageHistory)
 
 	rootCmd.AddCommand(cmdStageHistory)
 
@@ -299,6 +302,7 @@ func init() {
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
+	withChain(cmdLogIndex)
 
 	rootCmd.AddCommand(cmdLogIndex)
 
@@ -306,6 +310,7 @@ func init() {
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
+	withChain(cmdCallTraces)
 
 	rootCmd.AddCommand(cmdCallTraces)
 
@@ -313,6 +318,7 @@ func init() {
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
 	withDatadir(cmdStageTxLookup)
+	withChain(cmdStageTxLookup)
 
 	rootCmd.AddCommand(cmdStageTxLookup)
 
@@ -321,12 +327,15 @@ func init() {
 
 	withDatadir(cmdRemoveMigration)
 	withMigration(cmdRemoveMigration)
+	withChain(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
 	withDatadir(cmdRunMigrations)
+	withChain(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 
 	withDatadir(cmdSetStorageMode)
+	withChain(cmdSetStorageMode)
 	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htre", "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetStorageMode)
 }
@@ -358,7 +367,7 @@ func stageBodies(db ethdb.RwKV, ctx context.Context) error {
 
 func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, _, _, _, _, sync, _, _, _ := newSync(ctx, db)
+	_, _, chainConfig, _, _, sync, _, _, _ := newSync(ctx, db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -381,7 +390,7 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	ch := make(chan struct{})
 	defer close(ch)
 
-	cfg := stagedsync.StageSendersCfg(db, params.MainnetChainConfig, tmpdir)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
 		err = stagedsync.UnwindSendersStage(u, stage3, tx, cfg)

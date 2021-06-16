@@ -53,16 +53,15 @@ type MockSentry struct {
 	MinedBlocks   chan *types.Block
 	downloader    *download.ControlServerImpl
 	Key           *ecdsa.PrivateKey
-	Address       common.Address
 	Genesis       *types.Block
 	SentryClient  remote.SentryClient
 	PeerId        *ptypes.H512
-	ReceiveWg     sync.WaitGroup
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
-
-	streams      map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
-	StreamWg     sync.WaitGroup
-	sentMessages []*proto_sentry.OutboundMessageData
+	streams       map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
+	sentMessages  []*proto_sentry.OutboundMessageData
+	StreamWg      sync.WaitGroup
+	ReceiveWg     sync.WaitGroup
+	Address       common.Address
 }
 
 // Stream returns stream, waiting if necessary
@@ -384,7 +383,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}); err != nil {
 		return err
 	}
-	if _, bad := ms.downloader.Hd.BadHeaders[chain.TopBlock.Hash()]; bad {
+	if ms.downloader.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil

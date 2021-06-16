@@ -24,12 +24,11 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte, useMdbx bool) *SnapshotMigrator {
+func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator {
 	return &SnapshotMigrator{
 		snapshotsDir:               snapshotDir,
 		HeadersCurrentSnapshot:     currentSnapshotBlock,
 		HeadersNewSnapshotInfohash: currentSnapshotInfohash,
-		useMdbx:                    useMdbx,
 		replaceChan:                make(chan struct{}),
 	}
 }
@@ -39,7 +38,6 @@ type SnapshotMigrator struct {
 	HeadersCurrentSnapshot     uint64
 	HeadersNewSnapshot         uint64
 	HeadersNewSnapshotInfohash []byte
-	useMdbx                    bool
 	started                    uint64
 	replaceChan                chan struct{}
 	replaced                   uint64
@@ -56,14 +54,14 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 
 	stages := []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
 		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
-			return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath, sm.useMdbx)
+			return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath)
 		},
 		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 			//replace snapshot
 			if _, ok := db.(ethdb.SnapshotUpdater); !ok {
 				return errors.New("db don't implement snapshotUpdater interface")
 			}
-			snapshotKV, err := OpenHeadersSnapshot(snapshotPath, sm.useMdbx)
+			snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
 			if err != nil {
 				return err
 			}
@@ -301,47 +299,28 @@ func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
 	return snapshotBlock, infohash, nil
 }
 
-func OpenHeadersSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
-	if useMdbx {
-		return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Readonly().Path(dbPath).Open()
-	} else {
-		return ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Readonly().Path(dbPath).Open()
-	}
+func OpenHeadersSnapshot(dbPath string) (ethdb.RwKV, error) {
+	return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+		}
+	}).Readonly().Path(dbPath).Open()
 }
 
-func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64, snapshotPath string, useMdbx bool) error {
+func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64, snapshotPath string) error {
 	// remove created snapshot if it's not saved in main db(to avoid append error)
 	err := os.RemoveAll(snapshotPath)
 	if err != nil {
 		return err
 	}
 	var snKV ethdb.RwKV
-	if useMdbx {
-		snKV, err = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Path(snapshotPath).Open()
-		if err != nil {
-			return err
+	snKV, err = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		}
-	} else {
-		snKV, err = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Path(snapshotPath).Open()
-		if err != nil {
-			return err
-		}
+	}).Path(snapshotPath).Open()
+	if err != nil {
+		return err
 	}
 
 	sntx, err := snKV.BeginRw(context.Background())

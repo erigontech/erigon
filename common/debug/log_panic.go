@@ -29,17 +29,17 @@ func CheckForCrashes(datadir string) {
 	if _, err := os.Stat(crashReportDir); os.IsNotExist(err) {
 		os.Mkdir(crashReportDir, 0755)
 	} else if err != nil {
-		log.Error("log_panig.go: CheckForCrashes", "error", err)
+		log.Error("log_panic.go: CheckForCrashes", "error", err)
 		return
 	}
 	f, err := os.Open(crashReportDir)
 	if err != nil {
-		log.Error("log_panig.go: CheckForCrashes", "error", err)
+		log.Error("log_panic.go: CheckForCrashes", "error", err)
 		return
 	}
 	fileInfo, err := f.ReadDir(-1)
 	if err != nil {
-		log.Error("log_panig.go: CheckForCrashes", "error", err)
+		log.Error("log_panic.go: CheckForCrashes", "error", err)
 		return
 	}
 	for _, v := range fileInfo {

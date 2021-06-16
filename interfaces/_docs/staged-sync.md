@@ -51,7 +51,7 @@ That allows to group similar operations together and optimize each stage for thr
 
 That also allows DB inserts optimisations, see next part.
 
-### ETL and optimial DB inserts
+### ETL and optimal DB inserts
 
 ![](./stages-etl.png)
 

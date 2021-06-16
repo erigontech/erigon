@@ -332,9 +332,9 @@ func checkReader(tx ethdb.Tx, errorCh chan error) (bool, error) {
 }
 
 func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...func(ethdb.RwKV, ethdb.RwTx) (bool, error)) error {
-	dir, err := ioutil.TempDir(".", "lmdb-vis")
+	dir, err := ioutil.TempDir(".", "db-vis")
 	if err != nil {
-		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
+		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
 	defer os.RemoveAll(dir)
 	var kv ethdb.RwKV
@@ -342,7 +342,7 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...f
 		return bucketsCfg
 	}).Open()
 	if err != nil {
-		return fmt.Errorf("opening LMDB database: %w", err)
+		return fmt.Errorf("opening database: %w", err)
 	}
 	defer kv.Close()
 	for gi, generateF := range generateFs {

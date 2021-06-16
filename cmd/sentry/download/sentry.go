@@ -98,7 +98,6 @@ func (pi *PeerInfo) Removed() bool {
 }
 
 func makeP2PServer(
-	ctx context.Context,
 	p2pConfig p2p.Config,
 	genesisHash common.Hash,
 	protocol p2p.Protocol,
@@ -251,13 +250,13 @@ func runPeer(
 	peerPrinted := false
 	defer func() {
 		if peerPrinted {
-			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()))
+			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()), "proto", protocol)
 		}
 	}()
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()))
+				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()), "proto", protocol)
 				peerPrinted = true
 			}
 		}
@@ -502,6 +501,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			if err != nil {
 				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
 			}
+			ss.Peers.Store(peerID, peerInfo) // TODO: This means potentially setting this twice, first time few lines above
 			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 			if err := runPeer(
@@ -828,7 +828,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			}
 		}
 
-		ss.P2pServer, err = makeP2PServer(ss.ctx, *ss.p2p, genesisHash, ss.Protocol)
+		ss.P2pServer, err = makeP2PServer(*ss.p2p, genesisHash, ss.Protocol)
 		if err != nil {
 			return reply, err
 		}

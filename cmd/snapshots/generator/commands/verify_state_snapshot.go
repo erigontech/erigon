@@ -28,36 +28,26 @@ var verifyStateSnapshotCmd = &cobra.Command{
 	Short:   "Verify state snapshot",
 	Example: "go run cmd/snapshots/generator/main.go verify_state --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state/ --datadir /media/b00ris/nvme/backup/snapshotsync/",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return VerifyStateSnapshot(cmd.Context(), chaindata, snapshotFile, block, database)
+		return VerifyStateSnapshot(cmd.Context(), chaindata, snapshotFile, block)
 	},
 }
 
-func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64, database string) error {
+func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
 	var snkv, tmpDB ethdb.RwKV
 	tmpPath, err := ioutil.TempDir(os.TempDir(), "vrf*")
 	if err != nil {
 		return err
 	}
 
-	if database == "lmdb" {
-		snkv = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-				dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
-			}
-		}).Path(snapshotPath).Readonly().MustOpen()
-		tmpDB = ethdb.NewLMDB().Path(tmpPath).MustOpen()
-	} else {
-		snkv = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-				dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
-			}
-		}).Path(snapshotPath).Readonly().MustOpen()
-		tmpDB = ethdb.NewMDBX().Path(tmpPath).MustOpen()
-	}
+	snkv = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+		}
+	}).Path(snapshotPath).Readonly().MustOpen()
+	tmpDB = ethdb.NewMDBX().Path(tmpPath).MustOpen()
+
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
 	snkv = ethdb.NewSnapshotKV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).Open()

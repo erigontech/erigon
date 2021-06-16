@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/erigon/log"
 	"math"
 	"os"
 	"path"
@@ -13,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon/log"
 
 	"github.com/stretchr/testify/require"
 
@@ -65,7 +66,6 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx:      true,
 	}
 	currentSnapshotBlock := uint64(10)
 	tx, err := db.BeginRw(context.Background())
@@ -408,7 +408,6 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx:      true,
 	}
 
 	tx, err := db.BeginRw(context.Background())

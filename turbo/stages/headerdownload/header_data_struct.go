@@ -18,13 +18,13 @@ import (
 // Links can be either persistent or not. Persistent links encapsule headers that have already been saved to the database, but these links are still
 // present to allow potential reorgs
 type Link struct {
-	blockHeight uint64
 	header      *types.Header
-	hash        common.Hash // Hash of the header
 	next        []*Link     // Allows iteration over links in ascending block height order
-	persisted   bool        // Whether this link comes from the database record
-	preverified bool        // Ancestor of pre-verified header
-	idx         int         // Index in the heap
+	hash        common.Hash // Hash of the header
+	blockHeight uint64
+	persisted   bool // Whether this link comes from the database record
+	preverified bool // Ancestor of pre-verified header
+	idx         int  // Index in the heap
 }
 
 // LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links
@@ -74,12 +74,12 @@ func (lq *LinkQueue) Pop() interface{} {
 }
 
 type Anchor struct {
+	peerID      string
+	links       []*Link     // Links attached immediately to this anchor
 	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight uint64
-	peerID      string
-	timestamp   uint64  // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
-	timeouts    int     // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
-	links       []*Link // Links attached immediately to this anchor
+	timestamp   uint64 // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
+	timeouts    int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
 }
 
 type AnchorQueue []*Anchor
@@ -139,9 +139,9 @@ const (
 
 type PeerPenalty struct {
 	// This type may also contain the "severity" of penalty, if we find that it helps
-	peerHandle PeerHandle
-	penalty    Penalty
 	err        error // Underlying error if available
+	penalty    Penalty
+	peerHandle PeerHandle
 }
 
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
@@ -154,8 +154,8 @@ type HeaderRequest struct {
 }
 
 type PenaltyItem struct {
-	Penalty Penalty
 	PeerID  string
+	Penalty Penalty
 }
 type Announce struct {
 	Hash   common.Hash
@@ -166,34 +166,34 @@ type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
 type HeaderDownload struct {
-	lock               sync.RWMutex
-	BadHeaders         map[common.Hash]struct{}
+	badHeaders         map[common.Hash]struct{}
 	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
 	preverifiedHashes  map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
-	preverifiedHeight  uint64                   // Block height corresponding to the last preverified hash
 	links              map[common.Hash]*Link    // Links by header hash
-	linkLimit          int                      // Maximum allowed number of links
-	persistedLinkLimit int                      // Maximum allowed number of persisted links
-	anchorLimit        int                      // Maximum allowed number of anchors
 	engine             consensus.Engine
 	headerReader       consensus.ChainHeaderReader
-	highestInDb        uint64 // Height of the highest block header in the database
-	topSeenHeight      uint64
 	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
-	toAnnounce         []Announce
-	persistedLinkQueue *LinkQueue   // Priority queue of persisted links used to limit their number
-	linkQueue          *LinkQueue   // Priority queue of non-persisted links used to limit their number
-	anchorQueue        *AnchorQueue // Priority queue of anchors used to sequence the header requests
+	persistedLinkQueue *LinkQueue     // Priority queue of persisted links used to limit their number
+	linkQueue          *LinkQueue     // Priority queue of non-persisted links used to limit their number
+	anchorQueue        *AnchorQueue   // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
+	toAnnounce         []Announce
+	lock               sync.RWMutex
+	preverifiedHeight  uint64 // Block height corresponding to the last preverified hash
+	linkLimit          int    // Maximum allowed number of links
+	persistedLinkLimit int    // Maximum allowed number of persisted links
+	anchorLimit        int    // Maximum allowed number of anchors
+	highestInDb        uint64 // Height of the highest block header in the database
+	topSeenHeight      uint64
 	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
 type HeaderRecord struct {
-	Raw    []byte
 	Header *types.Header
+	Raw    []byte
 }
 
 func NewHeaderDownload(
@@ -203,7 +203,7 @@ func NewHeaderDownload(
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
-		BadHeaders:         make(map[common.Hash]struct{}),
+		badHeaders:         make(map[common.Hash]struct{}),
 		anchors:            make(map[common.Hash]*Anchor),
 		persistedLinkLimit: persistentLinkLimit,
 		linkLimit:          linkLimit - persistentLinkLimit,
@@ -253,16 +253,16 @@ func (pp PeerPenalty) String() string {
 // HeaderInserter incapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
+	localTd          *big.Int
 	logPrefix        string
 	prevHash         common.Hash // Hash of previously seen header - to filter out potential duplicates
-	prevHeight       uint64
-	newCanonical     bool
-	unwindPoint      uint64
-	unwind           bool
-	highest          uint64
 	highestHash      common.Hash
+	newCanonical     bool
+	unwind           bool
+	prevHeight       uint64
+	unwindPoint      uint64
+	highest          uint64
 	highestTimestamp uint64
-	localTd          *big.Int
 }
 
 func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {

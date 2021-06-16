@@ -142,7 +142,6 @@ type Config struct {
 	// the server is started.
 	ListenAddr   string
 	ListenAddr65 string
-	Eth65Enabled bool
 	SentryAddr   []string
 
 	// If set to a non-nil value, the given NAT port mapper
@@ -166,8 +165,6 @@ type Config struct {
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
-	MDBX  bool
-	LMDB  bool
 }
 
 // Server manages all peer connections.

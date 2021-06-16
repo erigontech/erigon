@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMutation_DeleteTimestamp(t *testing.T) {
+func TestMutationDeleteTimestamp(t *testing.T) {
 	_, tx := ethdb.NewTestTx(t)
 
 	acc := make([]*accounts.Account, 10)
@@ -84,7 +84,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	require.Nil(t, found, "account must be deleted")
 }
 
-func TestMutationCommitThinHistory(t *testing.T) {
+func TestMutationCommit(t *testing.T) {
 	_, tx := ethdb.NewTestTx(t)
 
 	numOfAccounts := 5
@@ -118,7 +118,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		parsedIndex := index.ToArray()
-		if parsedIndex[0] != 1 && index.GetCardinality() != 1 {
+		if parsedIndex[0] != 2 || index.GetCardinality() != 1 {
 			t.Fatal("incorrect history index")
 		}
 

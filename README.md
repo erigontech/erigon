@@ -25,7 +25,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
   + [Reporting security issues/concerns](#reporting-security-issues-concerns)
   + [Team](#team)
 - [Known issues](#known-issues)
-  + [`htop` shows incorrect memory usage on LMDB](#htop-shows-incorrect-memory-usage-when-using-lmdb)
+  + [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
 <!--te-->
 
 
@@ -106,9 +106,6 @@ Windows users may run erigon in 3 possible ways:
   those files as possibly infected by `Win64/Kryptic.CIS` trojan horse (or a variant of it). Although those are false positives we have no control over 100+ vendors of
   security products for Windows and their respective detection algorythms and we understand this might make your experience with Windows builds uncomfortable. To
   workaround the issue you might either set exlusions for your antivirus specifically for `ethdb\mdbx\dist\CMakeFiles` folder or you can run erigon on Docker or WSL
-
-  Though is still possible to run erigon with **LMDB** database there's a caveat which might cause your experience with LMDB on Windows uncomfortable: data file allocation is fixed so you need to know in advance how much space you want to allocate for database file using the command line option `--lmdb.mapSize`.
-  Please be advised Erigon will completely remove LMDB support in future releases thus we warmly suggest to resync using the default MDBX database.
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
@@ -284,9 +281,9 @@ Happy testing! 🥤
 Known issues
 ============
 
-### `htop` shows incorrect memory usage when using LMDB
+### `htop` shows incorrect memory usage
 
-Erigon's internal DB (LMDB) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
+Erigon's internal DB (MDBX) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of Application
 ([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html), [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
 
 `htop` on column `res` shows memory of "App + OS used to hold page cache for given App",
