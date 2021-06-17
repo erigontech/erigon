@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	cli "github.com/urfave/cli"
+	"github.com/urfave/cli"
 )
 
 var (
@@ -335,7 +335,7 @@ func writeTreeMetadata(directory string, def *dnsDefinition) {
 	if err != nil {
 		exit(err)
 	}
-	if err := os.Mkdir(directory, 0744); err != nil && !os.IsExist(err) {
+	if err := os.MkdirAll(directory, 0744); err != nil && !os.IsExist(err) {
 		exit(err)
 	}
 	metaFile, _ := treeDefinitionFiles(directory)
