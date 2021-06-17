@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/erigon/params"
 	"io/ioutil"
 	"os"
 	"path"
@@ -13,19 +12,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
 
-func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte, useMdbx bool) *SnapshotMigrator {
+func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator {
 	return &SnapshotMigrator{
 		snapshotsDir:               snapshotDir,
 		HeadersCurrentSnapshot:     currentSnapshotBlock,
 		HeadersNewSnapshotInfohash: currentSnapshotInfohash,
-		useMdbx:                    useMdbx,
 		replaceChan:                make(chan struct{}),
 	}
 }
@@ -39,7 +39,6 @@ type SnapshotMigrator struct {
 	HeadersNewSnapshotInfohash []byte
 	BodiesNewSnapshotInfohash  []byte
 	snapshotType               string
-	useMdbx                    bool
 	started                    uint64
 	replaceChan                chan struct{}
 	replaced                   uint64
@@ -196,6 +195,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 	if async {
 		go func() {
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
 				log.Error("begin", "err", err)

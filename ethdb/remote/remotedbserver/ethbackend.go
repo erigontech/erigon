@@ -22,9 +22,8 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 0, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	eth       EthBackend
-	events    *Events
-	gitCommit string
+	eth    EthBackend
+	events *Events
 }
 
 type EthBackend interface {
@@ -32,8 +31,8 @@ type EthBackend interface {
 	NetVersion() (uint64, error)
 }
 
-func NewEthBackendServer(eth EthBackend, events *Events, gitCommit string) *EthBackendServer {
-	return &EthBackendServer{eth: eth, events: events, gitCommit: gitCommit}
+func NewEthBackendServer(eth EthBackend, events *Events) *EthBackendServer {
+	return &EthBackendServer{eth: eth, events: events}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -104,5 +103,5 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
-	return &remote.ClientVersionReply{NodeName: common.MakeName("Erigon", params.VersionWithCommit(s.gitCommit, ""))}, nil
+	return &remote.ClientVersionReply{NodeName: common.MakeName("Erigon", params.VersionWithCommit(params.GitCommit, ""))}, nil
 }

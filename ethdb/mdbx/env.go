@@ -14,7 +14,7 @@ import (
 	"unsafe"
 )
 
-// success is a value returned from the LMDB API to indicate a successful call.
+// success is a value returned from the MDBX API to indicate a successful call.
 // The functions in this API this behavior and its use is not required.
 const success = C.MDBX_SUCCESS
 
@@ -39,10 +39,10 @@ const (
 	SafeNoSync    = C.MDBX_SAFE_NOSYNC
 	Durable       = C.MDBX_SYNC_DURABLE
 	NoTLS         = C.MDBX_NOTLS // Danger zone. When unset reader locktable slots are tied to their thread.
-	//NoLock      = C.MDBX_NOLOCK     // Danger zone. LMDB does not use any locks.
+	//NoLock      = C.MDBX_NOLOCK     // Danger zone. MDBX does not use any locks.
 	NoReadahead = C.MDBX_NORDAHEAD // Disable readahead. Requires OS support.
-	NoMemInit   = C.MDBX_NOMEMINIT // Disable LMDB memory initialization.
-	Exclusive   = C.MDBX_EXCLUSIVE // Disable LMDB memory initialization.
+	NoMemInit   = C.MDBX_NOMEMINIT // Disable MDBX memory initialization.
+	Exclusive   = C.MDBX_EXCLUSIVE // Disable MDBX memory initialization.
 )
 
 const (
@@ -120,13 +120,12 @@ type DBI C.MDBX_dbi
 // See MDBX_env.
 type Env struct {
 	_env *C.MDBX_env
+	ckey *C.MDBX_val
+	cval *C.MDBX_val
 
 	// closeLock is used to allow the Txn finalizer to check if the Env has
 	// been closed, so that it may know if it must abort.
 	closeLock sync.RWMutex
-
-	ckey *C.MDBX_val
-	cval *C.MDBX_val
 }
 
 // NewEnv allocates and initializes a new Env.
@@ -162,7 +161,7 @@ var errNotOpen = errors.New("enivornment is not open")
 //
 // See mdbx_env_get_fd.
 func (env *Env) FD() (uintptr, error) {
-	// fdInvalid is the value -1 as a uintptr, which is used by LMDB in the
+	// fdInvalid is the value -1 as a uintptr, which is used by MDBX in the
 	// case that env has not been opened yet.  the strange construction is done
 	// to avoid constant value overflow errors at compile time.
 	const fdInvalid = ^uintptr(0)

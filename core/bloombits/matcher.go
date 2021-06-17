@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common/bitutil"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -165,6 +166,7 @@ func (m *Matcher) Start(ctx context.Context, begin, end uint64, results chan uin
 	// Read the output from the result sink and deliver to the user
 	session.pend.Add(1)
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer session.pend.Done()
 		defer close(results)
 
@@ -227,6 +229,7 @@ func (m *Matcher) run(begin, end uint64, buffer int, session *MatcherSession) ch
 
 	session.pend.Add(1)
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer session.pend.Done()
 		defer close(source)
 
@@ -317,6 +320,7 @@ func (m *Matcher) subMatch(source chan *partialMatches, dist chan *request, bloo
 	}()
 
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		// Tear down the goroutine and terminate the final sink channel
 		defer session.pend.Done()
 		defer close(results)
@@ -379,6 +383,7 @@ func (m *Matcher) subMatch(source chan *partialMatches, dist chan *request, bloo
 // distributor receives requests from the schedulers and queues them into a set
 // of pending requests, which are assigned to retrievers wanting to fulfil them.
 func (m *Matcher) distributor(dist chan *request, session *MatcherSession) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer session.pend.Done()
 
 	var (

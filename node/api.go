@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	_debug "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/internal/debug"
@@ -141,6 +142,7 @@ func (api *privateAdminAPI) PeerEvents(ctx context.Context) (*rpc.Subscription, 
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
+		defer func() { _debug.LogPanic(nil, true, recover()) }()
 		events := make(chan *p2p.PeerEvent)
 		sub := server.SubscribeEvents(events)
 		defer sub.Unsubscribe()

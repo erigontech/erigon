@@ -35,12 +35,19 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	if err != nil {
 		return err
 	}
+	defer db.Close()
+
+	tx, err := db.RwKV().BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	err = os.RemoveAll(snapshotPath)
 	if err != nil {
 		return err
 	}
-	snkv := ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snkv := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
 			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
@@ -49,101 +56,73 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	}).Path(snapshotPath).MustOpen()
 	log.Info("Create snapshot db", "path", snapshotPath)
 
-	sndb := ethdb.NewObjectDatabase(snkv).NewBatch()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 
 	tt := time.Now()
-	tt2 := time.Now()
-	max := 10000000
-	i := 0
-	err = db.Walk(dbutils.PlainStateBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		innerErr := sndb.Put(dbutils.PlainStateBucket, k, v)
-		if innerErr != nil {
-			return false, fmt.Errorf("put state err: %w", innerErr)
-		}
-		i++
-		if i > max {
-			i = 0
-			innerErr = sndb.CommitAndBegin(ctx)
+	if err = snkv.Update(ctx, func(snTx ethdb.RwTx) error {
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			innerErr := snTx.Put(dbutils.PlainStateBucket, k, v)
 			if innerErr != nil {
-				return false, fmt.Errorf("commit state err: %w", innerErr)
+				return fmt.Errorf("put state err: %w", innerErr)
 			}
-			log.Info("Commit state", "batch", time.Since(tt2), "all", time.Since(tt))
-			tt2 = time.Now()
-		}
+			select {
+			case <-logEvery.C:
+				log.Info("progress", "bucket", dbutils.PlainStateBucket, "key", fmt.Sprintf("%x", k))
+			default:
+			}
 
-		return true, nil
-	})
-	if err != nil {
+			return nil
+		})
+	}); err != nil {
 		return err
 	}
-	err = sndb.CommitAndBegin(ctx)
-	if err != nil {
-		return err
-	}
+	log.Info("Copy state", "batch", "t", time.Since(tt))
 
 	log.Info("Copy plain state end", "t", time.Since(tt))
 	tt = time.Now()
-	tt2 = time.Now()
-	err = db.Walk(dbutils.PlainContractCodeBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		innerErr := sndb.Put(dbutils.PlainContractCodeBucket, k, v)
-		if innerErr != nil {
-			return false, fmt.Errorf("put contract code err: %w", innerErr)
-		}
-		i++
-		if i > max {
-			i = 0
-			innerErr = sndb.CommitAndBegin(ctx)
+	if err = snkv.Update(ctx, func(sntx ethdb.RwTx) error {
+		return tx.ForEach(dbutils.PlainContractCodeBucket, []byte{}, func(k, v []byte) error {
+			innerErr := sntx.Put(dbutils.PlainContractCodeBucket, k, v)
 			if innerErr != nil {
-				return false, fmt.Errorf("commit contract code err: %w", innerErr)
+				return fmt.Errorf("put contract code err: %w", innerErr)
 			}
-			log.Info("Commit contract code", "batch", time.Since(tt2), "all", time.Since(tt))
-			tt2 = time.Now()
-		}
-
-		return true, nil
-	})
-	if err != nil {
+			select {
+			case <-logEvery.C:
+				log.Info("progress", "bucket", dbutils.PlainContractCodeBucket, "key", fmt.Sprintf("%x", k))
+			default:
+			}
+			return nil
+		})
+	}); err != nil {
 		return err
 	}
 	log.Info("Copy contract code end", "t", time.Since(tt))
-	err = sndb.Commit()
-	if err != nil {
-		return err
-	}
 
 	tt = time.Now()
-	tt2 = time.Now()
-	err = db.Walk(dbutils.CodeBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		innerErr := sndb.Put(dbutils.CodeBucket, k, v)
-		if innerErr != nil {
-			return false, fmt.Errorf("put code err: %w", innerErr)
-		}
-		i++
-		if i > max {
-			i = 0
-			innerErr = sndb.CommitAndBegin(ctx)
+	if err = snkv.Update(ctx, func(sntx ethdb.RwTx) error {
+		return tx.ForEach(dbutils.CodeBucket, []byte{}, func(k, v []byte) error {
+			innerErr := sntx.Put(dbutils.CodeBucket, k, v)
 			if innerErr != nil {
-				return false, fmt.Errorf("commit code err: %w", innerErr)
+				return fmt.Errorf("put code err: %w", innerErr)
 			}
-			log.Info("Commit code", "batch", time.Since(tt2), "all", time.Since(tt))
-			tt2 = time.Now()
-		}
+			select {
+			case <-logEvery.C:
+				log.Info("progress", "bucket", dbutils.CodeBucket, "key", fmt.Sprintf("%x", k))
+			default:
+			}
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+	log.Info("Copy code", "t", time.Since(tt))
 
-		return true, nil
-	})
-	if err != nil {
-		return err
-	}
-	log.Info("Copy code end", "t", time.Since(tt))
-	err = sndb.Commit()
-	if err != nil {
-		return err
-	}
-	sndb.Close()
 	db.Close()
+	snkv.Close()
 	tt = time.Now()
 	defer func() {
 		log.Info("Verify end", "t", time.Since(tt))
 	}()
-	return VerifyStateSnapshot(ctx, dbpath, snapshotPath, block, database)
+	return VerifyStateSnapshot(ctx, dbpath, snapshotPath, block)
 }

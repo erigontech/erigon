@@ -75,7 +75,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		GasLimit         *math.HexOrDecimal64
 		GasUsed          *math.HexOrDecimal64
 		Timestamp        *math.HexOrDecimal64
-		BaseFee          *math.HexOrDecimal256
+		BaseFee          *math.HexOrDecimal256 `json:"baseFeePerGas"`
 	}
 	var dec btHeader
 	if err := json.Unmarshal(input, &dec); err != nil {

@@ -25,7 +25,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/ethdb"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -143,11 +142,7 @@ type Config struct {
 	// Logger is a custom logger to use with the p2p.Server.
 	Logger log.Logger `toml:",omitempty"`
 
-	// Whether to use LMDB.
 	DatabaseVerbosity ethdb.DBVerbosityLvl
-	LMDB              bool
-	LMDBMapSize       datasize.ByteSize
-	MDBX              bool
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener

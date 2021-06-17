@@ -34,6 +34,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 	"github.com/hashicorp/golang-lru/simplelru"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -237,6 +238,7 @@ func newCache(epoch uint64) interface{} {
 // generate ensures that the cache content is generated before use.
 func (c *cache) generate(dir string, limit int, lock bool, test bool) {
 	c.once.Do(func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		size := cacheSize(c.epoch*epochLength + 1)
 		seed := seedHash(c.epoch*epochLength + 1)
 		if test {
@@ -526,6 +528,7 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 	// If async is specified, generate everything in a background thread
 	if async && !current.generated() {
 		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			current.generate(ethash.config.DatasetDir, ethash.config.DatasetsOnDisk, ethash.config.DatasetsLockMmap, ethash.config.PowMode == ModeTest)
 
 			if futureI != nil {

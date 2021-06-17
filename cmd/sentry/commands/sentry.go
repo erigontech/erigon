@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	node2 "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
 )
 
@@ -77,7 +78,12 @@ var rootCmd = &cobra.Command{
 			p = eth.ETH65
 		}
 
-		return download.Sentry(datadir, natSetting, port, sentryAddr, staticPeers, discoveryDNS, nodiscover, netRestrict, uint(p))
+		nodeConfig := node2.NewNodeConfig()
+		p2pConfig, err := utils.NewP2PConfig(nodiscover, datadir, netRestrict, natSetting, nodeConfig.NodeName(), staticPeers, uint(port), uint(p))
+		if err != nil {
+			return err
+		}
+		return download.Sentry(datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p))
 	},
 }
 

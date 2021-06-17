@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -17,11 +16,6 @@ import (
 )
 
 var (
-	DatabaseFlag = cli.StringFlag{
-		Name:  "database",
-		Usage: "Which database software to use? Currently supported values: lmdb|mdbx",
-		Value: "mdbx",
-	}
 	DatabaseVerbosityFlag = cli.IntFlag{
 		Name:  "database.verbosity",
 		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
@@ -48,6 +42,12 @@ var (
 		Name:  "private.api.ratelimit",
 		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
 		Value: 500,
+	}
+
+	MaxPeersFlag = cli.IntFlag{
+		Name:  "maxpeers",
+		Usage: "Maximum number of network peers (network disabled if set to 0)",
+		Value: node.DefaultConfig.P2P.MaxPeers,
 	}
 
 	StorageModeFlag = cli.StringFlag{
@@ -83,13 +83,6 @@ var (
 	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
 		Name:  "snapshot.downloader.addr",
 		Usage: `enable external snapshot downloader`,
-	}
-
-	// LMDB flags
-	LMDBMapSizeFlag = cli.StringFlag{
-		Name:  "lmdb.mapSize",
-		Usage: "Sets Memory map size. Lower it if you have issues with opening the DB",
-		Value: ethdb.LMDBDefaultMapSize.String(),
 	}
 
 	// mTLS flags
@@ -195,31 +188,8 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
-
 	setPrivateApi(ctx, cfg)
 	cfg.DatabaseVerbosity = ethdb.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
-
-	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
-	cfg.MDBX = strings.EqualFold(databaseFlag, "mdbx") //case insensitive
-	cfg.LMDB = strings.EqualFold(databaseFlag, "lmdb") //case insensitive
-	if cfg.LMDB && ctx.GlobalString(LMDBMapSizeFlag.Name) != "" {
-		err := cfg.LMDBMapSize.UnmarshalText([]byte(ctx.GlobalString(LMDBMapSizeFlag.Name)))
-		if err != nil {
-			log.Error("Invalid LMDB map size provided. Will use defaults",
-				"lmdb.mapSize", ethdb.LMDBDefaultMapSize.HumanReadable(),
-				"err", err,
-			)
-		} else {
-			if cfg.LMDBMapSize < 1*datasize.GB {
-				log.Error("Invalid LMDB map size provided. Will use defaults",
-					"lmdb.mapSize", ethdb.LMDBDefaultMapSize.HumanReadable(),
-					"err", "the value should be at least 1 GB",
-				)
-			}
-		}
-	}
-	cfg.P2P.MDBX = cfg.MDBX
-	cfg.P2P.LMDB = cfg.LMDB
 }
 
 // setPrivateApi populates configuration fields related to the remote

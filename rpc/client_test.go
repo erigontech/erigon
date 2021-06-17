@@ -517,7 +517,7 @@ func TestClientReconnect(t *testing.T) {
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}
-		go http.Serve(l, srv.WebsocketHandler([]string{"*"}))
+		go http.Serve(l, srv.WebsocketHandler([]string{"*"}, false))
 		return srv, l
 	}
 
@@ -582,7 +582,7 @@ func httpTestClient(srv *Server, transport string, fl *flakeyListener) (*Client,
 	var hs *httptest.Server
 	switch transport {
 	case "ws":
-		hs = httptest.NewUnstartedServer(srv.WebsocketHandler([]string{"*"}))
+		hs = httptest.NewUnstartedServer(srv.WebsocketHandler([]string{"*"}, false))
 	case "http":
 		hs = httptest.NewUnstartedServer(srv)
 	default:

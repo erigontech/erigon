@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
@@ -290,6 +291,7 @@ func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan str
 	}
 	// Wait for the signal to start reading
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer tx1.Rollback()
 		<-startCh
 		c, err := tx1.Cursor("t")
@@ -330,17 +332,17 @@ func checkReader(tx ethdb.Tx, errorCh chan error) (bool, error) {
 }
 
 func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...func(ethdb.RwKV, ethdb.RwTx) (bool, error)) error {
-	dir, err := ioutil.TempDir(".", "lmdb-vis")
+	dir, err := ioutil.TempDir(".", "db-vis")
 	if err != nil {
-		return fmt.Errorf("creating temp dir for lmdb visualisation: %w", err)
+		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
 	defer os.RemoveAll(dir)
 	var kv ethdb.RwKV
-	kv, err = ethdb.NewLMDB().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
+	kv, err = ethdb.NewMDBX().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return bucketsCfg
 	}).Open()
 	if err != nil {
-		return fmt.Errorf("opening LMDB database: %w", err)
+		return fmt.Errorf("opening database: %w", err)
 	}
 	defer kv.Close()
 	for gi, generateF := range generateFs {

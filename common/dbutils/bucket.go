@@ -9,8 +9,7 @@ import (
 )
 
 // DBSchemaVersion
-var DBSchemaVersionLMDB = types.VersionReply{Major: 1, Minor: 1, Patch: 0}
-var DBSchemaVersionMDBX = types.VersionReply{Major: 2, Minor: 1, Patch: 0}
+var DBSchemaVersion = types.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 // Buckets
 
@@ -28,7 +27,7 @@ PlainStateBucket logical layout:
 	  value - storage value(common.hash)
 
 Physical layout:
-	PlainStateBucket and HashedStorageBucket utilises DupSort feature of LMDB (store multiple values inside 1 key).
+	PlainStateBucket and HashedStorageBucket utilises DupSort feature of MDBX (store multiple values inside 1 key).
 -------------------------------------------------------------
 	   key              |            value
 -------------------------------------------------------------
@@ -42,13 +41,12 @@ Physical layout:
 [acc2_hash]             | [acc2_value]
 						...
 */
-const PlainStateBucket = "PLAIN-CST2"
-const PlainStateBucketOld1 = "PLAIN-CST"
+const PlainStateBucket = "PlainState"
 
 //PlainContractCodeBucket -
 //key - address+incarnation
 //value - code hash
-const PlainContractCodeBucket = "PLAIN-contractCode"
+const PlainContractCodeBucket = "PlainCodeHash"
 
 /*
 AccountChangeSetBucket and StorageChangeSetBucket - of block N store values of state before block N changed them.
@@ -74,8 +72,8 @@ StorageChangeSetBucket:
 	key - blockNum_u64 + address + incarnation_u64
 	value - plain_storage_key + value
 */
-const AccountChangeSetBucket = "PLAIN-ACS"
-const StorageChangeSetBucket = "PLAIN-SCS"
+const AccountChangeSetBucket = "AccountChangeSet"
+const StorageChangeSetBucket = "StorageChangeSet"
 
 const (
 
@@ -85,9 +83,8 @@ const (
 	// Contains Storage:
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	HashedAccountsBucket   = "hashed_accounts"
-	HashedStorageBucket    = "hashed_storage"
-	CurrentStateBucketOld2 = "CST2"
+	HashedAccountsBucket = "HashedAccount"
+	HashedStorageBucket  = "HashedStorage"
 )
 
 /*
@@ -122,32 +119,27 @@ StorageHistoryBucket
 	key - address + storage_key + shard_id_u64
 	value - roaring bitmap - list of block where it changed
 */
-var AccountsHistoryBucket = "hAT"
-var StorageHistoryBucket = "hST"
+var AccountsHistoryBucket = "AccountHistory"
+var StorageHistoryBucket = "StorageHistory"
 
 var (
 
 	//key - contract code hash
 	//value - contract code
-	CodeBucket = "CODE"
+	CodeBucket = "Code"
 
 	//key - addressHash+incarnation
 	//value - code hash
-	ContractCodeBucket = "contractCode"
+	ContractCodeBucket = "HashedCodeHash"
 
 	// IncarnationMapBucket for deleted accounts
 	//key - address
 	//value - incarnation of account when it was last deleted
-	IncarnationMapBucket = "incarnationMap"
-
-	//TEVMCodeStatusBucket -
-	//key - encoded timestamp(block number)
-	//value - contract codes hashes: [code_hash1]+[code_hash2]
-	ContractTEVMCodeStatusBucket = "TEVMCodeStatus"
+	IncarnationMapBucket = "IncarnationMap"
 
 	//TEVMCodeBucket -
 	//key - contract code hash
-	//value - contract EVTM code
+	//value - contract TEVM code
 	ContractTEVMCodeBucket = "TEVMCode"
 )
 
@@ -191,78 +183,76 @@ Invariants:
 - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
 - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
 */
-const TrieOfAccountsBucket = "trie_account"
-const TrieOfStorageBucket = "trie_storage"
+const TrieOfAccountsBucket = "TrieAccount"
+const TrieOfStorageBucket = "TrieStorage"
 const IntermediateTrieHashBucketOld2 = "iTh2"
 
 const (
 	// DatabaseInfoBucket is used to store information about data layout.
-	DatabaseInfoBucket        = "DBINFO"
-	SnapshotInfoBucket        = "SNINFO"
-	BittorrentInfoBucket      = "BTINFO"
-	HeadersSnapshotInfoBucket = "hSNINFO"
-	BodiesSnapshotInfoBucket  = "bSNINFO"
-	StateSnapshotInfoBucket   = "sSNINFO"
+	DatabaseInfoBucket        = "DbInfo"
+	SnapshotInfoBucket        = "SnapshotInfo"
+	BittorrentInfoBucket      = "BittorrentInfo"
+	HeadersSnapshotInfoBucket = "HeadersSnapshotInfo"
+	BodiesSnapshotInfoBucket  = "BodiesSnapshotInfo"
+	StateSnapshotInfoBucket   = "StateSnapshotInfo"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefixOld    = "h" // block_num_u64 + hash -> header
-	HeaderNumberBucket = "H" // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderPrefixOld    = "h"            // block_num_u64 + hash -> header
+	HeaderNumberBucket = "HeaderNumber" // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	HeaderCanonicalBucket = "canonical_headers" // block_num_u64 -> header hash
-	HeadersBucket         = "headers"           // block_num_u64 + hash -> header (RLP)
-	HeaderTDBucket        = "header_to_td"      // block_num_u64 + hash -> td (RLP)
+	HeaderCanonicalBucket = "CanonicalHeader"        // block_num_u64 -> header hash
+	HeadersBucket         = "Header"                 // block_num_u64 + hash -> header (RLP)
+	HeaderTDBucket        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
-	BlockBodyPrefix     = "b"      // block_num_u64 + hash -> block body
-	EthTx               = "eth_tx" // tbl_sequence_u64 -> rlp(tx)
-	BlockReceiptsPrefix = "r"      // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log                 = "log"    // block_num_u64 + txId -> logs of transaction
+	BlockBodyPrefix     = "BlockBody"        // block_num_u64 + hash -> block body
+	EthTx               = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
+	BlockReceiptsPrefix = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log                 = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
 	// indices are sharded - because some bitmaps are >1Mb and when new incoming blocks process it
-	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (LMDB does copy-on-write).
+	//	 updates ~300 of bitmaps - by append small amount new values. It cause much big writes (MDBX does copy-on-write).
 	//
 	// if last existing shard size merge it with delta
 	// if serialized size of delta > ShardLimit - break down to multiple shards
 	// shard number - it's biggest value in bitmap
-	LogTopicIndex   = "log_topic_index"
-	LogAddressIndex = "log_address_index"
+	LogTopicIndex   = "LogTopicIndex"
+	LogAddressIndex = "LogAddressIndex"
 
 	// CallTraceSet is the name of the table that contain the mapping of block number to the set (sorted) of all accounts
 	// touched by call traces. It is DupSort-ed table
-	// 8-byte BE block nunber -> account address -> two bits (one for "from", another for "to")
-	CallTraceSet = "call_trace_set"
+	// 8-byte BE block number -> account address -> two bits (one for "from", another for "to")
+	CallTraceSet = "CallTraceSet"
 	// Indices for call traces - have the same format as LogTopicIndex and LogAddressIndex
 	// Store bitmap indices - in which block number we saw calls from (CallFromIndex) or to (CallToIndex) some addresses
-	CallFromIndex = "call_from_index"
-	CallToIndex   = "call_to_index"
+	CallFromIndex = "CallFromIndex"
+	CallToIndex   = "CallToIndex"
 
-	TxLookupPrefix  = "l" // hash -> transaction/receipt lookup metadata
-	BloomBitsPrefix = "B" // bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	TxLookupPrefix  = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
+	BloomBitsPrefix = "BloomBits"              // bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
-	PreimagePrefix = "secure-key-"      // preimagePrefix + hash -> preimage
-	ConfigPrefix   = "ethereum-config-" // config prefix for the db
+	PreimagePrefix = "Preimage" // preimagePrefix + hash -> preimage
+	ConfigPrefix   = "Config"   // config prefix for the db
 
 	// Chain index prefixes (use `i` + single byte to avoid mixing data types).
-	BloomBitsIndexPrefix = "iB" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
+	BloomBitsIndexPrefix = "BloomBitsIndex" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
 	// Progress of sync stages: stageName -> stageData
-	SyncStageProgress     = "SSP2"
-	SyncStageProgressOld1 = "SSP"
+	SyncStageProgress = "SyncStage"
 	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind     = "SSU2"
-	SyncStageUnwindOld1 = "SSU"
+	SyncStageUnwind = "SyncStageUnwind"
 
-	CliqueBucket             = "clique-"
-	CliqueSeparateBucket     = "clique-snapshots-"
-	CliqueSnapshotBucket     = "snap"
-	CliqueLastSnapshotBucket = "lastSnap"
+	CliqueBucket             = "Clique"
+	CliqueSeparateBucket     = "CliqueSeparate"
+	CliqueSnapshotBucket     = "CliqueSnapshot"
+	CliqueLastSnapshotBucket = "CliqueLastSnapshot"
 
 	// this bucket stored in separated database
-	InodesBucket = "inodes"
+	InodesBucket = "Inode"
 
 	// Transaction senders - stored separately from the block bodies
-	Senders = "txSenders" // block_num_u64 + blockHash -> sendersList (no serialization format, every 20 bytes is new sender)
+	Senders = "TxSender" // block_num_u64 + blockHash -> sendersList (no serialization format, every 20 bytes is new sender)
 
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
@@ -270,63 +260,13 @@ const (
 	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
-	Migrations = "migrations"
+	Migrations = "Migration"
 
-	Sequence      = "sequence" // tbl_name -> seq_u64
+	Sequence      = "Sequence" // tbl_name -> seq_u64
 	HeadHeaderKey = "LastHeader"
 )
 
-var Rename = map[string]string{
-	PlainStateBucket:          "PlainState",
-	PlainContractCodeBucket:   "PlainCodeHash",
-	AccountChangeSetBucket:    "AccountChangeSet",
-	StorageChangeSetBucket:    "StorageChangeSet",
-	HashedAccountsBucket:      "HashedAccount",
-	HashedStorageBucket:       "HashedStorage",
-	AccountsHistoryBucket:     "AccountHistory",
-	StorageHistoryBucket:      "StorageHistory",
-	CodeBucket:                "Code",
-	ContractCodeBucket:        "HashedCodeHash",
-	IncarnationMapBucket:      "IncarnationMap",
-	TrieOfAccountsBucket:      "TrieAccount",
-	TrieOfStorageBucket:       "TrieStorage",
-	DatabaseInfoBucket:        "DbInfo",
-	SnapshotInfoBucket:        "SnapshotInfo",
-	BittorrentInfoBucket:      "BittorrentInfo",
-	HeadersSnapshotInfoBucket: "HeadersSnapshotInfo",
-	BodiesSnapshotInfoBucket:  "BodiesSnapshotInfo",
-	StateSnapshotInfoBucket:   "StateSnapshotInfo",
-	HeaderNumberBucket:        "HeaderNumber",
-	HeaderCanonicalBucket:     "CanonicalHeader",
-	HeadersBucket:             "Header",
-	HeaderTDBucket:            "HeadersTotalDifficulty",
-	BlockBodyPrefix:           "BlockBody",
-	EthTx:                     "BlockTransaction",
-	BlockReceiptsPrefix:       "Receipt",
-	Log:                       "TransactionLog",
-	LogTopicIndex:             "LogTopicIndex",
-	LogAddressIndex:           "LogAddressIndex",
-	CallTraceSet:              "CallTraceSet",
-	CallFromIndex:             "CallFromIndex",
-	CallToIndex:               "CallToIndex",
-	TxLookupPrefix:            "BlockTransactionLookup",
-	BloomBitsPrefix:           "BloomBits",
-	PreimagePrefix:            "Preimage",
-	ConfigPrefix:              "Config",
-	BloomBitsIndexPrefix:      "BloomBitsIndex",
-	SyncStageProgress:         "SyncStage",
-	SyncStageUnwind:           "SyncStageUnwind",
-	CliqueBucket:              "Clique",
-	CliqueSeparateBucket:      "CliqueSeparate",
-	CliqueSnapshotBucket:      "CliqueSnapshot",
-	CliqueLastSnapshotBucket:  "CliqueLastSnapshot",
-	InodesBucket:              "Inode",
-	Senders:                   "TxSender",
-	HeadBlockKey:              "LastBlock",
-	Migrations:                "Migration",
-	Sequence:                  "Sequence",
-	HeadHeaderKey:             "LastHeader",
-}
+var Rename = map[string]string{}
 
 // Keys
 var (
@@ -374,7 +314,6 @@ var Buckets = []string{
 	DatabaseInfoBucket,
 	IncarnationMapBucket,
 	ContractTEVMCodeBucket,
-	ContractTEVMCodeStatusBucket,
 	CliqueSeparateBucket,
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,
@@ -413,10 +352,6 @@ var Buckets = []string{
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
 	IntermediateTrieHashBucketOld2,
-	CurrentStateBucketOld2,
-	SyncStageProgressOld1,
-	SyncStageUnwindOld1,
-	PlainStateBucketOld1,
 	HeaderPrefixOld,
 	CliqueBucket,
 }
@@ -474,12 +409,6 @@ type BucketConfigItem struct {
 }
 
 var BucketsConfigs = BucketsCfg{
-	CurrentStateBucketOld2: {
-		Flags:                     DupSort,
-		AutoDupSortKeysConversion: true,
-		DupFromLen:                72,
-		DupToLen:                  40,
-	},
 	HashedStorageBucket: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
@@ -503,9 +432,6 @@ var BucketsConfigs = BucketsCfg{
 		CustomDupComparator: DupCmpSuffix32,
 	},
 	CallTraceSet: {
-		Flags: DupSort,
-	},
-	ContractTEVMCodeStatusBucket: {
 		Flags: DupSort,
 	},
 }

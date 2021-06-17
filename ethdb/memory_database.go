@@ -19,8 +19,6 @@ package ethdb
 import (
 	"context"
 	"testing"
-
-	"github.com/ledgerwatch/erigon/common/debug"
 )
 
 func NewMemDatabase() *ObjectDatabase {
@@ -32,17 +30,7 @@ func NewTestDB(t testing.TB) *ObjectDatabase {
 }
 
 func NewMemKV() RwKV {
-	switch debug.TestDB() {
-	case "lmdb":
-		return NewLMDB().InMem().MustOpen()
-	case "mdbx": //nolint:goconst
-		return NewMDBX().InMem().MustOpen()
-	default:
-		// mdbx is too slow for our tests currently, so we keep
-		// lmdb as our in-mem db
-		// with mdbx tests time out, especially ./tests package
-		return NewMDBX().InMem().MustOpen()
-	}
+	return NewMDBX().InMem().MustOpen()
 }
 
 func NewTestKV(t testing.TB) RwKV {

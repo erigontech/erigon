@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -49,8 +48,6 @@ import (
 
 //go:embed allocs
 var allocs embed.FS
-
-var UseMDBX = true
 
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
@@ -66,7 +63,7 @@ type Genesis struct {
 	Mixhash    common.Hash         `json:"mixHash"`
 	Coinbase   common.Address      `json:"coinbase"`
 	Alloc      GenesisAlloc        `json:"alloc"      gencodec:"required"`
-	Seal       []rlp.RawValue      `json:"seal"`
+	Seal       [][]byte            `json:"seal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -301,12 +298,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		defer wg.Done()
-		var tmpDB ethdb.RwKV
-		if UseMDBX {
-			tmpDB = ethdb.NewMDBX().InMem().MustOpen()
-		} else {
-			tmpDB = ethdb.NewLMDB().InMem().MustOpen()
-		}
+		tmpDB := ethdb.NewMDBX().InMem().MustOpen()
 		defer tmpDB.Close()
 		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {
@@ -364,7 +356,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	}
 	if g.Config != nil && (g.Config.IsLondon(0)) {
 		head.Eip1559 = true
-		if g.BaseFee == nil {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}
@@ -590,8 +584,9 @@ func DefaultSokolGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:    params.SokolChainConfig,
 		Timestamp: 0x0,
-		Seal: []rlp.RawValue{
-			hexutil.MustDecode("0xb8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		Seal: [][]byte{
+			common.FromHex(""),
+			common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		},
 		GasLimit:   0x663BE0,
 		Difficulty: big.NewInt(0x20000),

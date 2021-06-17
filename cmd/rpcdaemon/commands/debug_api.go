@@ -36,22 +36,22 @@ type PrivateDebugAPI interface {
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
 	*BaseAPI
-	dbReader ethdb.RoKV
-	GasCap   uint64
+	db     ethdb.RoKV
+	GasCap uint64
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, dbReader ethdb.RoKV, gascap uint64) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(base *BaseAPI, db ethdb.RoKV, gascap uint64) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
-		BaseAPI:  base,
-		dbReader: dbReader,
-		GasCap:   gascap,
+		BaseAPI: base,
+		db:      db,
+		GasCap:  gascap,
 	}
 }
 
 // StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	tx, err := api.dbReader.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -73,7 +73,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block range
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage, excludeMissingPreimages bool) (state.IteratorDump, error) {
-	tx, err := api.dbReader.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -133,7 +133,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
-	tx, err := api.dbReader.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +170,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
-	tx, err := api.dbReader.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 }
 
 func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
-	tx, err := api.dbReader.BeginRo(ctx)
+	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}

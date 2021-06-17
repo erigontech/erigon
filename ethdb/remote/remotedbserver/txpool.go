@@ -13,6 +13,7 @@ import (
 	proto_txpool "github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	types2 "github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -22,6 +23,7 @@ var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	Get(hash common.Hash) types.Transaction
 	AddLocals(txs []types.Transaction) []error
+	Content() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
 	SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription
 }
 
@@ -37,6 +39,42 @@ func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
 
 func (s *TxPoolServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
 	return MiningAPIVersion, nil
+}
+func (s *TxPoolServer) All(context.Context, *proto_txpool.AllRequest) (*proto_txpool.AllReply, error) {
+	pending, queued := s.txPool.Content()
+	reply := &proto_txpool.AllReply{}
+	reply.Txs = make([]*proto_txpool.AllReply_Tx, 0, 16)
+	for addr, list := range pending {
+		addrBytes := addr.Bytes()
+		for i := range list {
+			b, err := rlp.EncodeToBytes(list[i])
+			if err != nil {
+				return nil, err
+			}
+			reply.Txs = append(reply.Txs, &proto_txpool.AllReply_Tx{
+				Sender: addrBytes,
+				Type:   proto_txpool.AllReply_PENDING,
+				RlpTx:  b,
+			})
+		}
+	}
+
+	for addr, list := range queued {
+		addrBytes := addr.Bytes()
+		for i := range list {
+			b, err := rlp.EncodeToBytes(list[i])
+			if err != nil {
+				return nil, err
+			}
+			reply.Txs = append(reply.Txs, &proto_txpool.AllReply_Tx{
+				Sender: addrBytes,
+				Type:   proto_txpool.AllReply_QUEUED,
+				RlpTx:  b,
+			})
+		}
+	}
+
+	return reply, nil
 }
 
 func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashes) (*proto_txpool.TxHashes, error) {

@@ -1,7 +1,10 @@
 # Interfaces
-Interfaces for Erigon components. Currently, it is a collection of `.proto` files describing gRPC interfaces between components, but later documentation about each interface, its components, as well as required version of gRPC will be added
+Interfaces for turbo-geth components. Currently it is a collection of `.proto` files describing gRPC interfaces between components, but later documentation about each interface, its components, as well as required version of gRPC will be added
 
-<img src="erigon-architecture.png">
+<img src="turbo-geth-architecture.png">
+
+See more info on the component and descriptions in [Components](./_docs/README.md)
+
 
 # What's in this repo
 - Protobuf definitions

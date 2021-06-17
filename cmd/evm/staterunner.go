@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-
 	"github.com/urfave/cli"
 )
 
@@ -105,6 +104,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	if txErr != nil {
 		return txErr
 	}
+	defer tx.Rollback()
 
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
@@ -112,17 +112,17 @@ func stateTestCmd(ctx *cli.Context) error {
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
 			var root common.Hash
+			var calcRootErr error
 
 			statedb, err := test.Run(context.Background(), tx, st, cfg)
-
+			// print state root for evmlab tracing
+			root, calcRootErr = trie.CalcRoot("", tx)
+			if err == nil && calcRootErr != nil {
+				err = calcRootErr
+			}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
 				result.Pass, result.Error = false, err.Error()
-			} else {
-				root, err = trie.CalcRoot("", tx)
-				if err != nil {
-					result.Pass, result.Error = false, err.Error()
-				}
 			}
 
 			/*

@@ -24,6 +24,7 @@ func init() {
 	withDatadir(cmdSnapshotCheck)
 	withBlock(cmdSnapshotCheck)
 	withBatchSize(cmdSnapshotCheck)
+	withChain(cmdSnapshotCheck)
 	cmdSnapshotCheck.Flags().StringVar(&tmpDBPath, "tmp_db", "", "path to temporary db(for debug)")
 }
 
@@ -50,24 +51,13 @@ var cmdSnapshotCheck = &cobra.Command{
 		}
 
 		stateSnapshotPath := filepath.Join(snapshotDir, "state")
-		var stateSnapshot ethdb.RwKV
-		if database == "lmdb" {
-			stateSnapshot = ethdb.NewLMDB().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-				return dbutils.BucketsCfg{
-					dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-					dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-					dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
-				}
-			}).Readonly().MustOpen()
-		} else {
-			stateSnapshot = ethdb.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-				return dbutils.BucketsCfg{
-					dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-					dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-					dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
-				}
-			}).Readonly().MustOpen()
-		}
+		stateSnapshot := ethdb.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+			return dbutils.BucketsCfg{
+				dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+				dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+			}
+		}).Readonly().MustOpen()
 		isNew := true
 		var path string
 		if len(tmpDBPath) > 0 {
@@ -87,12 +77,7 @@ var cmdSnapshotCheck = &cobra.Command{
 				log.Info("Temp database", "path", path)
 			}
 		}()
-		var tmpDb ethdb.RwKV
-		if database == "lmdb" {
-			tmpDb = ethdb.NewLMDB().Path(path).MustOpen()
-		} else {
-			tmpDb = ethdb.NewMDBX().Path(path).MustOpen()
-		}
+		tmpDb := ethdb.NewMDBX().Path(path).MustOpen()
 		kv := ethdb.NewSnapshotKV().
 			DB(tmpDb).
 			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
@@ -258,7 +243,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
 		err = stagedsync.SpawnExecuteBlocksStage(stage4, sync, tx, blockNumber, ch,
-			stagedsync.StageExecuteBlocksCfg(db, false, false, false, 0, batchSize, nil, nil, nil, chainConfig, engine, vmConfig, tmpDir), nil,
+			stagedsync.StageExecuteBlocksCfg(db, false, false, false, 0, batchSize, nil, chainConfig, engine, vmConfig, tmpDir), nil,
 		)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)

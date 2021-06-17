@@ -94,7 +94,7 @@ func ExecuteBlockEphemerally(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
-	checkTEVM func(hash common.Hash) (bool, error),
+	checkTEVM func(codeHash common.Hash) (bool, error),
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
 	block.Uncles()
@@ -148,11 +148,6 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	if !vmConfig.ReadOnly {
-		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs); err != nil {
-			return nil, err
-		}
-	}
 	if *usedGas != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
@@ -160,6 +155,11 @@ func ExecuteBlockEphemerally(
 		bloom := types.CreateBloom(receipts)
 		if bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+		}
+	}
+	if !vmConfig.ReadOnly {
+		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs); err != nil {
+			return nil, err
 		}
 	}
 

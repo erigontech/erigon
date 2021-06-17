@@ -11,7 +11,6 @@ var (
 	chaindata       string
 	snapshotDir     string
 	snapshotMode    string
-	database        string
 	statsfile       string
 	block           uint64
 	changeSetBucket string
@@ -38,8 +37,6 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 	must(cmd.MarkFlagDirname("snapshot.dir"))
-
-	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 }
 
 func withStatsfile(cmd *cobra.Command) {

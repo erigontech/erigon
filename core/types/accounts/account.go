@@ -543,7 +543,11 @@ func (a *Account) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
-	return a.CodeHash == emptyCodeHash || a.CodeHash == (common.Hash{})
+	return IsEmptyCodeHash(a.CodeHash)
+}
+
+func IsEmptyCodeHash(codeHash common.Hash) bool {
+	return codeHash == emptyCodeHash || codeHash == (common.Hash{})
 }
 
 func (a *Account) IsEmptyRoot() bool {

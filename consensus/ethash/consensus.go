@@ -29,6 +29,7 @@ import (
 	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -137,6 +138,7 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			defer wg.Done()
 			var index int64
 			for {
@@ -211,15 +213,23 @@ func getUncles(chain consensus.ChainReader, header *types.Header) (mapset.Set, m
 
 	number, parent := header.Number.Uint64()-1, header.ParentHash
 	for i := 0; i < 7; i++ {
-		ancestor := chain.GetBlock(parent, number)
-		if ancestor == nil {
+		ancestorHeader := chain.GetHeader(parent, number)
+		if ancestorHeader == nil {
 			break
 		}
-		ancestors[ancestor.Hash()] = ancestor.Header()
-		for _, uncle := range ancestor.Uncles() {
-			uncles.Add(uncle.Hash())
+		ancestors[parent] = ancestorHeader
+		// If the ancestor doesn't have any uncles, we don't have to iterate them
+		if ancestorHeader.UncleHash != types.EmptyUncleHash {
+			// Need to add those uncles to the blacklist too
+			ancestor := chain.GetBlock(parent, number)
+			if ancestor == nil {
+				break
+			}
+			for _, uncle := range ancestor.Uncles() {
+				uncles.Add(uncle.Hash())
+			}
 		}
-		parent, number = ancestor.ParentHash(), number-1
+		parent, number = ancestorHeader.ParentHash, number-1
 	}
 	ancestors[header.Hash()] = header
 	uncles.Add(header.Hash())

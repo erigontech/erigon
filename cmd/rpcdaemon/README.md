@@ -183,6 +183,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | trace_get                                  | Yes     |                                            |
 | trace_transaction                          | Yes     |                                            |
 |                                            |         |                                            |
+| txpool_content                             | Yes     |                                            |
+|                                            |         |                                            |
 | eth_getCompilers                           | No      | deprecated                                 |
 | eth_compileLLL                             | No      | deprecated                                 |
 | eth_compileSolidity                        | No      | deprecated                                 |
@@ -362,10 +364,6 @@ and hide others. That is possible with `rpc.accessList` flag.
 ```
 
 Now only these two methods are available.
-
-### Trace transactions progress
-
-There are still many open issues with the Erigon tracing routines. Please see [this issue](https://github.com/ledgerwatch/erigon/issues/1119#issuecomment-699028019) for the current open / known issues related to tracing.
 
 ### Clients getting timeout, but server load is low
 

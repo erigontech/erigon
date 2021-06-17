@@ -85,6 +85,19 @@ func (p *TestTxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	return groups, nil
 }
 
+// Content returns all the transactions known to the pool
+func (p *TestTxPool) Content() (map[common.Address]types.Transactions, map[common.Address]types.Transactions) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+
+	batches := make(map[common.Address]types.Transactions)
+	for _, tx := range p.pool {
+		from, _ := tx.Sender(*types.LatestSignerForChainID(nil))
+		batches[from] = append(batches[from], tx)
+	}
+	return batches, nil
+}
+
 // SubscribeNewTxsEvent should return an event subscription of NewTxsEvent and
 // send events to the given channel.
 func (p *TestTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {

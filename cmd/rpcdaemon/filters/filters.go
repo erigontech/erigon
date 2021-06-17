@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -53,29 +54,103 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		if ethBackend == nil {
 			return
 		}
-		if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
-			log.Warn("rpc filters: error subscribing to events", "err", err)
-			time.Sleep(time.Second)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			if err := ethBackend.Subscribe(ctx, ff.OnNewEvent); err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					continue
+				}
+				if errors.Is(err, io.EOF) {
+					continue
+				}
+
+				log.Warn("rpc filters: error subscribing to events", "err", err)
+				time.Sleep(time.Second)
+			}
 		}
 	}()
 
 	if txPool != nil {
 		go func() {
-			if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
-				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
-				time.Sleep(time.Second)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if err := ff.subscribeToPendingTransactions(ctx, txPool); err != nil {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+						continue
+					}
+					if errors.Is(err, io.EOF) {
+						continue
+					}
+					log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+					time.Sleep(time.Second)
+				}
 			}
 		}()
 		go func() {
-			if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
-				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
-				time.Sleep(time.Second)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+						continue
+					}
+					if errors.Is(err, io.EOF) {
+						continue
+					}
+					log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
+					time.Sleep(time.Second)
+				}
 			}
 		}()
 		go func() {
-			if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
-				log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
-				time.Sleep(time.Second)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+						continue
+					}
+					if errors.Is(err, io.EOF) {
+						continue
+					}
+					log.Warn("rpc filters: error subscribing to pending logs", "err", err)
+					time.Sleep(time.Second)
+				}
 			}
 		}()
 	}

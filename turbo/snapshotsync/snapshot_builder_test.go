@@ -6,11 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/rlp"
 	"math"
 	"math/big"
 	"os"
@@ -20,11 +15,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/stretchr/testify/require"
 )
 
 //Testcase plan
@@ -71,7 +70,6 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx:      true,
 	}
 	currentSnapshotBlock := uint64(10)
 	tx, err := db.BeginRw(context.Background())
@@ -411,7 +409,6 @@ func TestSnapshotMigratorStageSyncMode1(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx:      true,
 	}
 
 	tx, err := db.BeginRw(context.Background())
@@ -771,7 +768,6 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx:      true,
 	}
 
 	tx, err := db.BeginRw(context.Background())

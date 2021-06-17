@@ -31,6 +31,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/bitutil"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/log"
 )
@@ -351,6 +352,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 	var progress uint64
 	for i := 0; i < threads; i++ {
 		go func(id int) {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			defer pend.Done()
 
 			// Create a hasher to reuse between invocations

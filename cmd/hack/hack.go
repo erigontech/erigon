@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -43,7 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 )
 
 var (
@@ -344,25 +344,6 @@ func bucketStats(chaindata string) error {
 
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 	switch kv := ethDb.(type) {
-	case *ethdb.LmdbKV:
-		type LmdbStat interface {
-			BucketStat(name string) (*lmdb.Stat, error)
-		}
-		if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
-			for _, bucket := range bucketList {
-				bs, statErr := tx.(LmdbStat).BucketStat(bucket)
-				tool.Check(statErr)
-				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
-					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
-			}
-
-			bs, statErr := tx.(LmdbStat).BucketStat("freelist")
-			tool.Check(statErr)
-			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
-			return nil
-		}); err != nil {
-			panic(err)
-		}
 	case *ethdb.MdbxKV:
 		type MdbxStat interface {
 			BucketStat(name string) (*mdbx.Stat, error)
@@ -770,33 +751,35 @@ func printBranches(block uint64) {
 }
 
 func readAccount(chaindata string, account common.Address) error {
-	db := ethdb.MustOpen(chaindata)
+	db := ethdb.MustOpenKV(chaindata)
 	defer db.Close()
-	var a accounts.Account
-	ok, err := rawdb.PlainReadAccount(db, account, &a)
+
+	tx, txErr := db.BeginRo(context.Background())
+	if txErr != nil {
+		return txErr
+	}
+	defer tx.Rollback()
+
+	a, err := state.NewPlainStateReader(tx).ReadAccountData(account)
 	if err != nil {
 		return err
-	} else if !ok {
+	} else if a == nil {
 		return fmt.Errorf("acc not found")
 	}
 	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
-	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.PlainStateBucket)
-		if err != nil {
-			return err
-		}
-		for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
-			if e != nil {
-				return e
-			}
-			if !bytes.HasPrefix(k, account.Bytes()) {
-				break
-			}
-			fmt.Printf("%x => %x\n", k, v)
-		}
-		return nil
-	}); err != nil {
+
+	c, err := tx.Cursor(dbutils.PlainStateBucket)
+	if err != nil {
 		return err
+	}
+	for k, v, e := c.Seek(account.Bytes()); k != nil && e == nil; k, v, e = c.Next() {
+		if e != nil {
+			return e
+		}
+		if !bytes.HasPrefix(k, account.Bytes()) {
+			break
+		}
+		fmt.Printf("%x => %x\n", k, v)
 	}
 	return nil
 }
@@ -1207,10 +1190,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func dumpAddresses(chaindata string) error {
+func dumpState(chaindata string) error {
 	db := ethdb.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("addresses")
+	f, err := os.Create("statedump")
 	if err != nil {
 		return err
 	}
@@ -1219,20 +1202,34 @@ func dumpAddresses(chaindata string) error {
 	defer w.Flush()
 	stAccounts := 0
 	stStorage := 0
+	var varintBuf [10]byte // Buffer for varint number
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.PlainStateBucket)
 		if err != nil {
 			return err
 		}
-		k, _, e := c.First()
-		for ; k != nil && e == nil; k, _, e = c.Next() {
+		k, v, e := c.First()
+		for ; k != nil && e == nil; k, v, e = c.Next() {
+			keyLen := binary.PutUvarint(varintBuf[:], uint64(len(k)))
+			if _, err = w.Write(varintBuf[:keyLen]); err != nil {
+				return err
+			}
+			if _, err = w.Write([]byte(k)); err != nil {
+				return err
+			}
+			valLen := binary.PutUvarint(varintBuf[:], uint64(len(v)))
+			if _, err = w.Write(varintBuf[:valLen]); err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				if _, err = w.Write(v); err != nil {
+					return err
+				}
+			}
 			if len(k) > 28 {
 				stStorage++
 			} else {
 				stAccounts++
-				if _, err1 := w.Write(k[:20]); err1 != nil {
-					return err1
-				}
 			}
 			if (stStorage+stAccounts)%100000 == 0 {
 				fmt.Printf("State records: %d\n", stStorage+stAccounts)
@@ -1661,7 +1658,7 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	c, err := tx.(ethdb.HasTx).Tx().Cursor(dbutils.BlockBodyPrefix)
+	c, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {
 		return err
 	}
@@ -1673,21 +1670,8 @@ func extractBodies(chaindata string, block uint64) error {
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
-		b, err := rlp.EncodeToBytes(body)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Body %d %x: %x\n", blockNumber, blockHash, b)
-		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
-		b, err = rlp.EncodeToBytes(header)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Header %d %x: %x\n", blockNumber, blockHash, b)
-		if blockNumber > block+5 {
-			break
-		}
+		_, baseTxId, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, blockNumber)
+		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
 	}
 	return nil
 }
@@ -1803,6 +1787,93 @@ func readCallTraces(chaindata string, block uint64) error {
 		//fmt.Printf("%x: %d\n", k, bm.ToArray())
 	}
 	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func fixTd(chaindata string) error {
+	kv := ethdb.MustOpenKV(chaindata)
+	defer kv.Close()
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c, err1 := tx.RwCursor(dbutils.HeadersBucket)
+	if err1 != nil {
+		return err1
+	}
+	defer c.Close()
+	var k, v []byte
+	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
+		hv, herr := tx.GetOne(dbutils.HeaderTDBucket, k)
+		if herr != nil {
+			return herr
+		}
+		if hv == nil {
+			fmt.Printf("Missing TD record for %x, fixing\n", k)
+			var header types.Header
+			if err = rlp.DecodeBytes(v, &header); err != nil {
+				return fmt.Errorf("decoding header from %x: %v", v, err)
+			}
+			if header.Number.Uint64() == 0 {
+				continue
+			}
+			var parentK [40]byte
+			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
+			copy(parentK[8:], header.ParentHash[:])
+			var parentTdRec []byte
+			if parentTdRec, err = tx.GetOne(dbutils.HeaderTDBucket, parentK[:]); err != nil {
+				return fmt.Errorf("reading parentTd Rec for %d: %v", header.Number.Uint64(), err)
+			}
+			var parentTd big.Int
+			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
+				return fmt.Errorf("decoding parent Td record for block %d, from %x: %v", header.Number.Uint64(), parentTdRec, err)
+			}
+			var td big.Int
+			td.Add(&parentTd, header.Difficulty)
+			var newHv []byte
+			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
+				return fmt.Errorf("encoding td record for block %d: %v", header.Number.Uint64(), err)
+			}
+			if err = tx.Put(dbutils.HeaderTDBucket, k, newHv); err != nil {
+				return err
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func advanceExec(chaindata string) error {
+	db := ethdb.MustOpenKV(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stageExec, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage exec", "progress", stageExec)
+	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec+1); err != nil {
+		return err
+	}
+	stageExec, err = stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage exec", "changed to", stageExec)
+	if err = stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 	return nil
@@ -1941,11 +2012,17 @@ func main() {
 	case "snapSizes":
 		err = snapSizes(*chaindata)
 
-	case "dumpAddresses":
-		err = dumpAddresses(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata)
 
 	case "readCallTraces":
 		err = readCallTraces(*chaindata, uint64(*block))
+
+	case "fixTd":
+		err = fixTd(*chaindata)
+
+	case "advanceExec":
+		err = advanceExec(*chaindata)
 	}
 
 	if err != nil {

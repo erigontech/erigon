@@ -3,7 +3,6 @@ package commands
 import (
 	"path"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/debug"
@@ -49,7 +48,7 @@ func openDB(path string, applyMigrations bool) ethdb.RwKV {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = ethdb.NewObjectDatabase(openKV(label, path, true))
-			if err := migrations.NewMigrator(label).Apply(db, datadir, database != "lmdb"); err != nil {
+			if err := migrations.NewMigrator(label).Apply(db, datadir); err != nil {
 				panic(err)
 			}
 			db.Close()
@@ -61,24 +60,6 @@ func openDB(path string, applyMigrations bool) ethdb.RwKV {
 }
 
 func openKV(label ethdb.Label, path string, exclusive bool) ethdb.RwKV {
-	if database == "lmdb" {
-		opts := ethdb.NewLMDB().Path(path)
-		if exclusive {
-			opts = opts.Exclusive()
-		}
-		if mapSizeStr != "" {
-			var mapSize datasize.ByteSize
-			must(mapSize.UnmarshalText([]byte(mapSizeStr)))
-			opts = opts.MapSize(mapSize)
-		}
-		if databaseVerbosity != -1 {
-			opts = opts.DBVerbosity(ethdb.DBVerbosityLvl(databaseVerbosity))
-		}
-		kv := opts.MustOpen()
-		metrics.AddCallback(kv.CollectMetrics)
-		return kv
-	}
-
 	opts := ethdb.NewMDBX().Path(path).Label(label)
 	if exclusive {
 		opts = opts.Exclusive()

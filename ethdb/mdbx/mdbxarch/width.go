@@ -1,4 +1,4 @@
-// Package lmdbarch contains some architecture detection constants.  The
+// Package mdbxarch contains some architecture detection constants. The
 // primary reason the package exists is because the constant definitions are
 // scary and some will not pass linters.
 package mdbxarch

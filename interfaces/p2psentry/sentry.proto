@@ -120,7 +120,7 @@ message SetStatusReply {
 }
 
 message MessagesRequest {
- repeated MessageId ids = 1;
+  repeated MessageId ids = 1;
 }
 
 service Sentry {

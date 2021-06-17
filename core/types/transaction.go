@@ -53,6 +53,7 @@ type Transaction interface {
 	GetNonce() uint64
 	GetPrice() *uint256.Int
 	GetTip() *uint256.Int
+	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
 	GetGas() uint64
@@ -489,7 +490,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		m.gasPrice.Set(gasPrice)
 	}
 	if tip != nil {
-		m.feeCap.Set(tip)
+		m.tip.Set(tip)
 	}
 	if feeCap != nil {
 		m.feeCap.Set(feeCap)

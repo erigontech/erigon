@@ -25,14 +25,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/internal/flags"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/urfave/cli"
 )
 
-var gitCommit = "" // Git SHA1 commit hash of the release (set via linker flags)
-var gitDate = ""
-
 var (
-	app = flags.NewApp(gitCommit, gitDate, "the evm command line interface")
+	app = flags.NewApp(params.GitCommit, "", "the evm command line interface")
 
 	DebugFlag = cli.BoolFlag{
 		Name:  "debug",

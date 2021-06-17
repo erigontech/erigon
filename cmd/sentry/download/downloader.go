@@ -117,6 +117,11 @@ func RecvUploadMessage(ctx context.Context,
 	}
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
@@ -206,6 +211,11 @@ func RecvMessage(
 
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
@@ -636,7 +646,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		return fmt.Errorf("send header response: %v", err)
+		return fmt.Errorf("send header response 66: %v", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
@@ -671,7 +681,7 @@ func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		return fmt.Errorf("send header response: %v", err)
+		return fmt.Errorf("send header response 65: %v", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
