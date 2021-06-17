@@ -17,6 +17,7 @@ import (
 
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
+// 2.1.0 - add NetPeerCount function
 var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 type EthBackendServer struct {
