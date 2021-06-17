@@ -131,20 +131,12 @@ details about dealing with such situations.
 package mdbx
 
 /*
-#cgo !windows CFLAGS: -O2 -g -Wno-deprecated-declarations -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
+#cgo !windows CFLAGS: -O2 -g -DMDBX_BUILD_FLAGS='' -Wall -Werror -Wextra -Wpedantic -Wno-deprecated-declarations -fPIC -fvisibility=hidden -pthread -Wno-error=attributes -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 #cgo windows CFLAGS: -O2 -g -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 
-#cgo !windows LDFLAGS: ${SRCDIR}/dist/mdbx-static.o
 #cgo windows LDFLAGS: -L. -L./dist -L"${SRCDIR}" -llibmdbx
 */
 import "C"
-import (
-	"github.com/ledgerwatch/erigon/ethdb/mdbx/dist"
-)
-
-func init() {
-	_ = dist.GoModHack
-}
 
 /*
  Expiremental try to compile mdbx by cgo
