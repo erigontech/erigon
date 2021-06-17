@@ -138,6 +138,13 @@ package mdbx
 #cgo windows LDFLAGS: -L. -L./dist -L"${SRCDIR}" -llibmdbx
 */
 import "C"
+import (
+	"github.com/ledgerwatch/erigon/ethdb/mdbx/dist"
+)
+
+func init() {
+	_ = dist.GoModHack
+}
 
 /*
  Expiremental try to compile mdbx by cgo
