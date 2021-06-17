@@ -133,17 +133,8 @@ package mdbx
 /*
 #cgo !windows CFLAGS: -O2 -g -DMDBX_BUILD_FLAGS='' -Wall -Werror -Wextra -Wpedantic -Wno-deprecated-declarations -fPIC -fvisibility=hidden -pthread -Wno-error=attributes -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 #cgo windows CFLAGS: -O2 -g -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
-
-#cgo windows LDFLAGS: -L. -L./dist -L"${SRCDIR}" -llibmdbx
 */
 import "C"
-
-/*
- Expiremental try to compile mdbx by cgo
- #define MDBX_CONFIG_H "config.h"
- #cgo CFLAGS: -DNDEBUG=1 -ULIBMDBX_EXPORTS -std=gnu11 -W -Wall -Werror -Wextra -Wpedantic -Wno-deprecated-declarations -pthread -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-parameter -Wno-format-extra-args -Wbad-function-cast -Wno-missing-field-initializers -O2 -g
- //cc -ffunction-sections
-*/
 
 // Version return the major, minor, and patch version numbers of the LMDB C
 // library and a string representation of the version.

@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include "_cgo_export.h"
 #include "mdbxgo.h"
-#include "mdbx.h"
+#include "dist/mdbx.h"
 
 #define MDBXGO_SET_VAL(val, size, data) \
     *(val) = (MDBX_val){.iov_len = (size), .iov_base = (data)}
