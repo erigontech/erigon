@@ -69,7 +69,8 @@ jobs:
           cmake -G "MinGW Makefiles" . -D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF -D CMAKE_C_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function" -D CMAKE_CXX_FLAGS:STRING="-Wno-unused-variable -Wno-unused-parameter -Wno-unused-function"
           cmake --build .
           cp libmdbx.dll (Join-Path $env:SystemRoot system32)
-          go build ./cmd/...
+          go mod download
+          go mod vendor
 
   docker:
     runs-on: ubuntu-18.04
