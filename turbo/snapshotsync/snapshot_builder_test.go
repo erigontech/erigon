@@ -35,7 +35,7 @@ import (
 //After 3 seconds, we rollback Ro tx, and migration must continue without any errors.
 // Step 5. We need to check that the new snapshot contains headers from 0 to 20, the headers bucket in the main database is empty,
 // it started seeding a new snapshot and removed the old one.
-func TestSnapshotMigratorStage(t *testing.T) {
+func TestSnapshotMigratorStageAsync(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
@@ -1433,12 +1433,12 @@ func TestPruneBlocks(t *testing.T) {
 	}
 
 	bodySnapshotPath := path.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath, true)
+	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	readTX.Rollback()
-	kvSnapshot, err := OpenBodiesSnapshot(bodySnapshotPath, true)
+	kvSnapshot, err := OpenBodiesSnapshot(bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1529,13 +1529,13 @@ func TestPruneBlocks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath, true)
+	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	readTX.Rollback()
 
-	kvSnapshot, err = OpenBodiesSnapshot(bodySnapshotPath, true)
+	kvSnapshot, err = OpenBodiesSnapshot(bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1667,7 +1667,6 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
 		replaceChan:  make(chan struct{}),
-		useMdbx:      true,
 	}
 
 	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()

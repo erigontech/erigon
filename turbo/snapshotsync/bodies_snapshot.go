@@ -94,29 +94,15 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 	return nil
 }
 
-func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string, useMdbx bool) error {
-	var kv ethdb.RwKV
-	var err error
-	if useMdbx {
-		kv, err = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-				dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
-			}
-		}).Path(snapshotPath).Open()
-		if err != nil {
-			return err
+func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string) error {
+	kv, err := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
+			dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
 		}
-	} else {
-		kv, err = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-				dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
-			}
-		}).Path(snapshotPath).Open()
-		if err != nil {
-			return err
-		}
+	}).Path(snapshotPath).Open()
+	if err != nil {
+		return err
 	}
 
 	defer kv.Close()
@@ -132,22 +118,13 @@ func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string, 
 	return writeTX.Commit()
 }
 
-func OpenBodiesSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
-	if useMdbx {
-		return ethdb.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-				dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
-			}
-		}).Open()
-	} else {
-		return ethdb.NewLMDB().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-				dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
-			}
-		}).Open()
-	}
+func OpenBodiesSnapshot(dbPath string) (ethdb.RoKV, error) {
+	return ethdb.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
+			dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
+		}
+	}).Readonly().Open()
 }
 
 func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err error) {

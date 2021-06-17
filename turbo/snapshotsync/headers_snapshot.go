@@ -13,33 +13,21 @@ import (
 	"time"
 )
 
-func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64, snapshotPath string, useMdbx bool) error {
+func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64, snapshotPath string) error {
 	// remove created snapshot if it's not saved in main db(to avoid append error)
 	err := os.RemoveAll(snapshotPath)
 	if err != nil {
 		return err
 	}
-	var snKV ethdb.RwKV
-	if useMdbx {
-		snKV, err = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Path(snapshotPath).Open()
-		if err != nil {
-			return err
-		}
-	} else {
-		snKV, err = ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Path(snapshotPath).Open()
-		if err != nil {
-			return err
-		}
-	}
 
+	snKV, err := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+		}
+	}).Path(snapshotPath).Open()
+	if err != nil {
+		return err
+	}
 	sntx, err := snKV.BeginRw(context.Background())
 	if err != nil {
 		return fmt.Errorf("begin err: %w", err)
@@ -95,20 +83,12 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, 
 	return nil
 }
 
-func OpenHeadersSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
-	if useMdbx {
-		return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Readonly().Path(dbPath).Open()
-	} else {
-		return ethdb.NewLMDB().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-			}
-		}).Readonly().Path(dbPath).Open()
-	}
+func OpenHeadersSnapshot(dbPath string) (ethdb.RoKV, error) {
+	return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+		}
+	}).Readonly().Path(dbPath).Open()
 }
 
 func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {

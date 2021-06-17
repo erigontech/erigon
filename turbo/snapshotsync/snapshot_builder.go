@@ -12,13 +12,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator {
@@ -82,14 +82,14 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 	case "headers":
 		initialStages = []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
-				return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath, sm.useMdbx)
+				return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath)
 			},
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 				//replace snapshot
 				if _, ok := db.(ethdb.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
 				}
-				snapshotKV, err := OpenHeadersSnapshot(snapshotPath, sm.useMdbx)
+				snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
 				if err != nil {
 					return err
 				}
@@ -101,14 +101,14 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 	case "bodies":
 		initialStages = []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
-				return CreateBodySnapshot(tx, toBlock, snapshotPath, sm.useMdbx)
+				return CreateBodySnapshot(tx, toBlock, snapshotPath)
 			},
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 				//replace snapshot
 				if _, ok := db.(ethdb.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
 				}
-				snapshotKV, err := OpenBodiesSnapshot(snapshotPath, sm.useMdbx)
+				snapshotKV, err := OpenBodiesSnapshot(snapshotPath)
 				if err != nil {
 					return err
 				}
