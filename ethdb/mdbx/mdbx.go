@@ -135,7 +135,6 @@ package mdbx
 #cgo windows CFLAGS: -O2 -g -DMDBX_BUILD_FLAGS='' -fvisibility=hidden -ffast-math -fdata-sections -fexceptions -fno-common -ggdb -W -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 
 #cgo windows LDFLAGS: -lntdll
-#cgo solaris LDFLAGS: -lkstat
 #cgo linux !darwin !openbsd LDFLAGS: -lrt
 
 */
