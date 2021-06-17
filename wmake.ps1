@@ -20,7 +20,7 @@ Param(
     HelpMessage="Enter the build target")]
     [Alias("target")]
     [AllowEmptyString()]
-    [ValidateSet("all", "clean", "erigon","rpcdaemon","rpctest", "hack", "state", "pics", "integration", "db-tools", "sentry", "evm", "seeder", "sndownloader", "tracker")]
+    [ValidateSet("all", "clean", "test", "erigon","rpcdaemon","rpctest", "hack", "state", "integration", "db-tools", "sentry")]
     [string]$BuildTarget="erigon"
 )
 
@@ -31,7 +31,7 @@ Param(
 $headerText = @"
 
  ------------------------------------------------------------------------------
-  Erigon's make.ps1 : Selected target $($BuildTarget)
+  Erigon's wmake.ps1 : Selected target $($BuildTarget)
  ------------------------------------------------------------------------------
  
 "@
@@ -293,7 +293,7 @@ $MyContext.PSVer      = [int]$PSVersionTable.PSVersion.Major
 ## Test Git is installed
 if(!(Test-Git-Installed)) {
     Write-Host $gitErrorText
-    return
+    exit 1
 }
 Get-Command git.exe | Out-Null
 if (!($?)) {
@@ -306,13 +306,13 @@ if (!($?)) {
  environment variable.
 
 "@
-    return
+    exit 1
 }
 
 ## GO language is installed
 if(!(Test-GO-Installed)) {
     Write-Host $goErrorText
-    return
+    exit 1
 }
 Get-Command go.exe | Out-Null
 if (!($?)) {
@@ -325,7 +325,7 @@ if (!($?)) {
  environment variable.
 
 "@
-    return
+    exit 1
 }
 
 # ## Administrator Privileges
@@ -351,7 +351,7 @@ if(!$?) {
   Check your permissions and retry.
 
 "@
-   return
+    exit 1
 }
 
 Write-Host @"
@@ -365,7 +365,7 @@ Write-Host @"
 ## Choco components for building db-tools
 if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
     if(!(Test-choco-Installed)) {
-        return
+        exit 1
     }
 
     # Enter MDBX directory and build libmdbx.dll
@@ -377,7 +377,7 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
        Are you sure you have cloned the repository properly ?
      
 "@
-        return
+    exit 1
      }
      
     Write-Host " Building db-tools ..."
@@ -392,7 +392,7 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
     -D MDBX_FORCE_ASSERTIONS:INT=0
     if($LASTEXITCODE) {
         Write-Host "An error has occurred while configuring MDBX"
-        return
+        exit $LASTEXITCODE
     }    
 
     cmake --build .
@@ -403,7 +403,7 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
                      -or !(Test-Path "mdbx_load.exe" -PathType leaf) `
                      -or !(Test-Path "mdbx_drop.exe" -PathType leaf)) {
         Write-Host "An error has occurred while building MDBX tools"
-        return
+        exit $LASTEXITCODE
     }
 
     Set-Location $MyContext.Directory
@@ -426,6 +426,21 @@ if ($BuildTarget -eq "clean") {
 
     # Clear go cache
     go.exe clean -cache
+
+} elseif ($BuildTarget -eq "test") {
+    
+    Write-Host " Running tests ..."
+    $env:GODEBUG="cgocheck=0"
+    go test ./... -p 2 --timeout 30m
+    $TestCommand = "go test ./... -p 2 --timeout 30m"
+    $TestCommand += ';$?'
+    $success = Invoke-Expression -Command $TestCommand
+    if (-not $success) {
+        Write-Host " ERROR : Tests failed"
+        exit 1
+    } else {
+        Write-Host "`n Tests completed"
+    }
 
 } else {
 
@@ -487,54 +502,6 @@ if ($BuildTarget -eq "clean") {
         $binaries += $binary
     }
     
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "pics") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="pics.exe" 
-            Source="./cmd/pics"
-        }
-        $binaries += $binary
-    }
-
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "cons") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="cons.exe" 
-            Source="./cmd/cons"
-        }
-        $binaries += $binary
-    }
-    
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "evm") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="evm.exe" 
-            Source="./cmd/evm"
-        }
-        $binaries += $binary
-    }
-
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "seeder") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="seeder.exe" 
-            Source="./cmd/snapshots/seeder"
-        }
-        $binaries += $binary
-    }
-
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "downloader") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="downloader.exe" 
-            Source="./cmd/snapshots/downloader"
-        }
-        $binaries += $binary
-    }
-    
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "tracker") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="tracker.exe" 
-            Source="./cmd/snapshots/tracker"
-        }
-        $binaries += $binary
-    }
-
     if ($binaries.Count -gt 0) {
         $binaries | ForEach-Object {
             Write-Host "`n Building $($_.Executable)"
@@ -544,7 +511,7 @@ if ($BuildTarget -eq "clean") {
             $success = Invoke-Expression -Command $BuildCommand
             if (-not $success) {
                 Write-Host " ERROR : Could not build $($_.Executable)"
-                return
+                exit 1
             } else {
                 Write-Host "`n Built $($_.Executable). Run $($outExecutable) to launch"
             }
