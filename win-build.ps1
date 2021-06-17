@@ -14,6 +14,29 @@
    limitations under the License.
 #>
 
+
+Param(
+    [Parameter(Position=0, 
+    HelpMessage="Enter the build target")]
+    [Alias("target")]
+    [AllowEmptyString()]
+    [ValidateSet("all", "clean", "erigon","rpcdaemon","rpctest", "hack", "state", "pics", "integration", "db-tools", "sentry", "evm", "seeder", "sndownloader", "tracker")]
+    [string]$BuildTarget="erigon"
+)
+
+# ====================================================================
+# Messages texts
+# ====================================================================
+
+$headerText = @"
+
+ ------------------------------------------------------------------------------
+  Erigon's make.ps1 : Selected target $($BuildTarget)
+ ------------------------------------------------------------------------------
+ 
+"@
+
+
 $gitErrorText = @"
 
  Requirement Error.
@@ -65,16 +88,9 @@ $privilegeErrorText = @"
 
 "@
 
-$Error.Clear()
-$ErrorActionPreference = "SilentlyContinue"
-
-Set-Variable -Name "MyContext" -Value ([hashtable]::Synchronized(@{})) -Scope Script
-$MyContext.Name       = $MyInvocation.MyCommand.Name
-$MyContext.Definition = $MyInvocation.MyCommand.Definition
-$MyContext.Directory  = (Split-Path (Resolve-Path $MyInvocation.MyCommand.Definition) -Parent)
-$MyContext.StartDir   = (Get-Location -PSProvider FileSystem).ProviderPath
-$MyContext.WinVer     = (Get-WmiObject Win32_OperatingSystem).Version.Split(".")
-$MyContext.PSVer      = [int]$PSVersionTable.PSVersion.Major
+# ====================================================================
+# Functions
+# ====================================================================
 
 # -----------------------------------------------------------------------------
 # Function 		: Test-Administrator
@@ -91,10 +107,10 @@ function Test-Administrator {
 } 
 
 # -----------------------------------------------------------------------------
-# Function 		: Test-Valid-Env
+# Function 		: Get-Env
 # -----------------------------------------------------------------------------
-# Description	: Checks the named variable provided is present in env:
-# Returns       : $true / $false
+# Description	: Retrieves a value from a provided named environment var
+# Returns       : $null / var value (if exists)
 # -----------------------------------------------------------------------------
 function Get-Env {
     param ([string]$varName = $(throw "A variable name must be provided"))
@@ -177,8 +193,103 @@ function Test-Git-Installed {
     Write-Output $Private:result
 }
 
-# Test requirements
+# -----------------------------------------------------------------------------
+# Function 		: Test-Choco-Installed
+# -----------------------------------------------------------------------------
+# Description	: Checks whether or not chocolatey is installed
+# Returns       : $true / $false
+# -----------------------------------------------------------------------------
+function Test-Choco-Installed {
 
+    ## Test Chocolatey Install
+    $script:chocolateyPath = Get-Env "chocolateyInstall"
+    if(-not $chocolateyPath) {
+        Write-Host $chocolateyErrorText
+        return $false
+    }
+    
+    # Test Chocolatey bin directory is actually in %PATH%
+    $script:chocolateyBinPath = (Join-Path $chocolateyPath "bin")
+    $script:chocolateyBinPathInPath = $false
+    $private:pathExpanded = $env:Path.Split(";")
+    for($i=0; $i -lt $pathExpanded.Count; $i++){
+        $pathItem = $pathExpanded[$i]
+        if($pathItem -ieq $chocolateyBinPath){
+            Write-Host " Found $($chocolateyBinPath) in PATH"
+            $chocolateyBinPathInPath = $true
+        }
+    }
+    if(!$chocolateyBinPathInPath) {
+        Write-Host $chocolateyPathErrorText
+        Write-Host $chocolateyBinPath
+        return $false
+    }
+    
+    ## Test Chocolatey Components
+    $chocolateyHasCmake = $false
+    $chocolateyHasMake = $false
+    $chocolateyHasMingw = $false
+    $chocolateyComponents = @(clist -l)
+
+    for($i=0; $i -lt $chocolateyComponents.Count; $i++){
+        $item = $chocolateyComponents[$i]
+        if($item -imatch "^cmake\ [0-9]") {
+            $chocolateyHasCmake = $true
+            Write-Host " Found Chocolatey component $($item)"
+        }
+        if($item -imatch "^make\ [0-9]") {
+            $chocolateyHasMake = $true
+            Write-Host " Found Chocolatey component $($item)"
+        }
+        if($item -imatch "^mingw\ [0-9]") {
+            $chocolateyHasMingw = $true
+            Write-Host " Found Chocolatey component $($item)"
+        }
+    }
+
+    If(!$chocolateyHasCmake -or !$chocolateyHasMake -or !$chocolateyHasMingw) {
+        Write-Host $chocolateyErrorText
+        return $false
+    }
+
+    Get-Command cmake.exe | Out-Null
+    if (!($?)) {
+        Write-Host @"
+    
+     Error !
+     Though chocolatey cmake installation is found I could not get
+     the cmake binary executable. Ensure cmake installation
+     directory is properly inserted into your PATH
+     environment variable.
+     (Usually $(Join-Path $env:ProgramFiles "Cmake\bin"))
+    
+"@
+        return $false
+    }
+    
+    return $true
+}
+
+# ====================================================================
+# Main
+# ====================================================================
+
+$Error.Clear()
+$ErrorActionPreference = "SilentlyContinue"
+
+Write-Host $headerText
+
+Set-Variable -Name "MyContext" -Value ([hashtable]::Synchronized(@{})) -Scope Script
+$MyContext.Name       = $MyInvocation.MyCommand.Name
+$MyContext.Definition = $MyInvocation.MyCommand.Definition
+$MyContext.Directory  = (Split-Path (Resolve-Path $MyInvocation.MyCommand.Definition) -Parent)
+$MyContext.StartDir   = (Get-Location -PSProvider FileSystem).ProviderPath
+$MyContext.WinVer     = (Get-WmiObject Win32_OperatingSystem).Version.Split(".")
+$MyContext.PSVer      = [int]$PSVersionTable.PSVersion.Major
+
+# ====================================================================
+# ## Test requirements
+# ====================================================================
 ## Test Git is installed
 if(!(Test-Git-Installed)) {
     Write-Host $gitErrorText
@@ -217,127 +328,11 @@ if (!($?)) {
     return
 }
 
-## Test Chocolatey Install
-$chocolateyPath = Get-Env "chocolateyInstall"
-if(-not $chocolateyPath) {
-    Write-Host $chocolateyErrorText
-    return
-}
-
-# Test Chocolatey bin directory is actually in %PATH%
-$chocolateyBinPath = (Join-Path $chocolateyPath "bin")
-$chocolateyBinPathInPath = $false
-$pathExpanded = $env:Path.Split(";")
-for($i=0; $i -lt $pathExpanded.Count; $i++){
-    $pathItem = $pathExpanded[$i]
-    if($pathItem -ieq $chocolateyBinPath){
-        Write-Host " Found $($chocolateyBinPath) in PATH"
-        $chocolateyBinPathInPath = $true
-    }
-}
-if(!$chocolateyBinPathInPath) {
-    Write-Host $chocolateyPathErrorText
-    Write-Host $chocolateyBinPath
-    return
-}
-
-## Test Chocolatey Components
-$chocolateyHasCmake = $false
-$chocolateyHasMake = $false
-$chocolateyHasMingw = $false
-$chocolateyComponents = @(clist -l)
-for($i=0; $i -lt $chocolateyComponents.Count; $i++){
-    $item = $chocolateyComponents[$i]
-    if($item -imatch "^cmake\ [0-9]") {
-        $chocolateyHasCmake = $true
-        Write-Host " Found Chocolatey component $($item)"
-    }
-    if($item -imatch "^make\ [0-9]") {
-        $chocolateyHasMake = $true
-        Write-Host " Found Chocolatey component $($item)"
-    }
-    if($item -imatch "^mingw\ [0-9]") {
-        $chocolateyHasMingw = $true
-        Write-Host " Found Chocolatey component $($item)"
-    }
-}
-If(!$chocolateyHasCmake -or !$chocolateyHasMake -or !$chocolateyHasMingw) {
-    Write-Host $chocolateyErrorText
-    return
-}
-
-Get-Command cmake.exe | Out-Null
-if (!($?)) {
-    Write-Host @"
-
- Error !
- Though chocolatey cmake installation is found I could not get
- the cmake binary executable. Ensure cmake installation
- directory is properly inserted into your PATH
- environment variable.
- (Usually $(Join-Path $env:ProgramFiles "Cmake\bin"))
-
-"@
-    return
-}
-
-## Administrator Privileges
-if (!(Test-Administrator)) {
-   Write-Host $privilegeErrorText
-   return
-}
-
-# Enter MDBX directory and build libmdbx.dll
-Set-Location (Join-Path $MyContext.Directory "ethdb\mdbx\dist")
-
-# Delete CMakeCache.txt and CMakeFiles directory if they exist
-if (Test-Path "CMakeCache.txt" -PathType Leaf) {
-    Write-Host " Removing MDBX CMakeCache.txt ..."
-    Remove-Item -Path "CMakeCache.txt"
-}
-if (Test-Path "CMakeFiles") {
-    Write-Host " Removing MDBX CMakeFiles ..."
-    Remove-Item -Path "CMakeFiles" -Recurse -Force
-}
-
-Write-Host " Building libmdbx.dll ..."
-cmake -G "MinGW Makefiles" . `
--D CMAKE_MAKE_PROGRAM:PATH=""$(Join-Path $chocolateyBinPath "make.exe")"" `
--D CMAKE_C_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "gcc.exe")"" `
--D CMAKE_CXX_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "g++.exe")"" `
--D CMAKE_BUILD_TYPE:STRING="Release" `
--D MDBX_BUILD_SHARED_LIBRARY:BOOL=ON `
--D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF `
--D MDBX_FORCE_ASSERTIONS:INT=0
-
-if($LASTEXITCODE) {
-    Write-Host "An error has occurred while configuring MDBX dll"
-    return
-}
-cmake --build .
-if($LASTEXITCODE -or !(Test-Path "libmdbx.dll" -PathType leaf)) {
-    Write-Host "An error has occurred while building MDBX dll or libmdbx.dll cannot be found"
-    return
-}
-
-# Copy libmdbx.dll into %windir%\System32 directory
-# Note! default behavior is to overwrite
-Copy-Item libmdbx.dll (Join-Path $env:SystemRoot system32)
-if(!$?) {
-   Write-Host @" 
-
-  Error ! Could not copy libmdbx.dll to $(Join-Path $env:SystemRoot system32)
-  What you can try : 
-  - Check your permissions to directory
-  - Check there's an already existing libmdbx.dll file
-  - Check no instance of Erigon with mdbx is currently running
-
-"@
-   return
-}
-
-# Return to source folder
-Set-Location $MyContext.Directory
+# ## Administrator Privileges
+# if (!(Test-Administrator)) {
+#    Write-Host $privilegeErrorText
+#    return
+# }
 
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
@@ -348,38 +343,214 @@ $Erigon.Build   = "go build -v -trimpath -ldflags ""-X github.com/ledgerwatch/er
 $Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:GO111MODULE = "on"
 
-# Remove previous 'tg.exe' executable (if present)
-if (Test-Path -Path (Join-Path $Erigon.BinPath "tg.exe") -PathType Leaf) {
-    Remove-Item -Path (Join-Path $Erigon.BinPath "tg.exe")
+New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
+if(!$?) {
+   Write-Host @" 
+
+  Error ! You don't have write access to current folder.
+  Check your permissions and retry.
+
+"@
+   return
 }
 
-$binaries = @(
-    [pscustomobject]@{Executable="erigon.exe";Source="./cmd/erigon"}
-    [pscustomobject]@{Executable="rpcdaemon.exe";Source="./cmd/rpcdaemon"}
-    [pscustomobject]@{Executable="rpctest.exe";Source="./cmd/rpctest"}
-    [pscustomobject]@{Executable="integration.exe";Source="./cmd/integration"}
-    [pscustomobject]@{Executable="state.exe";Source="./cmd/state"}
-    [pscustomobject]@{Executable="hack.exe";Source="./cmd/hack"}
-    [pscustomobject]@{Executable="sentry.exe";Source="./cmd/sentry"}
-    [pscustomobject]@{Executable="pics.exe";Source="./cmd/pics"}
-    [pscustomobject]@{Executable="cons.exe";Source="./cmd/cons"}
-    [pscustomobject]@{Executable="evm.exe";Source="./cmd/evm"}
-    [pscustomobject]@{Executable="seeder.exe";Source="./cmd/snapshots/seeder"}
-    [pscustomobject]@{Executable="sndownloader.exe";Source="./cmd/snapshots/downloader"}
-    [pscustomobject]@{Executable="tracker.exe";Source="./cmd/snapshots/tracker"}
-)
+Write-Host @"
 
-$binaries | ForEach-Object {
-    Write-Host " Building $($_.Executable)"
-    $outExecutable = [string](Join-Path $Erigon.BinPath $_.Executable)
-    $BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" $($_.Source)"
-    $BuildCommand += ';$?'
-    $success = Invoke-Expression -Command $BuildCommand
-    if (-not $success) {
-        Write-Host " ERROR : Could not build $($_.Executable)"
+ Erigon Branch : $($Erigon.Branch)
+ Erigon Tag    : $($Erigon.Tag)
+ Erigon Commit : $($Erigon.Commit)
+
+"@
+
+## Choco components for building db-tools
+if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
+    if(!(Test-choco-Installed)) {
         return
+    }
+
+    # Enter MDBX directory and build libmdbx.dll
+    Set-Location (Join-Path $MyContext.Directory "ethdb\mdbx\dist")
+    if(!$?) {
+        Write-Host @" 
+     
+       Error ! Can't locate ""ethdb\mdbx\dist"" folder
+       Are you sure you have cloned the repository properly ?
+     
+"@
+        return
+     }
+     
+    Write-Host " Building db-tools ..."
+
+    cmake -G "MinGW Makefiles" . `
+    -D CMAKE_MAKE_PROGRAM:PATH=""$(Join-Path $chocolateyBinPath "make.exe")"" `
+    -D CMAKE_C_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "gcc.exe")"" `
+    -D CMAKE_CXX_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "g++.exe")"" `
+    -D CMAKE_BUILD_TYPE:STRING="Release" `
+    -D MDBX_BUILD_SHARED_LIBRARY:BOOL=OFF `
+    -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF `
+    -D MDBX_FORCE_ASSERTIONS:INT=0
+    if($LASTEXITCODE) {
+        Write-Host "An error has occurred while configuring MDBX"
+        return
+    }    
+
+    cmake --build .
+    if($LASTEXITCODE -or !(Test-Path "mdbx_stat.exe" -PathType leaf) `
+                     -or !(Test-Path "mdbx_chk.exe" -PathType leaf) `
+                     -or !(Test-Path "mdbx_copy.exe" -PathType leaf) `
+                     -or !(Test-Path "mdbx_dump.exe" -PathType leaf) `
+                     -or !(Test-Path "mdbx_load.exe" -PathType leaf) `
+                     -or !(Test-Path "mdbx_drop.exe" -PathType leaf)) {
+        Write-Host "An error has occurred while building MDBX tools"
+        return
+    }
+
+    Set-Location $MyContext.Directory
+    # Eventually move all mdbx_*.exe to ./build/bin directory
+    Move-Item -Path "./ethdb/mdbx/dist/mdbx_*.exe" -Destination $Erigon.BinPath -Force
+
+}
+    
+if ($BuildTarget -eq "clean") {
+
+    Write-Host " Cleaning ..."
+
+    # Clean ./ethdb/mdbx/dist/mdbx_*.exe
+    Remove-Item -Path "./ethdb/mdbx/dist/mdbx_*.exe" -Force
+    Remove-Item -Path "./ethdb/mdbx/dist/CMakeCache.txt" -Force
+    Remove-Item -Path "./ethdb/mdbx/dist/CMakeFiles" -Recurse -Force
+
+    # Remove ./build/bin directory
+    Remove-Item -Path "./build" -Recurse -Force
+
+    # Clear go cache
+    go.exe clean -cache
+
+} else {
+
+    $binaries = @()
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "erigon") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="erigon.exe" 
+            Source="./cmd/erigon"
+        }
+        $binaries += $binary
+    }
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "rpcdaemon") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="rpcdaemon.exe" 
+            Source="./cmd/rpcdaemon"
+        }
+        $binaries += $binary
+    }
+    
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "rpctest") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="rpctest.exe" 
+            Source="./cmd/rpctest"
+        }
+        $binaries += $binary
+    }
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "integration") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="integration.exe" 
+            Source="./cmd/integration"
+        }
+        $binaries += $binary
+    }
+    
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "state") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="state.exe" 
+            Source="./cmd/state"
+        }
+        $binaries += $binary
+    }
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "hack") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="hack.exe" 
+            Source="./cmd/hack"
+        }
+        $binaries += $binary
+    }
+        
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "sentry") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="sentry.exe" 
+            Source="./cmd/sentry"
+        }
+        $binaries += $binary
+    }
+    
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "pics") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="pics.exe" 
+            Source="./cmd/pics"
+        }
+        $binaries += $binary
+    }
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "cons") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="cons.exe" 
+            Source="./cmd/cons"
+        }
+        $binaries += $binary
+    }
+    
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "evm") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="evm.exe" 
+            Source="./cmd/evm"
+        }
+        $binaries += $binary
+    }
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "seeder") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="seeder.exe" 
+            Source="./cmd/snapshots/seeder"
+        }
+        $binaries += $binary
+    }
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "downloader") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="downloader.exe" 
+            Source="./cmd/snapshots/downloader"
+        }
+        $binaries += $binary
+    }
+    
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "tracker") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="tracker.exe" 
+            Source="./cmd/snapshots/tracker"
+        }
+        $binaries += $binary
+    }
+
+    if ($binaries.Count -gt 0) {
+        $binaries | ForEach-Object {
+            Write-Host "`n Building $($_.Executable)"
+            $outExecutable = [string](Join-Path $Erigon.BinPath $_.Executable)
+            $BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" $($_.Source)"
+            $BuildCommand += ';$?'
+            $success = Invoke-Expression -Command $BuildCommand
+            if (-not $success) {
+                Write-Host " ERROR : Could not build $($_.Executable)"
+                return
+            } else {
+                Write-Host "`n Built $($_.Executable). Run $($outExecutable) to launch"
+            }
+        }
     }
 }
 
-# Eventually copy all mdbx_*.exe to ./build/bin directory
-Copy-Item -Path "./ethdb/mdbx/dist/mdbx_*.exe" -Destination $Erigon.BinPath -Force
+# Return to source folder
+Set-Location $MyContext.Directory
