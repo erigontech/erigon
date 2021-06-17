@@ -1234,6 +1234,35 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint
 	}
 }
 
+// check headers snapshot data based on GenerateBodyData
+func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX ethdb.Tx, snapshotTo uint64) {
+	t.Helper()
+	headersCursor, err := headersSnapshotTX.Cursor(dbutils.HeadersBucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer headersCursor.Close()
+
+	var blockNum uint64
+	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+		//fmt.Println(common.Bytes2Hex(k))
+		if binary.BigEndian.Uint64(k[:8]) != blockNum {
+			t.Fatal("incorrect block number", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
+		}
+		if !bytes.Equal(k[8:], common.Hash{uint8(blockNum), uint8(blockNum%3) + 1}.Bytes()) {
+			t.Fatal("block is not canonical", blockNum, common.Bytes2Hex(k))
+		}
+		blockNum++
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blockNum-1 != snapshotTo {
+		t.Fatal(blockNum, snapshotTo)
+	}
+}
+
 func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) {
 	t.Helper()
 	bodyCursor, err := bodySnapshotTX.Cursor(dbutils.BlockBodyPrefix)
@@ -1313,7 +1342,7 @@ func verifyPrunedBlocksData(t *testing.T, tx ethdb.Tx, dataFrom, dataTo, snapsho
 		}
 		if blockNum <= dataFrom {
 			if bytes.Equal(k[8:], canonicalHash.Bytes()) {
-				t.Fatal("snapshot data hasn't deleted")
+				t.Fatal("snapshot data hasn't deleted", k, canonicalHash.Bytes())
 			}
 		}
 
@@ -1605,7 +1634,6 @@ func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) { //nolint: deadcode
 	}
 }
 
-
 /**
 todo
 1) тест на миграции блоков и хедеров
@@ -1613,13 +1641,10 @@ todo
 2.1) Вызовыы
 3) тест на асинхронную миграцию
 4)
- */
-
-
-
+*/
 
 func TestBodySnapshotSyncMigration(t *testing.T) {
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
 
@@ -1729,7 +1754,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 	}
 	writeStep(10)
 
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.BodiesCurrentSnapshot)==10 {
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.BodiesCurrentSnapshot) == 10 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -1742,5 +1767,78 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		roTx.Rollback()
 		time.Sleep(time.Millisecond * 100)
 	}
-	t.Log()
+	headersKV := db.SnapshotKV(dbutils.HeadersBucket)
+	if headersKV == nil {
+		t.Fatal("empty headers snapshot")
+	}
+	bodiesKV := db.SnapshotKV(dbutils.BlockBodyPrefix)
+	if bodiesKV == nil {
+		t.Fatal("empty bodies snapshot")
+	}
+
+	htx, err := headersKV.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyHeadersSnapshot(t, htx, 10)
+	htx.Rollback()
+
+	btx, err := bodiesKV.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyBodiesSnapshot(t, btx, 10)
+	ethTX, err := btx.Cursor(dbutils.EthTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lastEthTX, _, err := ethTX.Last()
+	if err != nil {
+		t.Fatal(err)
+	}
+	btx.Rollback()
+
+	writeKV := db.WriteDB()
+	roWriteDBTX, err := writeKV.BeginRo(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var blockNum uint64
+	var numOfDuplicateBlocks uint64
+	dataFrom := uint64(10)
+	err = roWriteDBTX.ForEach(dbutils.HeadersBucket, []byte{}, func(k, v []byte) error {
+		numOfDuplicateBlocks++
+
+		if binary.BigEndian.Uint64(k[:8]) != blockNum {
+			t.Fatal("incorrect block number", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
+		}
+
+		canonicalHash, err := rawdb.ReadCanonicalHash(roWriteDBTX, blockNum)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blockNum <= dataFrom {
+			if bytes.Equal(k[8:], canonicalHash.Bytes()) {
+				t.Fatal("snapshot data hasn't deleted", k, canonicalHash.Bytes())
+			}
+		}
+
+		switch {
+		case blockNum <= dataFrom && numOfDuplicateBlocks == 2:
+			blockNum++
+			numOfDuplicateBlocks = 0
+		//after snapshot data
+		case blockNum > dataFrom && numOfDuplicateBlocks == 3:
+			blockNum++
+			numOfDuplicateBlocks = 0
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	verifyPrunedBlocksData(t, roWriteDBTX, 10, dataTo, binary.BigEndian.Uint64(lastEthTX))
 }

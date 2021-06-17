@@ -34,9 +34,11 @@ type SnapshotMigrator struct {
 	snapshotsDir               string
 	HeadersCurrentSnapshot     uint64
 	HeadersNewSnapshot         uint64
-	BodiesCurrentSnapshot     uint64
-	BodiesNewSnapshot         uint64
+	BodiesCurrentSnapshot      uint64
+	BodiesNewSnapshot          uint64
 	HeadersNewSnapshotInfohash []byte
+	BodiesNewSnapshotInfohash  []byte
+	snapshotType               string
 	useMdbx                    bool
 	started                    uint64
 	replaceChan                chan struct{}
@@ -56,7 +58,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 
 	var snapshotName string
 	var snapshotHashKey []byte
-	if sm.HeadersCurrentSnapshot < migrateToBlock && atomic.LoadUint64(&sm.HeadersNewSnapshot) < migrateToBlock  {
+	if sm.HeadersCurrentSnapshot < migrateToBlock && atomic.LoadUint64(&sm.HeadersNewSnapshot) < migrateToBlock {
 		snapshotName = "headers"
 		snapshotHashKey = dbutils.CurrentHeadersSnapshotHash
 	} else if sm.BodiesCurrentSnapshot < migrateToBlock && atomic.LoadUint64(&sm.BodiesNewSnapshot) < migrateToBlock {
@@ -66,12 +68,18 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 		return nil
 	}
 	atomic.StoreUint64(&sm.started, 1)
-	snapshotPath := SnapshotName(sm.snapshotsDir, snapshotName, migrateToBlock)
-	sm.HeadersNewSnapshot = migrateToBlock
+	sm.snapshotType = snapshotName
+	snapshotPath := SnapshotName(sm.snapshotsDir, sm.snapshotType, migrateToBlock)
+	switch sm.snapshotType {
+	case "headers":
+		sm.HeadersNewSnapshot = migrateToBlock
+	case "bodies":
+		sm.BodiesNewSnapshot = migrateToBlock
+	}
 	atomic.StoreUint64(&sm.replaced, 0)
 
 	var initialStages []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error
-	switch snapshotName {
+	switch sm.snapshotType {
 	case "headers":
 		initialStages = []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
@@ -112,7 +120,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 		}
 	}
 
-	btStages:=func(shapshotHashKey []byte) []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+	btStages := func(shapshotHashKey []byte) []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 		return []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 				//todo headers infohash
@@ -146,8 +154,14 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 					log.Error("Seeding", "err", err)
 					return err
 				}
-				//todo change to generic HeadersNewSnapshotInfohash
-				sm.HeadersNewSnapshotInfohash = seedingInfoHash[:]
+
+				switch snapshotName {
+				case "bodies":
+					sm.BodiesNewSnapshotInfohash = seedingInfoHash[:]
+				case "headers":
+					sm.HeadersNewSnapshotInfohash = seedingInfoHash[:]
+				}
+
 				log.Info("Started seeding snapshot", "type", snapshotName, "infohash", seedingInfoHash.String())
 				atomic.StoreUint64(&sm.started, 2)
 				return nil
@@ -184,7 +198,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
-				log.Error("begin","err", err)
+				log.Error("begin", "err", err)
 				return
 			}
 			defer readTX.Rollback()
@@ -215,26 +229,52 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rw
 	log.Info("SyncStages", "started", atomic.LoadUint64(&sm.started))
 
 	if atomic.LoadUint64(&sm.started) == 2 && sm.Replaced() {
-		syncStages := []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error{
-			func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
-				log.Info("Prune db", "current", sm.HeadersCurrentSnapshot, "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
-				return RemoveHeadersData(db, tx, sm.HeadersCurrentSnapshot, atomic.LoadUint64(&sm.HeadersNewSnapshot))
-			},
-			func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
-				log.Info("Save CurrentHeadersSnapshotHash", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
-				c, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
-				if err != nil {
-					return err
-				}
-				if len(sm.HeadersNewSnapshotInfohash) == 20 {
-					err = c.Put(dbutils.CurrentHeadersSnapshotHash, sm.HeadersNewSnapshotInfohash)
+		var syncStages []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error
+		switch sm.snapshotType {
+		case "bodies":
+			syncStages = []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error{
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Prune db", "new", atomic.LoadUint64(&sm.BodiesNewSnapshot))
+					return RemoveBlocksData(db, tx, atomic.LoadUint64(&sm.BodiesNewSnapshot))
+				},
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Save bodies snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+					c, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
 					if err != nil {
 						return err
 					}
-				}
-				return c.Put(dbutils.CurrentHeadersSnapshotBlock, dbutils.EncodeBlockNumber(atomic.LoadUint64(&sm.HeadersNewSnapshot)))
-			},
+					if len(sm.BodiesNewSnapshotInfohash) == 20 {
+						err = c.Put(dbutils.CurrentBodiesSnapshotHash, sm.BodiesNewSnapshotInfohash)
+						if err != nil {
+							return err
+						}
+					}
+					return c.Put(dbutils.CurrentBodiesSnapshotBlock, dbutils.EncodeBlockNumber(atomic.LoadUint64(&sm.BodiesNewSnapshot)))
+				},
+			}
+		case "headers":
+			syncStages = []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error{
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Prune headers db", "current", sm.HeadersCurrentSnapshot, "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+					return RemoveHeadersData(db, tx, sm.HeadersCurrentSnapshot, atomic.LoadUint64(&sm.HeadersNewSnapshot))
+				},
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Save headers snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+					c, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
+					if err != nil {
+						return err
+					}
+					if len(sm.HeadersNewSnapshotInfohash) == 20 {
+						err = c.Put(dbutils.CurrentHeadersSnapshotHash, sm.HeadersNewSnapshotInfohash)
+						if err != nil {
+							return err
+						}
+					}
+					return c.Put(dbutils.CurrentHeadersSnapshotBlock, dbutils.EncodeBlockNumber(atomic.LoadUint64(&sm.HeadersNewSnapshot)))
+				},
+			}
 		}
+
 		for i := range syncStages {
 			innerErr := syncStages[i](dbi, rwTX, migrateToBlock)
 			if innerErr != nil {
@@ -350,4 +390,3 @@ func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
 	}
 	return snapshotBlock, infohash, nil
 }
-

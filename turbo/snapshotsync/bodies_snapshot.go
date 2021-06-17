@@ -132,8 +132,6 @@ func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string, 
 	return writeTX.Commit()
 }
 
-
-
 func OpenBodiesSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
 	if useMdbx {
 		return ethdb.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
@@ -151,7 +149,6 @@ func OpenBodiesSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
 		}).Open()
 	}
 }
-
 
 func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err error) {
 	log.Info("Remove blocks data", "to", newSnapshot)
@@ -277,5 +274,3 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 	}
 	return nil
 }
-
-

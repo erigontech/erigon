@@ -95,8 +95,6 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, 
 	return nil
 }
 
-
-
 func OpenHeadersSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
 	if useMdbx {
 		return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
@@ -112,8 +110,6 @@ func OpenHeadersSnapshot(dbPath string, useMdbx bool) (ethdb.RwKV, error) {
 		}).Readonly().Path(dbPath).Open()
 	}
 }
-
-
 
 func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
 	log.Info("Remove data", "from", currentSnapshot, "to", newSnapshot)
