@@ -112,7 +112,6 @@ func (cs *ControlServerImpl) SendHeaderRequest(ctx context.Context, req *headerd
 		}
 		switch cs.sentries[i].Protocol() {
 		case eth.ETH66:
-			// if sentry not found peers to send such message, try next one. stop if found.
 			//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", req.Hash, req.Number, req.Length))
 			reqData := &eth.GetBlockHeadersPacket66{
 				RequestId: rand.Uint64(),

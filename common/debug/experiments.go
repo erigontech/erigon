@@ -45,21 +45,6 @@ func OverrideGetNodeData(val bool) {
 }
 
 var (
-	testDB    string
-	getTestDB sync.Once
-)
-
-func TestDB() string {
-	getTestDB.Do(func() {
-		testDB, _ = os.LookupEnv("TEST_DB")
-		if testDB == "" {
-			testDB = ""
-		}
-	})
-	return testDB
-}
-
-var (
 	bigRoTx    uint
 	getBigRoTx sync.Once
 )

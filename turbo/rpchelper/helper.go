@@ -13,6 +13,15 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 )
 
+// unable to decode supplied params, or an invalid number of parameters
+type nonCanonocalHashError struct{ hash common.Hash }
+
+func (e nonCanonocalHashError) ErrorCode() int { return -32603 }
+
+func (e nonCanonocalHashError) Error() string {
+	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
+}
+
 func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
@@ -55,7 +64,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, filters *f
 			return 0, common.Hash{}, err
 		}
 		if blockNrOrHash.RequireCanonical && ch != hash {
-			return 0, common.Hash{}, fmt.Errorf("hash %q is not currently canonical", hash.String())
+			return 0, common.Hash{}, nonCanonocalHashError{hash}
 		}
 	}
 	return blockNumber, hash, nil

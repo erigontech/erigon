@@ -111,27 +111,28 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
-	//withChaindata(stateStags)
 	withDatadir2(stateStags)
 	withReferenceChaindata(stateStags)
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
-	//withBatchSize(stateStags)
 	withIntegrityChecks(stateStags)
 	withMining(stateStags)
+	withChain(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
 	withDatadir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
+	withChain(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
 
 	withDatadir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
+	withChain(loopExecCmd)
 
 	rootCmd.AddCommand(loopExecCmd)
 }
@@ -177,7 +178,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		stages.TxPool, // TODO: enable TxPool stage
 		stages.Finish)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, nil, changeSetHook, chainConfig, engine, vmConfig, tmpDir)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, changeSetHook, chainConfig, engine, vmConfig, tmpDir)
 
 	execUntilFunc := func(execToBlock uint64) func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
 		return func(s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
@@ -498,7 +499,7 @@ func loopExec(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 
 	from := progress(tx, stages.Execution)
 	to := from + unwind
-	cfg := stagedsync.StageExecuteBlocksCfg(db, true, false, false, 0, batchSize, nil, nil, nil, chainConfig, engine, vmConfig, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, true, false, false, 0, batchSize, nil, chainConfig, engine, vmConfig, tmpDBPath)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {

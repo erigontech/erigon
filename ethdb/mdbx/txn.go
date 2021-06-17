@@ -48,6 +48,13 @@ const (
 //
 // See MDBX_txn.
 type Txn struct {
+	env  *Env
+	_txn *C.MDBX_txn
+	key  *C.MDBX_val
+	val  *C.MDBX_val
+
+	errLogf func(format string, v ...interface{})
+
 	// If RawRead is true []byte values retrieved from Get() calls on the Txn
 	// and its cursors will point directly into the memory-mapped structure.
 	// Such slices will be readonly and must only be referenced wthin the
@@ -67,13 +74,6 @@ type Txn struct {
 	// be paid.  The id of a Txn cannot change over its life, even if it is
 	// reset/renewed
 	id uintptr
-
-	env  *Env
-	_txn *C.MDBX_txn
-	key  *C.MDBX_val
-	val  *C.MDBX_val
-
-	errLogf func(format string, v ...interface{})
 }
 
 // beginTxn does not lock the OS thread which is a prerequisite for creating a

@@ -18,6 +18,7 @@ func APIList(ctx context.Context, db ethdb.RoKV, eth services.ApiBackend, txPool
 	base := NewBaseApi(filters)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db)
+	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
@@ -46,6 +47,13 @@ func APIList(ctx context.Context, db ethdb.RoKV, eth services.ApiBackend, txPool
 				Namespace: "net",
 				Public:    true,
 				Service:   NetAPI(netImpl),
+				Version:   "1.0",
+			})
+		case "txpool":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "txpool",
+				Public:    true,
+				Service:   TxPoolAPI(txpoolImpl),
 				Version:   "1.0",
 			})
 		case "web3":

@@ -21,14 +21,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/lmdb-go/lmdb"
 )
 
 type DbCopier interface {
@@ -59,24 +57,15 @@ func MustOpenKV(path string) RwKV {
 	return db
 }
 
-// Open - main method to open database. Choosing driver based on path suffix.
-// If env TEST_DB provided - choose driver based on it. Some test using this method to open non-in-memory db
+// Open - main method to open database.
 func OpenKV(path string, readOnly bool) (RwKV, error) {
 	var kv RwKV
 	var err error
-	testDB := debug.TestDB()
-	switch true {
-	case testDB == "lmdb" || strings.HasSuffix(path, "_lmdb"):
-		kv, err = NewLMDB().Path(path).Open()
-	case testDB == "mdbx" || strings.HasSuffix(path, "_mdbx"):
-		kv, err = NewMDBX().Path(path).Open()
-	default:
-		opts := NewMDBX().Path(path)
-		if readOnly {
-			opts = opts.Flags(func(flags uint) uint { return flags | lmdb.Readonly })
-		}
-		kv, err = opts.Open()
+	opts := NewMDBX().Path(path)
+	if readOnly {
+		opts = opts.Flags(func(flags uint) uint { return flags | mdbx.Readonly })
 	}
+	kv, err = opts.Open()
 
 	if err != nil {
 		return nil, err

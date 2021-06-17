@@ -54,7 +54,7 @@ func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.He
 	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
 	for i, header := range msg {
 		headerHash := header.Hash()
-		if _, bad := hd.BadHeaders[headerHash]; bad {
+		if _, bad := hd.badHeaders[headerHash]; bad {
 			return nil, BadBlockPenalty, nil
 		}
 		if _, duplicate := dedupMap[headerHash]; duplicate {
@@ -100,10 +100,24 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	headerHash := header.Hash()
-	if _, bad := hd.BadHeaders[headerHash]; bad {
+	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
 	return []*ChainSegment{{HeadersRaw: [][]byte{headerRaw}, Headers: []*types.Header{header}}}, NoPenalty, nil
+}
+
+// ReportBadHeader -
+func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.badHeaders[headerHash] = struct{}{}
+}
+
+func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	_, ok := hd.badHeaders[headerHash]
+	return ok
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
@@ -561,7 +575,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
 		if !link.preverified {
-			if _, bad := hd.BadHeaders[link.hash]; bad {
+			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
 			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
 				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
@@ -697,7 +711,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
-	if err != nil {
+	if err != nil || parentTd == nil {
 		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty

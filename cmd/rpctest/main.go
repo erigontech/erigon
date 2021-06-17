@@ -231,21 +231,19 @@ func main() {
 	with(replayCmd, withErigonUrl, withRecord)
 
 	var tmpDataDir, tmpDataDirOrig string
-	var database string
 	var notRegenerateGethData bool
 	var compareAccountRange = &cobra.Command{
 		Use:   "compareAccountRange",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.CompareAccountRange(erigonURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData, database)
+			rpctest.CompareAccountRange(erigonURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData)
 		},
 	}
 	with(compareAccountRange, withErigonUrl, withGethUrl, withBlockNum)
 	compareAccountRange.Flags().BoolVar(&notRegenerateGethData, "regenGethData", false, "")
 	compareAccountRange.Flags().StringVar(&tmpDataDir, "tmpdir", "/media/b00ris/nvme/accrange1", "dir for tmp db")
 	compareAccountRange.Flags().StringVar(&tmpDataDirOrig, "gethtmpdir", "/media/b00ris/nvme/accrangeorig1", "dir for tmp db")
-	compareAccountRange.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 
 	var rootCmd = &cobra.Command{Use: "test"}
 	rootCmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")

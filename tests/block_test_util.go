@@ -62,9 +62,10 @@ type btJSON struct {
 }
 
 type btBlock struct {
-	BlockHeader  *btHeader
-	Rlp          string
-	UncleHeaders []*btHeader
+	BlockHeader     *btHeader
+	ExpectException string
+	Rlp             string
+	UncleHeaders    []*btHeader
 }
 
 //go:generate gencodec -type btHeader -field-override btHeaderMarshaling -out gen_btheader.go
@@ -111,8 +112,6 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 		engine = ethash.NewShared()
 	}
 	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine)
-	db := ethdb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != t.json.Genesis.Hash {
@@ -175,7 +174,7 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
 func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
-	for _, b := range t.json.Blocks {
+	for bi, b := range t.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
 			if b.BlockHeader == nil {
@@ -193,12 +192,17 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			canonical, cErr := rawdb.ReadCanonicalHash(ethdb.NewObjectDatabase(m.DB), cb.NumberU64())
-			if cErr != nil {
-				return nil, cErr
-			}
-			if canonical == cb.Hash() {
-				return nil, fmt.Errorf("block insertion should have failed")
+			if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+				canonical, cErr := rawdb.ReadCanonicalHash(tx, cb.NumberU64())
+				if cErr != nil {
+					return cErr
+				}
+				if canonical == cb.Hash() {
+					return fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
+				}
+				return nil
+			}); err != nil {
+				return nil, err
 			}
 		}
 		if b.BlockHeader == nil {

@@ -344,7 +344,7 @@ Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Scrip
 $Erigon.Commit  = [string]@(git.exe rev-list -1 HEAD)
 $Erigon.Branch  = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Tag     = [string]@(git.exe describe --tags)
-$Erigon.Build   = "go build -v -trimpath -ldflags ""-X main.gitCommit=$($Erigon.Commit) -X main.gitBranch=$($Erigon.Branch) -X main.gitTag=$($Erigon.Tag)"""
+$Erigon.Build   = "go build -v -trimpath -ldflags ""-X github.com/ledgerwatch/erigon/params.GitCommit=$($Erigon.Commit) -X github.com/ledgerwatch/erigon/params.GitBranch=$($Erigon.Branch) -X github.com/ledgerwatch/erigon/params.GitTag=$($Erigon.Tag)"""
 $Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:GO111MODULE = "on"
 
@@ -353,52 +353,33 @@ if (Test-Path -Path (Join-Path $Erigon.BinPath "tg.exe") -PathType Leaf) {
     Remove-Item -Path (Join-Path $Erigon.BinPath "tg.exe")
 }
 
-Write-Host " Building Erigon ..."
-$outExecutable = [string](Join-Path $Erigon.BinPath "erigon.exe")
-$BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" ./cmd/erigon"
-$BuildCommand += ';$?'
-$success = Invoke-Expression -Command $BuildCommand
-if (-not $success) {
-    Write-Host "Could not build Erigon executable"
-    return
+$binaries = @(
+    [pscustomobject]@{Executable="erigon.exe";Source="./cmd/erigon"}
+    [pscustomobject]@{Executable="rpcdaemon.exe";Source="./cmd/rpcdaemon"}
+    [pscustomobject]@{Executable="rpctest.exe";Source="./cmd/rpctest"}
+    [pscustomobject]@{Executable="integration.exe";Source="./cmd/integration"}
+    [pscustomobject]@{Executable="state.exe";Source="./cmd/state"}
+    [pscustomobject]@{Executable="hack.exe";Source="./cmd/hack"}
+    [pscustomobject]@{Executable="sentry.exe";Source="./cmd/sentry"}
+    [pscustomobject]@{Executable="pics.exe";Source="./cmd/pics"}
+    [pscustomobject]@{Executable="cons.exe";Source="./cmd/cons"}
+    [pscustomobject]@{Executable="evm.exe";Source="./cmd/evm"}
+    [pscustomobject]@{Executable="seeder.exe";Source="./cmd/snapshots/seeder"}
+    [pscustomobject]@{Executable="sndownloader.exe";Source="./cmd/snapshots/downloader"}
+    [pscustomobject]@{Executable="tracker.exe";Source="./cmd/snapshots/tracker"}
+)
+
+$binaries | ForEach-Object {
+    Write-Host " Building $($_.Executable)"
+    $outExecutable = [string](Join-Path $Erigon.BinPath $_.Executable)
+    $BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" $($_.Source)"
+    $BuildCommand += ';$?'
+    $success = Invoke-Expression -Command $BuildCommand
+    if (-not $success) {
+        Write-Host " ERROR : Could not build $($_.Executable)"
+        return
+    }
 }
 
-Write-Host " Building rpcdaemon ..."
-$outExecutable = [string](Join-Path $Erigon.BinPath "rpcdaemon.exe")
-$BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" ./cmd/rpcdaemon"
-$BuildCommand += ';$?'
-$success = Invoke-Expression -Command $BuildCommand
-if (-not $success) {
-    Write-Host "Could not build rpcdaemon executable"
-    return
-}
-
-Write-Host " Building integration ..."
-$outExecutable = [string](Join-Path $Erigon.BinPath "integration.exe")
-$BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" ./cmd/integration"
-$BuildCommand += ';$?'
-$success = Invoke-Expression -Command $BuildCommand
-if (-not $success) {
-    Write-Host "Could not build integration executable"
-    return
-}
-
-Write-Host " Building rpctest ..."
-$outExecutable = [string](Join-Path $Erigon.BinPath "rpctest.exe")
-$BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" ./cmd/rpctest"
-$BuildCommand += ';$?'
-$success = Invoke-Expression -Command $BuildCommand
-if (-not $success) {
-    Write-Host "Could not build rpctest executable"
-    return
-}
-
-Write-Host " Building state ..."
-$outExecutable = [string](Join-Path $Erigon.BinPath "state.exe")
-$BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" ./cmd/state"
-$BuildCommand += ';$?'
-$success = Invoke-Expression -Command $BuildCommand
-if (-not $success) {
-    Write-Host "Could not build state executable"
-    return
-}
+# Eventually copy all mdbx_*.exe to ./build/bin directory
+Copy-Item -Path "./ethdb/mdbx/dist/mdbx_*.exe" -Destination $Erigon.BinPath -Force

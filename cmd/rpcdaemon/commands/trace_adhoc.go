@@ -162,9 +162,10 @@ type OeTracer struct {
 	traceStack []*ParityTrace
 	lastTop    *ParityTrace
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
+	compat     bool // Bug for bug compatibility mode
 }
 
-func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int) error {
+func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
 	if precompile {
 		ot.precompile = true
 		return nil
@@ -245,7 +246,11 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	ot.lastTop = topTrace
-	if err != nil {
+	ignoreError := false
+	if ot.compat {
+		ignoreError = depth == 0 && topTrace.Type == CREATE
+	}
+	if err != nil && !ignoreError {
 		switch err {
 		case vm.ErrInvalidJump:
 			topTrace.Error = "Bad jump destination"
@@ -526,6 +531,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 	var ot OeTracer
+	ot.compat = api.compatibility
 	if traceTypeTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
@@ -535,7 +541,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	msg := args.ToMessage(api.gasCap)
 
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
-	//blockCtx.BlockNumber++
+	blockCtx.GasLimit = math.MaxUint64
+	blockCtx.MaxGasLimit = true
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
@@ -688,6 +695,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			}
 		}
 		var ot OeTracer
+		ot.compat = api.compatibility
 		if traceTypeTrace {
 			ot.r = traceResult
 			ot.traceAddr = []int{}
@@ -696,10 +704,16 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		// Get a new instance of the EVM.
 		msg := args.ToMessage(api.gasCap)
 
+		useParent := false
 		if header == nil {
 			header = parentHeader
+			useParent = true
 		}
 		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx)
+		if useParent {
+			blockCtx.GasLimit = math.MaxUint64
+			blockCtx.MaxGasLimit = true
+		}
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 

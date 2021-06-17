@@ -30,6 +30,20 @@ message OnAddReply {
   repeated bytes rplTxs = 1;
 }
 
+message AllRequest {}
+message AllReply {
+  enum Type {
+    PENDING = 0; // All currently processable transactions
+    QUEUED = 1;  // Queued but non-processable transactions
+  }
+  message Tx {
+    Type type = 1;
+    bytes sender = 2;
+    bytes rlpTx = 3;
+  }
+  repeated Tx txs = 1;
+}
+
 service Txpool {
   // Version returns the service version number
   rpc Version(google.protobuf.Empty) returns (types.VersionReply);
@@ -40,6 +54,8 @@ service Txpool {
   rpc Add(AddRequest) returns (AddReply);
   // preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
   rpc Transactions(TransactionsRequest) returns (TransactionsReply);
+  // returns all transactions from tx pool
+  rpc All(AllRequest) returns (AllReply);
   // subscribe to new transactions add event
   rpc OnAdd(OnAddRequest) returns (stream OnAddReply);
 }

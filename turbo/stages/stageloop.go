@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -15,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -90,7 +89,7 @@ func StageLoop(
 
 			log.Error("Stage loop failure", "error", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downoader", "error", recoveryErr)
+				log.Error("Failed to recover header downloader", "error", recoveryErr)
 			}
 			continue
 		}
@@ -113,18 +112,7 @@ func StageLoopStep(
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	// avoid crash because Erigon's core does many things -
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				err = fmt.Errorf("%w, trace: %s", typed, stack)
-			default:
-				err = fmt.Errorf("%+v, trace: %s", typed, stack)
-			}
-		}
-	}()
+	defer func() { err = debug.LogPanic(err, false, recover()) }()
 	var sm ethdb.StorageMode
 	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
@@ -230,18 +218,7 @@ func StageLoopStep(
 
 func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
 	// avoid crash because TG's core does many things -
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				err = fmt.Errorf("%w, trace: %s", typed, stack)
-			default:
-				err = fmt.Errorf("%+v, trace: %s", typed, stack)
-			}
-		}
-	}()
+	defer func() { err = debug.LogPanic(err, false, recover()) }()
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
@@ -324,11 +301,9 @@ func NewStagedSync2(
 			pruningDistance,
 			batchSize,
 			nil,
-			nil,
-			nil,
 			controlServer.ChainConfig,
 			controlServer.Engine,
-			&vm.Config{NoReceipts: !sm.Receipts},
+			&vm.Config{NoReceipts: !sm.Receipts, EnableTEMV: sm.TEVM},
 			tmpdir,
 		),
 		stagedsync.StageTranspileCfg(

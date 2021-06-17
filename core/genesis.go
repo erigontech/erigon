@@ -49,8 +49,6 @@ import (
 //go:embed allocs
 var allocs embed.FS
 
-var UseMDBX = true
-
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
@@ -300,12 +298,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		defer wg.Done()
-		var tmpDB ethdb.RwKV
-		if UseMDBX {
-			tmpDB = ethdb.NewMDBX().InMem().MustOpen()
-		} else {
-			tmpDB = ethdb.NewLMDB().InMem().MustOpen()
-		}
+		tmpDB := ethdb.NewMDBX().InMem().MustOpen()
 		defer tmpDB.Close()
 		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {
@@ -363,7 +356,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	}
 	if g.Config != nil && (g.Config.IsLondon(0)) {
 		head.Eip1559 = true
-		if g.BaseFee == nil {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}

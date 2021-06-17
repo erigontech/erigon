@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -29,6 +30,7 @@ import (
 	"text/tabwriter"
 	"text/template"
 
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -557,7 +559,8 @@ var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, Me
 // setNodeKey creates a node key from set command line flags, either loading it
 // from a file or as a specified hex value. If neither flags were provided, this
 // method returns nil and an emphemeral key is to be generated.
-func setNodeKey(ctx *cli.Context, cfg *p2p.Config) {
+func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
+	cfg.Name = nodeName
 	var (
 		hex  = ctx.GlobalString(NodeKeyHexFlag.Name)
 		file = ctx.GlobalString(NodeKeyFileFlag.Name)
@@ -568,6 +571,10 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config) {
 	case file != "" && hex != "":
 		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
 	case file != "":
+		if err := os.MkdirAll(path.Dir(file), 0755); err != nil {
+			panic(err)
+		}
+
 		if key, err = crypto.LoadECDSA(file); err != nil {
 			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
 		}
@@ -577,6 +584,8 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config) {
 			Fatalf("Option %q: %v", NodeKeyHexFlag.Name, err)
 		}
 		cfg.PrivateKey = key
+	default:
+		cfg.PrivateKey = nodeKey(path.Join(dataDir, "erigon", "nodekey"))
 	}
 }
 
@@ -680,16 +689,83 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		return
 	}
 	urls := SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
+	err := SetStaticPeers(cfg, urls)
+	if err != nil {
+		log.Error("setStaticPeers", "err", err)
+	}
+}
+
+func SetStaticPeers(cfg *p2p.Config, urls []string) error {
 	for _, url := range urls {
-		if url != "" {
-			node, err := enode.Parse(enode.ValidSchemes, url)
-			if err != nil {
-				log.Error("Static peer URL invalid", "enode", url, "err", err)
-				continue
-			}
-			cfg.StaticNodes = append(cfg.StaticNodes, node)
+		if url == "" {
+			continue
+		}
+		node, err := enode.Parse(enode.ValidSchemes, url)
+		if err != nil {
+			return fmt.Errorf("static peer URL invalid: %s, %w", url, err)
+		}
+		cfg.StaticNodes = append(cfg.StaticNodes, node)
+	}
+	return nil
+}
+
+// NewP2PConfig
+//  - doesn't setup bootnodes - they will set when genesisHash will know
+func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, port, protocol uint) (*p2p.Config, error) {
+	var enodeDBPath string
+	switch protocol {
+	case eth.ETH65:
+		enodeDBPath = path.Join(datadir, "nodes", "eth65")
+	case eth.ETH66:
+		enodeDBPath = path.Join(datadir, "nodes", "eth66")
+	default:
+		return nil, fmt.Errorf("unknown protocol: %v", protocol)
+	}
+	serverKey := nodeKey(path.Join(datadir, "erigon", "nodekey"))
+
+	cfg := &p2p.Config{
+		ListenAddr:   fmt.Sprintf(":%d", port),
+		MaxPeers:     100,
+		NAT:          nat.Any(),
+		NoDiscovery:  nodiscover,
+		PrivateKey:   serverKey,
+		Name:         nodeName,
+		Logger:       log.New(),
+		NodeDatabase: enodeDBPath,
+	}
+	if netRestrict != "" {
+		cfg.NetRestrict = new(netutil.Netlist)
+		cfg.NetRestrict.Add(netRestrict)
+	}
+	if staticPeers != nil {
+		if err := SetStaticPeers(cfg, staticPeers); err != nil {
+			return nil, err
 		}
 	}
+	natif, err := nat.Parse(natSetting)
+	if err != nil {
+		return nil, fmt.Errorf("invalid nat option %s: %v", natSetting, err)
+	}
+	cfg.NAT = natif
+	return cfg, nil
+}
+
+func nodeKey(keyfile string) *ecdsa.PrivateKey {
+	if err := os.MkdirAll(path.Dir(keyfile), 0755); err != nil {
+		panic(err)
+	}
+	if key, err := crypto.LoadECDSA(keyfile); err == nil {
+		return key
+	}
+	// No persistent key found, generate and store a new one.
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
+	}
+	if err := crypto.SaveECDSA(keyfile, key); err != nil {
+		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
+	}
+	return key
 }
 
 // setListenAddress creates a TCP listening address string from set command
@@ -700,7 +776,6 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.GlobalIsSet(ListenPort65Flag.Name) {
 		cfg.ListenAddr65 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort65Flag.Name))
-		cfg.Eth65Enabled = true
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
@@ -752,16 +827,16 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
-	setNodeKey(ctx, cfg)
+	setNodeKey(ctx, cfg, nodeName, dataDir)
 	setNAT(ctx, cfg)
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)
 	setBootstrapNodesV5(ctx, cfg)
 	setStaticPeers(ctx, cfg)
 
-	ethPeers := cfg.MaxPeers
-	cfg.Name = nodeName
-	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
+	if ctx.GlobalIsSet(MaxPeersFlag.Name) {
+		cfg.MaxPeers = ctx.GlobalInt(MaxPeersFlag.Name)
+	}
 
 	if ctx.GlobalIsSet(MaxPendingPeersFlag.Name) {
 		cfg.MaxPendingPeers = ctx.GlobalInt(MaxPendingPeersFlag.Name)
@@ -773,6 +848,10 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	if ctx.GlobalIsSet(DiscoveryV5Flag.Name) {
 		cfg.DiscoveryV5 = ctx.GlobalBool(DiscoveryV5Flag.Name)
 	}
+
+	ethPeers := cfg.MaxPeers
+	cfg.Name = nodeName
+	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
 
 	if netrestrict := ctx.GlobalString(NetrestrictFlag.Name); netrestrict != "" {
 		list, err := netutil.ParseNetlist(netrestrict)
@@ -992,7 +1071,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdbx bool) {
+func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
@@ -1001,7 +1080,10 @@ func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdb
 	} else {
 		cfg.DBPath = path.Join(datadir, "clique/db")
 	}
-	cfg.MDBX = mdbx
+}
+
+func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
+	cfg.DBPath = path.Join(datadir, "aura/db")
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
@@ -1105,7 +1187,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, stack.Config().DataDir, cfg)
-	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
+	setClique(ctx, &cfg.Clique, stack.Config().DataDir)
+	setAuRa(ctx, &cfg.Aura, stack.Config().DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 

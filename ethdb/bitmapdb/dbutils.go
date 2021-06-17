@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-const ChunkLimit = uint64(1950 * datasize.B) // threshold after which appear LMDB OverflowPages = 4096 / 2 - (keySize + 8)
+const ChunkLimit = uint64(1950 * datasize.B) // threshold beyond which MDBX overflow pages appear: 4096 / 2 - (keySize + 8)
 
 // CutLeft - cut from bitmap `targetSize` bytes from left
 // removing lft part from `bm`

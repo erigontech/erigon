@@ -52,7 +52,7 @@ type ExecutionResult struct {
 	LogsHash    common.Hash    `json:"logsHash"`
 	Bloom       types.Bloom    `json:"logsBloom"        gencodec:"required"`
 	Receipts    types.Receipts `json:"receipts"`
-	Rejected    []int          `json:"rejected,omitempty"`
+	Rejected    []*rejectedTx  `json:"rejected,omitempty"`
 }
 
 type ommer struct {
@@ -70,6 +70,11 @@ type stEnv struct {
 	BlockHashes map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
 	Ommers      []ommer                             `json:"ommers,omitempty"`
 	BaseFee     *big.Int                            `json:"currentBaseFee,omitempty"`
+}
+
+type rejectedTx struct {
+	Index int    `json:"index"`
+	Err   string `json:"error"`
 }
 
 type stEnvMarshaling struct {
@@ -106,7 +111,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
-		rejectedTxs []int
+		rejectedTxs []*rejectedTx
 		includedTxs types.Transactions
 		gasUsed     = uint64(0)
 		receipts    = make(types.Receipts, 0)
@@ -143,8 +148,8 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	for i, tx := range txs {
 		msg, err := tx.AsMessage(*signer, pre.Env.BaseFee)
 		if err != nil {
-			log.Info("rejected tx", "index", i, "hash", tx.Hash(), "error", err)
-			rejectedTxs = append(rejectedTxs, i)
+			log.Warn("rejected tx", "index", i, "hash", tx.Hash(), "error", err)
+			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}
 		tracer, err := getTracerFn(txIndex, tx.Hash())
@@ -163,7 +168,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		if err != nil {
 			ibs.RevertToSnapshot(snapshot)
 			log.Info("rejected tx", "index", i, "hash", tx.Hash(), "from", msg.From(), "error", err)
-			rejectedTxs = append(rejectedTxs, i)
+			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}
 		includedTxs = append(includedTxs, tx)

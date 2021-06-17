@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -54,16 +53,15 @@ type MockSentry struct {
 	MinedBlocks   chan *types.Block
 	downloader    *download.ControlServerImpl
 	Key           *ecdsa.PrivateKey
-	Address       common.Address
 	Genesis       *types.Block
 	SentryClient  remote.SentryClient
 	PeerId        *ptypes.H512
-	ReceiveWg     sync.WaitGroup
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
-
-	streams      map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
-	StreamWg     sync.WaitGroup
-	sentMessages []*proto_sentry.OutboundMessageData
+	streams       map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
+	sentMessages  []*proto_sentry.OutboundMessageData
+	StreamWg      sync.WaitGroup
+	ReceiveWg     sync.WaitGroup
+	Address       common.Address
 }
 
 // Stream returns stream, waiting if necessary
@@ -241,8 +239,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			0,
 			batchSize,
 			nil,
-			nil,
-			nil,
 			mock.ChainConfig,
 			mock.Engine,
 			&vm.Config{NoReceipts: !sm.Receipts},
@@ -376,15 +372,19 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
-		if !errors.Is(err, common.ErrStopped) {
-			return err
-		}
+		return err
 	}
 	// Check if the latest header was imported or rolled back
-	if td, tdErr := rawdb.ReadTd(ethdb.NewObjectDatabase(ms.DB), chain.TopBlock.Hash(), chain.TopBlock.NumberU64()); tdErr != nil {
-		return tdErr
-	} else if td == nil {
-		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+	if err = ms.DB.View(ms.Ctx, func(tx ethdb.Tx) error {
+		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
+			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if ms.downloader.Hd.IsBadHeader(chain.TopBlock.Hash()) {
+		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
 }

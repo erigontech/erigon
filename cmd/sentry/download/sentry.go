@@ -3,10 +3,10 @@ package download
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net"
 	"os"
 	"os/signal"
@@ -20,9 +20,10 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
@@ -32,9 +33,8 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
@@ -45,21 +45,6 @@ const (
 	handshakeTimeout  = 5 * time.Second
 	maxPermitsPerPeer = 4 // How many outstanding requests per peer we may have
 )
-
-func nodeKey(keyfile string) *ecdsa.PrivateKey {
-	if key, err := crypto.LoadECDSA(keyfile); err == nil {
-		return key
-	}
-	// No persistent key found, generate and store a new one.
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
-	}
-	if err := crypto.SaveECDSA(keyfile, key); err != nil {
-		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
-	}
-	return key
-}
 
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
@@ -113,30 +98,10 @@ func (pi *PeerInfo) Removed() bool {
 }
 
 func makeP2PServer(
-	ctx context.Context,
-	nodeKeyFile string,
-	dbPath string,
-	nodeName string,
-	natSetting string,
-	p2pListenAddr string,
+	p2pConfig p2p.Config,
 	genesisHash common.Hash,
 	protocol p2p.Protocol,
 ) (*p2p.Server, error) {
-	serverKey := nodeKey(nodeKeyFile)
-	p2pConfig := p2p.Config{}
-	natif, err := nat.Parse(natSetting)
-	if err != nil {
-		return nil, fmt.Errorf("invalid nat option %s: %v", natSetting, err)
-	}
-	p2pConfig.NAT = natif
-	p2pConfig.PrivateKey = serverKey
-
-	p2pConfig.Name = nodeName
-	p2pConfig.Logger = log.New()
-	p2pConfig.MaxPeers = 100
-	p2pConfig.Protocols = []p2p.Protocol{}
-	p2pConfig.NodeDatabase = dbPath
-	p2pConfig.ListenAddr = p2pListenAddr
 	var urls []string
 	switch genesisHash {
 	case params.MainnetGenesisHash:
@@ -163,7 +128,7 @@ func makeP2PServer(
 			p2pConfig.BootstrapNodes = append(p2pConfig.BootstrapNodes, node)
 		}
 	}
-
+	p2pConfig.BootstrapNodesV5 = p2pConfig.BootstrapNodes
 	p2pConfig.Protocols = []p2p.Protocol{protocol}
 	return &p2p.Server{Config: p2pConfig}, nil
 }
@@ -175,6 +140,7 @@ func handShake(
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
+	startSync func(bestHash common.Hash) error,
 ) error {
 	if status == nil {
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
@@ -183,17 +149,20 @@ func handShake(
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 
+	ourTD := gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
 	go func() {
-		errc <- p2p.Send(rw, eth.StatusMsg, &eth.StatusPacket{
+		defer func() { debug.LogPanic(nil, true, recover()) }()
+		s := &eth.StatusPacket{
 			ProtocolVersion: uint32(version),
 			NetworkID:       status.NetworkId,
-			TD:              gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty).ToBig(),
+			TD:              ourTD.ToBig(),
 			Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 			Genesis:         genesisHash,
 			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock),
-		})
+		}
+		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
 	var readStatus = func() error {
 		forkFilter := forkid.NewFilterFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock)
@@ -231,6 +200,19 @@ func handShake(
 		if err1 = forkFilter(reply.ForkID); err1 != nil {
 			return fmt.Errorf("%v", err1)
 		}
+
+		td, overflow := uint256.FromBig(reply.TD)
+		if overflow {
+			return fmt.Errorf("reply.TD higher than 2^256-1")
+		}
+
+		startSyncWithThisPeer := td.Cmp(ourTD) > 0 && startSync != nil
+		if startSyncWithThisPeer {
+			if err := startSync(reply.Head); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}
 	go func() {
@@ -251,6 +233,7 @@ func handShake(
 			return ctx.Err()
 		}
 	}
+
 	return nil
 }
 
@@ -267,13 +250,13 @@ func runPeer(
 	peerPrinted := false
 	defer func() {
 		if peerPrinted {
-			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()))
+			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()), "proto", protocol)
 		}
 	}()
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()))
+				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()), "proto", protocol)
 				peerPrinted = true
 			}
 		}
@@ -412,6 +395,7 @@ func runPeer(
 func rootContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		defer signal.Stop(ch)
@@ -427,7 +411,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func grpcSentryServer(ctx context.Context, nodeName, datadir string, sentryAddr string, p2pListenAddr string, protocol uint) (*SentryServerImpl, error) {
+func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) error {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
@@ -438,7 +422,7 @@ func grpcSentryServer(ctx context.Context, nodeName, datadir string, sentryAddr 
 	}
 	lis, err := listenConfig.Listen(ctx, "tcp", sentryAddr)
 	if err != nil {
-		return nil, fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
+		return fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
 	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -468,18 +452,8 @@ func grpcSentryServer(ctx context.Context, nodeName, datadir string, sentryAddr 
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
-	var dbDir string
-	switch protocol {
-	case eth.ETH65:
-		dbDir = path.Join(datadir, "nodes", "eth65")
-	case eth.ETH66:
-		dbDir = path.Join(datadir, "nodes", "eth66")
-	default:
-		return nil, fmt.Errorf("unknown protocol: %d", protocol)
-	}
 
-	sentryServer := NewSentryServer(ctx, nodeName, path.Join(datadir, "erigon", "nodekey"), dbDir, p2pListenAddr, nil, func() *eth.NodeInfo { return nil }, protocol)
-	proto_sentry.RegisterSentryServer(grpcServer, sentryServer)
+	proto_sentry.RegisterSentryServer(grpcServer, ss)
 	if metrics.Enabled {
 		grpc_prometheus.Register(grpcServer)
 	}
@@ -488,16 +462,13 @@ func grpcSentryServer(ctx context.Context, nodeName, datadir string, sentryAddr 
 			log.Error("Sentry P2P server fail", "err", err1)
 		}
 	}()
-	return sentryServer, nil
+	return nil
 }
 
-func NewSentryServer(ctx context.Context, nodeName, nodeKeyFile, dbPath, p2pListenAddr string, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, protocol uint) *SentryServerImpl {
+func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint) *SentryServerImpl {
 	ss := &SentryServerImpl{
-		ctx:           ctx,
-		nodeName:      nodeName,
-		nodeKeyFile:   nodeKeyFile,
-		dbPath:        dbPath,
-		p2pListenAddr: p2pListenAddr,
+		ctx: ctx,
+		p2p: cfg,
 	}
 
 	if protocol != eth.ETH65 && protocol != eth.ETH66 {
@@ -516,15 +487,23 @@ func NewSentryServer(ctx context.Context, nodeName, nodeKeyFile, dbPath, p2pList
 				return nil
 			}
 			log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
-			if err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol); err != nil {
-				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
-			}
-			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+
 			peerInfo := &PeerInfo{
 				peer: peer,
 				rw:   rw,
 			}
-			ss.Peers.Store(peerID, peerInfo)
+
+			defer ss.Peers.Delete(peerID)
+			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
+				ss.Peers.Store(peerID, peerInfo)
+				return ss.startSync(ctx, bestHash, peerID)
+			})
+			if err != nil {
+				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
+			}
+			ss.Peers.Store(peerID, peerInfo) // TODO: This means potentially setting this twice, first time few lines above
+			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+
 			if err := runPeer(
 				ctx,
 				peerID,
@@ -536,7 +515,6 @@ func NewSentryServer(ctx context.Context, nodeName, nodeKeyFile, dbPath, p2pList
 			); err != nil {
 				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
-			ss.Peers.Delete(peerID)
 			return nil
 		},
 		NodeInfo: func() interface{} {
@@ -555,60 +533,19 @@ func NewSentryServer(ctx context.Context, nodeName, nodeKeyFile, dbPath, p2pList
 	return ss
 }
 
-func p2pServer(ctx context.Context,
-	nodeKeyFile string,
-	dbPath string,
-	nodeName string,
-	sentryServer *SentryServerImpl,
-	natSetting string, p2pListenAddr string, staticPeers []string, nodiscover bool, netRestrict string,
-	genesisHash common.Hash,
-) (*p2p.Server, error) {
-	server, err := makeP2PServer(
-		ctx,
-		nodeKeyFile,
-		dbPath,
-		nodeName,
-		natSetting,
-		p2pListenAddr,
-		genesisHash,
-		sentryServer.Protocol,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	enodes := make([]*enode.Node, len(staticPeers))
-	for i, e := range staticPeers {
-		enodes[i] = enode.MustParse(e)
-	}
-
-	server.StaticNodes = enodes
-	server.NoDiscovery = nodiscover
-
-	if netRestrict != "" {
-		server.NetRestrict = new(netutil.Netlist)
-		server.NetRestrict.Add(netRestrict)
-	}
-	return server, nil
-}
-
 // Sentry creates and runs standalone sentry
-func Sentry(nodeName, datadir string, natSetting string, port int, sentryAddr string, staticPeers []string, discoveryDNS []string, nodiscover bool, netRestrict string, protocol uint) error {
+func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint) error {
 	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
 	ctx := rootContext()
+	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 
-	sentryServer, err := grpcSentryServer(ctx, nodeName, datadir, sentryAddr, fmt.Sprintf(":%d", port), protocol)
+	err := grpcSentryServer(ctx, sentryAddr, sentryServer)
 	if err != nil {
 		return err
 	}
-	sentryServer.natSetting = natSetting
-	sentryServer.p2pListenAddr = fmt.Sprintf(":%d", port)
-	sentryServer.staticPeers = staticPeers
 	sentryServer.discoveryDNS = discoveryDNS
-	sentryServer.nodiscover = nodiscover
-	sentryServer.netRestrict = netRestrict
 
 	<-ctx.Done()
 	return nil
@@ -616,23 +553,66 @@ func Sentry(nodeName, datadir string, natSetting string, port int, sentryAddr st
 
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
-	ctx           context.Context
-	Protocol      p2p.Protocol
-	nodeKeyFile   string
-	dbPath        string
-	natSetting    string
-	p2pListenAddr string
-	staticPeers   []string
-	discoveryDNS  []string
-	nodiscover    bool
-	netRestrict   string
-	Peers         sync.Map
-	statusData    *proto_sentry.StatusData
-	P2pServer     *p2p.Server
-	nodeName      string
-	TxSubscribed  uint32 // Set to non-zero if downloader is subscribed to transaction messages
-	lock          sync.RWMutex
-	streams       map[proto_sentry.MessageId]*StreamsList
+	ctx          context.Context
+	Protocol     p2p.Protocol
+	discoveryDNS []string
+	Peers        sync.Map
+	statusData   *proto_sentry.StatusData
+	P2pServer    *p2p.Server
+	TxSubscribed uint32 // Set to non-zero if downloader is subscribed to transaction messages
+	lock         sync.RWMutex
+	streams      map[proto_sentry.MessageId]*StreamsList
+	p2p          *p2p.Config
+}
+
+func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID string) error {
+	switch ss.Protocol.Version {
+	case eth.ETH65:
+		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
+			Amount:  1,
+			Reverse: false,
+			Skip:    0,
+			Origin:  eth.HashOrNumber{Hash: bestHash},
+		})
+		if err != nil {
+			return fmt.Errorf("startSync encode packet failed: %v", err)
+		}
+
+		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_65,
+				Data: b,
+			},
+		}); err != nil {
+			return err
+		}
+
+	case eth.ETH66:
+		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
+			RequestId: rand.Uint64(),
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Amount:  1,
+				Reverse: false,
+				Skip:    0,
+				Origin:  eth.HashOrNumber{Hash: bestHash},
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("startSync encode packet failed: %v", err)
+		}
+		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
+			PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
+				Data: b,
+			},
+		}); err != nil {
+			return err
+		}
+
+	}
+	return nil
 }
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
@@ -836,7 +816,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	init := ss.statusData == nil
 	if init {
 		var err error
-		if !ss.nodiscover {
+		if !ss.p2p.NoDiscovery {
 			if len(ss.discoveryDNS) == 0 {
 				if url := params.KnownDNSNetwork(genesisHash, "all"); url != "" {
 					ss.discoveryDNS = []string{url}
@@ -848,7 +828,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			}
 		}
 
-		ss.P2pServer, err = p2pServer(ss.ctx, ss.nodeKeyFile, ss.dbPath, ss.nodeName, ss, ss.natSetting, ss.p2pListenAddr, ss.staticPeers, ss.nodiscover, ss.netRestrict, genesisHash)
+		ss.P2pServer, err = makeP2PServer(*ss.p2p, genesisHash, ss.Protocol)
 		if err != nil {
 			return reply, err
 		}
@@ -924,7 +904,7 @@ func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Info(fmt.Sprintf("[Messages] new subscriber to: %s\n", req.Ids))
+	log.Info(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
 	clean := ss.addStream(req.Ids, server)
 	defer clean()
 	select {

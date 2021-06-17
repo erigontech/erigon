@@ -27,10 +27,10 @@ const (
 )
 
 type LogIndexCfg struct {
+	tmpdir     string
 	db         ethdb.RwKV
 	bufLimit   datasize.ByteSize
 	flushEvery time.Duration
-	tmpdir     string
 }
 
 func StageLogIndexCfg(db ethdb.RwKV, tmpDir string) LogIndexCfg {

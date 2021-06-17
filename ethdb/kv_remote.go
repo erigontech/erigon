@@ -28,37 +28,37 @@ import (
 
 // generate the messages and services
 type remoteOpts struct {
-	DialAddress string
-	inMemConn   *bufconn.Listener // for tests
 	bucketsCfg  BucketConfigsFunc
+	inMemConn   *bufconn.Listener // for tests
+	DialAddress string
 	version     gointerfaces.Version
 }
 
 type RemoteKV struct {
-	opts     remoteOpts
-	remoteKV remote.KVClient
 	conn     *grpc.ClientConn
+	remoteKV remote.KVClient
 	log      log.Logger
 	buckets  dbutils.BucketsCfg
+	opts     remoteOpts
 }
 
 type remoteTx struct {
+	stream             remote.KV_TxClient
 	ctx                context.Context
+	streamCancelFn     context.CancelFunc
 	db                 *RemoteKV
 	cursors            []*remoteCursor
-	stream             remote.KV_TxClient
-	streamCancelFn     context.CancelFunc
-	streamingRequested bool
 	statelessCursors   map[string]Cursor
+	streamingRequested bool
 }
 
 type remoteCursor struct {
-	id         uint32
 	ctx        context.Context
 	stream     remote.KV_TxClient
 	tx         *remoteTx
 	bucketName string
 	bucketCfg  dbutils.BucketConfigItem
+	id         uint32
 }
 
 type remoteCursorDupSort struct {

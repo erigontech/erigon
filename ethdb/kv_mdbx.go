@@ -8,6 +8,8 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -25,15 +27,22 @@ var _ DbCopier = &MdbxKV{}
 const expectMdbxVersionMajor = 0
 const expectMdbxVersionMinor = 10
 
+const NonExistingDBI dbutils.DBI = 999_999_999
+
+type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
+
+func DefaultBucketConfigs(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	return defaultBuckets
+}
+
 type MdbxOpts struct {
-	inMem      bool
-	exclusive  bool
-	label      Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
-	flags      uint
-	path       string
 	bucketsCfg BucketConfigsFunc
-	mapSize    datasize.ByteSize
+	path       string
+	inMem      bool
+	label      Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
 	verbosity  DBVerbosityLvl
+	mapSize    datasize.ByteSize
+	flags      uint
 }
 
 func NewMDBX() MdbxOpts {
@@ -63,7 +72,7 @@ func (opts MdbxOpts) InMem() MdbxOpts {
 }
 
 func (opts MdbxOpts) Exclusive() MdbxOpts {
-	opts.exclusive = true
+	opts.flags = opts.flags | mdbx.Exclusive
 	return opts
 }
 
@@ -126,7 +135,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 		if opts.inMem {
 			opts.mapSize = 64 * datasize.MB
 		} else {
-			opts.mapSize = LMDBDefaultMapSize
+			opts.mapSize = 2 * datasize.TB
 		}
 	}
 	const pageSize = 4 * 1024
@@ -286,13 +295,13 @@ func (opts MdbxOpts) MustOpen() RwKV {
 }
 
 type MdbxKV struct {
+	env      *mdbx.Env
+	log      log.Logger
+	wg       *sync.WaitGroup
+	buckets  dbutils.BucketsCfg
 	opts     MdbxOpts
 	txSize   uint64
 	pageSize uint64
-	env      *mdbx.Env
-	log      log.Logger
-	buckets  dbutils.BucketsCfg
-	wg       *sync.WaitGroup
 }
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
@@ -388,22 +397,21 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
 }
 
 type MdbxTx struct {
-	readOnly         bool
-	cursorID         uint64
 	tx               *mdbx.Txn
 	db               *MdbxKV
 	cursors          map[uint64]*mdbx.Cursor
 	statelessCursors map[string]Cursor
+	readOnly         bool
+	cursorID         uint64
 }
 
 type MdbxCursor struct {
-	id         uint64
-	tx         *MdbxTx
 	bucketName string
-	dbi        mdbx.DBI
+	tx         *MdbxTx
+	c          *mdbx.Cursor
 	bucketCfg  dbutils.BucketConfigItem
-
-	c *mdbx.Cursor
+	dbi        mdbx.DBI
+	id         uint64
 }
 
 func (db *MdbxKV) Env() *mdbx.Env {
@@ -1592,4 +1600,15 @@ func (c *MdbxDupSortCursor) CountDuplicates() (uint64, error) {
 		return 0, fmt.Errorf("in CountDuplicates: %w", err)
 	}
 	return res, nil
+}
+
+func bucketSlice(b dbutils.BucketsCfg) []string {
+	buckets := make([]string, 0, len(b))
+	for name := range b {
+		buckets = append(buckets, name)
+	}
+	sort.Slice(buckets, func(i, j int) bool {
+		return strings.Compare(buckets[i], buckets[j]) < 0
+	})
+	return buckets
 }

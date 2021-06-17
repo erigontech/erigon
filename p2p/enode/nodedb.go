@@ -64,8 +64,6 @@ const (
 	dbVersion        = 9
 )
 
-var UseMDBX = true
-
 var (
 	errInvalidIP = errors.New("invalid IP")
 )
@@ -99,16 +97,9 @@ var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 func newMemoryDB() (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	if UseMDBX {
-		db.kv, err = ethdb.NewMDBX().InMem().Label(ethdb.Sentry).WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		db.kv, err = ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
+	db.kv, err = ethdb.NewMDBX().InMem().Label(ethdb.Sentry).WithBucketsConfig(bucketsConfig).Open()
+	if err != nil {
+		return nil, err
 	}
 	return db, nil
 }
@@ -118,16 +109,9 @@ func newMemoryDB() (*DB, error) {
 func newPersistentDB(path string) (*DB, error) {
 	var kv ethdb.RwKV
 	var err error
-	if UseMDBX {
-		kv, err = ethdb.NewMDBX().Path(path).Label(ethdb.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		kv, err = ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
+	kv, err = ethdb.NewMDBX().Path(path).Label(ethdb.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+	if err != nil {
+		return nil, err
 	}
 	// The nodes contained in the cache correspond to a certain protocol version.
 	// Flush all nodes if the version doesn't match.

@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
@@ -33,7 +32,7 @@ func TestApplyWithInit(t *testing.T) {
 
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err := migrator.Apply(db, "")
 	require.NoError(err)
 	var applied map[string][]byte
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -49,7 +48,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -82,7 +81,7 @@ func TestApplyWithoutInit(t *testing.T) {
 
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -100,7 +99,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -135,7 +134,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -153,7 +152,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -200,7 +199,7 @@ func TestValidation(t *testing.T) {
 	}
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err := migrator.Apply(db, "")
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
 	var applied map[string][]byte
@@ -225,7 +224,7 @@ func TestCommitCallRequired(t *testing.T) {
 	}
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err := migrator.Apply(db, "")
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
 	var applied map[string][]byte

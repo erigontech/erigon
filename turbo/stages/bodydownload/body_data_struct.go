@@ -13,31 +13,31 @@ type DoubleHash [2 * common.HashLength]byte
 const MaxBodiesInRequest = 1024
 
 type Delivery struct {
+	peerID          string
 	txs             [][][]byte
 	uncles          [][]*types.Header
 	lenOfP2PMessage uint64
-	peerID          string
 }
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
+	peerMap          map[string]int
+	requestedMap     map[DoubleHash]uint64
+	DeliveryNotify   chan struct{}
 	deliveryCh       chan Delivery
+	Engine           consensus.Engine
 	delivered        *roaring64.Bitmap
+	prefetchedBlocks *PrefetchedBlocks
 	deliveriesH      []*types.Header
 	deliveriesB      []*types.RawBody
-	deliveredCount   float64
-	wastedCount      float64
 	requests         []*BodyRequest
-	requestedMap     map[DoubleHash]uint64
 	maxProgress      uint64
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
 	requestHigh      uint64
 	lowWaitUntil     uint64 // Time to wait for before starting the next round request from requestedLow
 	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
-	peerMap          map[string]int
-	prefetchedBlocks *PrefetchedBlocks
-	DeliveryNotify   chan struct{}
-	Engine           consensus.Engine
+	deliveredCount   float64
+	wastedCount      float64
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)

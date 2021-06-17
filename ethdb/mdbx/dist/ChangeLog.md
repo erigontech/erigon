@@ -17,6 +17,14 @@ ChangeLog
  - Finalize C++ API (few typos and trivia bugs are still likely for now).
  - Packages for [Astra Linux](https://astralinux.ru/), [ALT Linux](https://www.altlinux.org/), [ROSA Linux](https://www.rosalinux.ru/), etc.
 
+Acknowledgements:
+
+ - [Alex Sharov](https://github.com/AskAlexSharov) for reporting and testing.
+
+New features:
+
+ - Allow to predefine/override `MDBX_BUILD_TIMESTAMP` for builds reproducibility (https://github.com/erthink/libmdbx/issues/201).
+
 
 ## v0.10.1 at 2021-06-01
 

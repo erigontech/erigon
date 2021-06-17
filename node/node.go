@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
@@ -120,6 +121,9 @@ func New(conf *Config) (*Node, error) {
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
 	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
 	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
+	// Check for uncaught crashes from the previous boot and notify the user if
+	// there are any
+	debug.CheckForCrashes(conf.DataDir)
 
 	return node, nil
 }
@@ -527,32 +531,17 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*ethdb.ObjectDat
 	dbPath := n.config.ResolvePath(name)
 
 	var openFunc func(exclusive bool) (*ethdb.ObjectDatabase, error)
-	if n.config.MDBX {
-		log.Info("Opening Database", "label", name, "type", "mdbx")
-		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-			opts := ethdb.NewMDBX().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-			if exclusive {
-				opts = opts.Exclusive()
-			}
-			kv, err1 := opts.Open()
-			if err1 != nil {
-				return nil, err1
-			}
-			return ethdb.NewObjectDatabase(kv), nil
+	log.Info("Opening Database", "label", name)
+	openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
+		opts := ethdb.NewMDBX().Path(dbPath).DBVerbosity(n.config.DatabaseVerbosity)
+		if exclusive {
+			opts = opts.Exclusive()
 		}
-	} else {
-		log.Info("Opening Database (LMDB)", "mapSize", n.config.LMDBMapSize.HR())
-		openFunc = func(exclusive bool) (*ethdb.ObjectDatabase, error) {
-			opts := ethdb.NewLMDB().Path(dbPath).MapSize(n.config.LMDBMapSize).DBVerbosity(n.config.DatabaseVerbosity)
-			if exclusive {
-				opts = opts.Exclusive()
-			}
-			kv, err1 := opts.Open()
-			if err1 != nil {
-				return nil, err1
-			}
-			return ethdb.NewObjectDatabase(kv), nil
+		kv, err1 := opts.Open()
+		if err1 != nil {
+			return nil, err1
 		}
+		return ethdb.NewObjectDatabase(kv), nil
 	}
 	var err error
 	db, err = openFunc(false)
@@ -571,7 +560,7 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*ethdb.ObjectDat
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, datadir, n.config.MDBX); err != nil {
+		if err = migrator.Apply(db, datadir); err != nil {
 			return nil, err
 		}
 		db.Close()

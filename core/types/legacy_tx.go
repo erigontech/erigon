@@ -67,6 +67,22 @@ type LegacyTx struct {
 func (tx LegacyTx) GetPrice() *uint256.Int  { return tx.GasPrice }
 func (tx LegacyTx) GetTip() *uint256.Int    { return tx.GasPrice }
 func (tx LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
+func (tx LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+	if baseFee == nil {
+		return tx.GetTip()
+	}
+	gasFeeCap := tx.GetFeeCap()
+	// return 0 because effectiveFee cant be < 0
+	if gasFeeCap.Lt(baseFee) {
+		return uint256.NewInt(0)
+	}
+	effectiveFee := gasFeeCap.Sub(gasFeeCap, baseFee)
+	if tx.GetTip().Lt(effectiveFee) {
+		return tx.GetTip()
+	} else {
+		return effectiveFee
+	}
+}
 
 func (tx LegacyTx) Cost() *uint256.Int {
 	total := new(uint256.Int).SetUint64(tx.Gas)
