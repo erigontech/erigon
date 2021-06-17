@@ -66,6 +66,7 @@ jobs:
       - name: Build
         run: |
           go build ./cmd/erigon
+          make test
 
   docker:
     runs-on: ubuntu-18.04

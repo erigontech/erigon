@@ -136,7 +136,6 @@ package mdbx
 
 #cgo windows LDFLAGS: -lntdll
 #cgo linux LDFLAGS: -lrt
-
 */
 import "C"
 
