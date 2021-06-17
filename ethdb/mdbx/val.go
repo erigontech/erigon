@@ -4,7 +4,6 @@ package mdbx
 #include <stdlib.h>
 #include <stdio.h>
 #include "mdbxgo.h"
-#include "dist/mdbx.h"
 */
 import "C"
 

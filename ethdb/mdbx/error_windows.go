@@ -3,7 +3,6 @@ package mdbx
 /*
 #include <errno.h>
 #include "mdbxgo.h"
-#include "dist/mdbx.h"
 */
 import "C"
 import "syscall"
