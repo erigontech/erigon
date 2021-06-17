@@ -389,6 +389,7 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
     -D CMAKE_BUILD_TYPE:STRING="Release" `
     -D MDBX_BUILD_SHARED_LIBRARY:BOOL=OFF `
     -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF `
+    -D MDBX_BUILD_TIMESTAMP=unknown `
     -D MDBX_FORCE_ASSERTIONS:INT=0
     if($LASTEXITCODE) {
         Write-Host "An error has occurred while configuring MDBX"
