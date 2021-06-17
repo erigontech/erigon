@@ -131,9 +131,8 @@ details about dealing with such situations.
 package mdbx
 
 /*
-#cgo !windows CFLAGS: -O2 -g -DMDBX_BUILD_FLAGS='' -Wall -Werror -Wextra -Wpedantic -Wno-deprecated-declarations -fPIC -fvisibility=hidden -pthread -Wno-error=attributes -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
+#cgo !windows CFLAGS: -O2 -g -v -DMDBX_BUILD_FLAGS='' -Wall -Werror -Wextra -Wpedantic -Wno-deprecated-declarations -fPIC -fvisibility=hidden -pthread -Wno-error=attributes -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 #cgo windows CFLAGS: -O2 -g -DMDBX_BUILD_FLAGS='' -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
-
 
 #cgo windows LDFLAGS: -lntdll
 */
