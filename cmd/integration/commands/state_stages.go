@@ -299,6 +299,9 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		defer tx.Rollback()
 
 		execAtBlock = progress(tx, stages.Execution)
+		fmt.Printf("u:%d,%d,%d,%d\n", unwind, unwindEvery, execAtBlock, stopAt)
+		panic(2)
+
 		if execAtBlock == stopAt {
 			break
 		}
@@ -357,6 +360,8 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 			checkMinedBlock(nextBlock, minedBlock, chainConfig)
 		}
 
+		fmt.Printf("u:%d,%d,%d,%d\n", unwind, unwindEvery, execAtBlock, stopAt)
+		panic(2)
 		// Unwind all stages to `execStage - unwind` block
 		if unwind == 0 {
 			continue

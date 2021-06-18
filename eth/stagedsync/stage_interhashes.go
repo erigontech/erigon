@@ -88,7 +88,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 
 	if err == nil {
 		if cfg.checkRoot && root != expectedRootHash {
-			log.Error(fmt.Sprintf("[%s] Wrong trie root: %x, expected (from header): %x", logPrefix, root, expectedRootHash))
+			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x", logPrefix, to, root, expectedRootHash))
 			if to > s.BlockNumber {
 				log.Warn("Unwinding due to incorrect root hash", "to", to-1)
 				if err = u.UnwindTo(to-1, tx, headerHash); err != nil {

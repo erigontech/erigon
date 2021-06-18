@@ -27,6 +27,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon/consensus/aura"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -209,7 +210,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
-			eng = clique.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory))
+			eng = aura.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory))
 		}
 	}
 
