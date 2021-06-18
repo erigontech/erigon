@@ -612,8 +612,6 @@ func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
-	// TODO (mempirate): Get peers for all sentries (internal and external)
-	// and return unique count
 	if len(s.sentryServers) > 0 {
 		peers := make(map[string]interface{})
 		for _, ss := range s.sentryServers {
