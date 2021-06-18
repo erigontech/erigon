@@ -159,7 +159,7 @@ libmdbx.a: mdbx-static.o mdbx++-static.o
 
 libmdbx.$(SO_SUFFIX): mdbx-dylib.o mdbx++-dylib.o
 	@echo '  LD $@'
-	$(QUIET)$(CXX) $(CXXFLAGS) $^ -pthread -shared $(LDFLAGS) $(LIBS) -o $@
+	$(QUIET)$(CXX) $(CXXFLAGS) $^ -pthread -shared $(LDFLAGS) $(LIBS) -v -o $@
 
 
 ################################################################################

@@ -5,7 +5,7 @@
 #ifndef _MDBXGO_H_
 #define _MDBXGO_H_
 
-#include "dist/mdbx.h"
+#include "mdbx.h"
 
 /* Proxy functions for lmdb get/put operations. The functions are defined to
  * take char* values instead of void* to keep cgo from cheking their data for

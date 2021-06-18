@@ -103,7 +103,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | web3_sha3                                  | Yes     |                                            |
 |                                            |         |                                            |
 | net_listening                              | HC      | (remote only hard coded returns true)      |
-| net_peerCount                              | HC      | (hard coded 25 - work continues on Sentry) |
+| net_peerCount                              | Limited | internal sentries only                     |
 | net_version                                | Yes     | remote only                                |
 |                                            |         |                                            |
 | eth_blockNumber                            | Yes     |                                            |

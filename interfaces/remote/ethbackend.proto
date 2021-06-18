@@ -12,6 +12,8 @@ service ETHBACKEND {
 
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
 
+  rpc NetPeerCount(NetPeerCountRequest) returns (NetPeerCountReply);
+
   // Version returns the service version number
   rpc Version(google.protobuf.Empty) returns (types.VersionReply);
 
@@ -37,6 +39,10 @@ message EtherbaseReply { types.H160 address = 1; }
 message NetVersionRequest {}
 
 message NetVersionReply { uint64 id = 1; }
+
+message NetPeerCountRequest {}
+
+message NetPeerCountReply { uint64 id = 1; }
 
 message ProtocolVersionRequest {}
 

@@ -31,6 +31,9 @@ import (
 // Tests that datadirs can be successfully created, be them manually configured
 // ones or automatically generated temporary ones.
 func TestDatadirCreation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
 	// Create a temporary data dir and check that it can be used by a node
 	dir := t.TempDir()
 	node, err := New(&Config{DataDir: dir})

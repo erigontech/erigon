@@ -22,6 +22,7 @@ import (
 type ApiBackend interface {
 	Etherbase(ctx context.Context) (common.Address, error)
 	NetVersion(ctx context.Context) (uint64, error)
+	NetPeerCount(ctx context.Context) (uint64, error)
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
@@ -72,6 +73,18 @@ func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error
 
 func (back *RemoteBackend) NetVersion(ctx context.Context) (uint64, error) {
 	res, err := back.remoteEthBackend.NetVersion(ctx, &remote.NetVersionRequest{})
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return 0, errors.New(s.Message())
+		}
+		return 0, err
+	}
+
+	return res.Id, nil
+}
+
+func (back *RemoteBackend) NetPeerCount(ctx context.Context) (uint64, error) {
+	res, err := back.remoteEthBackend.NetPeerCount(ctx, &remote.NetPeerCountRequest{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return 0, errors.New(s.Message())

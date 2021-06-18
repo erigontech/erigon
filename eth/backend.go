@@ -88,8 +88,6 @@ type Ethereum struct {
 
 	networkID uint64
 
-	p2pServer *p2p.Server
-
 	torrentClient *snapshotsync.Client
 
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
@@ -174,7 +172,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		p2pServer:            stack.Server(),
 		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
@@ -612,6 +609,26 @@ func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
 func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+func (s *Ethereum) NetPeerCount() (uint64, error) {
+	// TODO (mempirate): Get peers for all sentries (internal and external)
+	// and return unique count
+	peers := make(map[string]interface{})
+	for _, ss := range s.sentryServers {
+		ss.Peers.Range(func(key, value interface{}) bool {
+			peerID := key.(string)
+			x, _ := ss.Peers.Load(peerID)
+			peerInfo, _ := x.(*download.PeerInfo)
+			if peerInfo == nil {
+				return true
+			}
+			peers[peerID] = peerInfo
+			return true
+		})
+	}
+
+	// TODO (mempirate): Loop over external sentries too
+	return uint64(len(peers)), nil
+}
 
 // Protocols returns all the currently configured
 // network protocols to start.
