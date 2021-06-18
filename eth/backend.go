@@ -53,6 +53,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -610,24 +611,38 @@ func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
 func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
+	var sentryPc uint64 = 0
 	// TODO (mempirate): Get peers for all sentries (internal and external)
 	// and return unique count
-	peers := make(map[string]interface{})
-	for _, ss := range s.sentryServers {
-		ss.Peers.Range(func(key, value interface{}) bool {
-			peerID := key.(string)
-			x, _ := ss.Peers.Load(peerID)
-			peerInfo, _ := x.(*download.PeerInfo)
-			if peerInfo == nil {
+	if len(s.sentryServers) > 0 {
+		peers := make(map[string]interface{})
+		for _, ss := range s.sentryServers {
+			ss.Peers.Range(func(key, value interface{}) bool {
+				peerID := key.(string)
+				x, _ := ss.Peers.Load(peerID)
+				peerInfo, _ := x.(*download.PeerInfo)
+				if peerInfo == nil {
+					return true
+				}
+				peers[peerID] = peerInfo
 				return true
-			}
-			peers[peerID] = peerInfo
-			return true
-		})
+			})
+		}
+		return uint64(len(peers)), nil
 	}
 
-	// TODO (mempirate): Loop over external sentries too
-	return uint64(len(peers)), nil
+	log.Trace("sentry", "remote peer count", sentryPc)
+	for _, sc := range s.sentries {
+		ctx := context.Background()
+		reply, err := sc.PeerCount(ctx, &sentry.PeerCountRequest{})
+		if err != nil {
+			log.Warn("sentry", "err", err)
+			return 0, nil
+		}
+		sentryPc += reply.Id
+	}
+
+	return sentryPc, nil
 }
 
 // Protocols returns all the currently configured
