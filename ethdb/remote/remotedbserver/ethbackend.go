@@ -66,7 +66,7 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 	if err != nil {
 		return &remote.NetPeerCountReply{}, err
 	}
-	return &remote.NetPeerCountReply{Id: id}, nil
+	return &remote.NetPeerCountReply{Count: id}, nil
 }
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {

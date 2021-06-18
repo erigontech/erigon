@@ -855,7 +855,7 @@ func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerC
 		pc++
 		return true
 	})
-	return &proto_sentry.PeerCountReply{Id: pc}, nil
+	return &proto_sentry.PeerCountReply{Count: pc}, nil
 }
 
 // setupDiscovery creates the node discovery source for the `eth` and `snap`

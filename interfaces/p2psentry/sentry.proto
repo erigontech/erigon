@@ -125,7 +125,7 @@ message MessagesRequest {
 
 message PeerCountRequest {}
 
-message PeerCountReply { uint64 id = 1; }
+message PeerCountReply { uint64 count = 1; }
 
 service Sentry {
   rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);

@@ -621,7 +621,7 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 			log.Warn("sentry", "err", err)
 			return 0, nil
 		}
-		sentryPc += reply.Id
+		sentryPc += reply.Count
 	}
 
 	return sentryPc, nil

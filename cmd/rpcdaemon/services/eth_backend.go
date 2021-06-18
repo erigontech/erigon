@@ -92,7 +92,7 @@ func (back *RemoteBackend) NetPeerCount(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	return res.Id, nil
+	return res.Count, nil
 }
 
 func (back *RemoteBackend) ProtocolVersion(ctx context.Context) (uint64, error) {
