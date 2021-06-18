@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/runtime"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/secp256k1"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -119,9 +120,6 @@ type RollingFinality struct {
 	/// First block for which a 2/3 quorum (instead of 1/2) is required.
 	twoThirdsMajorityTransition uint64 //BlockNumber
 }
-type SimpleList struct {
-	validators []common.Address
-}
 
 // AuRa
 type AuRa struct {
@@ -131,9 +129,9 @@ type AuRa struct {
 
 	step PermissionedStep
 	//client: Arc<RwLock<Option<Weak<dyn EngineClient>>>>,
-	Signer                  types.Signer
-	Validators              ValidatorSet1
-	ValidateScoreTransition uint64
+	Signer                         types.Signer
+	Validators                     ValidatorSet1
+	ValidateScoreTransition        uint64
 	ValidateStepTransition         uint64
 	EmptyStepsSet                  *EmptyStepSet
 	EpochManager                   EpochManager // Mutex<EpochManager>,
@@ -824,12 +822,13 @@ func (s *EmptyStep) Less(other *EmptyStep) bool {
 }
 
 /// Returns `true` if the message has a valid signature by the expected proposer in the message's step.
-func (s *EmptyStep) verify(validators ValidatorSet1) (bool, error) {
+func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) {
 	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	if err != nil {
-		return common.Address{}, err
+		return false, err
 	}
 	message := crypto.Keccak256(sRlp)
+
 	/*
 		let correct_proposer = step_proposer(validators, &self.parent_hash, self.step);
 
@@ -895,24 +894,26 @@ func EmptyStepRlp(step uint64, parentHash common.Hash) ([]byte, error) {
 	return rlp.EncodeToBytes(A{s: step, h: parentHash})
 }
 
-
 func stepProposer(validators ValidatorSet1, bh common.Hash, step uint64) common.Address {
-	proposer := validators.get(bh, step as usize);
+	runtime.Call()
+
+	proposer := validators.get(bh, step
+	as
+	usize)
 	/*
-proposer := validators.get(bh, step as usize);
-proposer
-	 */
+		proposer := validators.get(bh, step as usize);
+		proposer
+	*/
 }
 
 func isStepProposer(
-validators ValidatorSet1,
-bh common.Hash,
-step uint64,
-address common.Address,
+	validators ValidatorSet1,
+	bh common.Hash,
+	step uint64,
+	address common.Address,
 ) bool {
-return stepProposer(validators, bh, step) == address
+	return stepProposer(validators, bh, step) == address
 }
-
 
 /*
 

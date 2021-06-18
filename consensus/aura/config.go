@@ -20,43 +20,11 @@ package aura
 import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type StepDuration struct {
 	Single      uint          /// Duration of all steps.
 	Transitions map[uint]uint /// Step duration transitions: a mapping of timestamp to step durations.
-}
-
-type ValidatorSet1 struct {
-	List         []common.Address       /// A simple list of authorities.
-	SafeContract common.Address         /// Address of a contract that indicates the list of authorities.
-	Contrac      common.Address         /// Address of a contract that indicates the list of authorities and enables reporting of theor misbehaviour using transactions.
-	Multi        map[uint]ValidatorSet1 /// A map of starting blocks for each validator set.
-
-}
-
-type Call func(common.Address, []byte) (value []byte, proof [][]byte, err error)
-
-type ValidatorSet interface {
-
-	/// Get the default "Call" helper, for use in general operation.
-	// TODO [keorn]: this is a hack intended to migrate off of
-	// a strict dependency on state always being available.
-	defaultCaller(blockHash common.Hash) Call
-
-	/// Called for each new block this node is creating.  If this block is
-	/// the first block of an epoch, this is called *after* `on_epoch_begin()`,
-	/// but with the same parameters.
-	///
-	/// Returns a list of contract calls to be pushed onto the new block.
-	//func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
-
-	/// Called on the close of every block.
-	onCloseBlock(_header *types.Header, _address common.Address) error
-
-	/// Draws an validator nonce modulo number of validators.
-	getWithCaller(parentHash common.Hash, nonce uint, caller Call) common.Address
 }
 
 /// Draws an validator nonce modulo number of validators.
@@ -69,9 +37,22 @@ type BlockReward struct {
 	Single uint
 	Multi  map[uint]uint
 }
+
+/// Different ways of specifying validators.
+type ValidatorSetJson struct {
+	/// A simple list of authorities.
+	List []common.Address `json:"list"`
+	/// Address of a contract that indicates the list of authorities.
+	SafeContract *common.Address `json:"safeContract"`
+	/// Address of a contract that indicates the list of authorities and enables reporting of theor misbehaviour using transactions.
+	Contract *common.Address `json:"contract"`
+	/// A map of starting blocks for each validator set.
+	Multi map[uint64]*ValidatorSetJson `json:"multi"`
+}
+
 type JsonSpec struct {
-	StepDuration StepDuration  /// Block duration, in seconds.
-	Validators   ValidatorSet1 /// Valid authorities
+	StepDuration StepDuration      /// Block duration, in seconds.
+	Validators   *ValidatorSetJson /// Valid authorities
 
 	/// Starting step. Determined automatically if not specified.
 	/// To be used for testing only.
