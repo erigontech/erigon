@@ -562,6 +562,7 @@ type SentryServerImpl struct {
 	TxSubscribed uint32 // Set to non-zero if downloader is subscribed to transaction messages
 	lock         sync.RWMutex
 	streams      map[proto_sentry.MessageId]*StreamsList
+	streamsLock  sync.RWMutex
 	p2p          *p2p.Config
 }
 
@@ -860,8 +861,8 @@ func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
 }
 
 func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b []byte) {
-	ss.lock.RLock()
-	defer ss.lock.RUnlock()
+	ss.streamsLock.RLock()
+	defer ss.streamsLock.RUnlock()
 	errs := ss.streams[msgID].Broadcast(&proto_sentry.InboundMessage{
 		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
 		Id:     msgID,
@@ -873,15 +874,15 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 }
 
 func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
-	ss.lock.RLock()
-	defer ss.lock.RUnlock()
+	ss.streamsLock.RLock()
+	defer ss.streamsLock.RUnlock()
 	return ss.streams[msgID] != nil && ss.streams[msgID].Len() > 0
 	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
 }
 
 func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto_sentry.Sentry_MessagesServer) func() {
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
+	ss.streamsLock.Lock()
+	defer ss.streamsLock.Unlock()
 	if ss.streams == nil {
 		ss.streams = map[proto_sentry.MessageId]*StreamsList{}
 	}
