@@ -844,6 +844,21 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 	return reply, nil
 }
 
+func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerCountRequest) (*proto_sentry.PeerCountReply, error) {
+	var pc uint64 = 0
+	ss.Peers.Range(func(key, value interface{}) bool {
+		peerID := key.(string)
+		x, _ := ss.Peers.Load(peerID)
+		peerInfo, _ := x.(*PeerInfo)
+		if peerInfo == nil {
+			return true
+		}
+		pc++
+		return true
+	})
+	return &proto_sentry.PeerCountReply{Count: pc}, nil
+}
+
 // setupDiscovery creates the node discovery source for the `eth` and `snap`
 // protocols.
 func setupDiscovery(urls []string) (enode.Iterator, error) {

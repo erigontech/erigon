@@ -42,7 +42,7 @@ message NetVersionReply { uint64 id = 1; }
 
 message NetPeerCountRequest {}
 
-message NetPeerCountReply { uint64 id = 1; }
+message NetPeerCountReply { uint64 count = 1; }
 
 message ProtocolVersionRequest {}
 

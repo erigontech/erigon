@@ -27,6 +27,7 @@ type SentryClient interface {
 	SendMessageToAll(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error)
 	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error)
 	Messages(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error)
+	PeerCount(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error)
 }
 
 type sentryClient struct {
@@ -132,6 +133,15 @@ func (x *sentryMessagesClient) Recv() (*InboundMessage, error) {
 	return m, nil
 }
 
+func (c *sentryClient) PeerCount(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error) {
+	out := new(PeerCountReply)
+	err := c.cc.Invoke(ctx, "/sentry.Sentry/PeerCount", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SentryServer is the server API for Sentry service.
 // All implementations must embed UnimplementedSentryServer
 // for forward compatibility
@@ -144,6 +154,7 @@ type SentryServer interface {
 	SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error)
 	SetStatus(context.Context, *StatusData) (*SetStatusReply, error)
 	Messages(*MessagesRequest, Sentry_MessagesServer) error
+	PeerCount(context.Context, *PeerCountRequest) (*PeerCountReply, error)
 	mustEmbedUnimplementedSentryServer()
 }
 
@@ -174,6 +185,9 @@ func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*SetSt
 }
 func (UnimplementedSentryServer) Messages(*MessagesRequest, Sentry_MessagesServer) error {
 	return status.Errorf(codes.Unimplemented, "method Messages not implemented")
+}
+func (UnimplementedSentryServer) PeerCount(context.Context, *PeerCountRequest) (*PeerCountReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PeerCount not implemented")
 }
 func (UnimplementedSentryServer) mustEmbedUnimplementedSentryServer() {}
 
@@ -335,6 +349,24 @@ func (x *sentryMessagesServer) Send(m *InboundMessage) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Sentry_PeerCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PeerCountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).PeerCount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentry.Sentry/PeerCount",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).PeerCount(ctx, req.(*PeerCountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Sentry_ServiceDesc is the grpc.ServiceDesc for Sentry service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -369,6 +401,10 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetStatus",
 			Handler:    _Sentry_SetStatus_Handler,
+		},
+		{
+			MethodName: "PeerCount",
+			Handler:    _Sentry_PeerCount_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

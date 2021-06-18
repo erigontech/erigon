@@ -123,6 +123,10 @@ message MessagesRequest {
   repeated MessageId ids = 1;
 }
 
+message PeerCountRequest {}
+
+message PeerCountReply { uint64 count = 1; }
+
 service Sentry {
   rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);
   rpc PeerMinBlock(PeerMinBlockRequest) returns (google.protobuf.Empty);
@@ -133,4 +137,5 @@ service Sentry {
   rpc SendMessageToAll(OutboundMessageData) returns (SentPeers);
   rpc SetStatus(StatusData) returns (SetStatusReply);
   rpc Messages(MessagesRequest) returns (stream InboundMessage);
+  rpc PeerCount(PeerCountRequest) returns (PeerCountReply);
 }
