@@ -27,7 +27,7 @@ func prettyTime() string {
 func CheckForCrashes(datadir string) {
 	crashReportDir = filepath.Join(datadir, "crashreports")
 	if _, err := os.Stat(crashReportDir); os.IsNotExist(err) {
-		os.Mkdir(crashReportDir, 0755)
+		os.MkdirAll(crashReportDir, 0755)
 	} else if err != nil {
 		log.Error("log_panic.go: CheckForCrashes", "error", err)
 		return

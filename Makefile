@@ -39,7 +39,7 @@ dbg: mdbx-dbg
 
 geth: erigon
 
-erigon: go-version mdbx
+erigon: go-version
 	@echo "Building Erigon"
 	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
@@ -108,7 +108,7 @@ tracker:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
-db-tools: mdbx
+db-tools:
 	@echo "Building bb-tools"
 
 	cd ethdb/mdbx/dist/ && MDBX_BUILD_TIMESTAMP=unknown make tools
@@ -120,14 +120,6 @@ db-tools: mdbx
 	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-mdbx:
-	@echo "Building mdbx"
-	@cd ethdb/mdbx/dist/ \
-		&& make clean && MDBX_BUILD_TIMESTAMP=unknown make config.h \
-		&& echo '#define MDBX_DEBUG 0' >> config.h \
-		&& echo '#define MDBX_FORCE_ASSERTIONS 0' >> config.h \
-        && CFLAGS_EXTRA="-Wno-deprecated-declarations" make mdbx-static.o
-
 mdbx-dbg:
 	@echo "Building mdbx"
 	@cd ethdb/mdbx/dist/ \
@@ -136,13 +128,13 @@ mdbx-dbg:
 		&& echo '#define MDBX_FORCE_ASSERTIONS 1' >> config.h \
         && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes' make mdbx-static.o
 
-test: mdbx
+test:
 	$(GOTEST) --timeout 30m
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
-lintci: mdbx
+lintci:
 	@echo "--> Running linter for code"
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
