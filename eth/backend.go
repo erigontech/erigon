@@ -612,24 +612,8 @@ func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
-	if len(s.sentryServers) > 0 {
-		peers := make(map[string]interface{})
-		for _, ss := range s.sentryServers {
-			ss.Peers.Range(func(key, value interface{}) bool {
-				peerID := key.(string)
-				x, _ := ss.Peers.Load(peerID)
-				peerInfo, _ := x.(*download.PeerInfo)
-				if peerInfo == nil {
-					return true
-				}
-				peers[peerID] = peerInfo
-				return true
-			})
-		}
-		return uint64(len(peers)), nil
-	}
 
-	log.Trace("sentry", "remote peer count", sentryPc)
+	log.Trace("sentry", "peer count", sentryPc)
 	for _, sc := range s.sentries {
 		ctx := context.Background()
 		reply, err := sc.PeerCount(ctx, &sentry.PeerCountRequest{})
