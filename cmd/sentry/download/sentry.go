@@ -562,6 +562,7 @@ type SentryServerImpl struct {
 	TxSubscribed uint32 // Set to non-zero if downloader is subscribed to transaction messages
 	lock         sync.RWMutex
 	streams      map[proto_sentry.MessageId]*StreamsList
+	streamsLock  sync.RWMutex
 	p2p          *p2p.Config
 }
 
@@ -860,8 +861,8 @@ func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
 }
 
 func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b []byte) {
-	ss.lock.RLock()
-	defer ss.lock.RUnlock()
+	ss.streamsLock.RLock()
+	defer ss.streamsLock.RUnlock()
 	errs := ss.streams[msgID].Broadcast(&proto_sentry.InboundMessage{
 		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
 		Id:     msgID,
@@ -873,15 +874,15 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 }
 
 func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
-	ss.lock.RLock()
-	defer ss.lock.RUnlock()
+	ss.streamsLock.RLock()
+	defer ss.streamsLock.RUnlock()
 	return ss.streams[msgID] != nil && ss.streams[msgID].Len() > 0
 	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
 }
 
 func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto_sentry.Sentry_MessagesServer) func() {
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
+	ss.streamsLock.Lock()
+	defer ss.streamsLock.Unlock()
 	if ss.streams == nil {
 		ss.streams = map[proto_sentry.MessageId]*StreamsList{}
 	}
@@ -917,7 +918,7 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 
 // StreamsList - it's safe to use this class as non-pointer
 type StreamsList struct {
-	sync.Mutex
+	sync.RWMutex
 	id      uint
 	streams map[uint]proto_sentry.Sentry_MessagesServer
 }
@@ -938,26 +939,39 @@ func (s *StreamsList) Add(stream proto_sentry.Sentry_MessagesServer) (remove fun
 	return func() { s.remove(id) }
 }
 
-func (s *StreamsList) Broadcast(reply *proto_sentry.InboundMessage) (errs []error) {
-	s.Lock()
-	defer s.Unlock()
+func (s *StreamsList) doBroadcast(reply *proto_sentry.InboundMessage) (ids []uint, errs []error) {
+	s.RLock()
+	defer s.RUnlock()
 	for id, stream := range s.streams {
 		err := stream.Send(reply)
 		if err != nil {
 			select {
 			case <-stream.Context().Done():
-				delete(s.streams, id)
+				ids = append(ids, id)
 			default:
 			}
 			errs = append(errs, err)
 		}
 	}
+	return
+}
+
+func (s *StreamsList) Broadcast(reply *proto_sentry.InboundMessage) (errs []error) {
+	var ids []uint
+	ids, errs = s.doBroadcast(reply)
+	if len(ids) > 0 {
+		s.Lock()
+		defer s.Unlock()
+	}
+	for _, id := range ids {
+		delete(s.streams, id)
+	}
 	return errs
 }
 
 func (s *StreamsList) Len() int {
-	s.Lock()
-	defer s.Unlock()
+	s.RLock()
+	defer s.RUnlock()
 	return len(s.streams)
 }
 
