@@ -111,7 +111,7 @@ tracker:
 db-tools:
 	@echo "Building db-tools"
 	cc --version
-	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
+	cd libmdbx && ls -la && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
 	cp libmdbx/mdbx_dump $(GOBIN)
