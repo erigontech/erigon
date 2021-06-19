@@ -4,17 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 )
 
 type ChainEventNotifier interface {
@@ -27,28 +21,12 @@ type ChainEventNotifier interface {
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
 type StageParameters struct {
-	d           DownloaderGlue
-	ChainConfig *params.ChainConfig
-	vmConfig    *vm.Config
-	Engine      consensus.Engine
-	DB          ethdb.Database
-	// TX is a current transaction that staged sync runs in. It contains all the latest changes that DB has.
-	// It can be used for both reading and writing.
-	pid         string
-	BatchSize   datasize.ByteSize // Batch size for the execution stage
-	storageMode ethdb.StorageMode
-	TmpDir      string
+	DB ethdb.Database
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
-	QuitCh             <-chan struct{}
-	headersFetchers    []func() error
-	txPool             *core.TxPool
-	prefetchedBlocks   *bodydownload.PrefetchedBlocks
-	stateReaderBuilder StateReaderBuilder
-	stateWriterBuilder StateWriterBuilder
-	notifier           ChainEventNotifier
-	InitialCycle       bool
-	mining             *MiningCfg
+	QuitCh       <-chan struct{}
+	InitialCycle bool
+	mining       *MiningCfg
 
 	snapshotsDir    string
 	btClient        *snapshotsync.Client
