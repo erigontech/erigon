@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -39,14 +40,14 @@ func TestMatreshkaStream(t *testing.T) {
 	chaindataDir := "/media/b00ris/nvme/fresh_sync/tg/chaindata"
 	tmpDbDir := "/home/b00ris/event_stream"
 
-	chaindata, err := ethdb.Open(chaindataDir, true)
+	chaindata, err := kv2.Open(chaindataDir, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	//tmpDb:=ethdb.NewMemDatabase()
 	os.RemoveAll(tmpDbDir)
 
-	kv, err := ethdb.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	kv, err := kv2.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		defaultBuckets[AccountDiff] = dbutils.BucketConfigItem{}
 		defaultBuckets[StorageDiff] = dbutils.BucketConfigItem{}
 		defaultBuckets[ContractDiff] = dbutils.BucketConfigItem{}
@@ -66,9 +67,9 @@ func TestMatreshkaStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snkv := ethdb.NewSnapshotKV().DB(kv).SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).Open()
+	snkv := kv2.NewSnapshotKV().DB(kv).SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).Open()
 	defer snkv.Close()
-	db := ethdb.NewObjectDatabase(snkv)
+	db := kv2.NewObjectDatabase(snkv)
 
 	tx, err := snkv.BeginRw(context.Background())
 	if err != nil {

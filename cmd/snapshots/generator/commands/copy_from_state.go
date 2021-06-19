@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +32,7 @@ var copyFromStateSnapshotCmd = &cobra.Command{
 }
 
 func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, block uint64, snapshotDir, snapshotMode string) error {
-	db, err := ethdb.Open(dbpath, true)
+	db, err := kv.Open(dbpath, true)
 	if err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	if err != nil {
 		return err
 	}
-	snkv := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snkv := kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
 			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],

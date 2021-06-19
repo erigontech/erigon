@@ -19,13 +19,14 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMutationDeleteTimestamp(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
@@ -85,7 +86,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 }
 
 func TestMutationCommit(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	numOfAccounts := 5
 	numOfStateKeys := 5
@@ -293,7 +294,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address) {
 */
 
 func TestWalkAsOfStatePlain(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
 	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
@@ -453,7 +454,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
 	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
@@ -659,7 +660,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
@@ -807,7 +808,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
@@ -958,7 +959,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 }
 
 func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	numOfAccounts := uint8(4)
 	addrs := make([]common.Address, numOfAccounts)

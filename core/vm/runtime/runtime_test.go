@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -103,7 +103,7 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	state := state.New(state.NewDbStateReader(db))
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
@@ -159,7 +159,7 @@ func BenchmarkCall(b *testing.B) {
 	}
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
-	db := ethdb.NewMemDatabase()
+	db := kv.NewMemDatabase()
 	defer db.Close()
 	var (
 		statedb  = state.New(state.NewPlainStateReader(db))
@@ -330,7 +330,7 @@ func TestBlockhash(t *testing.T) {
 func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.B) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	db := ethdb.NewMemDatabase()
+	db := kv.NewMemDatabase()
 	defer db.Close()
 	cfg.State = state.New(state.NewDbStateReader(db))
 	cfg.GasLimit = gas

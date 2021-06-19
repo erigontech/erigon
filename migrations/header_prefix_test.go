@@ -10,13 +10,14 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestHeaderPrefix(t *testing.T) {
 	require := require.New(t)
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 
 	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 		err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)

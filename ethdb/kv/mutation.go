@@ -1,4 +1,4 @@
-package ethdb
+package kv
 
 import (
 	"bytes"
@@ -14,17 +14,13 @@ import (
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
-)
-
-var (
-	dbCommitBigBatchTimer = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
 )
 
 type mutation struct {
 	puts       *btree.BTree
-	db         Database
+	db         ethdb.Database
 	searchItem MutationItem
 	mu         sync.RWMutex
 	size       int
@@ -36,9 +32,9 @@ type MutationItem struct {
 	value []byte
 }
 
-func NewBatch(tx RwTx) *mutation {
+func NewBatch(tx ethdb.RwTx) *mutation {
 	return &mutation{
-		db:   &TxDb{tx: tx, cursors: map[string]Cursor{}},
+		db:   &TxDb{tx: tx, cursors: map[string]ethdb.Cursor{}},
 		puts: btree.New(32),
 	}
 }
@@ -52,8 +48,8 @@ func (mi *MutationItem) Less(than btree.Item) bool {
 	return bytes.Compare(mi.key, i.key) < 0
 }
 
-func (m *mutation) RwKV() RwKV {
-	if casted, ok := m.db.(HasRwKV); ok {
+func (m *mutation) RwKV() ethdb.RwKV {
+	if casted, ok := m.db.(ethdb.HasRwKV); ok {
 		return casted.RwKV()
 	}
 	return nil
@@ -75,7 +71,7 @@ func (m *mutation) IncrementSequence(bucket string, amount uint64) (res uint64, 
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
-		if err != nil && !errors.Is(err, ErrKeyNotFound) {
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return 0, err
 		}
 	}
@@ -96,7 +92,7 @@ func (m *mutation) ReadSequence(bucket string) (res uint64, err error) {
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
 		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
-		if err != nil && !errors.Is(err, ErrKeyNotFound) {
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return 0, err
 		}
 	}
@@ -119,7 +115,7 @@ func (m *mutation) GetOne(table string, key []byte) ([]byte, error) {
 	if m.db != nil {
 		// TODO: simplify when tx can no longer be parent of mutation
 		value, err := m.db.Get(table, key)
-		if err != nil && !errors.Is(err, ErrKeyNotFound) {
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil, err
 		}
 
@@ -136,7 +132,7 @@ func (m *mutation) Get(table string, key []byte) ([]byte, error) {
 	}
 
 	if value == nil {
-		return nil, ErrKeyNotFound
+		return nil, ethdb.ErrKeyNotFound
 	}
 
 	return value, nil
@@ -241,9 +237,9 @@ func (m *mutation) RollbackAndBegin(ctx context.Context) error {
 	return nil
 }
 
-func (m *mutation) doCommit(tx RwTx) error {
+func (m *mutation) doCommit(tx ethdb.RwTx) error {
 	var prevTable string
-	var c RwCursor
+	var c ethdb.RwCursor
 	var innerErr error
 	var isEndOfBucket bool
 	logEvery := time.NewTicker(30 * time.Second)
@@ -311,12 +307,12 @@ func (m *mutation) Commit() error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if tx, ok := m.db.(HasTx); ok {
-		if err := m.doCommit(tx.Tx().(RwTx)); err != nil {
+	if tx, ok := m.db.(ethdb.HasTx); ok {
+		if err := m.doCommit(tx.Tx().(ethdb.RwTx)); err != nil {
 			return err
 		}
 	} else {
-		if err := m.db.(HasRwKV).RwKV().Update(context.Background(), func(tx RwTx) error {
+		if err := m.db.(ethdb.HasRwKV).RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
 			return m.doCommit(tx)
 		}); err != nil {
 			return err
@@ -355,7 +351,7 @@ func (m *mutation) Close() {
 	m.Rollback()
 }
 
-func (m *mutation) NewBatch() DbWithPendingMutations {
+func (m *mutation) NewBatch() ethdb.DbWithPendingMutations {
 	mm := &mutation{
 		db:   m,
 		puts: btree.New(32),
@@ -363,11 +359,11 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	return mm
 }
 
-func (m *mutation) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
+func (m *mutation) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
 	return m.db.Begin(ctx, flags)
 }
 
-func (m *mutation) BeginGetter(ctx context.Context) (GetterTx, error) {
+func (m *mutation) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {
 	return m.db.BeginGetter(ctx)
 }
 
@@ -377,11 +373,11 @@ func (m *mutation) panicOnEmptyDB() {
 	}
 }
 
-func (m *mutation) MemCopy() Database {
+func (m *mutation) MemCopy() ethdb.Database {
 	m.panicOnEmptyDB()
 	return m.db
 }
 
-func (m *mutation) SetRwKV(kv RwKV) {
-	m.db.(HasRwKV).SetRwKV(kv)
+func (m *mutation) SetRwKV(kv ethdb.RwKV) {
+	m.db.(ethdb.HasRwKV).SetRwKV(kv)
 }

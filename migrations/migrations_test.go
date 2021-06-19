@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
@@ -14,7 +15,7 @@ import (
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			"one",
@@ -60,7 +61,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			"one",
@@ -113,7 +114,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			"one",
@@ -164,7 +165,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestMarshalStages(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 
 	err := stages.SaveStageProgress(db, stages.Execution, 42)
 	require.NoError(err)
@@ -182,7 +183,7 @@ func TestMarshalStages(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			Name: "repeated_name",
@@ -213,7 +214,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			Name: "one",

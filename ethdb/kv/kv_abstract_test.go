@@ -1,4 +1,4 @@
-package ethdb_test
+package kv_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
@@ -117,7 +118,7 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
-		case *ethdb.RemoteKV:
+		case *kv.RemoteKV:
 		default:
 			continue
 		}
@@ -139,7 +140,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	f := func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return defaultBuckets
 	}
-	writeDb := ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen()
+	writeDb := kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen()
 	defer writeDb.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -153,7 +154,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Major versions
 	v1 := v
 	v1.Major++
-	a, err := ethdb.NewRemote(v1).InMem(conn).Open("", "", "")
+	a, err := kv.NewRemote(v1).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -161,7 +162,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Minor versions
 	v2 := v
 	v2.Minor++
-	_, err = ethdb.NewRemote(v2).InMem(conn).Open("", "", "")
+	_, err = kv.NewRemote(v2).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -169,17 +170,17 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Patch versions
 	v3 := v
 	v3.Patch++
-	_, err = ethdb.NewRemote(v3).InMem(conn).Open("", "", "")
+	_, err = kv.NewRemote(v3).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	require.False(t, a.EnsureVersionCompatibility())
 }
 
-func setupDatabases(t *testing.T, f ethdb.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV) {
+func setupDatabases(t *testing.T, f kv.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV) {
 	writeDBs = []ethdb.RwKV{
-		ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
-		ethdb.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
+		kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
+		kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
@@ -192,7 +193,7 @@ func setupDatabases(t *testing.T, f ethdb.BucketConfigsFunc) (writeDBs []ethdb.R
 		}
 	}()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
-	rdb := ethdb.NewRemote(v).InMem(conn).MustOpen()
+	rdb := kv.NewRemote(v).InMem(conn).MustOpen()
 	readDBs = []ethdb.RwKV{
 		writeDBs[0],
 		writeDBs[1],
