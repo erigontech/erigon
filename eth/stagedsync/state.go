@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -165,7 +166,9 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 		}
 
 		_, stage := s.CurrentStage()
-
+		if string(stage.ID) == debug.StopBeforeStage() {
+			return common.ErrStopped
+		}
 		if stage.Disabled {
 			logPrefix := s.LogPrefix()
 			message := fmt.Sprintf(
