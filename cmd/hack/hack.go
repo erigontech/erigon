@@ -719,14 +719,6 @@ func invTree(wrong, right, diff string, name string) {
 	t1.PrintDiff(t2, c)
 }
 
-func preimage(chaindata string, image common.Hash) {
-	ethDb := kv2.MustOpen(chaindata)
-	defer ethDb.Close()
-	p, err := ethDb.Get(dbutils.PreimagePrefix, image[:])
-	tool.Check(err)
-	fmt.Printf("%x\n", p)
-}
-
 func printBranches(block uint64) {
 	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
 	ethDb := kv2.MustOpen(paths.DefaultDataDir() + "/testnet/geth/chaindata")
@@ -1991,9 +1983,6 @@ func main() {
 
 	case "printBranches":
 		printBranches(uint64(*block))
-
-	case "preimage":
-		preimage(*chaindata, common.HexToHash(*hash))
 
 	case "printFullNodeRLPs":
 		printFullNodeRLPs()
