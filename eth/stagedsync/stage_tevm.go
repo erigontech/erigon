@@ -46,11 +46,20 @@ func StageTranspileCfg(
 }
 
 func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
-	// panics! tx == nil
-
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Execution)
-	if errStart != nil {
-		return errStart
+	var prevStageProgress uint64
+	var err error
+	if tx != nil {
+		prevStageProgress, err = stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+	} else {
+		if err = cfg.db.View(context.Background(), func(tx ethdb.Tx) error {
+			prevStageProgress, err = stages.GetStageProgress(tx, stages.Execution)
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 
 	var to = prevStageProgress
@@ -70,7 +79,6 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	log.Info(fmt.Sprintf("[%s] Contract translation", logPrefix), "from", s.BlockNumber, "to", to)
 
 	var lastValue []byte
-	var err error
 	lastKey := dbutils.EncodeBlockNumber(s.BlockNumber + 1)
 
 	excludedAddress := common.Address{}
