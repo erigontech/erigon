@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -166,9 +167,12 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 		}
 
 		_, stage := s.CurrentStage()
-		if string(stage.ID) == debug.StopBeforeStage() {
-			return common.ErrStopped
+
+		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
+			log.Error("STOP_BEFORE_STAGE env flag forced to stop app")
+			os.Exit(1)
 		}
+
 		if stage.Disabled {
 			logPrefix := s.LogPrefix()
 			message := fmt.Sprintf(
