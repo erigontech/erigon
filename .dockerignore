@@ -9,4 +9,3 @@ tests/testdata
 tests/.git
 cmd/prometheus
 
-./.git
