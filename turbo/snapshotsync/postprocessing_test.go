@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
