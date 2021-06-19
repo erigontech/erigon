@@ -147,7 +147,7 @@ func StageLoopStep(
 		return err
 	}
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, kv.NewObjectDatabase(db), nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil, accumulator)
+	st, err1 := sync.Prepare(&vm.Config{}, kv.NewObjectDatabase(db), nil, sm, ctx.Done(), initialCycle, nil, accumulator)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
@@ -229,17 +229,9 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 	miningState, err := mining.Prepare(
 		nil,
 		nil,
-		nil,
-		nil,
-		nil,
 		tx,
-		"",
 		ethdb.DefaultStorageMode,
-		".",
-		0,
 		ctx.Done(),
-		nil,
-		nil,
 		false,
 		stagedsync.StageMiningCfg(true),
 		nil,
