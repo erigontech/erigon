@@ -14,9 +14,9 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
+	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 var stateBuckets = []string{
