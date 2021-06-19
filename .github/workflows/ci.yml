@@ -71,6 +71,5 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
-        with:
-          submodules: recursive
+      - run: git submodule update --init --recursive --force
       - run: docker build .
