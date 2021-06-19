@@ -65,8 +65,9 @@ jobs:
       - run: choco upgrade mingw cmake -y --no-progress
       - name: Build
         run: |
-          go build ./cmd/erigon
+          .\wmake.ps1
           make test
+        shell: powershell
 
   docker:
     runs-on: ubuntu-18.04
