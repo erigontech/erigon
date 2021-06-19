@@ -299,7 +299,6 @@ MainLoop:
 			return err
 		}
 
-		var prevK []byte
 		for {
 			if !fileScanner.Scan() {
 				break MainLoop
@@ -316,16 +315,9 @@ MainLoop:
 			v = common.FromHex(string(v[1:]))
 
 			if casted, ok := c.(ethdb.RwCursorDupSort); ok {
-				if bytes.Equal(k, prevK) {
-					if err = casted.AppendDup(k, v); err != nil {
-						panic(err)
-					}
-				} else {
-					if err = casted.Append(k, v); err != nil {
-						panic(err)
-					}
+				if err = casted.AppendDup(k, v); err != nil {
+					panic(err)
 				}
-				prevK = k
 			} else {
 				if err = c.Append(k, v); err != nil {
 					panic(err)
@@ -339,7 +331,6 @@ MainLoop:
 				log.Info("Progress", "bucket", bucket, "key", fmt.Sprintf("%x", k))
 			}
 		}
-		prevK = nil
 		err = fileScanner.Err()
 		if err != nil {
 			panic(err)
@@ -398,7 +389,6 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 		if err != nil {
 			return err
 		}
-		var prevK []byte
 		casted, isDupsort := c.(ethdb.RwCursorDupSort)
 
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
@@ -407,16 +397,9 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 			}
 
 			if isDupsort {
-				if bytes.Equal(k, prevK) {
-					if err = casted.AppendDup(k, v); err != nil {
-						panic(err)
-					}
-				} else {
-					if err = casted.Append(k, v); err != nil {
-						panic(err)
-					}
+				if err = casted.AppendDup(k, v); err != nil {
+					panic(err)
 				}
-				prevK = k
 			} else {
 				if err = c.Append(k, v); err != nil {
 					panic(err)
@@ -443,7 +426,6 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 			default:
 			}
 		}
-		prevK = nil
 
 		// migrate bucket sequences to native mdbx implementation
 		//currentID, err := srcTx.Sequence(name, 0)
