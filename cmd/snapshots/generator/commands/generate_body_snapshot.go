@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -34,8 +35,8 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 }
 
 func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
-	kv := ethdb.NewMDBX().Path(dbPath).MustOpen()
-	snKV := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	kv := kv2.NewMDBX().Path(dbPath).MustOpen()
+	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
 			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},

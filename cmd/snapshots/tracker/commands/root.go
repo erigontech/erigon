@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
@@ -73,7 +74,7 @@ var rootCmd = &cobra.Command{
 	Args:       cobra.ExactArgs(1),
 	ArgAliases: []string{"snapshots dir"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := ethdb.MustOpen(args[0])
+		db := kv.MustOpen(args[0])
 		m := http.NewServeMux()
 		m.Handle("/announce", &Tracker{db: db})
 		m.HandleFunc("/scrape", func(writer http.ResponseWriter, request *http.Request) {

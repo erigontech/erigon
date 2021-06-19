@@ -12,12 +12,12 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 func ValidateTxLookups(chaindata string) error {
-	db := ethdb.MustOpenKV(chaindata)
+	db := kv.MustOpenKV(chaindata)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err

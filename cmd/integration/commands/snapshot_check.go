@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
@@ -37,7 +38,7 @@ var cmdSnapshotCheck = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
 		//db to provide headers, blocks, senders ...
-		mainDB, err := ethdb.Open(chaindata, true)
+		mainDB, err := kv2.Open(chaindata, true)
 		if err != nil {
 			return err
 		}
@@ -51,7 +52,7 @@ var cmdSnapshotCheck = &cobra.Command{
 		}
 
 		stateSnapshotPath := filepath.Join(snapshotDir, "state")
-		stateSnapshot := ethdb.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		stateSnapshot := kv2.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 			return dbutils.BucketsCfg{
 				dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
 				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
@@ -77,8 +78,8 @@ var cmdSnapshotCheck = &cobra.Command{
 				log.Info("Temp database", "path", path)
 			}
 		}()
-		tmpDb := ethdb.NewMDBX().Path(path).MustOpen()
-		kv := ethdb.NewSnapshotKV().
+		tmpDb := kv2.NewMDBX().Path(path).MustOpen()
+		kv := kv2.NewSnapshotKV().
 			DB(tmpDb).
 			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
 			SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).

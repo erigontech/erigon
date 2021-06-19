@@ -3,10 +3,12 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -165,6 +167,11 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 		}
 
 		_, stage := s.CurrentStage()
+
+		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
+			log.Error("STOP_BEFORE_STAGE env flag forced to stop app")
+			os.Exit(1)
+		}
 
 		if stage.Disabled {
 			logPrefix := s.LogPrefix()

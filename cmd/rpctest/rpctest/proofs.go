@@ -6,12 +6,13 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 func Proofs(chaindata string, url string, block uint64) {
 	fileName := "trie.txt"
-	db := ethdb.MustOpen(chaindata)
+	db := kv.MustOpen(chaindata)
 	defer db.Close()
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {

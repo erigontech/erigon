@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 
 	"github.com/stretchr/testify/require"
@@ -62,7 +63,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 	btCli.trackers = [][]string{}
 
-	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -407,7 +408,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	btCli.trackers = [][]string{}
 
-	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)

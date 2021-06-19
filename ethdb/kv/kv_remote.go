@@ -1,4 +1,4 @@
-package ethdb
+package kv
 
 import (
 	"bytes"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/log"
@@ -48,7 +49,7 @@ type remoteTx struct {
 	streamCancelFn     context.CancelFunc
 	db                 *RemoteKV
 	cursors            []*remoteCursor
-	statelessCursors   map[string]Cursor
+	statelessCursors   map[string]ethdb.Cursor
 	streamingRequested bool
 }
 
@@ -162,7 +163,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 	return db, nil
 }
 
-func (opts remoteOpts) MustOpen() RwKV {
+func (opts remoteOpts) MustOpen() ethdb.RwKV {
 	db, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)
@@ -214,7 +215,7 @@ func (db *RemoteKV) Close() {
 
 func (db *RemoteKV) CollectMetrics() {}
 
-func (db *RemoteKV) BeginRo(ctx context.Context) (Tx, error) {
+func (db *RemoteKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -224,11 +225,11 @@ func (db *RemoteKV) BeginRo(ctx context.Context) (Tx, error) {
 	return &remoteTx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn}, nil
 }
 
-func (db *RemoteKV) BeginRw(ctx context.Context) (RwTx, error) {
+func (db *RemoteKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
 }
 
-func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *RemoteKV) View(ctx context.Context, f func(tx ethdb.Tx) error) (err error) {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -238,7 +239,7 @@ func (db *RemoteKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	return f(tx)
 }
 
-func (db *RemoteKV) Update(ctx context.Context, f func(tx RwTx) error) (err error) {
+func (db *RemoteKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
@@ -266,9 +267,9 @@ func (tx *remoteTx) Rollback() {
 	tx.closeGrpcStream()
 }
 
-func (tx *remoteTx) statelessCursor(bucket string) (Cursor, error) {
+func (tx *remoteTx) statelessCursor(bucket string) (ethdb.Cursor, error) {
 	if tx.statelessCursors == nil {
-		tx.statelessCursors = make(map[string]Cursor)
+		tx.statelessCursors = make(map[string]ethdb.Cursor)
 	}
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
@@ -371,7 +372,7 @@ func (c *remoteCursor) Prev() ([]byte, []byte, error) {
 	return c.prev()
 }
 
-func (tx *remoteTx) Cursor(bucket string) (Cursor, error) {
+func (tx *remoteTx) Cursor(bucket string) (ethdb.Cursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
@@ -608,7 +609,7 @@ func (c *remoteCursor) Close() {
 	}
 }
 
-func (tx *remoteTx) CursorDupSort(bucket string) (CursorDupSort, error) {
+func (tx *remoteTx) CursorDupSort(bucket string) (ethdb.CursorDupSort, error) {
 	c, err := tx.Cursor(bucket)
 	if err != nil {
 		return nil, err

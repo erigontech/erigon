@@ -14,11 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package ethdb
+package kv
 
 import (
 	"context"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func NewMemDatabase() *ObjectDatabase {
@@ -29,11 +31,11 @@ func NewTestDB(t testing.TB) *ObjectDatabase {
 	return NewObjectDatabase(NewTestKV(t))
 }
 
-func NewMemKV() RwKV {
+func NewMemKV() ethdb.RwKV {
 	return NewMDBX().InMem().MustOpen()
 }
 
-func NewTestKV(t testing.TB) RwKV {
+func NewTestKV(t testing.TB) ethdb.RwKV {
 	kv := NewMemKV()
 	switch tt := t.(type) {
 	case *testing.T:
@@ -44,7 +46,7 @@ func NewTestKV(t testing.TB) RwKV {
 	return kv
 }
 
-func NewTestTx(t testing.TB) (RwKV, RwTx) {
+func NewTestTx(t testing.TB) (ethdb.RwKV, ethdb.RwTx) {
 	kv := NewMemKV()
 	switch tt := t.(type) {
 	case *testing.T:

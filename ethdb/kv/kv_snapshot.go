@@ -1,4 +1,4 @@
-package ethdb
+package kv
 
 import (
 	"bytes"
@@ -10,24 +10,25 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var (
-	_ RwKV           = &SnapshotKV{}
-	_ RoKV           = &SnapshotKV{}
-	_ Tx             = &snTX{}
-	_ BucketMigrator = &snTX{}
-	_ RwCursor       = &snCursor{}
-	_ Cursor         = &snCursor{}
+	_ ethdb.RwKV           = &SnapshotKV{}
+	_ ethdb.RoKV           = &SnapshotKV{}
+	_ ethdb.Tx             = &snTX{}
+	_ ethdb.BucketMigrator = &snTX{}
+	_ ethdb.RwCursor       = &snCursor{}
+	_ ethdb.Cursor         = &snCursor{}
 )
 
 type SnapshotUpdater interface {
-	UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{})
-	SnapshotKV(bucket string) RoKV
+	UpdateSnapshots(buckets []string, snapshotKV ethdb.RoKV, done chan struct{})
+	SnapshotKV(bucket string) ethdb.RoKV
 }
 
 type WriteDB interface {
-	WriteDB() RwKV
+	WriteDB() ethdb.RwKV
 }
 
 func NewSnapshotKV() snapshotOpts {
@@ -35,15 +36,15 @@ func NewSnapshotKV() snapshotOpts {
 }
 
 type snapshotData struct {
-	snapshot RoKV
+	snapshot ethdb.RoKV
 	buckets  []string
 }
 type snapshotOpts struct {
-	db        RwKV
+	db        ethdb.RwKV
 	snapshots []snapshotData
 }
 
-func (opts snapshotOpts) SnapshotDB(buckets []string, db RoKV) snapshotOpts {
+func (opts snapshotOpts) SnapshotDB(buckets []string, db ethdb.RoKV) snapshotOpts {
 	opts.snapshots = append(opts.snapshots, snapshotData{
 		buckets:  buckets,
 		snapshot: db,
@@ -51,7 +52,7 @@ func (opts snapshotOpts) SnapshotDB(buckets []string, db RoKV) snapshotOpts {
 	return opts
 }
 
-func (opts snapshotOpts) DB(db RwKV) snapshotOpts {
+func (opts snapshotOpts) DB(db ethdb.RwKV) snapshotOpts {
 	opts.db = db
 	return opts
 }
@@ -70,12 +71,12 @@ func (opts snapshotOpts) Open() *SnapshotKV {
 }
 
 type SnapshotKV struct {
-	db        RwKV
+	db        ethdb.RwKV
 	snapshots map[string]snapshotData
 	mtx       sync.RWMutex
 }
 
-func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
+func (s *SnapshotKV) View(ctx context.Context, f func(tx ethdb.Tx) error) error {
 	snTX, err := s.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -84,7 +85,7 @@ func (s *SnapshotKV) View(ctx context.Context, f func(tx Tx) error) error {
 	return f(snTX)
 }
 
-func (s *SnapshotKV) Update(ctx context.Context, f func(tx RwTx) error) error {
+func (s *SnapshotKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) error {
 	tx, err := s.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -105,13 +106,13 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
-func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done chan struct{}) {
+func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV ethdb.RoKV, done chan struct{}) {
 	sd := snapshotData{
 		buckets:  buckets,
 		snapshot: snapshotKV,
 	}
 
-	toClose := []RoKV{}
+	toClose := []ethdb.RoKV{}
 	var (
 		snData snapshotData
 		ok     bool
@@ -142,10 +143,10 @@ func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV RoKV, done cha
 	}()
 }
 
-func (s *SnapshotKV) WriteDB() RwKV {
+func (s *SnapshotKV) WriteDB() ethdb.RwKV {
 	return s.db
 }
-func (s *SnapshotKV) SnapshotKV(bucket string) RoKV {
+func (s *SnapshotKV) SnapshotKV(bucket string) ethdb.RoKV {
 	return s.snapshots[bucket].snapshot
 }
 
@@ -153,7 +154,7 @@ func (s *SnapshotKV) CollectMetrics() {
 	s.db.CollectMetrics()
 }
 
-func (s *SnapshotKV) BeginRo(ctx context.Context) (Tx, error) {
+func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	dbTx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -161,7 +162,7 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (Tx, error) {
 	return &snTX{
 		dbTX:      dbTx,
 		snapshots: s.copySnapshots(),
-		snTX:      map[string]Tx{},
+		snTX:      map[string]ethdb.Tx{},
 	}, nil
 }
 func (s *SnapshotKV) copySnapshots() map[string]snapshotData {
@@ -174,7 +175,7 @@ func (s *SnapshotKV) copySnapshots() map[string]snapshotData {
 	return mp
 }
 
-func (s *SnapshotKV) BeginRw(ctx context.Context) (RwTx, error) {
+func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 	dbTx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
@@ -182,7 +183,7 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (RwTx, error) {
 	return &snTX{
 		dbTX:      dbTx,
 		snapshots: s.copySnapshots(),
-		snTX:      map[string]Tx{},
+		snTX:      map[string]ethdb.Tx{},
 	}, nil
 }
 
@@ -193,28 +194,28 @@ func (s *SnapshotKV) AllBuckets() dbutils.BucketsCfg {
 var ErrUnavailableSnapshot = errors.New("unavailable snapshot")
 
 type snTX struct {
-	dbTX      Tx
+	dbTX      ethdb.Tx
 	snapshots map[string]snapshotData
-	snTX      map[string]Tx
+	snTX      map[string]ethdb.Tx
 }
 
 type DBTX interface {
-	DBTX() RwTx
+	DBTX() ethdb.RwTx
 }
 
-func (s *snTX) DBTX() RwTx {
-	return s.dbTX.(RwTx)
+func (s *snTX) DBTX() ethdb.RwTx {
+	return s.dbTX.(ethdb.RwTx)
 }
-func (s *snTX) RwCursor(bucket string) (RwCursor, error) {
+func (s *snTX) RwCursor(bucket string) (ethdb.RwCursor, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
 	}
 	//process only db buckets
 	if errors.Is(err, ErrUnavailableSnapshot) {
-		return s.dbTX.(RwTx).RwCursor(bucket)
+		return s.dbTX.(ethdb.RwTx).RwCursor(bucket)
 	}
-	dbCursor, err := s.dbTX.(RwTx).RwCursor(bucket)
+	dbCursor, err := s.dbTX.(ethdb.RwTx).RwCursor(bucket)
 	if err != nil {
 		return nil, err
 	}
@@ -230,26 +231,26 @@ func (s *snTX) RwCursor(bucket string) (RwCursor, error) {
 }
 
 func (s *snTX) DropBucket(bucket string) error {
-	return s.dbTX.(BucketMigrator).DropBucket(bucket)
+	return s.dbTX.(ethdb.BucketMigrator).DropBucket(bucket)
 }
 
 func (s *snTX) CreateBucket(bucket string) error {
-	return s.dbTX.(BucketMigrator).CreateBucket(bucket)
+	return s.dbTX.(ethdb.BucketMigrator).CreateBucket(bucket)
 }
 
 func (s *snTX) ExistsBucket(bucket string) bool {
-	return s.dbTX.(BucketMigrator).ExistsBucket(bucket)
+	return s.dbTX.(ethdb.BucketMigrator).ExistsBucket(bucket)
 }
 
 func (s *snTX) ClearBucket(bucket string) error {
-	return s.dbTX.(BucketMigrator).ClearBucket(bucket)
+	return s.dbTX.(ethdb.BucketMigrator).ClearBucket(bucket)
 }
 
 func (s *snTX) ExistingBuckets() ([]string, error) {
-	return s.dbTX.(BucketMigrator).ExistingBuckets()
+	return s.dbTX.(ethdb.BucketMigrator).ExistingBuckets()
 }
 
-func (s *snTX) Cursor(bucket string) (Cursor, error) {
+func (s *snTX) Cursor(bucket string) (ethdb.Cursor, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -272,7 +273,7 @@ func (s *snTX) Cursor(bucket string) (Cursor, error) {
 	}, nil
 }
 
-func (s *snTX) CursorDupSort(bucket string) (CursorDupSort, error) {
+func (s *snTX) CursorDupSort(bucket string) (ethdb.CursorDupSort, error) {
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -299,12 +300,12 @@ func (s *snTX) CursorDupSort(bucket string) (CursorDupSort, error) {
 	}, nil
 }
 
-func (s *snTX) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
+func (s *snTX) RwCursorDupSort(bucket string) (ethdb.RwCursorDupSort, error) {
 	c, err := s.CursorDupSort(bucket)
 	if err != nil {
 		return nil, err
 	}
-	return c.(RwCursorDupSort), nil
+	return c.(ethdb.RwCursorDupSort), nil
 }
 func (s *snTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	v, err := s.dbTX.GetOne(bucket, key)
@@ -332,20 +333,22 @@ func (s *snTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	return v, nil
 }
 
-func (s *snTX) Put(bucket string, k, v []byte) error    { return s.dbTX.(RwTx).Put(bucket, k, v) }
-func (s *snTX) Append(bucket string, k, v []byte) error { return s.dbTX.(RwTx).Append(bucket, k, v) }
+func (s *snTX) Put(bucket string, k, v []byte) error { return s.dbTX.(ethdb.RwTx).Put(bucket, k, v) }
+func (s *snTX) Append(bucket string, k, v []byte) error {
+	return s.dbTX.(ethdb.RwTx).Append(bucket, k, v)
+}
 func (s *snTX) AppendDup(bucket string, k, v []byte) error {
-	return s.dbTX.(RwTx).AppendDup(bucket, k, v)
+	return s.dbTX.(ethdb.RwTx).AppendDup(bucket, k, v)
 }
 func (s *snTX) Delete(bucket string, k, v []byte) error {
-	return s.dbTX.(RwTx).Put(bucket, k, DeletedValue)
+	return s.dbTX.(ethdb.RwTx).Put(bucket, k, DeletedValue)
 }
 
 func (s *snTX) CollectMetrics() {
 	s.dbTX.CollectMetrics()
 }
 
-func (s *snTX) getSnapshotTX(bucket string) (Tx, error) {
+func (s *snTX) getSnapshotTX(bucket string) (ethdb.Tx, error) {
 	tx, ok := s.snTX[bucket]
 	if ok {
 		return tx, nil
@@ -471,7 +474,7 @@ func (s *snTX) Comparator(bucket string) dbutils.CmpFunc {
 }
 
 func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	return s.dbTX.(RwTx).IncrementSequence(bucket, amount)
+	return s.dbTX.(ethdb.RwTx).IncrementSequence(bucket, amount)
 }
 
 func (s *snTX) ReadSequence(bucket string) (uint64, error) {
@@ -483,22 +486,22 @@ func (s *snTX) CHandle() unsafe.Pointer {
 }
 
 func (s *snTX) BucketExists(bucket string) (bool, error) {
-	return s.dbTX.(BucketsMigrator).BucketExists(bucket)
+	return s.dbTX.(ethdb.BucketsMigrator).BucketExists(bucket)
 }
 
 func (s *snTX) ClearBuckets(buckets ...string) error {
-	return s.dbTX.(BucketsMigrator).ClearBuckets(buckets...)
+	return s.dbTX.(ethdb.BucketsMigrator).ClearBuckets(buckets...)
 }
 
 func (s *snTX) DropBuckets(buckets ...string) error {
-	return s.dbTX.(BucketsMigrator).DropBuckets(buckets...)
+	return s.dbTX.(ethdb.BucketsMigrator).DropBuckets(buckets...)
 }
 
 var DeletedValue = []byte{0}
 
 type snCursor struct {
-	dbCursor Cursor
-	snCursor Cursor
+	dbCursor ethdb.Cursor
+	snCursor ethdb.Cursor
 
 	currentKey []byte
 }
@@ -529,11 +532,11 @@ func (s *snCursor) First() ([]byte, []byte, error) {
 
 func (s *snCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	dbKey, dbVal, err := s.dbCursor.Seek(seek)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, nil, err
 	}
 	sndbKey, sndbVal, err := s.snCursor.Seek(seek)
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, nil, err
 	}
 
@@ -725,15 +728,15 @@ func (s *snCursor) Current() ([]byte, []byte, error) {
 }
 
 func (s *snCursor) Put(k, v []byte) error {
-	return s.dbCursor.(RwCursor).Put(k, v)
+	return s.dbCursor.(ethdb.RwCursor).Put(k, v)
 }
 
 func (s *snCursor) Append(k []byte, v []byte) error {
-	return s.dbCursor.(RwCursor).Append(k, v)
+	return s.dbCursor.(ethdb.RwCursor).Append(k, v)
 }
 
 func (s *snCursor) Delete(k, v []byte) error {
-	return s.dbCursor.(RwCursor).Put(k, DeletedValue)
+	return s.dbCursor.(ethdb.RwCursor).Put(k, DeletedValue)
 }
 
 func (s *snCursor) DeleteCurrent() error {
@@ -750,8 +753,8 @@ func (s *snCursor) Close() {
 }
 
 type snCursorDup struct {
-	dbCursorDup   CursorDupSort
-	sndbCursorDup CursorDupSort
+	dbCursorDup   ethdb.CursorDupSort
+	sndbCursorDup ethdb.CursorDupSort
 	snCursor
 }
 
@@ -840,14 +843,14 @@ type KvData struct {
 	V []byte
 }
 
-func GenStateData(data []KvData) (RwKV, error) {
+func GenStateData(data []KvData) (ethdb.RwKV, error) {
 	snapshot := NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
 		}
 	}).InMem().MustOpen()
 
-	err := snapshot.Update(context.Background(), func(tx RwTx) error {
+	err := snapshot.Update(context.Background(), func(tx ethdb.RwTx) error {
 		c, err := tx.RwCursor(dbutils.PlainStateBucket)
 		if err != nil {
 			return err

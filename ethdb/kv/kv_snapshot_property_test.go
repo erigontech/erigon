@@ -1,12 +1,14 @@
-package ethdb
+package kv
 
 import (
 	"context"
+	"testing"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
-	"testing"
 )
 
 func TestGetAndPut(t *testing.T) {
@@ -16,14 +18,14 @@ func TestGetAndPut(t *testing.T) {
 
 type getPutkvMachine struct {
 	bucket       string
-	snKV         RwKV
-	modelKV      RwKV
+	snKV         ethdb.RwKV
+	modelKV      ethdb.RwKV
 	snapshotKeys [][20]byte
 	newKeys      [][20]byte
 	allKeys      [][20]byte
 
-	snTX    RwTx
-	modelTX RwTx
+	snTX    ethdb.RwTx
+	modelTX ethdb.RwTx
 }
 
 func (m *getPutkvMachine) Init(t *rapid.T) {
@@ -163,8 +165,8 @@ func (m *getPutkvMachine) Commit(t *rapid.T) {
 
 type getKVMachine struct {
 	bucket        string
-	snKV          RwKV
-	modelKV       RwKV
+	snKV          ethdb.RwKV
+	modelKV       ethdb.RwKV
 	overWriteKeys [][20]byte
 	snKeys        [][20]byte
 	newKeys       [][20]byte
@@ -238,12 +240,12 @@ func (m *getKVMachine) Get(t *rapid.T) {
 		v1, v2     []byte
 		err1, err2 error
 	)
-	err := m.snKV.View(context.Background(), func(tx Tx) error {
+	err := m.snKV.View(context.Background(), func(tx ethdb.Tx) error {
 		v1, err1 = tx.GetOne(m.bucket, key[:])
 		return nil
 	})
 	require.NoError(t, err)
-	err = m.modelKV.View(context.Background(), func(tx Tx) error {
+	err = m.modelKV.View(context.Background(), func(tx ethdb.Tx) error {
 		v2, err2 = tx.GetOne(m.bucket, key[:])
 		return nil
 	})
@@ -264,14 +266,14 @@ func TestCursorWithTX(t *testing.T) {
 
 type cursorKVMachine struct {
 	bucket  string
-	snKV    RwKV
-	modelKV RwKV
+	snKV    ethdb.RwKV
+	modelKV ethdb.RwKV
 
-	snTX    RwTx
-	modelTX RwTx
+	snTX    ethdb.RwTx
+	modelTX ethdb.RwTx
 
-	snCursor    RwCursor
-	modelCursor RwCursor
+	snCursor    ethdb.RwCursor
+	modelCursor ethdb.RwCursor
 
 	snapshotKeys [][20]byte
 	newKeys      [][20]byte

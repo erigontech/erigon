@@ -13,11 +13,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 func FixState(chaindata string, url string) {
-	db := ethdb.MustOpen(chaindata).RwKV()
+	db := kv.MustOpen(chaindata).RwKV()
 	defer db.Close()
 	tx, err1 := db.BeginRw(context.Background())
 	if err1 != nil {

@@ -15,7 +15,7 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 // Package ethdb defines the interfaces for an Ethereum data store.
-package ethdb
+package kv
 
 import (
 	"bytes"
@@ -25,6 +25,7 @@ import (
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
 )
@@ -35,11 +36,11 @@ type DbCopier interface {
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
-	kv RwKV
+	kv ethdb.RwKV
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
-func NewObjectDatabase(kv RwKV) *ObjectDatabase {
+func NewObjectDatabase(kv ethdb.RwKV) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv: kv,
 	}
@@ -49,7 +50,7 @@ func MustOpen(path string) *ObjectDatabase {
 	return NewObjectDatabase(MustOpenKV(path))
 }
 
-func MustOpenKV(path string) RwKV {
+func MustOpenKV(path string) ethdb.RwKV {
 	db, err := OpenKV(path, false)
 	if err != nil {
 		panic(err)
@@ -58,19 +59,19 @@ func MustOpenKV(path string) RwKV {
 }
 
 // Open - main method to open database.
-func OpenKV(path string, readOnly bool) (RwKV, error) {
-	var kv RwKV
+func OpenKV(path string, readOnly bool) (ethdb.RwKV, error) {
+	var db ethdb.RwKV
 	var err error
 	opts := NewMDBX().Path(path)
 	if readOnly {
 		opts = opts.Flags(func(flags uint) uint { return flags | mdbx.Readonly })
 	}
-	kv, err = opts.Open()
+	db, err = opts.Open()
 
 	if err != nil {
 		return nil, err
 	}
-	return kv, nil
+	return db, nil
 }
 
 func Open(path string, readOnly bool) (*ObjectDatabase, error) {
@@ -84,7 +85,7 @@ func Open(path string, readOnly bool) (*ObjectDatabase, error) {
 
 // Put inserts or updates a single entry.
 func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+	err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.Put(bucket, key, value)
 	})
 	return err
@@ -92,7 +93,7 @@ func (db *ObjectDatabase) Put(bucket string, key []byte, value []byte) error {
 
 // Append appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+	err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		c, err := tx.RwCursor(bucket)
 		if err != nil {
 			return err
@@ -104,7 +105,7 @@ func (db *ObjectDatabase) Append(bucket string, key []byte, value []byte) error 
 
 // AppendDup appends a single entry to the end of the bucket.
 func (db *ObjectDatabase) AppendDup(bucket string, key []byte, value []byte) error {
-	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+	err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		c, err := tx.RwCursorDupSort(bucket)
 		if err != nil {
 			return err
@@ -116,8 +117,8 @@ func (db *ObjectDatabase) AppendDup(bucket string, key []byte, value []byte) err
 
 // MultiPut - requirements: input must be sorted and without duplicates
 func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	err := db.kv.Update(context.Background(), func(tx RwTx) error {
-		return MultiPut(tx, tuples...)
+	err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return ethdb.MultiPut(tx, tuples...)
 	})
 	if err != nil {
 		return 0, err
@@ -127,7 +128,7 @@ func (db *ObjectDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 
 func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 	var has bool
-	err := db.kv.View(context.Background(), func(tx Tx) error {
+	err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
@@ -139,14 +140,14 @@ func (db *ObjectDatabase) Has(bucket string, key []byte) (bool, error) {
 }
 
 func (db *ObjectDatabase) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
-	err = db.kv.Update(context.Background(), func(tx RwTx) error {
+	err = db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		res, err = tx.IncrementSequence(bucket, amount)
 		return err
 	})
 	return res, err
 }
 func (db *ObjectDatabase) ReadSequence(bucket string) (res uint64, err error) {
-	err = db.kv.View(context.Background(), func(tx Tx) error {
+	err = db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		res, err = tx.ReadSequence(bucket)
 		return err
 	})
@@ -156,7 +157,7 @@ func (db *ObjectDatabase) ReadSequence(bucket string) (res uint64, err error) {
 // Get returns the value for a given key if it's present.
 func (db *ObjectDatabase) GetOne(bucket string, key []byte) ([]byte, error) {
 	var dat []byte
-	err := db.kv.View(context.Background(), func(tx Tx) error {
+	err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		v, err := tx.GetOne(bucket, key)
 		if err != nil {
 			return err
@@ -172,12 +173,12 @@ func (db *ObjectDatabase) GetOne(bucket string, key []byte) ([]byte, error) {
 
 func (db *ObjectDatabase) Get(bucket string, key []byte) ([]byte, error) {
 	dat, err := db.GetOne(bucket, key)
-	return getOneWrapper(dat, err)
+	return ethdb.GetOneWrapper(dat, err)
 }
 
 func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 	var key, value []byte
-	if err := db.kv.View(context.Background(), func(tx Tx) error {
+	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(bucket)
 		if err != nil {
 			return err
@@ -197,29 +198,29 @@ func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 }
 
 func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
-	err := db.kv.View(context.Background(), func(tx Tx) error {
+	err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(bucket)
 		if err != nil {
 			return err
 		}
-		return Walk(c, startkey, fixedbits, walker)
+		return ethdb.Walk(c, startkey, fixedbits, walker)
 	})
 	return err
 }
 
 func (db *ObjectDatabase) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	return db.kv.View(context.Background(), func(tx Tx) error {
+	return db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		return tx.ForEach(bucket, fromPrefix, walker)
 	})
 }
 func (db *ObjectDatabase) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
-	return db.kv.View(context.Background(), func(tx Tx) error {
+	return db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		return tx.ForAmount(bucket, fromPrefix, amount, walker)
 	})
 }
 
 func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	return db.kv.View(context.Background(), func(tx Tx) error {
+	return db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		return tx.ForPrefix(bucket, prefix, walker)
 	})
 }
@@ -227,7 +228,7 @@ func (db *ObjectDatabase) ForPrefix(bucket string, prefix []byte, walker func(k,
 // Delete deletes the key from the queue and database
 func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 	// Execute the actual operation
-	err := db.kv.Update(context.Background(), func(tx RwTx) error {
+	err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		return tx.Delete(bucket, k, v)
 	})
 	return err
@@ -235,8 +236,8 @@ func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 
 func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 	exists := false
-	if err := db.kv.View(context.Background(), func(tx Tx) error {
-		migrator, ok := tx.(BucketMigrator)
+	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
+		migrator, ok := tx.(ethdb.BucketMigrator)
 		if !ok {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 		}
@@ -251,8 +252,8 @@ func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 func (db *ObjectDatabase) ClearBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
-		if err := db.kv.Update(context.Background(), func(tx RwTx) error {
-			migrator, ok := tx.(BucketMigrator)
+		if err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+			migrator, ok := tx.(ethdb.BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 			}
@@ -272,8 +273,8 @@ func (db *ObjectDatabase) DropBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		log.Info("Dropping bucket", "name", name)
-		if err := db.kv.Update(context.Background(), func(tx RwTx) error {
-			migrator, ok := tx.(BucketMigrator)
+		if err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+			migrator, ok := tx.(ethdb.BucketMigrator)
 			if !ok {
 				return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 			}
@@ -294,7 +295,7 @@ func (db *ObjectDatabase) Close() {
 
 func (db *ObjectDatabase) Keys() ([][]byte, error) {
 	var keys [][]byte
-	err := db.kv.View(context.Background(), func(tx Tx) error {
+	err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
 		for _, name := range dbutils.Buckets {
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
@@ -302,7 +303,7 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 			if err != nil {
 				return err
 			}
-			err = ForEach(c, func(k, _ []byte) (bool, error) {
+			err = ethdb.ForEach(c, func(k, _ []byte) (bool, error) {
 				var kCopy = make([]byte, len(k))
 				copy(kCopy, k)
 				keys = append(append(keys, nameCopy), kCopy)
@@ -320,11 +321,11 @@ func (db *ObjectDatabase) Keys() ([][]byte, error) {
 	return keys, err
 }
 
-func (db *ObjectDatabase) RwKV() RwKV {
+func (db *ObjectDatabase) RwKV() ethdb.RwKV {
 	return db.kv
 }
 
-func (db *ObjectDatabase) SetRwKV(kv RwKV) {
+func (db *ObjectDatabase) SetRwKV(kv ethdb.RwKV) {
 	db.kv = kv
 }
 
@@ -338,10 +339,10 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 		panic(fmt.Sprintf("MemCopy is not implemented for type %T", t))
 	}
 
-	if err := db.kv.View(context.Background(), func(readTx Tx) error {
+	if err := db.kv.View(context.Background(), func(readTx ethdb.Tx) error {
 		for _, name := range dbutils.Buckets {
 			name := name
-			if err := mem.kv.Update(context.Background(), func(writeTx RwTx) error {
+			if err := mem.kv.Update(context.Background(), func(writeTx ethdb.RwTx) error {
 				newBucketToWrite, err := writeTx.RwCursor(name)
 				if err != nil {
 					return err
@@ -352,7 +353,7 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 					return err
 				}
 				defer readC.Close()
-				return ForEach(readC, func(k, v []byte) (bool, error) {
+				return ethdb.ForEach(readC, func(k, v []byte) (bool, error) {
 					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
 						return false, err
 					}
@@ -370,7 +371,7 @@ func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
 	return mem
 }
 
-func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
+func (db *ObjectDatabase) NewBatch() ethdb.DbWithPendingMutations {
 	m := &mutation{
 		db:   db,
 		puts: btree.New(32),
@@ -378,15 +379,15 @@ func (db *ObjectDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
-func (db *ObjectDatabase) BeginGetter(ctx context.Context) (GetterTx, error) {
+func (db *ObjectDatabase) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {
 	batch := &TxDb{db: db}
-	if err := batch.begin(ctx, RO); err != nil {
+	if err := batch.begin(ctx, ethdb.RO); err != nil {
 		return batch, err
 	}
 	return batch, nil
 }
 
-func (db *ObjectDatabase) Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) {
+func (db *ObjectDatabase) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
 	if err := batch.begin(ctx, flags); err != nil {
 		return batch, err
@@ -419,20 +420,10 @@ func (t MultiPutTuples) Swap(i, j int) {
 	t[i3+2], t[j3+2] = t[j3+2], t[i3+2]
 }
 
-func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
-	fixedbytes = (fixedbits + 7) / 8
-	shiftbits := fixedbits & 7
-	mask = byte(0xff)
-	if shiftbits != 0 {
-		mask = 0xff << (8 - shiftbits)
-	}
-	return fixedbytes, mask
-}
-
-func InspectDatabase(db Database) error {
+func InspectDatabase(db ethdb.Database) error {
 	// FIXME: implement in Erigon
 	// see https://github.com/ethereum/go-ethereum/blob/f5d89cdb72c1e82e9deb54754bef8dd20bf12591/core/rawdb/database.go#L224
-	return errNotSupported
+	return ethdb.ErrNotSupported
 }
 
 func NewDatabaseWithFreezer(db *ObjectDatabase, dir, suffix string) (*ObjectDatabase, error) {

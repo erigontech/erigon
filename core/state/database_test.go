@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
@@ -71,7 +72,7 @@ func TestCreate2Revive(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -242,7 +243,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -463,7 +464,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -601,7 +602,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -745,7 +746,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	var err error
@@ -820,7 +821,7 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	tsw := state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(state.NewPlainStateReader(db))
 	ctx := context.Background()
@@ -873,7 +874,7 @@ func TestEip2200Gas(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -959,7 +960,7 @@ func TestWrongIncarnation(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1078,7 +1079,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -1198,7 +1199,7 @@ func TestWrongIncarnation2(t *testing.T) {
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	r, tsw := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
@@ -1240,7 +1241,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
@@ -1274,7 +1275,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
 	ctx := context.Background()
@@ -1335,7 +1336,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
