@@ -1,12 +1,8 @@
 package stagedsync
 
 import (
-	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -46,32 +42,15 @@ func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameter
 }
 
 func (stagedSync *StagedSync) Prepare(
-	d DownloaderGlue,
-	chainConfig *params.ChainConfig,
-	engine consensus.Engine,
 	vmConfig *vm.Config,
 	db ethdb.Database,
 	tx ethdb.Tx,
-	pid string,
 	storageMode ethdb.StorageMode,
-	tmpdir string,
-	batchSize datasize.ByteSize,
 	quitCh <-chan struct{},
-	headersFetchers []func() error,
-	txPool *core.TxPool,
 	initialCycle bool,
 	miningConfig *MiningCfg,
 	accumulator *shards.Accumulator,
 ) (*State, error) {
-	var readerBuilder StateReaderBuilder
-	if stagedSync.params.StateReaderBuilder != nil {
-		readerBuilder = stagedSync.params.StateReaderBuilder
-	}
-
-	var writerBuilder StateWriterBuilder
-	if stagedSync.params.StateWriterBuilder != nil {
-		writerBuilder = stagedSync.params.StateWriterBuilder
-	}
 
 	if vmConfig == nil {
 		vmConfig = &vm.Config{}
@@ -80,28 +59,14 @@ func (stagedSync *StagedSync) Prepare(
 
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
-			d:                  d,
-			ChainConfig:        chainConfig,
-			Engine:             engine,
-			vmConfig:           vmConfig,
-			DB:                 db,
-			pid:                pid,
-			storageMode:        storageMode,
-			TmpDir:             tmpdir,
-			QuitCh:             quitCh,
-			headersFetchers:    headersFetchers,
-			txPool:             txPool,
-			BatchSize:          batchSize,
-			prefetchedBlocks:   stagedSync.PrefetchedBlocks,
-			stateReaderBuilder: readerBuilder,
-			stateWriterBuilder: writerBuilder,
-			notifier:           stagedSync.Notifier,
-			InitialCycle:       initialCycle,
-			mining:             miningConfig,
-			snapshotsDir:       stagedSync.params.SnapshotDir,
-			btClient:           stagedSync.params.TorrentClient,
-			SnapshotBuilder:    stagedSync.params.SnapshotMigrator,
-			Accumulator:        accumulator,
+			DB:              db,
+			QuitCh:          quitCh,
+			InitialCycle:    initialCycle,
+			mining:          miningConfig,
+			snapshotsDir:    stagedSync.params.SnapshotDir,
+			btClient:        stagedSync.params.TorrentClient,
+			SnapshotBuilder: stagedSync.params.SnapshotMigrator,
+			Accumulator:     accumulator,
 		},
 	)
 	state := NewState(stages)

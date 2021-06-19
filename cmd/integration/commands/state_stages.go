@@ -316,7 +316,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
-			miningStages, err := mining.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, false, miningWorld, nil)
+			miningStages, err := mining.Prepare(vmConfig, ethdb.NewObjectDatabase(db), tx, sm, quit, false, miningWorld, nil)
 			if err != nil {
 				panic(err)
 			}

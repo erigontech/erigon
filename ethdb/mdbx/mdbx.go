@@ -131,20 +131,13 @@ details about dealing with such situations.
 package mdbx
 
 /*
-#cgo !windows CFLAGS: -O2 -g -Wno-deprecated-declarations -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
-#cgo windows CFLAGS: -O2 -g -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -pthread -W -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
+#cgo !windows CFLAGS: -O2 -g -DMDBX_BUILD_FLAGS='' -fPIC -fvisibility=hidden -pthread -Wno-error=attributes -W -Wall -Werror -Wextra -Wpedantic -Wno-deprecated-declarations -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
+#cgo windows CFLAGS: -O2 -g -DMDBX_BUILD_FLAGS='' -fvisibility=hidden -ffast-math -fexceptions -fno-common -W -Wno-deprecated-declarations -Wno-bad-function-cast -Wno-cast-function-type -Wall -Wno-format -Wno-implicit-fallthrough -Wno-unused-parameter -Wno-format-extra-args -Wno-missing-field-initializers
 
-#cgo !windows LDFLAGS: ${SRCDIR}/dist/mdbx-static.o
-#cgo windows LDFLAGS: -L. -L./dist -L"${SRCDIR}" -llibmdbx
+#cgo windows LDFLAGS: -lntdll
+#cgo linux LDFLAGS: -lrt
 */
 import "C"
-
-/*
- Expiremental try to compile mdbx by cgo
- #define MDBX_CONFIG_H "config.h"
- #cgo CFLAGS: -DNDEBUG=1 -ULIBMDBX_EXPORTS -std=gnu11 -W -Wall -Werror -Wextra -Wpedantic -Wno-deprecated-declarations -pthread -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes -Wno-implicit-fallthrough -Wno-unused-function -Wno-unused-parameter -Wno-format-extra-args -Wbad-function-cast -Wno-missing-field-initializers -O2 -g
- //cc -ffunction-sections
-*/
 
 // Version return the major, minor, and patch version numbers of the LMDB C
 // library and a string representation of the version.

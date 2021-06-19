@@ -89,7 +89,7 @@ func (e *ExecAdapter) NewNode(config *NodeConfig) (Node, error) {
 	// create the node directory using the first 12 characters of the ID
 	// as Unix socket paths cannot be longer than 256 characters
 	dir := filepath.Join(e.BaseDir, config.ID.String()[:12])
-	if err := os.Mkdir(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("error creating node directory: %s", err)
 	}
 

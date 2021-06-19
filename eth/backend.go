@@ -53,6 +53,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -87,8 +88,6 @@ type Ethereum struct {
 	etherbase common.Address
 
 	networkID uint64
-
-	p2pServer *p2p.Server
 
 	torrentClient *snapshotsync.Client
 
@@ -174,7 +173,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		p2pServer:            stack.Server(),
 		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
@@ -612,6 +610,22 @@ func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
 func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+func (s *Ethereum) NetPeerCount() (uint64, error) {
+	var sentryPc uint64 = 0
+
+	log.Trace("sentry", "peer count", sentryPc)
+	for _, sc := range s.sentries {
+		ctx := context.Background()
+		reply, err := sc.PeerCount(ctx, &sentry.PeerCountRequest{})
+		if err != nil {
+			log.Warn("sentry", "err", err)
+			return 0, nil
+		}
+		sentryPc += reply.Count
+	}
+
+	return sentryPc, nil
+}
 
 // Protocols returns all the currently configured
 // network protocols to start.
