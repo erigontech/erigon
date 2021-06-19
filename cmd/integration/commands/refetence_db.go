@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
@@ -125,10 +126,10 @@ func init() {
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv.MustOpen(chaindata)
 	defer db.Close()
 
-	refDB := ethdb.MustOpen(referenceChaindata)
+	refDB := kv.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -151,10 +152,10 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 	return nil
 }
 func compareBucketBetweenDatabases(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv.MustOpen(chaindata)
 	defer db.Close()
 
-	refDB := ethdb.MustOpen(referenceChaindata)
+	refDB := kv.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -249,7 +250,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	}
 	defer file.Close()
 
-	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	dst := kv.NewMDBX().Path(to).MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
@@ -363,8 +364,8 @@ MainLoop:
 
 func mdbxToMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
-	src := ethdb.NewMDBX().Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := ethdb.NewMDBX().Path(to).MustOpen()
+	src := kv.NewMDBX().Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
+	dst := kv.NewMDBX().Path(to).MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 

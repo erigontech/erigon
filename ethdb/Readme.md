@@ -100,7 +100,7 @@ if err != nil {
 - No internal copies/allocations. It means: 1. app must copy keys/values before put to database. 2. Data after read from db - valid only during current transaction - copy it if plan use data after transaction Commit/Rollback.
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
 - Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `MdbxCursor` and `MdbxDupSortCursor` classes satisfy it. 
-  If your are not familiar with "DupSort" concept, please read [dupsort.md](./../docs/programmers_guide/dupsort.md) first.
+  If your are not familiar with "DupSort" concept, please read [dupsort.md](../docs/programmers_guide/dupsort.md) first.
 
 
 - If Cursor returns err!=nil then key SHOULD be != nil (can be []byte{} for example). 

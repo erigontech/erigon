@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -40,11 +41,11 @@ func WrapBySnapshotsFromDir(kv ethdb.RwKV, snapshotDir string, mode SnapshotMode
 }
 
 func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.RwKV, error) {
-	snKV := ethdb.NewSnapshotKV().DB(kv)
+	snKV := kv2.NewSnapshotKV().DB(kv)
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
 		cfg := BucketConfigs[k]
-		snapshotKV, err := ethdb.NewMDBX().Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		snapshotKV, err := kv2.NewMDBX().Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 			return cfg
 		}).Open()
 
@@ -69,7 +70,7 @@ func WrapSnapshots(chainDb ethdb.Database, snapshotsDir string) error {
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return err
 	}
-	snKVOpts := ethdb.NewSnapshotKV().DB(chainDb.(ethdb.HasRwKV).RwKV())
+	snKVOpts := kv2.NewSnapshotKV().DB(chainDb.(ethdb.HasRwKV).RwKV())
 	if len(snapshotBlock) == 8 {
 		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", binary.BigEndian.Uint64(snapshotBlock)))
 		if innerErr != nil {

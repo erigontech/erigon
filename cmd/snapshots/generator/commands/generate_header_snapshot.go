@@ -8,12 +8,12 @@ import (
 	"os"
 	"time"
 
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -42,9 +42,9 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	if err != nil {
 		return err
 	}
-	kv := ethdb.NewMDBX().Path(dbPath).MustOpen()
+	kv := kv2.NewMDBX().Path(dbPath).MustOpen()
 
-	snKV := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
 		}

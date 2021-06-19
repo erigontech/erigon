@@ -1,4 +1,4 @@
-package ethdb
+package kv
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +22,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	normalBucket := dbutils.Buckets[15]
 	deprecatedBucket := dbutils.DeprecatedBuckets[0]
-	migrator, ok := tx.(BucketMigrator)
+	migrator, ok := tx.(ethdb.BucketMigrator)
 	if !ok {
 		return
 	}
@@ -42,7 +43,7 @@ func TestBucketCRUD(t *testing.T) {
 	}
 
 	require.True(migrator.ExistsBucket(normalBucket))
-	require.True(errors.Is(migrator.DropBucket(normalBucket), ErrAttemptToDeleteNonDeprecatedBucket))
+	require.True(errors.Is(migrator.DropBucket(normalBucket), ethdb.ErrAttemptToDeleteNonDeprecatedBucket))
 
 	require.False(migrator.ExistsBucket(deprecatedBucket))
 	require.NoError(migrator.CreateBucket(deprecatedBucket))

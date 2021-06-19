@@ -16,7 +16,7 @@
 
 // +build !js
 
-package ethdb
+package kv
 
 import (
 	"bytes"
@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,7 +144,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.Update(context.Background(), func(tx RwTx) error {
+			_ = db.Update(context.Background(), func(tx ethdb.RwTx) error {
 				err := tx.Put(testBucket, []byte(key), []byte("v"+key))
 				if err != nil {
 					panic("put failed: " + err.Error())
@@ -158,7 +159,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.View(context.Background(), func(tx Tx) error {
+			_ = db.View(context.Background(), func(tx ethdb.Tx) error {
 				data, err := tx.GetOne(testBucket, []byte(key))
 				if err != nil {
 					panic("get failed: " + err.Error())
@@ -176,7 +177,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.Update(context.Background(), func(tx RwTx) error {
+			_ = db.Update(context.Background(), func(tx ethdb.RwTx) error {
 				err := tx.Delete(testBucket, []byte(key), nil)
 				if err != nil {
 					panic("delete failed: " + err.Error())
@@ -191,7 +192,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.Update(context.Background(), func(tx RwTx) error {
+			_ = db.Update(context.Background(), func(tx ethdb.RwTx) error {
 				v, err := tx.GetOne(testBucket, []byte(key))
 				if err != nil {
 					panic(err)
@@ -236,7 +237,7 @@ func TestWalk(t *testing.T) {
 		panic(err)
 	}
 	defer c.Close()
-	err = Walk(c, startKey, fixedBits, func(key, val []byte) (bool, error) {
+	err = ethdb.Walk(c, startKey, fixedBits, func(key, val []byte) (bool, error) {
 		gotKeys = append(gotKeys, common.CopyBytes(key))
 		return true, nil
 	})

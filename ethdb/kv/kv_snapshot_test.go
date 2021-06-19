@@ -1,4 +1,4 @@
-package ethdb
+package kv
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +20,7 @@ func TestSnapshot2Get(t *testing.T) {
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
-	err := sn1.Update(context.Background(), func(tx RwTx) error {
+	err := sn1.Update(context.Background(), func(tx ethdb.RwTx) error {
 		bucket, err := tx.RwCursor(dbutils.HeadersBucket)
 		if err != nil {
 			return err
@@ -45,7 +46,7 @@ func TestSnapshot2Get(t *testing.T) {
 		}
 	}).InMem().MustOpen()
 	defer sn2.Close()
-	err = sn2.Update(context.Background(), func(tx RwTx) error {
+	err = sn2.Update(context.Background(), func(tx ethdb.RwTx) error {
 		bucket, err := tx.RwCursor(dbutils.BlockBodyPrefix)
 		require.NoError(t, err)
 		innerErr := bucket.Put(dbutils.BlockBodyKey(1, common.Hash{1}), []byte{1})
@@ -64,7 +65,7 @@ func TestSnapshot2Get(t *testing.T) {
 	}
 
 	mainDB := NewTestKV(t)
-	err = mainDB.Update(context.Background(), func(tx RwTx) error {
+	err = mainDB.Update(context.Background(), func(tx ethdb.RwTx) error {
 		bucket, err := tx.RwCursor(dbutils.HeadersBucket)
 		if err != nil {
 			return err
@@ -199,7 +200,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	defer sn1.Close()
 
 	{
-		err := sn1.Update(context.Background(), func(tx RwTx) error {
+		err := sn1.Update(context.Background(), func(tx ethdb.RwTx) error {
 			bucket, err := tx.RwCursor(dbutils.HeadersBucket)
 			require.NoError(t, err)
 			innerErr := bucket.Put(dbutils.HeaderKey(1, common.Hash{1}), []byte{1})
@@ -225,7 +226,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	}).InMem().MustOpen()
 	defer sn2.Close()
 	{
-		err := sn2.Update(context.Background(), func(tx RwTx) error {
+		err := sn2.Update(context.Background(), func(tx ethdb.RwTx) error {
 			bucket, err := tx.RwCursor(dbutils.BlockBodyPrefix)
 			require.NoError(t, err)
 			innerErr := bucket.Put(dbutils.BlockBodyKey(1, common.Hash{1}), []byte{1})
@@ -764,7 +765,7 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 	}
 
 	i := 0
-	err = Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
 		checkKV(t, k, v, data[i].K, data[i].V)
 		i++
 		return true, nil
@@ -801,7 +802,7 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 	require.NoError(t, err)
 
 	i := 0
-	err = Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = ethdb.Walk(c, []byte{}, 0, func(k, v []byte) (bool, error) {
 		checkKV(t, k, v, data[i].K, data[i].V)
 		i++
 		return true, nil
@@ -1073,12 +1074,12 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	}
 }
 
-func printBucket(kv RoKV, bucket string) {
+func printBucket(kv ethdb.RoKV, bucket string) {
 	fmt.Println("+Print bucket", bucket)
 	defer func() {
 		fmt.Println("-Print bucket", bucket)
 	}()
-	err := kv.View(context.Background(), func(tx Tx) error {
+	err := kv.View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(bucket)
 		if err != nil {
 			return err

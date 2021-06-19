@@ -9,14 +9,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLogIndex(t *testing.T) {
 	require := require.New(t)
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 
 	addr1, addr2 := common.HexToAddress("0x0"), common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2")
 	topic1, topic2 := common.HexToHash("0x0"), common.HexToHash("0x1234")

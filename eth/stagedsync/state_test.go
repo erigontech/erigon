@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -42,7 +43,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
@@ -85,7 +86,7 @@ func TestStateDisabledStages(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
@@ -131,7 +132,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		},
 	}
 	state := NewState(s)
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
@@ -175,7 +176,7 @@ func TestStateErroredStage(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.Equal(t, expectedErr, err)
 
@@ -262,7 +263,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
@@ -363,7 +364,7 @@ func TestStateUnwind(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
@@ -445,7 +446,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
@@ -501,7 +502,7 @@ func TestStateSyncDoTwice(t *testing.T) {
 	}
 
 	state := NewState(s)
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.NoError(t, err)
 
@@ -562,7 +563,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 	}
 
 	state := NewState(s)
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.Equal(t, expectedErr, err)
 
@@ -648,7 +649,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	}
 	state := NewState(s)
 	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx)
 	assert.Error(t, errInterrupted, err)
 

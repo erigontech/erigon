@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -244,7 +245,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	}
 
 	var batch ethdb.DbWithPendingMutations
-	batch = ethdb.NewBatch(tx)
+	batch = kv.NewBatch(tx)
 	defer batch.Rollback()
 
 	logEvery := time.NewTicker(logInterval)
@@ -310,7 +311,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = ethdb.NewBatch(tx)
+			batch = kv.NewBatch(tx)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}

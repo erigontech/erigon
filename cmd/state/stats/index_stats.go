@@ -13,11 +13,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func IndexStats(chaindata string, indexBucket string, statsFile string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv.MustOpen(chaindata)
 	startTime := time.Now()
 	lenOfKey := common.HashLength
 	if strings.HasPrefix(indexBucket, dbutils.StorageHistoryBucket) {

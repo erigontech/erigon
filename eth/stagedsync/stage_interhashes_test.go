@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
@@ -28,7 +29,7 @@ func addTestAccount(tx ethdb.Putter, hash common.Hash, balance uint64, incarnati
 }
 
 func TestAccountAndStorageTrie(t *testing.T) {
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 
 	hash1 := common.HexToHash("0xB000000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash1, 3*params.Ether, 0))
@@ -118,7 +119,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 }
 
 func TestAccountTrieAroundExtensionNode(t *testing.T) {
-	db, tx := ethdb.NewTestTx(t)
+	db, tx := kv.NewTestTx(t)
 
 	acc := accounts.NewAccount()
 	acc.Balance.SetUint64(1 * params.Ether)

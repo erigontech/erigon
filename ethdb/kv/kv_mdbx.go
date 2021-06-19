@@ -1,10 +1,11 @@
-package ethdb
+package kv
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -39,10 +41,18 @@ type MdbxOpts struct {
 	bucketsCfg BucketConfigsFunc
 	path       string
 	inMem      bool
-	label      Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
-	verbosity  DBVerbosityLvl
+	label      ethdb.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
+	verbosity  ethdb.DBVerbosityLvl
 	mapSize    datasize.ByteSize
 	flags      uint
+}
+
+func testKVPath() string {
+	dir, err := ioutil.TempDir(os.TempDir(), "erigon-test-db")
+	if err != nil {
+		panic(err)
+	}
+	return dir
 }
 
 func NewMDBX() MdbxOpts {
@@ -52,7 +62,7 @@ func NewMDBX() MdbxOpts {
 	}
 }
 
-func (opts MdbxOpts) Label(label Label) MdbxOpts {
+func (opts MdbxOpts) Label(label ethdb.Label) MdbxOpts {
 	opts.label = label
 	return opts
 }
@@ -86,7 +96,7 @@ func (opts MdbxOpts) Readonly() MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) DBVerbosity(v DBVerbosityLvl) MdbxOpts {
+func (opts MdbxOpts) DBVerbosity(v ethdb.DBVerbosityLvl) MdbxOpts {
 	opts.verbosity = v
 	return opts
 }
@@ -101,7 +111,7 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) Open() (RwKV, error) {
+func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
 		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
 	}
@@ -127,7 +137,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptMaxReaders, ReadersLimit); err != nil {
+	if err = env.SetOption(mdbx.OptMaxReaders, ethdb.ReadersLimit); err != nil {
 		return nil, err
 	}
 
@@ -220,7 +230,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 			if db.buckets[name].IsDeprecated {
 				continue
 			}
-			if err = tx.(BucketMigrator).CreateBucket(name); err != nil {
+			if err = tx.(ethdb.BucketMigrator).CreateBucket(name); err != nil {
 				return nil, err
 			}
 		}
@@ -229,12 +239,12 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 			return nil, err
 		}
 	} else {
-		if err := db.Update(context.Background(), func(tx RwTx) error {
+		if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
 			for _, name := range buckets {
 				if db.buckets[name].IsDeprecated {
 					continue
 				}
-				if err := tx.(BucketMigrator).CreateBucket(name); err != nil {
+				if err := tx.(ethdb.BucketMigrator).CreateBucket(name); err != nil {
 					return err
 				}
 			}
@@ -286,7 +296,7 @@ func (opts MdbxOpts) Open() (RwKV, error) {
 	return db, nil
 }
 
-func (opts MdbxOpts) MustOpen() RwKV {
+func (opts MdbxOpts) MustOpen() ethdb.RwKV {
 	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
@@ -333,25 +343,25 @@ func (db *MdbxKV) CollectMetrics() {
 	if !metrics.Enabled {
 		return
 	}
-	if db.opts.label != Chain {
+	if db.opts.label != ethdb.Chain {
 		return
 	}
 	info, err := db.env.Info()
 	if err != nil {
 		return // ignore error for metrics collection
 	}
-	dbSize.Update(int64(info.Geo.Current))
-	dbPgopsNewly.Update(int64(info.PageOps.Newly))
-	dbPgopsCow.Update(int64(info.PageOps.Cow))
-	dbPgopsClone.Update(int64(info.PageOps.Clone))
-	dbPgopsSplit.Update(int64(info.PageOps.Split))
-	dbPgopsMerge.Update(int64(info.PageOps.Merge))
-	dbPgopsSpill.Update(int64(info.PageOps.Spill))
-	dbPgopsUnspill.Update(int64(info.PageOps.Unspill))
-	dbPgopsWops.Update(int64(info.PageOps.Wops))
+	ethdb.DbSize.Update(int64(info.Geo.Current))
+	ethdb.DbPgopsNewly.Update(int64(info.PageOps.Newly))
+	ethdb.DbPgopsCow.Update(int64(info.PageOps.Cow))
+	ethdb.DbPgopsClone.Update(int64(info.PageOps.Clone))
+	ethdb.DbPgopsSplit.Update(int64(info.PageOps.Split))
+	ethdb.DbPgopsMerge.Update(int64(info.PageOps.Merge))
+	ethdb.DbPgopsSpill.Update(int64(info.PageOps.Spill))
+	ethdb.DbPgopsUnspill.Update(int64(info.PageOps.Unspill))
+	ethdb.DbPgopsWops.Update(int64(info.PageOps.Wops))
 }
 
-func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
+func (db *MdbxKV) BeginRo(_ context.Context) (txn ethdb.Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -373,7 +383,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn Tx, err error) {
 	}, nil
 }
 
-func (db *MdbxKV) BeginRw(_ context.Context) (txn RwTx, err error) {
+func (db *MdbxKV) BeginRw(_ context.Context) (txn ethdb.RwTx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -400,7 +410,7 @@ type MdbxTx struct {
 	tx               *mdbx.Txn
 	db               *MdbxKV
 	cursors          map[uint64]*mdbx.Cursor
-	statelessCursors map[string]Cursor
+	statelessCursors map[string]ethdb.Cursor
 	readOnly         bool
 	cursorID         uint64
 }
@@ -491,7 +501,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	if !metrics.Enabled {
 		return
 	}
-	if tx.db.opts.label != Chain {
+	if tx.db.opts.label != ethdb.Chain {
 		return
 	}
 	txInfo, err := tx.tx.Info(true)
@@ -499,25 +509,25 @@ func (tx *MdbxTx) CollectMetrics() {
 		return
 	}
 
-	txDirty.Update(int64(txInfo.SpaceDirty))
-	txLimit.Update(int64(tx.db.txSize))
-	txSpill.Update(int64(txInfo.Spill))
-	txUnspill.Update(int64(txInfo.Unspill))
+	ethdb.TxDirty.Update(int64(txInfo.SpaceDirty))
+	ethdb.TxLimit.Update(int64(tx.db.txSize))
+	ethdb.TxSpill.Update(int64(txInfo.Spill))
+	ethdb.TxUnspill.Update(int64(txInfo.Unspill))
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	gcLeafMetric.Update(int64(gc.LeafPages))
-	gcOverflowMetric.Update(int64(gc.OverflowPages))
-	gcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * tx.db.pageSize / 8))
+	ethdb.GcLeafMetric.Update(int64(gc.LeafPages))
+	ethdb.GcOverflowMetric.Update(int64(gc.OverflowPages))
+	ethdb.GcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * tx.db.pageSize / 8))
 
 	state, err := tx.BucketStat(dbutils.PlainStateBucket)
 	if err != nil {
 		return
 	}
-	stateLeafMetric.Update(int64(state.LeafPages))
-	stateBranchesMetric.Update(int64(state.BranchPages))
+	ethdb.StateLeafMetric.Update(int64(state.LeafPages))
+	ethdb.StateBranchesMetric.Update(int64(state.BranchPages))
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
@@ -546,7 +556,7 @@ func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 	return res, nil
 }
 
-func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *MdbxKV) View(ctx context.Context, f func(tx ethdb.Tx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
@@ -563,7 +573,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	return f(tx)
 }
 
-func (db *MdbxKV) Update(ctx context.Context, f func(tx RwTx) error) (err error) {
+func (db *MdbxKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
@@ -724,7 +734,7 @@ func (tx *MdbxTx) ClearBucket(bucket string) error {
 
 func (tx *MdbxTx) DropBucket(bucket string) error {
 	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
-		return fmt.Errorf("%w, bucket: %s", ErrAttemptToDeleteNonDeprecatedBucket, bucket)
+		return fmt.Errorf("%w, bucket: %s", ethdb.ErrAttemptToDeleteNonDeprecatedBucket, bucket)
 	}
 
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
@@ -767,14 +777,14 @@ func (tx *MdbxTx) Commit() error {
 		return err
 	}
 
-	if tx.db.opts.label == Chain {
-		dbCommitPreparation.Update(latency.Preparation)
-		dbCommitGc.Update(latency.GC)
-		dbCommitAudit.Update(latency.Audit)
-		dbCommitWrite.Update(latency.Write)
-		dbCommitSync.Update(latency.Sync)
-		dbCommitEnding.Update(latency.Ending)
-		dbCommitBigBatchTimer.Update(latency.Whole)
+	if tx.db.opts.label == ethdb.Chain {
+		ethdb.DbCommitPreparation.Update(latency.Preparation)
+		ethdb.DbCommitGc.Update(latency.GC)
+		ethdb.DbCommitAudit.Update(latency.Audit)
+		ethdb.DbCommitWrite.Update(latency.Write)
+		ethdb.DbCommitSync.Update(latency.Sync)
+		ethdb.DbCommitEnding.Update(latency.Ending)
+		ethdb.DbCommitBigBatchTimer.Update(latency.Whole)
 	}
 
 	if latency.Whole > slowTx {
@@ -854,9 +864,9 @@ func (tx *MdbxTx) closeCursors() {
 	tx.statelessCursors = nil
 }
 
-func (tx *MdbxTx) statelessCursor(bucket string) (RwCursor, error) {
+func (tx *MdbxTx) statelessCursor(bucket string) (ethdb.RwCursor, error) {
 	if tx.statelessCursors == nil {
-		tx.statelessCursors = make(map[string]Cursor)
+		tx.statelessCursors = make(map[string]ethdb.Cursor)
 	}
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
@@ -867,7 +877,7 @@ func (tx *MdbxTx) statelessCursor(bucket string) (RwCursor, error) {
 		}
 		tx.statelessCursors[bucket] = c
 	}
-	return c.(RwCursor), nil
+	return c.(ethdb.RwCursor), nil
 }
 
 func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
@@ -986,7 +996,7 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	return st, nil
 }
 
-func (tx *MdbxTx) RwCursor(bucket string) (RwCursor, error) {
+func (tx *MdbxTx) RwCursor(bucket string) (ethdb.RwCursor, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
 		return tx.stdCursor(bucket)
@@ -999,11 +1009,11 @@ func (tx *MdbxTx) RwCursor(bucket string) (RwCursor, error) {
 	return tx.stdCursor(bucket)
 }
 
-func (tx *MdbxTx) Cursor(bucket string) (Cursor, error) {
+func (tx *MdbxTx) Cursor(bucket string) (ethdb.Cursor, error) {
 	return tx.RwCursor(bucket)
 }
 
-func (tx *MdbxTx) stdCursor(bucket string) (RwCursor, error) {
+func (tx *MdbxTx) stdCursor(bucket string) (ethdb.RwCursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.cursorID}
 	tx.cursorID++
@@ -1022,7 +1032,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (RwCursor, error) {
 	return c, nil
 }
 
-func (tx *MdbxTx) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
+func (tx *MdbxTx) RwCursorDupSort(bucket string) (ethdb.RwCursorDupSort, error) {
 	basicCursor, err := tx.stdCursor(bucket)
 	if err != nil {
 		return nil, err
@@ -1030,7 +1040,7 @@ func (tx *MdbxTx) RwCursorDupSort(bucket string) (RwCursorDupSort, error) {
 	return &MdbxDupSortCursor{MdbxCursor: basicCursor.(*MdbxCursor)}, nil
 }
 
-func (tx *MdbxTx) CursorDupSort(bucket string) (CursorDupSort, error) {
+func (tx *MdbxTx) CursorDupSort(bucket string) (ethdb.CursorDupSort, error) {
 	return tx.RwCursorDupSort(bucket)
 }
 

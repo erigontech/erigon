@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -24,7 +25,7 @@ import (
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	db := ethdb.NewMemDatabase()
+	db := kv2.NewMemDatabase()
 	defer db.Close()
 	kv := db.RwKV()
 	cfg := StageHistoryCfg(db.RwKV(), t.TempDir())
@@ -67,7 +68,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
-	kv := ethdb.NewTestKV(t)
+	kv := kv2.NewTestKV(t)
 	cfg := StageHistoryCfg(kv, t.TempDir())
 	for i := range buckets {
 		csbucket := buckets[i]

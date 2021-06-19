@@ -159,7 +159,7 @@ type BucketsMigrator interface {
 	DropBuckets(buckets ...string) error      // drops them, use of them after drop will panic
 }
 
-func getOneWrapper(dat []byte, err error) ([]byte, error) {
+func GetOneWrapper(dat []byte, err error) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -169,4 +169,4 @@ func getOneWrapper(dat []byte, err error) ([]byte, error) {
 	return dat, nil
 }
 
-var errNotSupported = errors.New("not supported")
+var ErrNotSupported = errors.New("not supported")

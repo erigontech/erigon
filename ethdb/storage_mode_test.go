@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
-	_, tx := NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 	sm, err := GetStorageModeFromDB(tx)
 	if err != nil {
 		t.Fatal(err)

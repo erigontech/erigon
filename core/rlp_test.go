@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -28,13 +29,12 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 func getBlock(transactions int, uncles int, dataSize int) *types.Block {
-	db := ethdb.NewMemKV()
+	db := kv.NewMemKV()
 	defer db.Close()
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
