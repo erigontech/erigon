@@ -118,3 +118,19 @@ func HeadersSeal() bool {
 	})
 	return headersSeal
 }
+
+var (
+	stopBeforeStage     string
+	stopBeforeStageFlag sync.Once
+)
+
+func StopBeforeStage() string {
+	f := func() {
+		v, _ := os.LookupEnv("STOP_BEFORE_STAGE") // see names in eth/stagedsync/stages/stages.go
+		if v != "" {
+			stopBeforeStage = v
+		}
+	}
+	stopBeforeStageFlag.Do(f)
+	return stopBeforeStage
+}
