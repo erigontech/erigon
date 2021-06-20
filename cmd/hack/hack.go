@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -46,8 +45,6 @@ import (
 )
 
 var (
-	emptyCodeHash = crypto.Keccak256(nil) //nolint
-
 	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
@@ -297,31 +294,6 @@ func mychart() {
 	tool.Check(err)
 	err = ioutil.WriteFile("chart2.png", buffer.Bytes(), 0644)
 	tool.Check(err)
-}
-
-//nolint
-func accountSavings(db ethdb.RwKV) (int, int) {
-	emptyRoots := 0
-	emptyCodes := 0
-	tool.Check(db.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HashedAccountsBucket)
-		if err != nil {
-			return err
-		}
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
-				emptyRoots++
-			}
-			if bytes.Contains(v, emptyCodeHash) {
-				emptyCodes++
-			}
-		}
-		return nil
-	}))
-	return emptyRoots, emptyCodes
 }
 
 func bucketStats(chaindata string) error {
@@ -1598,7 +1570,7 @@ func extractHeaders(chaindata string, block uint64) error {
 		if err = rlp.DecodeBytes(v, &header); err != nil {
 			return fmt.Errorf("decoding header from %x: %v", v, err)
 		}
-		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x\n", blockNumber, blockHash, header.Root, header.ParentHash)
+		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x, diff %d\n", blockNumber, blockHash, header.Root, header.ParentHash, header.Difficulty)
 	}
 	return nil
 }
