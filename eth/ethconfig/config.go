@@ -210,7 +210,11 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
-			eng = aura.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory))
+			var err error
+			eng, err = aura.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory), chainConfig.Aura.Etherbase, chainConfig.Aura.RewardAbi, chainConfig.Aura.ValidatorSedAbi, aura.AuthorityRoundParams{})
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 

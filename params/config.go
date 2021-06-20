@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -472,8 +473,11 @@ type CliqueConfig struct {
 
 // AuRaConfig is the consensus engine configs for proof-of-authority based sealing.
 type AuRaConfig struct {
-	DBPath   string
-	InMemory bool
+	DBPath          string
+	InMemory        bool
+	Etherbase       common.Address // same as miner etherbase
+	RewardAbi       aurainterfaces.BlockRewardABI
+	ValidatorSedAbi aurainterfaces.ValidatorSetABI
 }
 
 // String implements the stringer interface, returning the consensus engine details.

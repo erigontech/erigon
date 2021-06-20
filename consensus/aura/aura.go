@@ -30,11 +30,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm/runtime"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/secp256k1"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -54,7 +54,7 @@ type StepDurationInfo struct {
 type Step struct {
 	calibrate bool // whether calibration is enabled.
 	inner     *atomic.Uint64
-	/// Planned durations of steps.
+	// Planned durations of steps.
 	durations []StepDurationInfo
 }
 
@@ -110,14 +110,14 @@ type unAssembledHeader struct {
 	a []common.Address
 }
 
-/// RollingFinality checker for authority round consensus.
-/// Stores a chain of unfinalized hashes that can be pushed onto.
+// RollingFinality checker for authority round consensus.
+// Stores a chain of unfinalized hashes that can be pushed onto.
 type RollingFinality struct {
 	headers    []unAssembledHeader
 	signers    SimpleList
 	signCount  map[common.Address]uint
 	lastPushed *common.Hash // Option<H256>,
-	/// First block for which a 2/3 quorum (instead of 1/2) is required.
+	// First block for which a 2/3 quorum (instead of 1/2) is required.
 	twoThirdsMajorityTransition uint64 //BlockNumber
 }
 
@@ -127,17 +127,18 @@ type AuRa struct {
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
 
-	step PermissionedStep
-	//client: Arc<RwLock<Option<Weak<dyn EngineClient>>>>,
-	Signer                         types.Signer
-	Validators                     ValidatorSet1
+	step                           PermissionedStep
+	rewardAbi                      aurainterfaces.BlockRewardABI
+	validatorSetAbi                aurainterfaces.ValidatorSetABI
+	OurSigningAddress              common.Address // Same as Etherbase in Mining
+	Validators                     ValidatorSet
 	ValidateScoreTransition        uint64
 	ValidateStepTransition         uint64
 	EmptyStepsSet                  *EmptyStepSet
 	EpochManager                   EpochManager // Mutex<EpochManager>,
 	immediateTransitions           bool
-	blockReward                    map[uint64]uint256.Int
-	blockRewardContractTransitions map[uint64]BlockRewardContract
+	blockReward                    map[uint64]*uint256.Int
+	blockRewardContractTransitions BlockRewardContractList
 	maximumUncleCountTransition    uint64
 	maximumUncleCount              uint
 	emptyStepsTransition           uint64
@@ -145,17 +146,17 @@ type AuRa struct {
 	twoThirdsMajorityTransition    uint64 //  BlockNumber
 	maximumEmptySteps              uint
 	//machine: EthereumMachine,
-	/// History of step hashes recently received from peers.
+	// History of step hashes recently received from peers.
 	receivedStepHashes map[uint64]map[common.Address]common.Hash // RwLock<BTreeMap<(u64, Address), H256>>
-	/// If set, enables random number contract integration. It maps the transition block to the contract address.
+	// If set, enables random number contract integration. It maps the transition block to the contract address.
 	randomnessContractAddress map[uint64]common.Address
-	/// The addresses of contracts that determine the block gas limit.
+	// The addresses of contracts that determine the block gas limit.
 	blockGasLimitContractTransitions map[uint64]common.Address
-	/// Memoized gas limit overrides, by block hash.
+	// Memoized gas limit overrides, by block hash.
 	gasLimitOverrideCache *GasLimitOverride //Mutex<LruCache<H256, Option<U256>>>,
-	/// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
-	/// modifications. For details about POSDAO, see the whitepaper:
-	/// https://www.xdaichain.com/for-validators/posdao-whitepaper
+	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
+	// modifications. For details about POSDAO, see the whitepaper:
+	// https://www.xdaichain.com/for-validators/posdao-whitepaper
 	posdaoTransition *uint64 // Option<BlockNumber>,
 }
 
@@ -164,7 +165,7 @@ type GasLimitOverride struct {
 }
 
 func NewGasLimitOverride() *GasLimitOverride {
-	/// The number of recent block hashes for which the gas limit override is memoized.
+	// The number of recent block hashes for which the gas limit override is memoized.
 	const GasLimitOverrideCacheCapacity = 10
 
 	cache, err := lru.New(GasLimitOverrideCacheCapacity)
@@ -193,7 +194,7 @@ func (pb *GasLimitOverride) Add(hash common.Hash, b *uint256.Int) {
 
 // NewAuRa creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, auraParams AuthorityRoundParams) (*AuRa, error) {
+func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Address, rewardAbi aurainterfaces.BlockRewardABI, validatorSedAbi aurainterfaces.ValidatorSetABI, auraParams AuthorityRoundParams) (*AuRa, error) {
 	config := cfg.Aura
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
@@ -288,17 +289,20 @@ func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, auraParams AuthorityRoundPa
 	exitCh := make(chan struct{})
 
 	c := &AuRa{
-		db:     db,
-		exitCh: exitCh,
-		step:   PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
+		db:                db,
+		exitCh:            exitCh,
+		step:              PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
+		OurSigningAddress: ourSigningAddress,
+		rewardAbi:         rewardAbi,
+		validatorSetAbi:   validatorSedAbi,
 	}
 	_ = config
 
 	return c, nil
 }
 
-/// A helper accumulator function mapping a step duration and a step duration transition timestamp
-/// to the corresponding step number and the correct starting second of the step.
+// A helper accumulator function mapping a step duration and a step duration transition timestamp
+// to the corresponding step number and the correct starting second of the step.
 func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, bool) {
 	stepDiff := time + info.StepDuration
 	if stepDiff < 1 {
@@ -371,12 +375,12 @@ func (c *AuRa) VerifySeal(chain consensus.ChainHeaderReader, header *types.Heade
 // header for running the transactions on top.
 func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	return nil
-	//// If the block isn't a checkpoint, cast a random vote (good enough for now)
+	/// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	//header.Coinbase = common.Address{}
 	//header.Nonce = types.BlockNonce{}
 	//
 	//number := header.Number.Uint64()
-	//// Assemble the voting snapshot to check which votes make sense
+	/// Assemble the voting snapshot to check which votes make sense
 	//snap, err := c.Snapshot(chain, number-1, header.ParentHash, nil)
 	//if err != nil {
 	//	return err
@@ -402,10 +406,10 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 	//	}
 	//	c.lock.RUnlock()
 	//}
-	//// Set the correct difficulty
+	/// Set the correct difficulty
 	//header.Difficulty = calcDifficulty(snap, c.signer)
 	//
-	//// Ensure the extra data has all its components
+	/// Ensure the extra data has all its components
 	//if len(header.Extra) < ExtraVanity {
 	//	header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, ExtraVanity-len(header.Extra))...)
 	//}
@@ -418,10 +422,10 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 	//}
 	//header.Extra = append(header.Extra, make([]byte, ExtraSeal)...)
 	//
-	//// Mix digest is reserved for now, set to empty
+	/// Mix digest is reserved for now, set to empty
 	//header.MixDigest = common.Hash{}
 	//
-	//// Ensure the timestamp has the correct delay
+	/// Ensure the timestamp has the correct delay
 	//parent := chain.GetHeader(header.ParentHash, number-1)
 	//if parent == nil {
 	//	return consensus.ErrUnknownAncestor
@@ -440,7 +444,10 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 // rewards given.
 func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header) {
 	// Accumulate any block and uncle rewards and commit the final state root
-	accumulateRewards(cc, state, header, uncles)
+	err := accumulateRewards(cc, c, state, header, uncles)
+	if err != nil {
+		log.Error("accumulateRewards", "err", err)
+	}
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
@@ -469,22 +476,22 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	return nil
 	//header := block.Header()
 	//
-	//// Sealing the genesis block is not supported
+	/// Sealing the genesis block is not supported
 	//number := header.Number.Uint64()
 	//if number == 0 {
 	//	return errUnknownBlock
 	//}
-	//// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
+	/// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	//if c.config.Period == 0 && len(block.Transactions()) == 0 {
 	//	log.Info("Sealing paused, waiting for transactions")
 	//	return nil
 	//}
-	//// Don't hold the signer fields for the entire sealing procedure
+	/// Don't hold the signer fields for the entire sealing procedure
 	//c.lock.RLock()
 	//signer, signFn := c.signer, c.signFn
 	//c.lock.RUnlock()
 	//
-	//// Bail out if we're unauthorized to sign a block
+	/// Bail out if we're unauthorized to sign a block
 	//snap, err := c.Snapshot(chain, number-1, header.ParentHash, nil)
 	//if err != nil {
 	//	return err
@@ -492,7 +499,7 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	//if _, authorized := snap.Signers[signer]; !authorized {
 	//	return ErrUnauthorizedSigner
 	//}
-	//// If we're amongst the recent signers, wait for the next block
+	/// If we're amongst the recent signers, wait for the next block
 	//for seen, recent := range snap.Recents {
 	//	if recent == signer {
 	//		// Signer is among RecentsRLP, only wait if the current block doesn't shift it out
@@ -502,7 +509,7 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	//		}
 	//	}
 	//}
-	//// Sweet, the protocol permits us to sign the block, wait for our time
+	/// Sweet, the protocol permits us to sign the block, wait for our time
 	//delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) // nolint: gosimple
 	//if header.Difficulty.Cmp(diffNoTurn) == 0 {
 	//	// It's not our turn explicitly to sign, delay it a bit
@@ -511,13 +518,13 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	//
 	//	log.Trace("Out-of-turn signing requested", "wiggle", common.PrettyDuration(wiggle))
 	//}
-	//// Sign all the things!
+	/// Sign all the things!
 	//sighash, err := signFn(signer, accounts.MimetypeClique, CliqueRLP(header))
 	//if err != nil {
 	//	return err
 	//}
 	//copy(header.Extra[len(header.Extra)-ExtraSeal:], sighash)
-	//// Wait until sealing is terminated or delay timeout.
+	/// Wait until sealing is terminated or delay timeout.
 	//log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	//go func() {
 	//	select {
@@ -574,20 +581,18 @@ func (c *AuRa) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 // accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 func accumulateRewards(config *params.ChainConfig, aura *AuRa, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) error {
-	minerReward, uncleRewards, err := AccumulateRewards(config, aura, header, uncles)
+	beneficiaries, _, rewards, err := AccumulateRewards(config, aura, header, uncles)
 	if err != nil {
 		return err
 	}
-	for i, uncle := range uncles {
-		if i < len(uncleRewards) {
-			state.AddBalance(uncle.Coinbase, &uncleRewards[i])
-		}
+	for i := range beneficiaries {
+		state.AddBalance(beneficiaries[i], rewards[i])
 	}
-	state.AddBalance(header.Coinbase, &minerReward)
+
 	return nil
 }
 
-func (s *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
+func (c *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
 	from := EmptyStep{step: fromStep + 1, parentHash: parentHash}
 	to := EmptyStep{step: toStep}
 	res := []EmptyStep{}
@@ -595,8 +600,8 @@ func (s *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 		return res
 	}
 
-	s.EmptyStepsSet.Sort()
-	s.EmptyStepsSet.ForEach(func(i int, step *EmptyStep) {
+	c.EmptyStepsSet.Sort()
+	c.EmptyStepsSet.ForEach(func(i int, step *EmptyStep) {
 		if step.Less(&from) || (&to).Less(step) {
 			return
 		}
@@ -611,9 +616,7 @@ func (s *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 // AccumulateRewards returns rewards for a given block. The mining reward consists
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.
-func AccumulateRewards(config *params.ChainConfig, aura *AuRa, header *types.Header, uncles []*types.Header) (uint256.Int, []uint256.Int, error) {
-	beneficiaries := []int{}
-
+func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
 	if header.Number.Uint64() == aura.twoThirdsMajorityTransition {
 		log.Info("Transitioning to 2/3 quorum", "block", aura.twoThirdsMajorityTransition)
 	}
@@ -621,7 +624,7 @@ func AccumulateRewards(config *params.ChainConfig, aura *AuRa, header *types.Hea
 		var emptySteps []EmptyStep
 		if len(header.Seal) == 0 {
 			// this is a new block, calculate rewards based on the empty steps messages we have accumulated
-			if err := aura.db.View(context.Background(), func(tx ethdb.Tx) error {
+			if err = aura.db.View(context.Background(), func(tx ethdb.Tx) error {
 				parent := rawdb.ReadHeader(tx, header.ParentHash, header.Number.Uint64())
 				if parent == nil {
 					return fmt.Errorf("parent not found: %d,%x\n", header.Number.Uint64(), header.ParentHash)
@@ -635,104 +638,72 @@ func AccumulateRewards(config *params.ChainConfig, aura *AuRa, header *types.Hea
 
 				return nil
 			}); err != nil {
-				return nil, nil, err
+				return
 			}
 		} else {
 			// we're verifying a block, extract empty steps from the seal
-			var err error
 			emptySteps, err = headerEmptySteps(header)
 			if err != nil {
-				return nil, nil, err
+				return
 			}
 		}
 
 		for _, s := range emptySteps {
-			let
-			author = s.author()?
-			beneficiaries.push((author, RewardKind::EmptyStep))
-		}
+			var author common.Address
+			author, err = s.author()
+			if err != nil {
+				return
+			}
 
+			beneficiaries = append(beneficiaries, author)
+			rewardKind = append(rewardKind, aurainterfaces.RewardEmptyStep)
+		}
 	}
 
-	/*
+	beneficiaries = append(beneficiaries, header.Coinbase)
+	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 
-	   if block.header.number() >= self.empty_steps_transition {
-	       let empty_steps = if block.header.seal().is_empty() {
-	           // this is a new block, calculate rewards based on the empty steps messages we have accumulated
-	           let client = match self.client.read().as_ref().and_then(|weak| weak.upgrade()) {
-	               Some(client) => client,
-	               None => {
-	                   debug!(target: "engine", "Unable to close block: missing client ref.");
-	                   return Err(EngineError::RequiresClient.into());
-	               }
-	           };
+	rewardContract := aura.blockRewardContractTransitions.GreaterOrEqual(header.Number.Uint64())
+	if rewardContract != nil {
+		beneficiaries, rewards, err = aura.rewardAbi.Reward(beneficiaries, rewardKind)
+		if err != nil {
+			return
+		}
+		rewardKind = rewardKind[:len(beneficiaries)]
+		for i := 0; i < len(rewardKind); i++ {
+			rewardKind[i] = aurainterfaces.RewardExternal
+		}
+	} else {
+		// find: n <= header.number
+		var foundNum uint64
+		var found bool
+		for n := range aura.blockReward {
+			if n > header.Number.Uint64() {
+				continue
+			}
+			if n > foundNum {
+				found = true
+				foundNum = n
+			}
+		}
+		if !found {
+			panic("Current block's reward is not found; this indicates a chain config error")
+		}
+		reward := aura.blockReward[foundNum]
+		rewards = append(rewards, reward)
+	}
 
-	           let parent = client
-	               .block_header(::client::BlockId::Hash(*block.header.parent_hash()))
-	               .expect("hash is from parent; parent header must exist; qed")
-	               .decode()?;
-
-	           let parent_step = header_step(&parent, self.empty_steps_transition)?;
-	           let current_step = self.step.inner.load();
-	           self.empty_steps(parent_step.into(), current_step.into(), parent.hash())
-	       } else {
-	           // we're verifying a block, extract empty steps from the seal
-	           header_empty_steps(&block.header)?
-	       };
-
-	       for empty_step in empty_steps {
-	           let author = empty_step.author()?;
-	           beneficiaries.push((author, RewardKind::EmptyStep));
-	       }
-	   }
-
-	   let author = *block.header.author();
-	   let number = block.header.number();
-	   beneficiaries.push((author, RewardKind::Author));
-
-	   let block_reward_contract_transition = self
-	       .block_reward_contract_transitions
-	       .range(..=block.header.number())
-	       .last();
-	   let rewards: Vec<_> = if let Some((_, contract)) = block_reward_contract_transition {
-	       let mut call = crate::engines::default_system_or_code_call(&self.machine, block);
-	       let rewards = contract.reward(&beneficiaries, &mut call)?;
-	       rewards
-	           .into_iter()
-	           .map(|(author, amount)| (author, RewardKind::External, amount))
-	           .collect()
-	   } else {
-	       let (_, reward) = self
-	           .block_reward
-	           .iter()
-	           .rev()
-	           .find(|&(block, _)| *block <= number)
-	           .expect(
-	               "Current block's reward is not found; this indicates a chain config error; qed",
-	           );
-	       let reward = *reward;
-
-	       beneficiaries
-	           .into_iter()
-	           .map(|(author, reward_kind)| (author, reward_kind, reward))
-	           .collect()
-	   };
-
-	   if let Some(signer) = self.signer.read().as_ref() {
-	       let our_addr = signer.address();
-	       self.validators.on_close_block(&block.header, &our_addr)?
-	   }
-
-	   block_reward::apply_block_rewards(&rewards, block, &self.machine)
-	*/
-
-	return *reward, uncleRewards
+	//err = aura.Validators.onCloseBlock(header, aura.OurSigningAddress)
+	//if err != nil {
+	//	return
+	//}
+	return
 }
 
-/// An empty step message that is included in a seal, the only difference is that it doesn't include
-/// the `parent_hash` in order to save space. The included signature is of the original empty step
-/// message, which can be reconstructed by using the parent hash of the block in which this sealed
-/// empty message is included.
+// An empty step message that is included in a seal, the only difference is that it doesn't include
+// the `parent_hash` in order to save space. The included signature is of the original empty step
+// message, which can be reconstructed by using the parent hash of the block in which this sealed
+// empty message is inc    luded.
 type SealedEmptyStep struct {
 	signature []byte // H520
 	step      uint64
@@ -773,7 +744,7 @@ func headerEmptyStepsRaw(header *types.Header) []byte {
 
 func headerStep(header *types.Header, emptyStepsTransition uint64) (uint64, error) {
 	if len(header.Seal) == 0 {
-		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has %v fields; qed (Make sure the spec file has a correct genesis seal)", headerExpectedSealFields(header, emptyStepsTransition))
+		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has %v fields; qed (Make sure the spec file has a correct genesis seal)", headerExpectedSealFields(header, emptyStepsTransition)))
 	}
 	var val uint64
 	err := rlp.DecodeBytes(header.Seal[0], &val)
@@ -787,24 +758,24 @@ func headerExpectedSealFields(header *types.Header, emptyStepsTransition uint64)
 	return 2
 }
 
-/// A message broadcast by authorities when it's their turn to seal a block but there are no
-/// transactions. Other authorities accumulate these messages and later include them in the seal as
-/// proof.
-///
-/// An empty step message is created _instead of_ a block if there are no pending transactions.
-/// It cannot itself be a parent, and `parent_hash` always points to the most recent block. E.g.:
-/// * Validator A creates block `bA`.
-/// * Validator B has no pending transactions, so it signs an empty step message `mB`
-///   instead whose hash points to block `bA`.
-/// * Validator C also has no pending transactions, so it also signs an empty step message `mC`
-///   instead whose hash points to block `bA`.
-/// * Validator D creates block `bD`. The parent is block `bA`, and the header includes `mB` and `mC`.
+// A message broadcast by authorities when it's their turn to seal a block but there are no
+// transactions. Other authorities accumulate these messages and later include them in the seal as
+// proof.
+//
+// An empty step message is created _instead of_ a block if there are no pending transactions.
+// It cannot itself be a parent, and `parent_hash` always points to the most recent block. E.g.:
+// * Validator A creates block `bA`.
+// * Validator B has no pending transactions, so it signs an empty step message `mB`
+//   instead whose hash points to block `bA`.
+// * Validator C also has no pending transactions, so it also signs an empty step message `mC`
+//   instead whose hash points to block `bA`.
+// * Validator D creates block `bD`. The parent is block `bA`, and the header includes `mB` and `mC`.
 type EmptyStep struct {
-	/// The signature of the other two fields, by the message's author.
+	// The signature of the other two fields, by the message's author.
 	signature []byte // H520
-	/// This message's step number.
+	// This message's step number.
 	step uint64
-	/// The hash of the most recent block.
+	// The hash of the most recent block.
 	parentHash common.Hash //     H256
 }
 
@@ -821,13 +792,13 @@ func (s *EmptyStep) Less(other *EmptyStep) bool {
 	return false
 }
 
-/// Returns `true` if the message has a valid signature by the expected proposer in the message's step.
+// Returns `true` if the message has a valid signature by the expected proposer in the message's step.
 func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) {
-	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
-	if err != nil {
-		return false, err
-	}
-	message := crypto.Keccak256(sRlp)
+	//sRlp, err := EmptyStepRlp(s.step, s.parentHash)
+	//if err != nil {
+	//	return false, err
+	//}
+	//message := crypto.Keccak256(sRlp)
 
 	/*
 		let correct_proposer = step_proposer(validators, &self.parent_hash, self.step);
@@ -835,6 +806,7 @@ func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) {
 		publickey::verify_address(&correct_proposer, &self.signature.into(), &message)
 		.map_err(|e| e.into())
 	*/
+	return true, nil
 }
 
 func (s *EmptyStep) author() (common.Address, error) {
@@ -893,34 +865,3 @@ func EmptyStepRlp(step uint64, parentHash common.Hash) ([]byte, error) {
 	}
 	return rlp.EncodeToBytes(A{s: step, h: parentHash})
 }
-
-func stepProposer(validators ValidatorSet1, bh common.Hash, step uint64) common.Address {
-	runtime.Call()
-
-	proposer := validators.get(bh, step
-	as
-	usize)
-	/*
-		proposer := validators.get(bh, step as usize);
-		proposer
-	*/
-}
-
-func isStepProposer(
-	validators ValidatorSet1,
-	bh common.Hash,
-	step uint64,
-	address common.Address,
-) bool {
-	return stepProposer(validators, bh, step) == address
-}
-
-/*
-
-    fn sealed(&self) -> SealedEmptyStep {
-        let signature = self.signature;
-        let step = self.step;
-        SealedEmptyStep { signature, step }
-    }
-}
-*/

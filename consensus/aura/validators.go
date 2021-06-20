@@ -8,12 +8,19 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/log"
 	"go.uber.org/atomic"
 )
 
-type abiDecoder func([]byte, interface{}) error
+/// Kind of SystemOrCodeCall, this is either an on-chain address, or code.
+type SystemOrCodeCallKind uint8
+
+const (
+	SystemCallOnChain SystemOrCodeCallKind = 0
+	CallHardCodedCode SystemOrCodeCallKind = 1
+)
 
 type CallResults struct {
 	data      []byte
@@ -21,54 +28,52 @@ type CallResults struct {
 	execError string
 }
 
-// see openethereum/crates/ethcore/res/contracts/validator_set.json
-type ValidatorSetABI interface {
-	GetValidators() ([]byte, abiDecoder)
-	ShouldValidatorReport(ourAddr, maliciousValidatorAddress common.Address, blockNum uint64) ([]byte, abiDecoder)
-}
-
-/// Type alias for a function we can make calls through synchronously.
-/// Returns the call result and state proof for each call.
+// Type alias for a function we can make calls through synchronously.
+// Returns the call result and state proof for each call.
 type Call func(common.Address, []byte) (CallResults, error)
+
+// A system-calling closure. Enacts calls on a block's state from the system address.
+type SystemCall func(common.Address, []byte) (CallResults, error)
 
 type client interface {
 	CallAtBlockHash(common.Hash, common.Address, []byte) (CallResults, error)
 	CallAtLatestBlock(common.Address, []byte) (CallResults, error)
+	SystemCallAtBlockHash(blockHash common.Hash, contract common.Address, data []byte) (CallResults, error)
 }
 
 type ValidatorSet interface {
 
-	/// Get the default "Call" helper, for use in general operation.
+	// Get the default "Call" helper, for use in general operation.
 	// TODO [keorn]: this is a hack intended to migrate off of
 	// a strict dependency on state always being available.
 	defaultCaller(blockHash common.Hash) (Call, error)
 
-	/// Called for each new block this node is creating.  If this block is
-	/// the first block of an epoch, this is called *after* `on_epoch_begin()`,
-	/// but with the same parameters.
-	///
-	/// Returns a list of contract calls to be pushed onto the new block.
+	// Called for each new block this node is creating.  If this block is
+	// the first block of an epoch, this is called *after* `on_epoch_begin()`,
+	// but with the same parameters.
+	//
+	// Returns a list of contract calls to be pushed onto the new block.
 	//func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 
-	/// Called on the close of every block.
+	// Called on the close of every block.
 	onCloseBlock(_header *types.Header, _address common.Address) error
 
-	/// Draws an validator nonce modulo number of validators.
+	// Draws an validator nonce modulo number of validators.
 	getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error)
 	/*
-	 /// Returns the current number of validators.
+	 // Returns the current number of validators.
 	    fn count(&self, parent: &H256) -> usize {
 	        let default = self.default_caller(BlockId::Hash(*parent));
 	        self.count_with_caller(parent, &*default)
 	    }
 
-	    /// Signalling that a new epoch has begun.
-	    ///
-	    /// All calls here will be from the `SYSTEM_ADDRESS`: 2^160 - 2
-	    /// and will have an effect on the block's state.
-	    /// The caller provided here may not generate proofs.
-	    ///
-	    /// `first` is true if this is the first block in the set.
+	    // Signalling that a new epoch has begun.
+	    //
+	    // All calls here will be from the `SYSTEM_ADDRESS`: 2^160 - 2
+	    // and will have an effect on the block's state.
+	    // The caller provided here may not generate proofs.
+	    //
+	    // `first` is true if this is the first block in the set.
 	    fn on_epoch_begin(
 	        &self,
 	        _first: bool,
@@ -78,24 +83,24 @@ type ValidatorSet interface {
 	        Ok(())
 	    }
 
-	    /// Extract genesis epoch data from the genesis state and header.
+	    // Extract genesis epoch data from the genesis state and header.
 	    fn genesis_epoch_data(&self, _header: &Header, _call: &Call) -> Result<Vec<u8>, String> {
 	        Ok(Vec::new())
 	    }
 
-	    /// Whether this block is the last one in its epoch.
-	    ///
-	    /// Indicates that the validator set changed at the given block in a manner
-	    /// that doesn't require finality.
-	    ///
-	    /// `first` is true if this is the first block in the set.
+	    // Whether this block is the last one in its epoch.
+	    //
+	    // Indicates that the validator set changed at the given block in a manner
+	    // that doesn't require finality.
+	    //
+	    // `first` is true if this is the first block in the set.
 	    fn is_epoch_end(&self, first: bool, chain_head: &Header) -> Option<Vec<u8>>;
 
-	    /// Whether the given block signals the end of an epoch, but change won't take effect
-	    /// until finality.
-	    ///
-	    /// Engine should set `first` only if the header is genesis. Multiplexing validator
-	    /// sets can set `first` to internal changes.
+	    // Whether the given block signals the end of an epoch, but change won't take effect
+	    // until finality.
+	    //
+	    // Engine should set `first` only if the header is genesis. Multiplexing validator
+	    // sets can set `first` to internal changes.
 	    fn signals_epoch_end(
 	        &self,
 	        first: bool,
@@ -103,14 +108,14 @@ type ValidatorSet interface {
 	        aux: AuxiliaryData,
 	    ) -> ::engines::EpochChange<EthereumMachine>;
 
-	    /// Recover the validator set from the given proof, the block number, and
-	    /// whether this header is first in its set.
-	    ///
-	    /// May fail if the given header doesn't kick off an epoch or
-	    /// the proof is invalid.
-	    ///
-	    /// Returns the set, along with a flag indicating whether finality of a specific
-	    /// hash should be proven.
+	    // Recover the validator set from the given proof, the block number, and
+	    // whether this header is first in its set.
+	    //
+	    // May fail if the given header doesn't kick off an epoch or
+	    // the proof is invalid.
+	    //
+	    // Returns the set, along with a flag indicating whether finality of a specific
+	    // hash should be proven.
 	    fn epoch_set(
 	        &self,
 	        first: bool,
@@ -119,8 +124,8 @@ type ValidatorSet interface {
 	        proof: &[u8],
 	    ) -> Result<(SimpleList, Option<H256>), ::error::Error>;
 
-	    /// Checks if a given address is a validator, with the given function
-	    /// for executing synchronous calls to contracts.
+	    // Checks if a given address is a validator, with the given function
+	    // for executing synchronous calls to contracts.
 	    fn contains_with_caller(
 	        &self,
 	        parent_block_hash: &H256,
@@ -128,13 +133,13 @@ type ValidatorSet interface {
 	        caller: &Call,
 	    ) -> bool;
 
-	    /// Draws an validator nonce modulo number of validators.
+	    // Draws an validator nonce modulo number of validators.
 	    fn get_with_caller(&self, parent_block_hash: &H256, nonce: usize, caller: &Call) -> Address;
 
-	    /// Returns the current number of validators.
+	    // Returns the current number of validators.
 	    fn count_with_caller(&self, parent_block_hash: &H256, caller: &Call) -> usize;
 
-	    /// Notifies about malicious behaviour.
+	    // Notifies about malicious behaviour.
 	    fn report_malicious(
 	        &self,
 	        _validator: &Address,
@@ -143,7 +148,7 @@ type ValidatorSet interface {
 	        _proof: Bytes,
 	    ) {
 	    }
-	    /// Notifies about benign misbehaviour.
+	    // Notifies about benign misbehaviour.
 	    fn report_benign(&self, _validator: &Address, _set_block: BlockNumber, _block: BlockNumber) {}
 	*/
 }
@@ -234,6 +239,19 @@ type SimpleList struct {
 	validators []common.Address
 }
 
+func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
+func (s *SimpleList) defaultCaller(blockHash common.Hash) (Call, error) {
+	return nil, fmt.Errorf("simple list doesn't require calls")
+}
+func (s *SimpleList) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
+	if len(s.validators) == 0 {
+		return common.Address{}, fmt.Errorf("cannot operate with an empty validator set")
+	}
+	return s.validators[nonce%uint(len(s.validators))], nil
+}
+
+// Draws an validator nonce modulo number of validators.
+
 func NewSimpleList(validators []common.Address) *SimpleList {
 	return &SimpleList{validators: validators}
 }
@@ -254,9 +272,9 @@ func (q *ReportQueue) push(addr common.Address, blockNum uint64, data []byte) {
 	q.list.PushBack(&ReportQueueItem{addr: addr, blockNum: blockNum, data: data})
 }
 
-/// Filters reports of validators that have already been reported or are banned.
+// Filters reports of validators that have already been reported or are banned.
 
-func (q *ReportQueue) filter(abi ValidatorSetABI, client client, ourAddr, contractAddr common.Address) error {
+func (q *ReportQueue) filter(abi aurainterfaces.ValidatorSetABI, client client, ourAddr, contractAddr common.Address) error {
 	q.Lock()
 	defer q.Unlock()
 	for e := q.list.Front(); e != nil; e = e.Next() {
@@ -284,14 +302,14 @@ func (q *ReportQueue) filter(abi ValidatorSetABI, client client, ourAddr, contra
 	return nil
 }
 
-/// Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
+// Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
 func (q *ReportQueue) truncate() {
-	/// The maximum number of reports to keep queued.
+	// The maximum number of reports to keep queued.
 	const MaxQueuedReports = 10
 
 	q.RLock()
 	defer q.RUnlock()
-	/// Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
+	// Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
 	if q.list.Len() > MaxQueuedReports {
 		log.Warn("Removing reports from report cache, even though it has not been finalized", "amount", q.list.Len()-MaxQueuedReports)
 	}
@@ -304,22 +322,22 @@ func (q *ReportQueue) truncate() {
 	}
 }
 
-/// The validator contract should have the following interface:
+// The validator contract should have the following interface:
 type ValidatorSafeContract struct {
 	contractAddress common.Address
 	validators      *lru.Cache  // RwLock<MemoryLruCache<H256, SimpleList>>,
 	reportQueue     ReportQueue //Mutex<ReportQueue>,
-	/// The block number where we resent the queued reports last time.
+	// The block number where we resent the queued reports last time.
 	resentReportsInBlock atomic.Uint64
-	/// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
-	/// with POSDAO modifications.
+	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
+	// with POSDAO modifications.
 	posdaoTransition *uint64
 
-	abi    ValidatorSetABI
+	abi    aurainterfaces.ValidatorSetABI
 	client client
 }
 
-func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *uint64, abi ValidatorSetABI, client client) *ValidatorSafeContract {
+func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *uint64, abi aurainterfaces.ValidatorSetABI, client client) *ValidatorSafeContract {
 	const MemoizeCapacity = 500
 	c, err := lru.New(MemoizeCapacity)
 	if err != nil {
@@ -328,11 +346,11 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 	return &ValidatorSafeContract{contractAddress: contractAddress, posdaoTransition: posdaoTransition, validators: c, client: client}
 }
 
-/// Called for each new block this node is creating.  If this block is
-/// the first block of an epoch, this is called *after* `on_epoch_begin()`,
-/// but with the same parameters.
-///
-/// Returns a list of contract calls to be pushed onto the new block.
+// Called for each new block this node is creating.  If this block is
+// the first block of an epoch, this is called *after* `on_epoch_begin()`,
+// but with the same parameters.
+//
+// Returns a list of contract calls to be pushed onto the new block.
 //func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 
 func (s *ValidatorSafeContract) defaultCaller(blockHash common.Hash) (Call, error) {
@@ -416,9 +434,10 @@ func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress co
 	   Ok(())
 
 	*/
+	return nil
 }
 
-/// A validator contract with reporting.
+// A validator contract with reporting.
 type ValidatorContract struct {
 	contractAddress  common.Address
 	validators       ValidatorSafeContract

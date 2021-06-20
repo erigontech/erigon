@@ -18,18 +18,23 @@
 package aura
 
 import (
+	"sort"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 )
 
 type StepDuration struct {
-	Single      uint          /// Duration of all steps.
-	Transitions map[uint]uint /// Step duration transitions: a mapping of timestamp to step durations.
+	Single      uint          // Duration of all steps.
+	Transitions map[uint]uint // Step duration transitions: a mapping of timestamp to step durations.
 }
 
-/// Draws an validator nonce modulo number of validators.
-func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint) common.Address {
-	d := set.defaultCaller(parent)
+// Draws an validator nonce modulo number of validators.
+func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint) (common.Address, error) {
+	d, err := set.defaultCaller(parent)
+	if err != nil {
+		return common.Address{}, err
+	}
 	return set.getWithCaller(parent, nonce, d)
 }
 
@@ -38,68 +43,62 @@ type BlockReward struct {
 	Multi  map[uint]uint
 }
 
-/// Different ways of specifying validators.
+// Different ways of specifying validators.
 type ValidatorSetJson struct {
-	/// A simple list of authorities.
+	// A simple list of authorities.
 	List []common.Address `json:"list"`
-	/// Address of a contract that indicates the list of authorities.
+	// Address of a contract that indicates the list of authorities.
 	SafeContract *common.Address `json:"safeContract"`
-	/// Address of a contract that indicates the list of authorities and enables reporting of theor misbehaviour using transactions.
+	// Address of a contract that indicates the list of authorities and enables reporting of theor misbehaviour using transactions.
 	Contract *common.Address `json:"contract"`
-	/// A map of starting blocks for each validator set.
+	// A map of starting blocks for each validator set.
 	Multi map[uint64]*ValidatorSetJson `json:"multi"`
 }
 
 type JsonSpec struct {
-	StepDuration StepDuration      /// Block duration, in seconds.
-	Validators   *ValidatorSetJson /// Valid authorities
+	StepDuration StepDuration      // Block duration, in seconds.
+	Validators   *ValidatorSetJson // Valid authorities
 
-	/// Starting step. Determined automatically if not specified.
-	/// To be used for testing only.
+	// Starting step. Determined automatically if not specified.
+	// To be used for testing only.
 	StartStep               *uint
-	ValidateScoreTransition *uint        /// Block at which score validation should start.
-	ValidateStepTransition  *uint        /// Block from which monotonic steps start.
-	ImmediateTransitions    *bool        /// Whether transitions should be immediate.
-	BlockReward             *BlockReward /// Reward per block in wei.
-	/// Block at which the block reward contract should start being used. This option allows one to
-	/// add a single block reward contract transition and is compatible with the multiple address
-	/// option `block_reward_contract_transitions` below.
+	ValidateScoreTransition *uint        // Block at which score validation should start.
+	ValidateStepTransition  *uint        // Block from which monotonic steps start.
+	ImmediateTransitions    *bool        // Whether transitions should be immediate.
+	BlockReward             *BlockReward // Reward per block in wei.
+	// Block at which the block reward contract should start being used. This option allows one to
+	// add a single block reward contract transition and is compatible with the multiple address
+	// option `block_reward_contract_transitions` below.
 	BlockRewardContractTransition uint
-	/// Block reward contract address which overrides the `block_reward` setting. This option allows
-	/// one to add a single block reward contract address and is compatible with the multiple
-	/// address option `block_reward_contract_transitions` below.
-	BlockRewardContractAddress common.Address
-	/// Block reward contract addresses with their associated starting block numbers.
-	///
-	/// Setting the block reward contract overrides `block_reward`. If the single block reward
-	/// contract address is also present then it is added into the map at the block number stored in
-	/// `block_reward_contract_transition` or 0 if that block number is not provided. Therefore both
-	/// a single block reward contract transition and a map of reward contract transitions can be
-	/// used simulataneously in the same configuration. In such a case the code requires that the
-	/// block number of the single transition is strictly less than any of the block numbers in the
-	/// map.
+	// Block reward contract addresses with their associated starting block numbers.
+	//
+	// Setting the block reward contract overrides `block_reward`. If the single block reward
+	// contract address is also present then it is added into the map at the block number stored in
+	// `block_reward_contract_transition` or 0 if that block number is not provided. Therefore both
+	// a single block reward contract transition and a map of reward contract transitions can be
+	// used simulataneously in the same configuration. In such a case the code requires that the
+	// block number of the single transition is strictly less than any of the block numbers in the
+	// map.
 	BlockRewardContractTransitions map[uint]common.Address
-	/// Block reward code. This overrides the block reward contract address.
-	BlockRewardContractCode []byte
-	/// Block at which maximum uncle count should be considered.
+	// Block at which maximum uncle count should be considered.
 	MaximumUncleCountTransition *uint
-	/// Maximum number of accepted uncles.
+	// Maximum number of accepted uncles.
 	MaximumUncleCount uint
-	/// Block at which empty step messages should start.
+	// Block at which empty step messages should start.
 	EmptyStepsTransition *uint
-	/// Maximum number of accepted empty steps.
+	// Maximum number of accepted empty steps.
 	MaximumEmptySteps *uint
-	/// Strict validation of empty steps transition block.
+	// Strict validation of empty steps transition block.
 	StrictEmptyStepsTransition *uint
-	/// First block for which a 2/3 quorum (instead of 1/2) is required.
+	// First block for which a 2/3 quorum (instead of 1/2) is required.
 	TwoThirdsMajorityTransition *uint
-	/// The random number contract's address, or a map of contract transitions.
+	// The random number contract's address, or a map of contract transitions.
 	RandomnessContractAddress map[uint]common.Address
-	/// The addresses of contracts that determine the block gas limit starting from the block number
-	/// associated with each of those contracts.
+	// The addresses of contracts that determine the block gas limit starting from the block number
+	// associated with each of those contracts.
 	BlockGasLimitContractTransitions map[uint]common.Address
-	/// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
-	/// modifications.
+	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
+	// modifications.
 	PosdaoTransition *uint
 }
 
@@ -108,57 +107,65 @@ type Code struct {
 	CodeHash common.Hash
 }
 
-/// Kind of SystemOrCodeCall, this is either an on-chain address, or code.
-type SystemOrCodeCallKind struct {
-	Address common.Address /// On-chain address.
-	Code    *Code          /// Hard-coded code.
+type BlockRewardContract struct {
+	BlockNum uint64
+	Address  common.Address // On-chain address.
 }
 
-type BlockRewardContract struct {
-	Kind SystemOrCodeCallKind
+func NewBlockRewardContract(address common.Address) *BlockRewardContract {
+	return &BlockRewardContract{Address: address}
+}
+
+type BlockRewardContractList []*BlockRewardContract
+
+func (r BlockRewardContractList) Less(i, j int) bool { return r[i].BlockNum < r[j].BlockNum }
+func (r BlockRewardContractList) Len() int           { return len(r) }
+func (r BlockRewardContractList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r BlockRewardContractList) GreaterOrEqual(block uint64) *BlockRewardContract {
+	return r[sort.Search(len(r), func(i int) bool { return block >= r[i].BlockNum })]
 }
 
 type AuthorityRoundParams struct {
-	/// A map defining intervals of blocks with the given times (in seconds) to wait before next
-	/// block or authority switching. The keys in the map are steps of starting blocks of those
-	/// periods. The entry at `0` should be defined.
-	///
-	/// Wait times (durations) are additionally required to be less than 65535 since larger values
-	/// lead to slow block issuance.
+	// A map defining intervals of blocks with the given times (in seconds) to wait before next
+	// block or authority switching. The keys in the map are steps of starting blocks of those
+	// periods. The entry at `0` should be defined.
+	//
+	// Wait times (durations) are additionally required to be less than 65535 since larger values
+	// lead to slow block issuance.
 	StepDurations map[uint64]uint64
-	/// Starting step,
+	// Starting step,
 	StartStep *uint64
-	/// Valid validators.
-	Validators ValidatorSet1
-	/// Chain score validation transition block.
+	// Valid validators.
+	Validators ValidatorSet
+	// Chain score validation transition block.
 	ValidateScoreTransition uint64
-	/// Monotonic step validation transition block.
+	// Monotonic step validation transition block.
 	ValidateStepTransition uint64
-	/// Immediate transitions.
+	// Immediate transitions.
 	ImmediateTransitions bool
-	/// Block reward in base units.
+	// Block reward in base units.
 	BlockReward map[uint64]uint256.Int
-	/// Block reward contract addresses with their associated starting block numbers.
+	// Block reward contract addresses with their associated starting block numbers.
 	BlockRewardContractTransitions map[uint64]BlockRewardContract
-	/// Number of accepted uncles transition block.
+	// Number of accepted uncles transition block.
 	MaximumUncleCountTransition uint64
-	/// Number of accepted uncles.
+	// Number of accepted uncles.
 	MaximumUncleCount uint
-	/// Empty step messages transition block.
+	// Empty step messages transition block.
 	EmptyStepsTransition uint64
-	/// First block for which a 2/3 quorum (instead of 1/2) is required.
+	// First block for which a 2/3 quorum (instead of 1/2) is required.
 	TwoThirdsMajorityTransition uint64
-	/// Number of accepted empty steps.
+	// Number of accepted empty steps.
 	MaximumEmptySteps uint
-	/// Transition block to strict empty steps validation.
+	// Transition block to strict empty steps validation.
 	StrictEmptyStepsTransition uint64
-	/// If set, enables random number contract integration. It maps the transition block to the contract address.
+	// If set, enables random number contract integration. It maps the transition block to the contract address.
 	RandomnessContractAddress map[uint64]common.Address
-	/// The addresses of contracts that determine the block gas limit with their associated block
-	/// numbers.
+	// The addresses of contracts that determine the block gas limit with their associated block
+	// numbers.
 	BlockGasLimitContractTransitions map[uint64]common.Address
-	/// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
-	/// with POSDAO modifications.
+	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
+	// with POSDAO modifications.
 	PosdaoTransition *uint64
 }
 
