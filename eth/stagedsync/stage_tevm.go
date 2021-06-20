@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
@@ -216,7 +217,7 @@ func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock u
 				defer tx.Rollback()
 			}
 
-			batch = ethdb.NewBatch(tx)
+			batch = kv.NewBatch(tx)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 
@@ -274,7 +275,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Contract translation", logPrefix), "from", s.BlockNumber, "to", to)
 
-	batch := ethdb.NewBatch(tx)
+	batch := kv.NewBatch(tx)
 	defer batch.Rollback()
 
 	err := common.Stopped(quit)

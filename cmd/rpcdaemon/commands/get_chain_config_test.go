@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func TestGetChainConfig(t *testing.T) {
-	db := ethdb.NewTestKV(t)
+	db := kv.NewTestKV(t)
 	config, _, err := core.CommitGenesisBlock(db, core.DefaultGenesisBlock(), false)
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)

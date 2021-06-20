@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -127,14 +125,6 @@ func MultiPut(tx RwTx, tuples ...[]byte) error {
 	return nil
 }
 
-func testKVPath() string {
-	dir, err := ioutil.TempDir(os.TempDir(), "erigon-test-db")
-	if err != nil {
-		panic(err)
-	}
-	return dir
-}
-
 // todo: return TEVM code and use it
 func GetCheckTEVM(db KVGetter) func(contractHash common.Hash) (bool, error) {
 	checked := map[common.Hash]struct{}{}
@@ -161,4 +151,14 @@ func GetCheckTEVM(db KVGetter) func(contractHash common.Hash) (bool, error) {
 
 		return ok, nil
 	}
+}
+
+func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
+	fixedbytes = (fixedbits + 7) / 8
+	shiftbits := fixedbits & 7
+	mask = byte(0xff)
+	if shiftbits != 0 {
+		mask = 0xff << (8 - shiftbits)
+	}
+	return fixedbytes, mask
 }

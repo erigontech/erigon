@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -47,10 +47,10 @@ func TestHeaderVerification(t *testing.T) {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: ethdb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: kv.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
 			} else {
 				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: ethdb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
+				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: kv.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
 			}
 			if (err == nil) != valid {
 				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)

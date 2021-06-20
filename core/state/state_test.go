@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -101,7 +102,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	db := ethdb.NewMemDatabase()
+	db := kv.NewMemDatabase()
 	s.db = db
 	s.kv = db.RwKV()
 	s.r = NewDbStateReader(s.db)
@@ -169,7 +170,7 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
 
-	db := ethdb.NewMemDatabase()
+	db := kv.NewMemDatabase()
 	ctx := context.TODO()
 	w := NewDbStateWriter(db, 0)
 	state := New(NewDbStateReader(db))
@@ -285,7 +286,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 	w := NewPlainStateWriter(tx, tx, 0)
 	state := New(NewPlainStateReader(tx))
 

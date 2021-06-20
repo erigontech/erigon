@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 )
 
@@ -39,18 +40,18 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 		return err
 	}
 
-	snkv = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snkv = kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
 			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
 			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
 		}
 	}).Path(snapshotPath).Readonly().MustOpen()
-	tmpDB = ethdb.NewMDBX().Path(tmpPath).MustOpen()
+	tmpDB = kv.NewMDBX().Path(tmpPath).MustOpen()
 
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv = ethdb.NewSnapshotKV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).Open()
+	snkv = kv.NewSnapshotKV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).Open()
 	tx, err := snkv.BeginRw(context.Background())
 	if err != nil {
 		return err

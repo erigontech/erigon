@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -197,7 +198,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 	m := Mapper[storageTable]
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	c, err := tx.CursorDupSort(storageTable)
 	require.NoError(t, err)
@@ -224,7 +225,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnation(t *testing.T) {
 	bkt := storageTable
 	m := Mapper[bkt]
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	c, err := tx.CursorDupSort(bkt)
 	require.NoError(t, err)
@@ -378,7 +379,7 @@ func formatTestName(elements, keys int) string {
 func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	bkt := dbutils.StorageChangeSetBucket
 	m := Mapper[bkt]
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	c1, err := tx.CursorDupSort(bkt)
 	require.NoError(t, err)
