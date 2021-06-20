@@ -3,9 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -1576,70 +1574,32 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 	return nil
 }
 
-func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
-	db := kv2.MustOpen(chaindata)
+func extractHeaders(chaindata string, block uint64) error {
+	db := kv2.MustOpen(chaindata).RwKV()
 	defer db.Close()
-
-	f, err := os.Create(fmt.Sprintf("hard_coded_headers_%s.go", name))
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-
-	fmt.Fprintf(w, "package headerdownload\n\n")
-	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
-
-	b := uint64(0)
-	i := 0
-	for {
-		hash, err := rawdb.ReadCanonicalHash(db, b)
-		if err != nil {
-			return err
-		}
-
-		if hash == (common.Hash{}) {
-			break
-		}
-
-		h := rawdb.ReadHeader(db, hash, b)
-
-		fmt.Fprintf(w, "	\"")
-
-		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
-		gz, err := gzip.NewWriterLevel(base64writer, gzip.BestCompression)
-		if err != nil {
-			base64writer.Close()
-			return err
-		}
-
-		if err = rlp.Encode(gz, h); err != nil {
-			base64writer.Close()
-			gz.Close()
-			return err
-		}
-		gz.Close()
-		base64writer.Close()
-
-		fmt.Fprintf(w, "\",\n")
-		b += blockStep
-		i++
-
-		if b > blockTotal {
-			break
-		}
-	}
-	fmt.Fprintf(w, "}\n")
-	fmt.Printf("Last block is %d\n", b)
-
-	hash := rawdb.ReadHeadHeaderHash(db)
-	h, err := rawdb.ReadHeaderByHash(db, hash)
+	defer tx.Rollback()
+	c, err := tx.Cursor(dbutils.HeadersBucket)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Latest header timestamp: %d, current time: %d\n", h.Time, uint64(time.Now().Unix()))
+	defer c.Close()
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		blockHash := common.BytesToHash(k[8:])
+		var header types.Header
+		if err = rlp.DecodeBytes(v, &header); err != nil {
+			return fmt.Errorf("decoding header from %x: %v", v, err)
+		}
+		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x\n", blockNumber, blockHash, header.Root, header.ParentHash)
+	}
 	return nil
 }
 
@@ -1961,7 +1921,7 @@ func main() {
 		err = mint(*chaindata, uint64(*block))
 
 	case "extractHeaders":
-		err = extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal), *name)
+		err = extractHeaders(*chaindata, uint64(*block))
 
 	case "extractHashes":
 		err = extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name)
