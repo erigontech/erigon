@@ -232,8 +232,7 @@ const (
 	TxLookupPrefix  = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 	BloomBitsPrefix = "BloomBits"              // bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
 
-	PreimagePrefix = "Preimage" // preimagePrefix + hash -> preimage
-	ConfigPrefix   = "Config"   // config prefix for the db
+	ConfigPrefix = "Config" // config prefix for the db
 
 	// Chain index prefixes (use `i` + single byte to avoid mixing data types).
 	BloomBitsIndexPrefix = "BloomBitsIndex" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
@@ -304,7 +303,6 @@ var Buckets = []string{
 	BlockReceiptsPrefix,
 	TxLookupPrefix,
 	BloomBitsPrefix,
-	PreimagePrefix,
 	ConfigPrefix,
 	BloomBitsIndexPrefix,
 	DatabaseInfoBucket,
