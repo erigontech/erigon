@@ -254,6 +254,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	logBlock := stageProgress
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
+	var gas uint64
 
 	var stoppedErr error
 Loop:
@@ -316,10 +317,13 @@ Loop:
 			defer batch.Rollback()
 		}
 
+		gas = gas + block.GasUsed()
+
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
+			gas = 0
 			if hasTx, ok := tx.(ethdb.HasTx); ok {
 				hasTx.Tx().CollectMetrics()
 			}
@@ -399,22 +403,24 @@ func pruneDupSortedBucket(tx ethdb.RwTx, logPrefix string, name string, tableNam
 	return nil
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
 	speedTx := float64(currentTx-prevTx) / (float64(interval) / float64(time.Second))
+	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
-		"blk/second", speed,
-		"tx/second", speedTx,
+		"blk/s", speed,
+		"tx/s", speedTx,
+		"Mgas/s", speedMgas,
 	}
 	if batch != nil {
 		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
 	}
-	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
 	return currentBlock, currentTx, currentTime

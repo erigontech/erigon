@@ -759,14 +759,6 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 			numberOfEntries--
 		}
 
-		if bucketName == dbutils.PreimagePrefix {
-			// we will always have 2 preimages because core.GenerateChain interface does not
-			// allow us to set it to ignore them
-			// but if the preimages are enabled in BlockChain, we will have more than 2.
-			// TODO: with a better interface to core.GenerateChain allow to check preimages
-			numberOfEntries -= 2
-		}
-
 		if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
 			return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
 		}
