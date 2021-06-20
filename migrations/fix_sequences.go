@@ -19,9 +19,11 @@ var fixSequences = Migration{
 				return getErr
 			}
 
-			putErr := db.Put(dbutils.Sequence, []byte(bkt), seq)
-			if putErr != nil {
-				return putErr
+			if seq != nil {
+				putErr := db.Put(dbutils.Sequence, []byte(bkt), seq)
+				if putErr != nil {
+					return putErr
+				}
 			}
 		}
 
