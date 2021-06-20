@@ -9,7 +9,7 @@ import (
 )
 
 // DBSchemaVersion
-var DBSchemaVersion = types.VersionReply{Major: 2, Minor: 1, Patch: 0}
+var DBSchemaVersion = types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
 // Buckets
 
