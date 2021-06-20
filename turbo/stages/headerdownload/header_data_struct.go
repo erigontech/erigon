@@ -263,14 +263,17 @@ type HeaderInserter struct {
 	unwindPoint      uint64
 	highest          uint64
 	highestTimestamp uint64
+	canonicalCache   *lru.Cache
 }
 
 func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
-	return &HeaderInserter{
+	hi := &HeaderInserter{
 		logPrefix:   logPrefix,
 		localTd:     localTd,
 		unwindPoint: headerProgress,
 	}
+	hi.canonicalCache, _ = lru.New(1000)
+	return hi
 }
 
 // SeenAnnounces - external announcement hashes, after header verification if hash is in this set - will broadcast it further
