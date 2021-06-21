@@ -91,6 +91,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	}
 	observedCodeHashes := map[common.Hash]struct{}{}
 
+	var err error
 	for lastKey != nil {
 		lastKey, lastValue, stageProgress, logTime, err = transpileBatch(logPrefix, s, lastKey, lastValue, to, cfg, tx, observedAddresses, observedCodeHashes, stageProgress, logTime, quit)
 		if err != nil {
