@@ -15,8 +15,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-        with:
-          submodules: recursive
+      - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v2
         with:
           go-version: 1.16.x
@@ -57,21 +56,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-        with:
-          submodules: recursive
+      - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v2
         with:
           go-version: 1.16.x
       - run: choco upgrade mingw cmake -y --no-progress
       - name: Build
         run: |
-          go build ./cmd/erigon
+          .\wmake.ps1
           make test
+        shell: powershell
 
   docker:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
-        with:
-          submodules: recursive
+      - run: git submodule update --init --recursive --force
       - run: docker build .

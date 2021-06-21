@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/internal/debug"
@@ -166,7 +167,7 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
 		var rwKv ethdb.RwKV
-		rwKv, err = ethdb.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
+		rwKv, err = kv2.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -187,7 +188,7 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 		}
 	}
 	if cfg.PrivateApiAddr != "" {
-		remoteKv, err := ethdb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		remoteKv, err := kv2.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}

@@ -13,15 +13,15 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func IndexStats(chaindata string, indexBucket string, statsFile string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv.MustOpen(chaindata)
 	startTime := time.Now()
-	lenOfKey := common.HashLength
+	lenOfKey := common.AddressLength
 	if strings.HasPrefix(indexBucket, dbutils.StorageHistoryBucket) {
-		lenOfKey = common.HashLength*2 + common.IncarnationLength
+		lenOfKey = common.AddressLength + common.HashLength + common.IncarnationLength
 	}
 
 	more1index := 0
@@ -67,7 +67,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 		} else {
 			added = false
 			count = 1
-			prevKey = common.CopyBytes(k[:common.HashLength])
+			prevKey = common.CopyBytes(k[:common.AddressLength])
 		}
 
 		return true, nil
@@ -95,10 +95,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 			NumOfIndexes uint64
 		}, 0, len(more10index))
 		for hash, v := range more10index {
-			p, innerErr := db.Get(dbutils.PreimagePrefix, []byte(hash)[:common.HashLength])
-			if innerErr != nil {
-				return innerErr
-			}
+			p := []byte(hash)[:common.AddressLength]
 			if len(p) == 0 {
 				p = make([]byte, 20)
 			}

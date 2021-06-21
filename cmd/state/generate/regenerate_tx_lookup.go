@@ -10,11 +10,12 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 func RegenerateTxLookup(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.ClearBuckets(dbutils.TxLookupPrefix); err != nil {
 		return err

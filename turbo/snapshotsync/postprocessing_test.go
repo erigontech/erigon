@@ -10,13 +10,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 func TestHeadersGenerateIndex(t *testing.T) {
 	snPath := t.TempDir()
-	snVK := ethdb.NewMDBX().Path(snPath).MustOpen()
+	snVK := kv.NewMDBX().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers := generateHeaders(10)
 	err := snVK.Update(context.Background(), func(tx ethdb.RwTx) error {
@@ -50,24 +51,24 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 	snVK.Close()
 
-	db := ethdb.NewMDBX().InMem().WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
+	db := kv.NewMDBX().InMem().WithBucketsConfig(kv.DefaultBucketConfigs).MustOpen()
 	defer db.Close()
 	//we need genesis
-	err = rawdb.WriteCanonicalHash(ethdb.NewObjectDatabase(db), headers[0].Hash(), headers[0].Number.Uint64())
+	err = rawdb.WriteCanonicalHash(kv.NewObjectDatabase(db), headers[0].Hash(), headers[0].Number.Uint64())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var snKV ethdb.RwKV
-	snKV = ethdb.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(ethdb.DefaultBucketConfigs).MustOpen()
+	snKV = kv.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(kv.DefaultBucketConfigs).MustOpen()
 	defer snKV.Close()
 
-	snKV = ethdb.NewSnapshotKV().SnapshotDB([]string{dbutils.HeadersSnapshotInfoBucket, dbutils.HeadersBucket}, snKV).DB(db).Open()
-	snDb := ethdb.NewObjectDatabase(snKV)
+	snKV = kv.NewSnapshotKV().SnapshotDB([]string{dbutils.HeadersSnapshotInfoBucket, dbutils.HeadersBucket}, snKV).DB(db).Open()
+	snDb := kv.NewObjectDatabase(snKV)
 	err = GenerateHeaderIndexes(context.Background(), snDb)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snDB := ethdb.NewObjectDatabase(snKV)
+	snDB := kv.NewObjectDatabase(snKV)
 	td := big.NewInt(0)
 	for i, header := range headers {
 		td = td.Add(td, header.Difficulty)

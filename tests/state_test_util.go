@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -178,7 +179,7 @@ func (t *StateTest) Run(ctx context.Context, tx ethdb.RwTx, subtest StateSubtest
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
 func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
-	tx := ethdb.WrapIntoTxDB(kvtx)
+	tx := kv.WrapIntoTxDB(kvtx)
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}

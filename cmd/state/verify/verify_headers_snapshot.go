@@ -7,12 +7,13 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 func HeadersSnapshot(snapshotPath string) error {
-	snKV := ethdb.NewMDBX().Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV := kv.NewMDBX().Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket:             dbutils.BucketConfigItem{},
 			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},

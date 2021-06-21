@@ -60,6 +60,7 @@ var migrations = map[ethdb.Label][]Migration{
 		removeCliqueBucket,
 		dbSchemaVersion,
 		rebuilCallTraceIndex,
+		fixSequences,
 	},
 	ethdb.TxPool: {},
 	ethdb.Sentry: {},

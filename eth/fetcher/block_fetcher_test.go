@@ -25,18 +25,18 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 var (
-	testdb       = ethdb.NewMemDatabase()
+	testdb       = kv.NewMemDatabase()
 	testKey, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddress  = crypto.PubkeyToAddress(testKey.PublicKey)
 	genesis      = core.GenesisBlockForTesting(testdb.RwKV(), testAddress, big.NewInt(1000000000))
@@ -48,7 +48,7 @@ var (
 // contains a transaction and every 5th an uncle to allow testing correct block
 // reassembly.
 func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common.Hash]*types.Block) {
-	db := ethdb.NewMemKV()
+	db := kv.NewMemKV()
 	defer db.Close()
 	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
 	chain, err := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {

@@ -11,13 +11,15 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 func FixState(chaindata string, url string) {
-	db := ethdb.MustOpen(chaindata).RwKV()
+	db := kv.MustOpen(chaindata).RwKV()
 	defer db.Close()
 	tx, err1 := db.BeginRw(context.Background())
 	if err1 != nil {
@@ -30,27 +32,26 @@ func FixState(chaindata string, url string) {
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", currentHeader.Root)
 	reqID := 0
-	roots := make(map[common.Hash]*accounts.Account)
+	roots := make(map[common.Address]*accounts.Account)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
 
-	c, err := tx.Cursor(dbutils.HashedAccountsBucket)
+	c, err := tx.Cursor(dbutils.PlainStateBucket)
 	if err != nil {
 		panic(err)
 	}
 	defer c.Close()
 	if err := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
-		var addrHash common.Hash
-		copy(addrHash[:], k[:32])
-		if _, ok := roots[addrHash]; !ok {
-			var account accounts.Account
-			if ok, err2 := rawdb.ReadAccount(tx, addrHash, &account); err2 != nil {
-				return false, err2
-			} else if !ok {
-				roots[addrHash] = nil
-			} else {
-				roots[addrHash] = &account
+		if len(k) == common.AddressLength {
+			var address common.Address
+			address.SetBytes(k)
+			if _, ok := roots[address]; !ok {
+				if account, err2 := state.NewPlainStateReader(tx).ReadAccountData(address); err2 != nil {
+					return false, err2
+				} else {
+					roots[address] = account
+				}
 			}
 		}
 
@@ -58,9 +59,10 @@ func FixState(chaindata string, url string) {
 	}); err != nil {
 		panic(err)
 	}
-	for addrHash, account := range roots {
+	for address, account := range roots {
 		if account != nil && account.Root != trie.EmptyRoot {
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
+			addrHash, _ := common.HashData(address.Bytes())
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation)
 			rl := trie.NewRetainList(0)
@@ -71,7 +73,6 @@ func FixState(chaindata string, url string) {
 			root, err1 := loader.CalcTrieRoot(tx, contractPrefix, nil)
 			if err1 != nil || root != account.Root {
 				fmt.Printf("%x: error %v, got hash %x, expected hash %x\n", addrHash, err1, root, account.Root)
-				address, _ := tx.GetOne(dbutils.PreimagePrefix, addrHash[:])
 				template := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
 				sm := make(map[common.Hash]storageEntry)
 				nextKey := &common.Hash{}

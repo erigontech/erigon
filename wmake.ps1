@@ -369,11 +369,11 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
     }
 
     # Enter MDBX directory and build libmdbx.dll
-    Set-Location (Join-Path $MyContext.Directory "ethdb\mdbx\dist")
+    Set-Location (Join-Path $MyContext.Directory "libmdbx")
     if(!$?) {
         Write-Host @" 
      
-       Error ! Can't locate ""ethdb\mdbx\dist"" folder
+       Error ! Can't locate ""libmdbx"" folder
        Are you sure you have cloned the repository properly ?
      
 "@
@@ -409,7 +409,7 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
 
     Set-Location $MyContext.Directory
     # Eventually move all mdbx_*.exe to ./build/bin directory
-    Move-Item -Path "./ethdb/mdbx/dist/mdbx_*.exe" -Destination $Erigon.BinPath -Force
+    Move-Item -Path "./libmdbx/mdbx_*.exe" -Destination $Erigon.BinPath -Force
 
 }
     
@@ -417,10 +417,10 @@ if ($BuildTarget -eq "clean") {
 
     Write-Host " Cleaning ..."
 
-    # Clean ./ethdb/mdbx/dist/mdbx_*.exe
-    Remove-Item -Path "./ethdb/mdbx/dist/mdbx_*.exe" -Force
-    Remove-Item -Path "./ethdb/mdbx/dist/CMakeCache.txt" -Force
-    Remove-Item -Path "./ethdb/mdbx/dist/CMakeFiles" -Recurse -Force
+    # Clean ./libmdbx/mdbx_*.exe
+    Remove-Item -Path "./libmdbx/mdbx_*.exe" -Force
+    Remove-Item -Path "./libmdbx/CMakeCache.txt" -Force
+    Remove-Item -Path "./libmdbx/CMakeFiles" -Recurse -Force
 
     # Remove ./build/bin directory
     Remove-Item -Path "./build" -Recurse -Force

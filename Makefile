@@ -5,7 +5,7 @@ GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags)
 GOBUILD = env GO111MODULE=on go build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/params.GitTag=${GIT_TAG}"
-GO_DBG_BUILD = env CGO_CFLAGS='-O0 -g -DMDBX_BUILD_FLAGS_CONFIG="config.h"' GODEBUG=cgocheck=2 go build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
+GO_DBG_BUILD = go build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
@@ -34,7 +34,7 @@ docker-compose:
 	docker-compose up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
-dbg: mdbx-dbg
+dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
 geth: erigon
@@ -109,24 +109,16 @@ tracker:
 	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
 db-tools:
-	@echo "Building bb-tools"
-
-	cd ethdb/mdbx/dist/ && MDBX_BUILD_TIMESTAMP=unknown make tools
-	cp ethdb/mdbx/dist/mdbx_chk $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_copy $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_dump $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_drop $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_load $(GOBIN)
-	cp ethdb/mdbx/dist/mdbx_stat $(GOBIN)
+	@echo "Building db-tools"
+	cc --version
+	cd libmdbx && ls -la && MDBX_BUILD_TIMESTAMP=unknown make tools
+	cp libmdbx/mdbx_chk $(GOBIN)
+	cp libmdbx/mdbx_copy $(GOBIN)
+	cp libmdbx/mdbx_dump $(GOBIN)
+	cp libmdbx/mdbx_drop $(GOBIN)
+	cp libmdbx/mdbx_load $(GOBIN)
+	cp libmdbx/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
-
-mdbx-dbg:
-	@echo "Building mdbx"
-	@cd ethdb/mdbx/dist/ \
-		&& make clean && make config.h \
-		&& echo '#define MDBX_DEBUG 1' >> config.h \
-		&& echo '#define MDBX_FORCE_ASSERTIONS 1' >> config.h \
-        && CFLAGS_EXTRA="-Wno-deprecated-declarations" CFLAGS='-O0 -g -Wall -Werror -Wextra -Wpedantic -ffunction-sections -fPIC -fvisibility=hidden -std=gnu11 -pthread -Wno-error=attributes' make mdbx-static.o
 
 test:
 	$(GOTEST) --timeout 30m
@@ -145,7 +137,7 @@ lintci-deps:
 clean:
 	env GO111MODULE=on go clean -cache
 	rm -fr build/*
-	cd ethdb/mdbx/dist/ && make clean
+	cd libmdbx/ && make clean
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.

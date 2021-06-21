@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -73,7 +74,7 @@ func PostProcessBodies(db ethdb.Database) error {
 	if v > 0 {
 		return nil
 	}
-	err = db.(*ethdb.ObjectDatabase).ClearBuckets(dbutils.TxLookupPrefix)
+	err = db.(*kv.ObjectDatabase).ClearBuckets(dbutils.TxLookupPrefix)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,7 @@ func PostProcessState(db ethdb.GetterPutter, info *SnapshotsInfo) error {
 		return nil
 	}
 	// clear genesis state
-	err = db.(*ethdb.ObjectDatabase).ClearBuckets(dbutils.PlainStateBucket, dbutils.EthTx)
+	err = db.(*kv.ObjectDatabase).ClearBuckets(dbutils.PlainStateBucket, dbutils.EthTx)
 	if err != nil {
 		return err
 	}

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
@@ -39,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -135,7 +135,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = vm.NewStructLogger(logconfig)
 	}
-	db := ethdb.NewMemDatabase()
+	db := kv.NewMemDatabase()
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		_, _, err := gen.Commit(db, false)

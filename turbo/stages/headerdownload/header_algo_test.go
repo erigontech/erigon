@@ -7,11 +7,11 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func TestInserter1(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 	// Set up parent difficulty
 	if err := rawdb.WriteTd(tx, common.Hash{}, 4, big.NewInt(0)); err != nil {
 		t.Fatalf("write parent diff: %v", err)

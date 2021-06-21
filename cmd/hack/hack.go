@@ -3,9 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
-	"encoding/base64"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -22,6 +20,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -36,19 +35,16 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 var (
-	emptyCodeHash = crypto.Keccak256(nil) //nolint
-
 	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
@@ -300,33 +296,8 @@ func mychart() {
 	tool.Check(err)
 }
 
-//nolint
-func accountSavings(db ethdb.RwKV) (int, int) {
-	emptyRoots := 0
-	emptyCodes := 0
-	tool.Check(db.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HashedAccountsBucket)
-		if err != nil {
-			return err
-		}
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
-				emptyRoots++
-			}
-			if bytes.Contains(v, emptyCodeHash) {
-				emptyCodes++
-			}
-		}
-		return nil
-	}))
-	return emptyRoots, emptyCodes
-}
-
 func bucketStats(chaindata string) error {
-	ethDb := ethdb.MustOpenKV(chaindata)
+	ethDb := kv2.MustOpenKV(chaindata)
 	defer ethDb.Close()
 
 	var bucketList []string
@@ -344,7 +315,7 @@ func bucketStats(chaindata string) error {
 
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 	switch kv := ethDb.(type) {
-	case *ethdb.MdbxKV:
+	case *kv2.MdbxKV:
 		type MdbxStat interface {
 			BucketStat(name string) (*mdbx.Stat, error)
 		}
@@ -576,7 +547,7 @@ func trieChart() {
 }
 
 func dbSlice(chaindata string, bucket string, prefix []byte) {
-	db := ethdb.MustOpenKV(chaindata)
+	db := kv2.MustOpenKV(chaindata)
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(bucket)
@@ -646,7 +617,7 @@ func printFullNodeRLPs() {
 
 // Searches 1000 blocks from the given one to try to find the one with the given state root hash
 func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
-	ethDb := ethdb.MustOpen(chaindata)
+	ethDb := kv2.MustOpen(chaindata)
 	defer ethDb.Close()
 	blocksToSearch := 10000000
 	for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
@@ -665,7 +636,7 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 }
 
 func printCurrentBlockNumber(chaindata string) {
-	ethDb := ethdb.MustOpenKV(chaindata)
+	ethDb := kv2.MustOpenKV(chaindata)
 	defer ethDb.Close()
 	ethDb.View(context.Background(), func(tx ethdb.Tx) error {
 		hash := rawdb.ReadHeadBlockHash(tx)
@@ -676,7 +647,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func printTxHashes() {
-	db := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata").RwKV()
+	db := kv2.MustOpen(paths.DefaultDataDir() + "/geth/chaindata").RwKV()
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
 		for b := uint64(0); b < uint64(100000); b++ {
@@ -718,17 +689,9 @@ func invTree(wrong, right, diff string, name string) {
 	t1.PrintDiff(t2, c)
 }
 
-func preimage(chaindata string, image common.Hash) {
-	ethDb := ethdb.MustOpen(chaindata)
-	defer ethDb.Close()
-	p, err := ethDb.Get(dbutils.PreimagePrefix, image[:])
-	tool.Check(err)
-	fmt.Printf("%x\n", p)
-}
-
 func printBranches(block uint64) {
 	//ethDb := ethdb.MustOpen("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb := ethdb.MustOpen(paths.DefaultDataDir() + "/testnet/geth/chaindata")
+	ethDb := kv2.MustOpen(paths.DefaultDataDir() + "/testnet/geth/chaindata")
 	defer ethDb.Close()
 	fmt.Printf("All headers at the same height %d\n", block)
 	{
@@ -751,7 +714,7 @@ func printBranches(block uint64) {
 }
 
 func readAccount(chaindata string, account common.Address) error {
-	db := ethdb.MustOpenKV(chaindata)
+	db := kv2.MustOpenKV(chaindata)
 	defer db.Close()
 
 	tx, txErr := db.BeginRo(context.Background())
@@ -785,7 +748,7 @@ func readAccount(chaindata string, account common.Address) error {
 }
 
 func nextIncarnation(chaindata string, addrHash common.Hash) {
-	ethDb := ethdb.MustOpen(chaindata)
+	ethDb := kv2.MustOpen(chaindata)
 	defer ethDb.Close()
 	var found bool
 	var incarnationBytes [common.IncarnationLength]byte
@@ -808,9 +771,9 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 }
 
 func repairCurrent() {
-	historyDb := ethdb.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
+	historyDb := kv2.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
 	defer historyDb.Close()
-	currentDb := ethdb.MustOpen("statedb")
+	currentDb := kv2.MustOpen("statedb")
 	defer currentDb.Close()
 	tool.Check(historyDb.ClearBuckets(dbutils.HashedStorageBucket))
 	tool.Check(historyDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
@@ -843,7 +806,7 @@ func repairCurrent() {
 }
 
 func dumpStorage() {
-	db := ethdb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
+	db := kv2.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		c, err := tx.Cursor(dbutils.StorageHistoryBucket)
@@ -860,7 +823,7 @@ func dumpStorage() {
 }
 
 func printBucket(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	f, err := os.Create("bucket.txt")
 	tool.Check(err)
@@ -885,7 +848,7 @@ func printBucket(chaindata string) {
 }
 
 func ValidateTxLookups2(chaindata string) {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -1016,7 +979,7 @@ func (r *Receiver) Result() trie.SubTries {
 }
 
 func regenerate(chaindata string) error {
-	db := ethdb.MustOpenKV(chaindata)
+	db := kv2.MustOpenKV(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1050,7 +1013,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	db := ethdb.MustOpenKV(chaindata)
+	db := kv2.MustOpenKV(chaindata)
 	defer db.Close()
 	tx, err1 := db.BeginRo(context.Background())
 	if err1 != nil {
@@ -1191,7 +1154,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 }
 
 func dumpState(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	f, err := os.Create("statedump")
 	if err != nil {
@@ -1244,7 +1207,7 @@ func dumpState(chaindata string) error {
 }
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 
 	fmt.Printf("State stats\n")
@@ -1311,7 +1274,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 
 func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
@@ -1332,7 +1295,7 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 
 func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching storage changesets\n")
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
@@ -1353,7 +1316,7 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 
 func supply(chaindata string) error {
 	startTime := time.Now()
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	count := 0
 	supply := uint256.NewInt(0)
@@ -1388,7 +1351,7 @@ func supply(chaindata string) error {
 }
 
 func extractCode(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	var contractCount int
 	if err1 := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -1413,7 +1376,7 @@ func extractCode(chaindata string) error {
 }
 
 func iterateOverCode(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	var contractCount int
 	var contractKeyTotalLength int
@@ -1463,7 +1426,7 @@ func mint(chaindata string, block uint64) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	db := ethdb.MustOpen(chaindata).RwKV()
+	db := kv2.MustOpen(chaindata).RwKV()
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1547,7 +1510,7 @@ func mint(chaindata string, block uint64) error {
 }
 
 func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 
 	f, err := os.Create(fmt.Sprintf("preverified_hashes_%s.go", name))
@@ -1583,75 +1546,37 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 	return nil
 }
 
-func extractHeaders(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
-	db := ethdb.MustOpen(chaindata)
+func extractHeaders(chaindata string, block uint64) error {
+	db := kv2.MustOpen(chaindata).RwKV()
 	defer db.Close()
-
-	f, err := os.Create(fmt.Sprintf("hard_coded_headers_%s.go", name))
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-
-	fmt.Fprintf(w, "package headerdownload\n\n")
-	fmt.Fprintf(w, "var %sHardCodedHeaders = []string{\n", name)
-
-	b := uint64(0)
-	i := 0
-	for {
-		hash, err := rawdb.ReadCanonicalHash(db, b)
-		if err != nil {
-			return err
-		}
-
-		if hash == (common.Hash{}) {
-			break
-		}
-
-		h := rawdb.ReadHeader(db, hash, b)
-
-		fmt.Fprintf(w, "	\"")
-
-		base64writer := base64.NewEncoder(base64.RawStdEncoding, w)
-		gz, err := gzip.NewWriterLevel(base64writer, gzip.BestCompression)
-		if err != nil {
-			base64writer.Close()
-			return err
-		}
-
-		if err = rlp.Encode(gz, h); err != nil {
-			base64writer.Close()
-			gz.Close()
-			return err
-		}
-		gz.Close()
-		base64writer.Close()
-
-		fmt.Fprintf(w, "\",\n")
-		b += blockStep
-		i++
-
-		if b > blockTotal {
-			break
-		}
-	}
-	fmt.Fprintf(w, "}\n")
-	fmt.Printf("Last block is %d\n", b)
-
-	hash := rawdb.ReadHeadHeaderHash(db)
-	h, err := rawdb.ReadHeaderByHash(db, hash)
+	defer tx.Rollback()
+	c, err := tx.Cursor(dbutils.HeadersBucket)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Latest header timestamp: %d, current time: %d\n", h.Time, uint64(time.Now().Unix()))
+	defer c.Close()
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNumber := binary.BigEndian.Uint64(k[:8])
+		blockHash := common.BytesToHash(k[8:])
+		var header types.Header
+		if err = rlp.DecodeBytes(v, &header); err != nil {
+			return fmt.Errorf("decoding header from %x: %v", v, err)
+		}
+		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x, diff %d\n", blockNumber, blockHash, header.Root, header.ParentHash, header.Difficulty)
+	}
 	return nil
 }
 
 func extractBodies(chaindata string, block uint64) error {
-	db := ethdb.MustOpen(chaindata).RwKV()
+	db := kv2.MustOpen(chaindata).RwKV()
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -1678,7 +1603,7 @@ func extractBodies(chaindata string, block uint64) error {
 
 func fixUnwind(chaindata string) error {
 	contractAddr := common.HexToAddress("0x577a32aa9c40cf4266e49fc1e44c749c356309bd")
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 	i, err := db.GetOne(dbutils.IncarnationMapBucket, contractAddr[:])
 	if err != nil {
@@ -1697,7 +1622,7 @@ func fixUnwind(chaindata string) error {
 }
 
 func snapSizes(chaindata string) error {
-	db := ethdb.MustOpen(chaindata)
+	db := kv2.MustOpen(chaindata)
 	defer db.Close()
 
 	dbtx, err := db.Begin(context.Background(), ethdb.RO)
@@ -1747,7 +1672,7 @@ func snapSizes(chaindata string) error {
 }
 
 func readCallTraces(chaindata string, block uint64) error {
-	kv := ethdb.MustOpenKV(chaindata)
+	kv := kv2.MustOpenKV(chaindata)
 	defer kv.Close()
 	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
@@ -1793,7 +1718,7 @@ func readCallTraces(chaindata string, block uint64) error {
 }
 
 func fixTd(chaindata string) error {
-	kv := ethdb.MustOpenKV(chaindata)
+	kv := kv2.MustOpenKV(chaindata)
 	defer kv.Close()
 	tx, err := kv.BeginRw(context.Background())
 	if err != nil {
@@ -1849,7 +1774,7 @@ func fixTd(chaindata string) error {
 }
 
 func advanceExec(chaindata string) error {
-	db := ethdb.MustOpenKV(chaindata)
+	db := kv2.MustOpenKV(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1968,7 +1893,7 @@ func main() {
 		err = mint(*chaindata, uint64(*block))
 
 	case "extractHeaders":
-		err = extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal), *name)
+		err = extractHeaders(*chaindata, uint64(*block))
 
 	case "extractHashes":
 		err = extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name)
@@ -1990,9 +1915,6 @@ func main() {
 
 	case "printBranches":
 		printBranches(uint64(*block))
-
-	case "preimage":
-		preimage(*chaindata, common.HexToHash(*hash))
 
 	case "printFullNodeRLPs":
 		printFullNodeRLPs()

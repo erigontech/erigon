@@ -827,7 +827,7 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 
 	var sync *stagedsync.State
 	if err := db.View(context.Background(), func(tx ethdb.Tx) (err error) {
-		sync, err = st.Prepare(nil, chainConfig, engine, vmConfig, nil, tx, "integration_test", sm, tmpdir, 0, ctx.Done(), nil, nil, false, nil, nil)
+		sync, err = st.Prepare(vmConfig, nil, tx, sm, ctx.Done(), false, nil, nil)
 		if err != nil {
 			return nil
 		}

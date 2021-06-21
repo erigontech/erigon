@@ -85,7 +85,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+func applyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
 	if err != nil {
 		return nil, err
@@ -148,12 +148,8 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, checkTEVM func(contractHash common.Hash) (bool, error)) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
-	if err != nil {
-		return nil, err
-	}
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, getHeader, engine, author, checkTEVM)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
-	return applyTransaction(msg, config, getHeader, engine, author, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(config, getHeader, engine, author, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }
