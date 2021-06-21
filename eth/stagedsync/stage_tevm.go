@@ -148,7 +148,7 @@ func transpileBatch(logPrefix string, s *StageState, blockKey []byte, toBlock ui
 	var addressStatus []byte
 	blockKey, addressStatus, err = c.SeekExact(blockKey)
 	if err != nil {
-		return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
+		return nil, 0, time.Time{}, fmt.Errorf("can't read very first block pending code translations: %w", err)
 	}
 
 	for ; err == nil; blockKey, addressStatus, err = c.Next() {
@@ -156,7 +156,7 @@ func transpileBatch(logPrefix string, s *StageState, blockKey []byte, toBlock ui
 			return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
 		}
 		if err = common.Stopped(quitCh); err != nil {
-			return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
+			return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations. stopped: %w", err)
 		}
 
 		select {
@@ -171,7 +171,7 @@ func transpileBatch(logPrefix string, s *StageState, blockKey []byte, toBlock ui
 
 		block, err = dbutils.DecodeBlockNumber(blockKey)
 		if err != nil {
-			return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
+			return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations. incorrect block key: %w", err)
 		}
 
 		if block > toBlock {
@@ -230,7 +230,7 @@ func transpileBatch(logPrefix string, s *StageState, blockKey []byte, toBlock ui
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations: %w", err)
+			return nil, 0, time.Time{}, fmt.Errorf("can't read pending code translations. incorrect code hash in the bucket: %w", err)
 		}
 		if len(evmContract) == 0 {
 			continue
@@ -263,7 +263,7 @@ func transpileBatch(logPrefix string, s *StageState, blockKey []byte, toBlock ui
 		}
 	}
 
-	blockKey, addressStatus, err = c.Current()
+	blockKey, _, err = c.Current()
 	if err != nil {
 		return nil, 0, time.Time{}, fmt.Errorf("cannot get current key: %w", err)
 	}
