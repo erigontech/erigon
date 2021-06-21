@@ -57,8 +57,10 @@ type WriterWithChangeSets interface {
 type NoopWriter struct {
 }
 
+var noopWriter = &NoopWriter{}
+
 func NewNoopWriter() *NoopWriter {
-	return &NoopWriter{}
+	return noopWriter
 }
 
 func (nw *NoopWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
