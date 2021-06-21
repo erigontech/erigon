@@ -58,6 +58,8 @@ type ChainReader interface {
 	HasBlock(hash common.Hash, number uint64) bool
 }
 
+type SystemCall func(contract common.Address, data []byte) ([]byte, error)
+
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
 	// Author retrieves the Ethereum address of the account that minted the given
@@ -89,7 +91,7 @@ type Engine interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header)
+	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
@@ -97,7 +99,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction,
-		uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error)
+		uncles []*types.Header, receipts []*types.Receipt, syscall SystemCall) (*types.Block, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.

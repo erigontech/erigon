@@ -60,10 +60,6 @@ Examples:
 		db := openDB(path.Join(cfg.DataDir, "erigon", "chaindata"), true)
 		defer db.Close()
 
-		//c := cmd.Flags().String(utils.ChainFlag.Name, utils.ChainFlag.Value, utils.ChainFlag.Usage)
-		//if c != nil {
-		//	chain = *c
-		//}
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return nil

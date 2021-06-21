@@ -45,7 +45,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 
-		receipt, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, checkTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, checkTEVM)
 		if err != nil {
 			return nil, err
 		}

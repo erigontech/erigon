@@ -442,17 +442,21 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header) {
-	// Accumulate any block and uncle rewards and commit the final state root
-	err := accumulateRewards(cc, c, state, header, uncles)
+func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
+	beneficiaries, _, rewards, err := AccumulateRewards(cc, c, header, uncles, syscall)
 	if err != nil {
 		log.Error("accumulateRewards", "err", err)
+		return
+	}
+	for i := range beneficiaries {
+		state.AddBalance(beneficiaries[i], rewards[i])
 	}
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
+func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts []*types.Receipt, syscall consensus.SystemCall) (*types.Block, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	//header.UncleHash = types.CalcUncleHash(nil)
 
@@ -579,19 +583,6 @@ func (c *AuRa) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
-// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
-func accumulateRewards(config *params.ChainConfig, aura *AuRa, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) error {
-	beneficiaries, _, rewards, err := AccumulateRewards(config, aura, header, uncles)
-	if err != nil {
-		return err
-	}
-	for i := range beneficiaries {
-		state.AddBalance(beneficiaries[i], rewards[i])
-	}
-
-	return nil
-}
-
 func (c *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
 	from := EmptyStep{step: fromStep + 1, parentHash: parentHash}
 	to := EmptyStep{step: toStep}
@@ -616,7 +607,7 @@ func (c *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 // AccumulateRewards returns rewards for a given block. The mining reward consists
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.
-func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
+func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header, syscall consensus.SystemCall) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
 	if header.Number.Uint64() == aura.twoThirdsMajorityTransition {
 		log.Info("Transitioning to 2/3 quorum", "block", aura.twoThirdsMajorityTransition)
 	}
