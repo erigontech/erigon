@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"os"
@@ -95,7 +96,7 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 }
 
 func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string) error {
-	kv, err := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	kv, err := kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
 			dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
@@ -119,7 +120,7 @@ func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string) 
 }
 
 func OpenBodiesSnapshot(dbPath string) (ethdb.RoKV, error) {
-	return ethdb.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	return kv.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
 			dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
@@ -129,10 +130,10 @@ func OpenBodiesSnapshot(dbPath string) (ethdb.RoKV, error) {
 
 func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err error) {
 	log.Info("Remove blocks data", "to", newSnapshot)
-	if _, ok := db.(ethdb.SnapshotUpdater); !ok {
+	if _, ok := db.(kv.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	bodiesSnapshot := db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.BlockBodyPrefix)
+	bodiesSnapshot := db.(kv.SnapshotUpdater).SnapshotKV(dbutils.BlockBodyPrefix)
 	if bodiesSnapshot == nil {
 		log.Info("bodiesSnapshot is empty")
 		return nil
@@ -152,7 +153,7 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 	}
 	rewriteId := binary.BigEndian.Uint64(lastEthTXSnapshotKey) + 1
 
-	writeTX := tx.(ethdb.DBTX).DBTX()
+	writeTX := tx.(kv.DBTX).DBTX()
 	blockBodyWriteCursor, err := writeTX.RwCursor(dbutils.BlockBodyPrefix)
 	if err != nil {
 		return fmt.Errorf("get bodies cursor %w", err)

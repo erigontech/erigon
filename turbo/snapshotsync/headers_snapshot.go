@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"os"
 	"time"
@@ -20,7 +21,7 @@ func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64,
 		return err
 	}
 
-	snKV, err := ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV, err := kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		}
@@ -84,7 +85,7 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, 
 }
 
 func OpenHeadersSnapshot(dbPath string) (ethdb.RoKV, error) {
-	return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	return kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		}
@@ -93,15 +94,15 @@ func OpenHeadersSnapshot(dbPath string) (ethdb.RoKV, error) {
 
 func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
 	log.Info("Remove data", "from", currentSnapshot, "to", newSnapshot)
-	if _, ok := db.(ethdb.SnapshotUpdater); !ok {
+	if _, ok := db.(kv.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	headerSnapshot := db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
+	headerSnapshot := db.(kv.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
 	if headerSnapshot == nil {
 		log.Info("headerSnapshot is empty")
 		return nil
 	}
-	writeTX := tx.(ethdb.DBTX).DBTX()
+	writeTX := tx.(kv.DBTX).DBTX()
 	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
 	if err != nil {
 		return fmt.Errorf("get headers cursor %w", err)

@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/params"
-
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -89,7 +87,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			},
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 				//replace snapshot
-				if _, ok := db.(ethdb.SnapshotUpdater); !ok {
+				if _, ok := db.(kv.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
 				}
 				snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
@@ -97,7 +95,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 					return err
 				}
 
-				db.(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, sm.replaceChan)
+				db.(kv.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, sm.replaceChan)
 				return nil
 			},
 		}
@@ -108,7 +106,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			},
 			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 				//replace snapshot
-				if _, ok := db.(ethdb.SnapshotUpdater); !ok {
+				if _, ok := db.(kv.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
 				}
 				snapshotKV, err := OpenBodiesSnapshot(snapshotPath)
@@ -116,7 +114,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 					return err
 				}
 
-				db.(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, snapshotKV, sm.replaceChan)
+				db.(kv.SnapshotUpdater).UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, snapshotKV, sm.replaceChan)
 				return nil
 			},
 		}

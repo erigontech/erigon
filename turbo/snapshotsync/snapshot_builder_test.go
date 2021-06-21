@@ -1408,7 +1408,7 @@ func TestPruneBlocks(t *testing.T) {
 	}
 	btCli.trackers = [][]string{}
 
-	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -1674,7 +1674,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		replaceChan:  make(chan struct{}),
 	}
 
-	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
