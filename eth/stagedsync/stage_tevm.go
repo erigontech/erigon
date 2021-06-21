@@ -79,7 +79,6 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	log.Info(fmt.Sprintf("[%s] Contract translation", logPrefix), "from", s.BlockNumber, "to", to)
 
 	var lastValue []byte
-	var err error
 	lastKey := dbutils.EncodeBlockNumber(s.BlockNumber + 1)
 
 	excludedAddress := common.Address{}
