@@ -1804,6 +1804,34 @@ func advanceExec(chaindata string) error {
 	return nil
 }
 
+func backExec(chaindata string) error {
+	db := kv2.MustOpenKV(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stageExec, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage exec", "progress", stageExec)
+	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec-1); err != nil {
+		return err
+	}
+	stageExec, err = stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	log.Info("Stage exec", "changed to", stageExec)
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func fixState(chaindata string) error {
 	kv := kv2.MustOpenKV(chaindata)
 	defer kv.Close()
@@ -1994,6 +2022,9 @@ func main() {
 
 	case "advanceExec":
 		err = advanceExec(*chaindata)
+
+	case "backExec":
+		err = backExec(*chaindata)
 
 	case "fixState":
 		err = fixState(*chaindata)
