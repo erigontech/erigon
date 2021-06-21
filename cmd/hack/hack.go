@@ -1834,14 +1834,16 @@ func fixState(chaindata string) error {
 		if err = rlp.DecodeBytes(hv, &header); err != nil {
 			return fmt.Errorf("decoding header from %x: %v", v, err)
 		}
-		if header.Number.Uint64() == 0 {
-			continue
+		if header.Number.Uint64() >= 12661112 {
+			fmt.Printf("%d %x\n", header.Number.Uint64(), header.Hash())
 		}
-		var parentK [40]byte
-		binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
-		copy(parentK[8:], header.ParentHash[:])
-		if !bytes.Equal(parentK[:], prevHeaderKey[:]) {
-			fmt.Printf("broken ancestry from %d %x (parent hash %x): prevKey %x\n", header.Number.Uint64(), v, header.ParentHash, prevHeaderKey)
+		if header.Number.Uint64() > 1 {
+			var parentK [40]byte
+			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
+			copy(parentK[8:], header.ParentHash[:])
+			if !bytes.Equal(parentK[:], prevHeaderKey[:]) {
+				fmt.Printf("broken ancestry from %d %x (parent hash %x): prevKey %x\n", header.Number.Uint64(), v, header.ParentHash, prevHeaderKey)
+			}
 		}
 		copy(prevHeaderKey[:], headerKey[:])
 	}
