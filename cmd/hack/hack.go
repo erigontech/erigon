@@ -1989,6 +1989,7 @@ func trimTxs(chaindata string) error {
 		}
 		if deleted == 0 {
 			fmt.Printf("Nothing more to delete\n")
+			break
 		}
 		fmt.Printf("Committing after deleting %d records\n", deleted)
 		if err = tx.Commit(); err != nil {
