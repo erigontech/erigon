@@ -6,7 +6,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"os"
-	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -359,7 +359,7 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 				continue
 			}
 			if snapshotBlock != sm.HeadersCurrentSnapshot {
-				snapshotPath := path.Join(sm.snapshotsDir, snapshotName)
+				snapshotPath := filepath.Join(sm.snapshotsDir, snapshotName)
 				innerErr = os.RemoveAll(snapshotPath)
 				if innerErr != nil {
 					log.Warn("useless snapshot has't removed", "path", snapshotPath, "err", innerErr)
@@ -377,7 +377,7 @@ func CalculateEpoch(block, epochSize uint64) uint64 {
 }
 
 func SnapshotName(baseDir, name string, blockNum uint64) string {
-	return path.Join(baseDir, name) + strconv.FormatUint(blockNum, 10)
+	return filepath.Join(baseDir, name) + strconv.FormatUint(blockNum, 10)
 }
 
 func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
