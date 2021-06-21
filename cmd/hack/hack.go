@@ -1862,9 +1862,6 @@ func fixState(chaindata string) error {
 		if err = rlp.DecodeBytes(hv, &header); err != nil {
 			return fmt.Errorf("decoding header from %x: %v", v, err)
 		}
-		if header.Number.Uint64() >= 12661112 {
-			fmt.Printf("%d %x\n", header.Number.Uint64(), header.Hash())
-		}
 		if header.Number.Uint64() > 1 {
 			var parentK [40]byte
 			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
