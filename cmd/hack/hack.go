@@ -1832,6 +1832,63 @@ func backExec(chaindata string) error {
 	return nil
 }
 
+func unwind(chaindata string, block uint64) error {
+	db := kv2.MustOpenKV(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	log.Info("Unwinding to", "block", block)
+	if err = stages.SaveStageUnwind(tx, stages.Headers, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.BlockHashes, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.Bodies, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.Senders, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.Execution, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.HashState, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.IntermediateHashes, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.CallTraces, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.AccountHistoryIndex, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.StorageHistoryIndex, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.LogIndex, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.TxLookup, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.Finish, block); err != nil {
+		return err
+	}
+	if err = stages.SaveStageUnwind(tx, stages.TxPool, block); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func fixState(chaindata string) error {
 	kv := kv2.MustOpenKV(chaindata)
 	defer kv.Close()
@@ -2025,6 +2082,9 @@ func main() {
 
 	case "fixState":
 		err = fixState(*chaindata)
+
+	case "unwind":
+		err = unwind(*chaindata, uint64(*block))
 	}
 
 	if err != nil {
