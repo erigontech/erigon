@@ -1935,6 +1935,46 @@ func fixState(chaindata string) error {
 	return tx.Commit()
 }
 
+func trimTxs(chaindata string) error {
+	db := kv2.MustOpen(chaindata).RwKV()
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	lastTxId, err := tx.ReadSequence(dbutils.EthTx)
+	if err != nil {
+		return err
+	}
+	txs, err1 := tx.RwCursor(dbutils.EthTx)
+	if err1 != nil {
+		return err1
+	}
+	defer txs.Close()
+	bodies, err2 := tx.Cursor(dbutils.BlockBodyPrefix)
+	if err2 != nil {
+		return err
+	}
+	defer bodies.Close()
+	toDelete := roaring64.New()
+	toDelete.AddRange(0, lastTxId)
+	// Exclude transaction that are used, from the range
+	for k, v, err := bodies.First(); k != nil; k, v, err = bodies.Next() {
+		if err != nil {
+			return err
+		}
+		var body types.BodyForStorage
+		if err = rlp.DecodeBytes(v, &body); err != nil {
+			return err
+		}
+		// Remove from the map
+		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxAmount))
+	}
+	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2085,6 +2125,9 @@ func main() {
 
 	case "unwind":
 		err = unwind(*chaindata, uint64(*block))
+
+	case "trimTxs":
+		err = trimTxs(*chaindata)
 	}
 
 	if err != nil {
