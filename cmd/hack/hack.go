@@ -1972,6 +1972,24 @@ func trimTxs(chaindata string) error {
 		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxAmount))
 	}
 	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	// Takes 20min to iterate 1.4b
+	toDelete2 := roaring64.New()
+	var iterated int
+	for k, _, err := txs.First(); k != nil; k, _, err = txs.Next() {
+		if err != nil {
+			return err
+		}
+		toDelete2.Add(binary.BigEndian.Uint64(k))
+		iterated++
+		if iterated%100_000_000 == 0 {
+			fmt.Printf("Iterated %d\n", iterated)
+		}
+	}
+	fmt.Printf("Number of tx records: %d\n", toDelete2.GetCardinality())
+	toDelete.And(toDelete2)
+	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
+
 	iter := toDelete.Iterator()
 	for {
 		var deleted int
