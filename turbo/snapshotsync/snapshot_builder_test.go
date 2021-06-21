@@ -15,13 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
@@ -63,6 +63,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	btCli.trackers = [][]string{}
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	defer db.Close()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -402,6 +403,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	btCli.trackers = [][]string{}
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	defer db.Close()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -1405,6 +1407,7 @@ func TestPruneBlocks(t *testing.T) {
 	btCli.trackers = [][]string{}
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	defer db.Close()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -1631,15 +1634,6 @@ func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) { //nolint: deadcode
 	}
 }
 
-/**
-todo
-1) тест на миграции блоков и хедеров
-2) тест на синхронную миграцию
-2.1) Вызовыы
-3) тест на асинхронную миграцию
-4)
-*/
-
 func TestBodySnapshotSyncMigration(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
@@ -1672,6 +1666,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
+	defer db.Close()
 	defer func() {
 		close(quit)
 	}()
