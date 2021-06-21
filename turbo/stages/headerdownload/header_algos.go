@@ -54,7 +54,7 @@ func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.He
 	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
 	for i, header := range msg {
 		headerHash := header.Hash()
-		if _, bad := hd.BadHeaders[headerHash]; bad {
+		if _, bad := hd.badHeaders[headerHash]; bad {
 			return nil, BadBlockPenalty, nil
 		}
 		if _, duplicate := dedupMap[headerHash]; duplicate {
@@ -100,10 +100,24 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	headerHash := header.Hash()
-	if _, bad := hd.BadHeaders[headerHash]; bad {
+	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
 	return []*ChainSegment{{HeadersRaw: [][]byte{headerRaw}, Headers: []*types.Header{header}}}, NoPenalty, nil
+}
+
+// ReportBadHeader -
+func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.badHeaders[headerHash] = struct{}{}
+}
+
+func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	_, ok := hd.badHeaders[headerHash]
+	return ok
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
@@ -561,7 +575,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
 		if !link.preverified {
-			if _, bad := hd.BadHeaders[link.hash]; bad {
+			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
 			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
 				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
@@ -708,16 +722,32 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
 		// Most common case - forking point is the height of the parent header
 		var forkingPoint uint64
-		ch, err1 := rawdb.ReadCanonicalHash(db, blockHeight-1)
-		if err1 != nil {
-			return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err1)
+		var ch common.Hash
+		var err error
+		if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
+			ch = fromCache.(common.Hash)
+		} else {
+			if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
+				return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
+			}
 		}
-		if ch == (common.Hash{}) || ch == header.ParentHash {
+		if ch == header.ParentHash {
 			forkingPoint = blockHeight - 1
 		} else {
 			// Going further back
 			ancestorHash := parent.ParentHash
 			ancestorHeight := blockHeight - 2
+			// Look in the cache first
+			for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
+				ch = fromCache.(common.Hash)
+				if ch == ancestorHash {
+					break
+				}
+				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
+				ancestorHash = ancestor.ParentHash
+				ancestorHeight--
+			}
+			// Now look in the DB
 			for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
 				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
 				ancestorHash = ancestor.ParentHash
@@ -738,6 +768,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 		hi.highest = blockHeight
 		hi.highestHash = hash
 		hi.highestTimestamp = header.Time
+		hi.canonicalCache.Add(blockHeight, hash)
 		// See if the forking point affects the unwindPoint (the block number to which other stages will need to unwind before the new canonical chain is applied)
 		if forkingPoint < hi.unwindPoint {
 			hi.unwindPoint = forkingPoint

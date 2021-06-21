@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
@@ -52,6 +53,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -86,8 +88,6 @@ type Ethereum struct {
 	etherbase common.Address
 
 	networkID uint64
-
-	p2pServer *p2p.Server
 
 	torrentClient *snapshotsync.Client
 
@@ -152,7 +152,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 		}
 
-		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir, stack.Config().MDBX)
+		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +173,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		p2pServer:            stack.Server(),
 		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
@@ -187,6 +186,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
+	} else if chainConfig.Aura != nil {
+		consensusConfig = &config.Aura
 	} else {
 		consensusConfig = &config.Ethash
 	}
@@ -216,6 +217,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		} else {
 			config.StorageMode = sm
 		}
+		log.Info("Effective", "storage mode", config.StorageMode)
 
 		return nil
 	}); err != nil {
@@ -236,7 +238,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if err != nil {
 			return nil, err
 		}
-		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash, stack.Config().MDBX)
+		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
 		err = mg.RemoveNonCurrentSnapshots()
 		if err != nil {
 			log.Error("Remove non current snapshot", "err", err)
@@ -262,7 +264,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver.NewKvServer(backend.chainKV, stack.Config().MDBX)
+	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
 	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events)
 	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
 	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
@@ -357,18 +359,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		server66 := download.NewSentryServer(backend.downloadV2Ctx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
-		if stack.Config().P2P.Eth65Enabled {
-			cfg65 := stack.Config().P2P
-			cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
-			d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-			if err != nil {
-				return nil, err
-			}
-			cfg65.ListenAddr = cfg65.ListenAddr65
-			server65 := download.NewSentryServer(backend.downloadV2Ctx, d65, readNodeInfo, &cfg65, eth.ETH65)
-			backend.sentryServers = append(backend.sentryServers, server65)
-			backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
+		cfg65 := stack.Config().P2P
+		cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
+		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+		if err != nil {
+			return nil, err
 		}
+		cfg65.ListenAddr = cfg65.ListenAddr65
+		server65 := download.NewSentryServer(backend.downloadV2Ctx, d65, readNodeInfo, &cfg65, eth.ETH65)
+		backend.sentryServers = append(backend.sentryServers, server65)
+		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 	}
 	blockDownloaderWindow := 65536
 	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
@@ -412,6 +412,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -449,6 +450,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 const txChanSize int = 4096
 
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	if notifier == nil {
 		return
 	}
@@ -563,6 +565,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 	}
 
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer close(s.waitForMiningStop)
 		newTransactions := make(chan core.NewTxsEvent, txChanSize)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
@@ -607,6 +610,22 @@ func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
 func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+func (s *Ethereum) NetPeerCount() (uint64, error) {
+	var sentryPc uint64 = 0
+
+	log.Trace("sentry", "peer count", sentryPc)
+	for _, sc := range s.sentries {
+		ctx := context.Background()
+		reply, err := sc.PeerCount(ctx, &sentry.PeerCountRequest{})
+		if err != nil {
+			log.Warn("sentry", "err", err)
+			return 0, nil
+		}
+		sentryPc += reply.Count
+	}
+
+	return sentryPc, nil
+}
 
 // Protocols returns all the currently configured
 // network protocols to start.
@@ -668,6 +687,7 @@ func (s *Ethereum) Stop() error {
 
 //Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *download.ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
+	defer func() { debug.LogPanic(nil, true, recover()) }()
 	stages2.StageLoop(
 		ctx,
 		db,

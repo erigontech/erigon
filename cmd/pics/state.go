@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -415,7 +416,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := ethdb.NewMemKV()
+	emptyKv := kv.NewMemKV()
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

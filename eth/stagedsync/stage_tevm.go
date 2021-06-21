@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
@@ -113,7 +114,7 @@ func transpileBatch(logPrefix string, s *StageState, blockKey []byte, toBlock ui
 		defer tx.Rollback()
 	}
 
-	batch := ethdb.NewBatch(tx)
+	batch := kv.NewBatch(tx)
 	defer batch.Rollback()
 
 	// read contracts pending for translation

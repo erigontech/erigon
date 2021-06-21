@@ -46,7 +46,6 @@ func rootContext() context.Context {
 
 var (
 	datadir      string
-	database     string
 	chaindata    string
 	snapshotFile string
 	block        uint64
@@ -90,8 +89,6 @@ func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
 	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
 	must(cmd.MarkFlagDirname("snapshot.dir"))
-
-	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 }
 
 func withSnapshotFile(cmd *cobra.Command) {

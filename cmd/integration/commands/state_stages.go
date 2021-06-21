@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -111,27 +112,28 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
-	//withChaindata(stateStags)
 	withDatadir2(stateStags)
 	withReferenceChaindata(stateStags)
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
 	withBlock(stateStags)
-	//withBatchSize(stateStags)
 	withIntegrityChecks(stateStags)
 	withMining(stateStags)
+	withChain(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
 	withDatadir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
+	withChain(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
 
 	withDatadir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
+	withChain(loopExecCmd)
 
 	rootCmd.AddCommand(loopExecCmd)
 }
@@ -307,7 +309,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
-			miningStages, err := mining.Prepare(nil, chainConfig, engine, vmConfig, ethdb.NewObjectDatabase(db), tx, "integration_test", sm, tmpDir, batchSize, quit, nil, txPool, false, miningWorld, nil)
+			miningStages, err := mining.Prepare(vmConfig, kv.NewObjectDatabase(db), tx, sm, quit, false, miningWorld, nil)
 			if err != nil {
 				panic(err)
 			}

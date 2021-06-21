@@ -45,21 +45,6 @@ func OverrideGetNodeData(val bool) {
 }
 
 var (
-	testDB    string
-	getTestDB sync.Once
-)
-
-func TestDB() string {
-	getTestDB.Do(func() {
-		testDB, _ = os.LookupEnv("TEST_DB")
-		if testDB == "" {
-			testDB = ""
-		}
-	})
-	return testDB
-}
-
-var (
 	bigRoTx    uint
 	getBigRoTx sync.Once
 )
@@ -132,4 +117,20 @@ func HeadersSeal() bool {
 		}
 	})
 	return headersSeal
+}
+
+var (
+	stopBeforeStage     string
+	stopBeforeStageFlag sync.Once
+)
+
+func StopBeforeStage() string {
+	f := func() {
+		v, _ := os.LookupEnv("STOP_BEFORE_STAGE") // see names in eth/stagedsync/stages/stages.go
+		if v != "" {
+			stopBeforeStage = v
+		}
+	}
+	stopBeforeStageFlag.Do(f)
+	return stopBeforeStage
 }

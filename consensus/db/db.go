@@ -2,20 +2,11 @@ package db
 
 import (
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
-func OpenDatabase(path string, inmem bool, mdbx bool) ethdb.RwKV {
-	if mdbx {
-		opts := ethdb.NewMDBX()
-		if inmem {
-			opts = opts.InMem()
-		} else {
-			opts = opts.Path(path)
-		}
-
-		return opts.MustOpen()
-	}
-	opts := ethdb.NewLMDB()
+func OpenDatabase(path string, inmem bool) ethdb.RwKV {
+	opts := kv.NewMDBX()
 	if inmem {
 		opts = opts.InMem()
 	} else {
@@ -23,5 +14,4 @@ func OpenDatabase(path string, inmem bool, mdbx bool) ethdb.RwKV {
 	}
 
 	return opts.MustOpen()
-
 }

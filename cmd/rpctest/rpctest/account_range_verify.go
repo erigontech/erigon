@@ -16,9 +16,10 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
-func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool, database string) {
+func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
 		log.Fatal(err)
@@ -30,16 +31,10 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 			log.Fatal(err)
 		}
 	}
-	var resultsKV, gethKV ethdb.RwKV
-	if database == "lmdb" {
-		resultsKV = ethdb.NewLMDB().Path(tmpDataDir).MustOpen()
-		gethKV = ethdb.NewLMDB().Path(gethDataDir).MustOpen()
-	} else {
-		resultsKV = ethdb.NewMDBX().Path(tmpDataDir).MustOpen()
-		gethKV = ethdb.NewMDBX().Path(gethDataDir).MustOpen()
-	}
-	resultsDB := ethdb.NewObjectDatabase(resultsKV)
-	gethResultsDB := ethdb.NewObjectDatabase(gethKV)
+	resultsKV := kv.NewMDBX().Path(tmpDataDir).MustOpen()
+	gethKV := kv.NewMDBX().Path(gethDataDir).MustOpen()
+	resultsDB := kv.NewObjectDatabase(resultsKV)
+	gethResultsDB := kv.NewObjectDatabase(gethKV)
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,

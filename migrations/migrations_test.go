@@ -6,16 +6,16 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			"one",
@@ -33,7 +33,7 @@ func TestApplyWithInit(t *testing.T) {
 
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err := migrator.Apply(db, "")
 	require.NoError(err)
 	var applied map[string][]byte
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -49,7 +49,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -61,7 +61,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			"one",
@@ -82,7 +82,7 @@ func TestApplyWithoutInit(t *testing.T) {
 
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -100,7 +100,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
@@ -114,7 +114,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			"one",
@@ -135,7 +135,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -153,7 +153,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err = migrator.Apply(db, "")
 	require.NoError(err)
 	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -165,7 +165,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestMarshalStages(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 
 	err := stages.SaveStageProgress(db, stages.Execution, 42)
 	require.NoError(err)
@@ -183,7 +183,7 @@ func TestMarshalStages(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			Name: "repeated_name",
@@ -200,7 +200,7 @@ func TestValidation(t *testing.T) {
 	}
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err := migrator.Apply(db, "")
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
 	var applied map[string][]byte
@@ -214,7 +214,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), ethdb.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestDB(t)
 	m := []Migration{
 		{
 			Name: "one",
@@ -225,7 +225,7 @@ func TestCommitCallRequired(t *testing.T) {
 	}
 	migrator := NewMigrator(ethdb.Chain)
 	migrator.Migrations = m
-	err := migrator.Apply(db, "", debug.TestDB() == "mdbx")
+	err := migrator.Apply(db, "")
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
 	var applied map[string][]byte

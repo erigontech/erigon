@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -15,12 +13,14 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -90,7 +90,7 @@ func StageLoop(
 
 			log.Error("Stage loop failure", "error", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downoader", "error", recoveryErr)
+				log.Error("Failed to recover header downloader", "error", recoveryErr)
 			}
 			continue
 		}
@@ -113,18 +113,7 @@ func StageLoopStep(
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	// avoid crash because Erigon's core does many things -
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				err = fmt.Errorf("%w, trace: %s", typed, stack)
-			default:
-				err = fmt.Errorf("%+v, trace: %s", typed, stack)
-			}
-		}
-	}()
+	defer func() { err = debug.LogPanic(err, false, recover()) }()
 	var sm ethdb.StorageMode
 	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
@@ -158,7 +147,7 @@ func StageLoopStep(
 		return err
 	}
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, ethdb.NewObjectDatabase(db), nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil, accumulator)
+	st, err1 := sync.Prepare(&vm.Config{}, kv.NewObjectDatabase(db), nil, sm, ctx.Done(), initialCycle, nil, accumulator)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
@@ -230,18 +219,7 @@ func StageLoopStep(
 
 func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
 	// avoid crash because TG's core does many things -
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				err = fmt.Errorf("%w, trace: %s", typed, stack)
-			default:
-				err = fmt.Errorf("%+v, trace: %s", typed, stack)
-			}
-		}
-	}()
+	defer func() { err = debug.LogPanic(err, false, recover()) }()
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
@@ -251,17 +229,9 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 	miningState, err := mining.Prepare(
 		nil,
 		nil,
-		nil,
-		nil,
-		nil,
 		tx,
-		"",
 		ethdb.DefaultStorageMode,
-		".",
-		0,
 		ctx.Done(),
-		nil,
-		nil,
 		false,
 		stagedsync.StageMiningCfg(true),
 		nil,

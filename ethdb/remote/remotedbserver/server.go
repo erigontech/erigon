@@ -30,13 +30,12 @@ const MaxTxTTL = 30 * time.Second
 // 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
 // 1.2.0 - Added separated services for mining and txpool methods
 // 2.0.0 - Rename all buckets
-var KvServiceAPIVersion = &types.VersionReply{Major: 2, Minor: 1, Patch: 0}
+var KvServiceAPIVersion = &types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv   ethdb.RwKV
-	mdbx bool
+	kv ethdb.RwKV
 }
 
 func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, miningServer *MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
@@ -98,18 +97,13 @@ func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPo
 	return grpcServer, nil
 }
 
-func NewKvServer(kv ethdb.RwKV, mdbx bool) *KvServer {
-	return &KvServer{kv: kv, mdbx: mdbx}
+func NewKvServer(kv ethdb.RwKV) *KvServer {
+	return &KvServer{kv: kv}
 }
 
 // Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
-	var dbSchemaVersion *types.VersionReply
-	if s.mdbx {
-		dbSchemaVersion = &dbutils.DBSchemaVersionMDBX
-	} else {
-		dbSchemaVersion = &dbutils.DBSchemaVersionLMDB
-	}
+	dbSchemaVersion := &dbutils.DBSchemaVersion
 	if KvServiceAPIVersion.Major > dbSchemaVersion.Major {
 		return KvServiceAPIVersion, nil
 	}

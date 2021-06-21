@@ -11,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -117,11 +118,14 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	out := make(chan *senderRecoveryJob, cfg.batchSize)
 	wg := new(sync.WaitGroup)
 	wg.Add(cfg.numOfGoroutines)
+	ctx, cancelWorkers := context.WithCancel(context.Background())
+	defer cancelWorkers()
 	for i := 0; i < cfg.numOfGoroutines; i++ {
 		go func(threadNo int) {
+			defer func() { debug.LogPanic(nil, true, recover()) }()
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
+			recoverSenders(ctx, logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
 		}(i)
 	}
 
@@ -129,31 +133,52 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 
 	errCh := make(chan senderRecoveryError)
 	go func() {
+		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer close(errCh)
-		for j := range out {
-			if j.err != nil {
-				errCh <- senderRecoveryError{err: j.err, blockNumber: j.blockNumber, blockHash: j.blockHash}
-				return
-			}
-			if err := common.Stopped(quitCh); err != nil {
-				errCh <- senderRecoveryError{err: j.err}
-				return
-			}
+		defer cancelWorkers()
+		var ok bool
+		var j *senderRecoveryJob
+		for {
 			select {
-			default:
+			case <-quitCh:
+				return
 			case <-logEvery.C:
 				log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", s.BlockNumber+uint64(j.index))
-			}
+			case j, ok = <-out:
+				if !ok {
+					return
+				}
+				if j.err != nil {
+					errCh <- senderRecoveryError{err: j.err, blockNumber: j.blockNumber, blockHash: j.blockHash}
+					return
+				}
 
-			k := make([]byte, 4)
-			binary.BigEndian.PutUint32(k, uint32(j.index))
-			index := int(binary.BigEndian.Uint32(k))
-			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
-				errCh <- senderRecoveryError{err: j.err}
-				return
+				k := make([]byte, 4)
+				binary.BigEndian.PutUint32(k, uint32(j.index))
+				index := int(binary.BigEndian.Uint32(k))
+				if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
+					errCh <- senderRecoveryError{err: j.err}
+					return
+				}
 			}
 		}
 	}()
+
+	var minBlockNum uint64 = math.MaxUint64
+	var minBlockHash common.Hash
+	var minBlockErr error
+	handleRecoverErr := func(recErr senderRecoveryError) error {
+		if recErr.blockHash == (common.Hash{}) {
+			return recErr.err
+		}
+
+		if recErr.blockNumber < minBlockNum {
+			minBlockNum = recErr.blockNumber
+			minBlockHash = recErr.blockHash
+			minBlockErr = recErr.err
+		}
+		return nil
+	}
 
 	bodiesC, err := tx.Cursor(dbutils.BlockBodyPrefix)
 	if err != nil {
@@ -161,6 +186,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	}
 	defer bodiesC.Close()
 
+Loop:
 	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, _, err = bodiesC.Next() {
 		if err != nil {
 			return err
@@ -184,9 +210,11 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 		select {
 		case recoveryErr := <-errCh:
 			if recoveryErr.err != nil {
-				if recoveryErr.blockHash == (common.Hash{}) {
-					return recoveryErr.err
+				cancelWorkers()
+				if err := handleRecoverErr(recoveryErr); err != nil {
+					return err
 				}
+				break Loop
 			}
 		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, blockHash: blockHash, index: int(blockNumber - s.BlockNumber - 1)}:
 		}
@@ -195,18 +223,11 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	close(jobs)
 	wg.Wait()
 	close(out)
-	var minBlockNum uint64 = math.MaxUint64
-	var minBlockHash common.Hash
-	var minBlockErr error
 	for recoveryErr := range errCh {
 		if recoveryErr.err != nil {
-			if recoveryErr.blockHash == (common.Hash{}) {
-				return recoveryErr.err
-			}
-			if recoveryErr.blockNumber < minBlockNum {
-				minBlockNum = recoveryErr.blockNumber
-				minBlockHash = recoveryErr.blockHash
-				minBlockErr = recoveryErr.err
+			cancelWorkers()
+			if err := handleRecoverErr(recoveryErr); err != nil {
+				return err
 			}
 		}
 	}
@@ -253,18 +274,31 @@ type senderRecoveryError struct {
 type senderRecoveryJob struct {
 	body        *types.Body
 	key         []byte
-	blockNumber uint64
-	blockHash   common.Hash
-	index       int
 	senders     []byte
+	blockHash   common.Hash
+	blockNumber uint64
+	index       int
 	err         error
 }
 
-func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
-	for job := range in {
-		if job == nil {
+func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
+	var job *senderRecoveryJob
+	var ok bool
+	for {
+		select {
+		case job, ok = <-in:
+			if !ok {
+				return
+			}
+			if job == nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		case <-quit:
 			return
 		}
+
 		body := job.body
 		signer := types.MakeSigner(config, job.blockNumber)
 		job.senders = make([]byte, len(body.Transactions)*common.AddressLength)
@@ -279,6 +313,8 @@ func recoverSenders(logPrefix string, cryptoContext *secp256k1.Context, config *
 
 		// prevent sending to close channel
 		if err := common.Stopped(quit); err != nil {
+			job.err = err
+		} else if err = common.Stopped(ctx.Done()); err != nil {
 			job.err = err
 		}
 		out <- job

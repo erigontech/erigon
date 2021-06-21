@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -54,16 +55,17 @@ func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
 		ctx           = context.Background()
-		configNoFork  = &params.ChainConfig{HomesteadBlock: big.NewInt(1)}
+		configNoFork  = &params.ChainConfig{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
 		configProFork = &params.ChainConfig{
+			ChainID:        big.NewInt(1),
 			HomesteadBlock: big.NewInt(1),
 			EIP150Block:    big.NewInt(2),
 			EIP155Block:    big.NewInt(2),
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
-		dbNoFork  = ethdb.NewTestKV(t)
-		dbProFork = ethdb.NewTestKV(t)
+		dbNoFork  = kv.NewTestKV(t)
+		dbProFork = kv.NewTestKV(t)
 
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
@@ -91,8 +93,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer p2pProFork.Close()
 
 	errc := make(chan error, 2)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol, nil) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -109,8 +111,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s1.statusData.MaxBlock = 1
 	s2.statusData.MaxBlock = 1
 
-	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol, nil) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -128,8 +130,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s2.statusData.MaxBlock = 2
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol, nil) }()
 
 	var successes int
 	for i := 0; i < 2; i++ {

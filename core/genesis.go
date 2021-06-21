@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -48,8 +49,6 @@ import (
 
 //go:embed allocs
 var allocs embed.FS
-
-var UseMDBX = true
 
 var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 
@@ -300,19 +299,14 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		defer wg.Done()
-		var tmpDB ethdb.RwKV
-		if UseMDBX {
-			tmpDB = ethdb.NewMDBX().InMem().MustOpen()
-		} else {
-			tmpDB = ethdb.NewLMDB().InMem().MustOpen()
-		}
+		tmpDB := kv.NewMDBX().InMem().MustOpen()
 		defer tmpDB.Close()
 		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {
 			panic(err)
 		}
 		defer tx.Rollback()
-		r, w := state.NewDbStateReader(ethdb.WrapIntoTxDB(tx)), state.NewDbStateWriter(ethdb.WrapIntoTxDB(tx), 0)
+		r, w := state.NewDbStateReader(kv.WrapIntoTxDB(tx)), state.NewDbStateWriter(kv.WrapIntoTxDB(tx), 0)
 		statedb = state.New(r)
 		for addr, account := range g.Alloc {
 			balance, _ := uint256.FromBig(account.Balance)
@@ -363,7 +357,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	}
 	if g.Config != nil && (g.Config.IsLondon(0)) {
 		head.Eip1559 = true
-		if g.BaseFee == nil {
+		if g.BaseFee != nil {
+			head.BaseFee = g.BaseFee
+		} else {
 			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 		}
 	}

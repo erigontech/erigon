@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -49,16 +49,16 @@ type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNu
 
 type ExecuteBlockCfg struct {
 	db              ethdb.RwKV
-	writeReceipts   bool
-	writeCallTraces bool
-	writeTEVM       bool
-	pruningDistance uint64
 	batchSize       datasize.ByteSize
 	changeSetHook   ChangeSetHook
 	chainConfig     *params.ChainConfig
 	engine          consensus.Engine
 	vmConfig        *vm.Config
 	tmpdir          string
+	writeReceipts   bool
+	writeCallTraces bool
+	writeTEVM       bool
+	pruningDistance uint64
 }
 
 func StageExecuteBlocksCfg(
@@ -245,7 +245,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	}
 
 	var batch ethdb.DbWithPendingMutations
-	batch = ethdb.NewBatch(tx)
+	batch = kv.NewBatch(tx)
 	defer batch.Rollback()
 
 	logEvery := time.NewTicker(logInterval)
@@ -254,6 +254,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	logBlock := stageProgress
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
+	var gas uint64
 
 	var stoppedErr error
 Loop:
@@ -283,7 +284,6 @@ Loop:
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
-		stageProgress = blockNum
 		if err = executeBlock(block, tx, batch, cfg, writeChangesets, accumulator, checkTEVMCode); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
 			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
@@ -291,6 +291,7 @@ Loop:
 			}
 			break Loop
 		}
+		stageProgress = blockNum
 
 		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if updateProgress {
@@ -311,15 +312,18 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = ethdb.NewBatch(tx)
+			batch = kv.NewBatch(tx)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
 
+		gas = gas + block.GasUsed()
+
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
+			gas = 0
 			if hasTx, ok := tx.(ethdb.HasTx); ok {
 				hasTx.Tx().CollectMetrics()
 			}
@@ -399,22 +403,24 @@ func pruneDupSortedBucket(tx ethdb.RwTx, logPrefix string, name string, tableNam
 	return nil
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
-	speed := float64(currentBlock-prevBlock) / float64(interval/time.Second)
-	speedTx := uint64(float64(currentTx-prevTx) / float64(interval/time.Second))
+	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
+	speedTx := float64(currentTx-prevTx) / (float64(interval) / float64(time.Second))
+	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
-		"blk/second", speed,
-		"tx/second", fmt.Sprintf("%dK", int(speedTx)/1000),
+		"blk/s", speed,
+		"tx/s", speedTx,
+		"Mgas/s", speedMgas,
 	}
 	if batch != nil {
 		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
 	}
-	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
 	return currentBlock, currentTx, currentTime
@@ -480,17 +486,20 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 				recoverCodeHashPlain(&acc, tx, k)
 				var address common.Address
 				copy(address[:], k)
-				if err := cleanupContractCodeBucket(
-					logPrefix,
-					tx,
-					dbutils.PlainContractCodeBucket,
-					acc,
-					func(db ethdb.Tx, out *accounts.Account) (bool, error) {
-						return rawdb.PlainReadAccount(db, address, out)
-					},
-					func(inc uint64) []byte { return dbutils.PlainGenerateStoragePrefix(address[:], inc) },
-				); err != nil {
-					return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
+
+				// cleanup contract code bucket
+				original, err := state.NewPlainStateReader(tx).ReadAccountData(address)
+				if err != nil {
+					return fmt.Errorf("%s: read account for %x: %w", logPrefix, address, err)
+				}
+				if original != nil {
+					// clean up all the code incarnations original incarnation and the new one
+					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
+						err = tx.Delete(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), nil)
+						if err != nil {
+							return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
+						}
+					}
 				}
 
 				newV := make([]byte, acc.EncodingLengthForStorage())
@@ -566,31 +575,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		}
 	}
 
-	return nil
-}
-
-func cleanupContractCodeBucket(
-	logPrefix string,
-	db ethdb.RwTx,
-	bucket string,
-	acc accounts.Account,
-	readAccountFunc func(ethdb.Tx, *accounts.Account) (bool, error),
-	getKeyForIncarnationFunc func(uint64) []byte,
-) error {
-	var original accounts.Account
-	got, err := readAccountFunc(db, &original)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return fmt.Errorf("%s: cleanupContractCodeBucket: %w", logPrefix, err)
-	}
-	if got {
-		// clean up all the code incarnations original incarnation and the new one
-		for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-			err = db.Delete(bucket, getKeyForIncarnationFunc(incarnation), nil)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 

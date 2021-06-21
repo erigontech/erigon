@@ -111,11 +111,13 @@ func TraceTx(
 		timeout := defaultTraceTimeout
 		if config.Timeout != nil {
 			if timeout, err = time.ParseDuration(*config.Timeout); err != nil {
+				stream.WriteNil()
 				return err
 			}
 		}
 		// Constuct the JavaScript tracer to execute with
 		if tracer, err = tracers.New(*config.Tracer, txCtx); err != nil {
+			stream.WriteNil()
 			return err
 		}
 		// Handle timeouts and RPC cancellations
@@ -149,6 +151,10 @@ func TraceTx(
 	}
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	if err != nil {
+		if streaming {
+			stream.WriteArrayEnd()
+			stream.WriteObjectEnd()
+		}
 		return fmt.Errorf("tracing failed: %v", err)
 	}
 	// Depending on the tracer type, format and return the output

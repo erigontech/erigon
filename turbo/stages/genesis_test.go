@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -134,11 +135,11 @@ func TestSetupGenesis(t *testing.T) {
 	)
 	oldcustomg.Config = &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
-		name       string
+		wantErr    error
 		fn         func(ethdb.RwKV) (*params.ChainConfig, *types.Block, error)
 		wantConfig *params.ChainConfig
+		name       string
 		wantHash   common.Hash
-		wantErr    error
 	}{
 		{
 			name: "genesis without ChainConfig",
@@ -224,7 +225,7 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			db := ethdb.NewTestKV(t)
+			db := kv.NewTestKV(t)
 			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

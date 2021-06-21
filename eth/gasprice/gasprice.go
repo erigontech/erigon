@@ -19,6 +19,7 @@ package gasprice
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"math/big"
 	"sync"
 
@@ -32,13 +33,17 @@ import (
 
 const sampleNumber = 3 // Number of transactions sampled in a block
 
-var DefaultMaxPrice = big.NewInt(500 * params.GWei)
+var (
+	DefaultMaxPrice    = big.NewInt(500 * params.GWei)
+	DefaultIgnorePrice = big.NewInt(2 * params.Wei)
+)
 
 type Config struct {
-	Blocks     int
-	Percentile int
-	Default    *big.Int `toml:",omitempty"`
-	MaxPrice   *big.Int `toml:",omitempty"`
+	Blocks      int
+	Percentile  int
+	Default     *big.Int `toml:",omitempty"`
+	MaxPrice    *big.Int `toml:",omitempty"`
+	IgnorePrice *big.Int `toml:",omitempty"`
 }
 
 // OracleBackend includes all necessary background APIs for oracle.
@@ -51,11 +56,12 @@ type OracleBackend interface {
 // Oracle recommends gas prices based on the content of recent
 // blocks. Suitable for both light and full clients.
 type Oracle struct {
-	backend   OracleBackend
-	lastHead  common.Hash
-	lastPrice *big.Int
-	maxPrice  *big.Int
-	cacheLock sync.RWMutex
+	backend     OracleBackend
+	lastHead    common.Hash
+	lastPrice   *big.Int
+	maxPrice    *big.Int
+	ignorePrice *big.Int
+	cacheLock   sync.RWMutex
 
 	checkBlocks int
 	percentile  int
@@ -83,17 +89,25 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 		maxPrice = DefaultMaxPrice
 		log.Warn("Sanitizing invalid gasprice oracle price cap", "provided", params.MaxPrice, "updated", maxPrice)
 	}
+	ignorePrice := params.IgnorePrice
+	if ignorePrice == nil || ignorePrice.Int64() < 0 {
+		ignorePrice = DefaultIgnorePrice
+		log.Warn("Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
+	}
 	return &Oracle{
 		backend:     backend,
 		lastPrice:   params.Default,
 		maxPrice:    maxPrice,
+		ignorePrice: ignorePrice,
 		checkBlocks: blocks,
 		percentile:  percent,
 	}
 }
 
-// SuggestPrice returns a gasprice so that newly created transaction can
+// SuggestPrice returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
+// NODE: if caller wants legacy tx SuggestedPrice, we need to add
+// baseFee to the returned bigInt
 func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	head, _ := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
 	headHash := head.Hash()
@@ -116,7 +130,10 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	number := head.Number.Uint64()
 	txPrices := make(sortingHeap, 0, sampleNumber*gpo.checkBlocks)
 	for txPrices.Len() < sampleNumber*gpo.checkBlocks && number > 0 {
-		gpo.getBlockPrices(ctx, number, sampleNumber, &txPrices)
+		err := gpo.getBlockPrices(ctx, number, sampleNumber, gpo.ignorePrice, &txPrices)
+		if err != nil {
+			return lastPrice, err
+		}
 		number--
 	}
 	price := lastPrice
@@ -142,53 +159,93 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	return price, nil
 }
 
-type transactionsByGasPrice []types.Transaction
+type transactionsByGasPrice struct {
+	txs     []types.Transaction
+	baseFee *uint256.Int
+}
 
-func (t transactionsByGasPrice) Len() int           { return len(t) }
-func (t transactionsByGasPrice) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
-func (t transactionsByGasPrice) Less(i, j int) bool { return t[i].GetPrice().Cmp(t[j].GetPrice()) < 0 }
+func newTransactionsByGasPrice(txs []types.Transaction,
+	baseFee *uint256.Int) transactionsByGasPrice {
+	return transactionsByGasPrice{
+		txs:     txs,
+		baseFee: baseFee,
+	}
+}
+
+func (t transactionsByGasPrice) Len() int      { return len(t.txs) }
+func (t transactionsByGasPrice) Swap(i, j int) { t.txs[i], t.txs[j] = t.txs[j], t.txs[i] }
+func (t transactionsByGasPrice) Less(i, j int) bool {
+	tip1 := t.txs[i].GetEffectiveGasTip(t.baseFee)
+	tip2 := t.txs[j].GetEffectiveGasTip(t.baseFee)
+	return tip1.Lt(tip2)
+}
 
 // Push (part of heap.Interface) places a new link onto the end of queue
 func (t *transactionsByGasPrice) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l := x.(types.Transaction)
-	*t = append(*t, l)
+	t.txs = append(t.txs, l)
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
 func (t *transactionsByGasPrice) Pop() interface{} {
-	old := *t
+	old := t.txs
 	n := len(old)
 	x := old[n-1]
-	*t = old[0 : n-1]
+	t.txs = old[0 : n-1]
 	return x
 }
 
-// getBlockPrices calculates the lowest transaction gas price in a given block
-// and sends it to the result channel. If the block is empty or all transactions
-// are sent by the miner itself(it doesn't make any sense to include this kind of
-// transaction prices for sampling), nil gasprice is returned.
-func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int, s *sortingHeap) {
+// getBlockPrices calculates the lowest transaction gas price in a given block.
+// the block is empty or all transactions are sent by the miner
+// itself(it doesn't make any sense to include this kind of transaction prices for sampling),
+// nil gasprice is returned.
+func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int,
+	ingoreUnderBig *big.Int, s *sortingHeap) error {
+	ignoreUnder, overflow := uint256.FromBig(ingoreUnderBig)
+	if overflow {
+		err := errors.New("overflow in getBlockPrices, gasprice.go: ignoreUnder too large")
+		log.Error("gasprice.go: getBlockPrices", "error", err)
+		return err
+	}
 	block, err := gpo.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if block == nil {
-		return
+		log.Error("gasprice.go: getBlockPrices", "error", err)
+		return err
 	}
 	blockTxs := block.Transactions()
-	txs := make(transactionsByGasPrice, len(blockTxs))
-	copy(txs, blockTxs)
+	plainTxs := make([]types.Transaction, len(blockTxs))
+	copy(plainTxs, blockTxs)
+	var baseFee *uint256.Int
+	if block.BaseFee() == nil {
+		baseFee = nil
+	} else {
+		baseFee, overflow = uint256.FromBig(block.BaseFee())
+		if overflow {
+			err := errors.New("overflow in getBlockPrices, gasprice.go: baseFee > 2^256-1")
+			log.Error("gasprice.go: getBlockPrices", "error", err)
+			return err
+		}
+	}
+	txs := newTransactionsByGasPrice(plainTxs, baseFee)
 	heap.Init(&txs)
 
 	for txs.Len() > 0 {
 		tx := heap.Pop(&txs).(types.Transaction)
+		tip := tx.GetEffectiveGasTip(baseFee)
+		if ignoreUnder != nil && tip.Lt(ignoreUnder) {
+			continue
+		}
 		sender, _ := tx.GetSender()
 		if err == nil && sender != block.Coinbase() {
-			heap.Push(s, tx.GetPrice())
+			heap.Push(s, tip)
 			if s.Len() >= limit {
 				break
 			}
 		}
 	}
+	return nil
 }
 
 type sortingHeap []*uint256.Int

@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func TestVM(t *testing.T) {
@@ -30,7 +30,7 @@ func TestVM(t *testing.T) {
 	vmt.slow("^vmPerformance")
 	vmt.fails("^vmSystemOperationsTest.json/createNameRegistrator$", "fails without parallel execution")
 
-	db := ethdb.NewTestKV(t)
+	db := kv.NewTestKV(t)
 
 	vmt.walk(t, vmTestDir, func(t *testing.T, name string, test *VMTest) {
 		withTrace(t, test.json.Exec.GasLimit, func(vmconfig vm.Config) error {

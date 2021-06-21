@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	"text/template"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -570,6 +572,10 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	case file != "" && hex != "":
 		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
 	case file != "":
+		if err := os.MkdirAll(path.Dir(file), 0755); err != nil {
+			panic(err)
+		}
+
 		if key, err = crypto.LoadECDSA(file); err != nil {
 			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
 		}
@@ -746,6 +752,9 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 }
 
 func nodeKey(keyfile string) *ecdsa.PrivateKey {
+	if err := os.MkdirAll(path.Dir(keyfile), 0755); err != nil {
+		panic(err)
+	}
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
 		return key
 	}
@@ -768,7 +777,6 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.GlobalIsSet(ListenPort65Flag.Name) {
 		cfg.ListenAddr65 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort65Flag.Name))
-		cfg.Eth65Enabled = true
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
@@ -827,9 +835,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	setBootstrapNodesV5(ctx, cfg)
 	setStaticPeers(ctx, cfg)
 
-	ethPeers := cfg.MaxPeers
-	cfg.Name = nodeName
-	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
+	if ctx.GlobalIsSet(MaxPeersFlag.Name) {
+		cfg.MaxPeers = ctx.GlobalInt(MaxPeersFlag.Name)
+	}
 
 	if ctx.GlobalIsSet(MaxPendingPeersFlag.Name) {
 		cfg.MaxPendingPeers = ctx.GlobalInt(MaxPendingPeersFlag.Name)
@@ -841,6 +849,10 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	if ctx.GlobalIsSet(DiscoveryV5Flag.Name) {
 		cfg.DiscoveryV5 = ctx.GlobalBool(DiscoveryV5Flag.Name)
 	}
+
+	ethPeers := cfg.MaxPeers
+	cfg.Name = nodeName
+	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
 
 	if netrestrict := ctx.GlobalString(NetrestrictFlag.Name); netrestrict != "" {
 		list, err := netutil.ParseNetlist(netrestrict)
@@ -1060,7 +1072,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdbx bool) {
+func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
@@ -1069,7 +1081,10 @@ func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string, mdb
 	} else {
 		cfg.DBPath = path.Join(datadir, "clique/db")
 	}
-	cfg.MDBX = mdbx
+}
+
+func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
+	cfg.DBPath = path.Join(datadir, "aura/db")
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
@@ -1173,7 +1188,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, stack.Config().DataDir, cfg)
-	setClique(ctx, &cfg.Clique, stack.Config().DataDir, stack.Config().MDBX)
+	setClique(ctx, &cfg.Clique, stack.Config().DataDir)
+	setAuRa(ctx, &cfg.Aura, stack.Config().DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
@@ -1324,7 +1340,7 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
+func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *kv.ObjectDatabase {
 	chainDb, err := stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)

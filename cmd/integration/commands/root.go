@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -38,7 +39,7 @@ func RootCommand() *cobra.Command {
 
 func openDB(path string, applyMigrations bool) ethdb.RwKV {
 	label := ethdb.Chain
-	db := ethdb.NewObjectDatabase(openKV(label, path, false))
+	db := kv2.NewObjectDatabase(openKV(label, path, false))
 	if applyMigrations {
 		has, err := migrations.NewMigrator(label).HasPendingMigrations(db.RwKV())
 		if err != nil {
@@ -47,12 +48,12 @@ func openDB(path string, applyMigrations bool) ethdb.RwKV {
 		if has {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
-			db = ethdb.NewObjectDatabase(openKV(label, path, true))
-			if err := migrations.NewMigrator(label).Apply(db, datadir, true); err != nil {
+			db = kv2.NewObjectDatabase(openKV(label, path, true))
+			if err := migrations.NewMigrator(label).Apply(db, datadir); err != nil {
 				panic(err)
 			}
 			db.Close()
-			db = ethdb.NewObjectDatabase(openKV(label, path, false))
+			db = kv2.NewObjectDatabase(openKV(label, path, false))
 		}
 	}
 	metrics.AddCallback(db.RwKV().CollectMetrics)
@@ -60,7 +61,7 @@ func openDB(path string, applyMigrations bool) ethdb.RwKV {
 }
 
 func openKV(label ethdb.Label, path string, exclusive bool) ethdb.RwKV {
-	opts := ethdb.NewMDBX().Path(path).Label(label)
+	opts := kv2.NewMDBX().Path(path).Label(label)
 	if exclusive {
 		opts = opts.Exclusive()
 	}

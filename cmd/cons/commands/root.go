@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +15,6 @@ import (
 var (
 	consensusAddr string // Address of the consensus engine <host>:<port>
 	datadir       string // Path to the working dir
-	database      string // Type of database (lmdb or mdbx)
 	config        string // `file:<path>`` to specify config file in file system, `embed:<path>`` to use embedded file, `test` to register test interface and receive config from test driver
 )
 
@@ -52,7 +52,6 @@ func must(err error) {
 func withDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
-	cmd.Flags().StringVar(&database, "database", "mdbx", "lmdb|mdbx")
 }
 
 func withApiAddr(cmd *cobra.Command) {
@@ -68,15 +67,7 @@ func openDatabase(path string) ethdb.RwKV {
 }
 
 func openKV(path string, exclusive bool) ethdb.RwKV {
-	if database == "lmdb" {
-		opts := ethdb.NewLMDB().Path(path)
-		if exclusive {
-			opts = opts.Exclusive()
-		}
-		return opts.MustOpen()
-	}
-
-	opts := ethdb.NewMDBX().Path(path)
+	opts := kv.NewMDBX().Path(path)
 	if exclusive {
 		opts = opts.Exclusive()
 	}

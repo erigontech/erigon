@@ -22,7 +22,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -34,8 +33,6 @@ import (
 // This test uses the admin_startRPC and admin_startWS APIs,
 // checking whether the HTTP server is started correctly.
 func TestStartRPC(t *testing.T) {
-	os.TempDir()
-
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}

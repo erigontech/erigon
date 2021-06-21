@@ -30,11 +30,11 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestSnapshotRandom(t *testing.T) {
@@ -225,7 +225,7 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
-	db := ethdb.NewMemDatabase()
+	db := kv.NewMemDatabase()
 	defer db.Close()
 	var (
 		ds           = NewDbStateReader(db)
@@ -354,7 +354,7 @@ func TestAccessList(t *testing.T) {
 		return common.HexToHash(a)
 	}
 
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	state := New(NewPlainStateReader(db))
 	state.accessList = newAccessList()
 

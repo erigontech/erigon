@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -64,8 +65,6 @@ const (
 	dbVersion        = 9
 )
 
-var UseMDBX = true
-
 var (
 	errInvalidIP = errors.New("invalid IP")
 )
@@ -99,16 +98,9 @@ var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 func newMemoryDB() (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	if UseMDBX {
-		db.kv, err = ethdb.NewMDBX().InMem().Label(ethdb.Sentry).WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		db.kv, err = ethdb.NewLMDB().InMem().WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
+	db.kv, err = kv.NewMDBX().InMem().Label(ethdb.Sentry).WithBucketsConfig(bucketsConfig).Open()
+	if err != nil {
+		return nil, err
 	}
 	return db, nil
 }
@@ -116,18 +108,11 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	var kv ethdb.RwKV
+	var db ethdb.RwKV
 	var err error
-	if UseMDBX {
-		kv, err = ethdb.NewMDBX().Path(path).Label(ethdb.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		kv, err = ethdb.NewLMDB().Path(path).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
-		if err != nil {
-			return nil, err
-		}
+	db, err = kv.NewMDBX().Path(path).Label(ethdb.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+	if err != nil {
+		return nil, err
 	}
 	// The nodes contained in the cache correspond to a certain protocol version.
 	// Flush all nodes if the version doesn't match.
@@ -135,7 +120,7 @@ func newPersistentDB(path string) (*DB, error) {
 	currentVer = currentVer[:binary.PutVarint(currentVer, int64(dbVersion))]
 
 	var blob []byte
-	if err := kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
 		c, err := tx.RwCursor(dbutils.InodesBucket)
 		if err != nil {
 			return err
@@ -155,13 +140,13 @@ func newPersistentDB(path string) (*DB, error) {
 		return nil, err
 	}
 	if blob != nil && !bytes.Equal(blob, currentVer) {
-		kv.Close()
+		db.Close()
 		if err := os.Remove(path); err != nil {
 			return nil, err
 		}
 		return newPersistentDB(path)
 	}
-	return &DB{kv: kv, quit: make(chan struct{})}, nil
+	return &DB{kv: db, quit: make(chan struct{})}, nil
 }
 
 // nodeKey returns the database key for a node record.
