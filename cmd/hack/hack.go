@@ -1972,6 +1972,34 @@ func trimTxs(chaindata string) error {
 		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxAmount))
 	}
 	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	for {
+		var deleted int
+		for k, _, err := txs.First(); k != nil; k, _, err = txs.Next() {
+			if err != nil {
+				return err
+			}
+			txId := binary.BigEndian.Uint64(k)
+			if toDelete.Contains(txId) {
+				txs.DeleteCurrent()
+				deleted++
+				if deleted >= 100000 {
+					break
+				}
+			}
+		}
+		if deleted == 0 {
+			fmt.Printf("Nothing more to delete\n")
+		}
+		fmt.Printf("Committing after deleting %d records\n", deleted)
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 	return nil
 }
 
