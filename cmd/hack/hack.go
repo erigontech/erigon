@@ -1804,6 +1804,53 @@ func advanceExec(chaindata string) error {
 	return nil
 }
 
+func fixState(chaindata string) error {
+	kv := kv2.MustOpenKV(chaindata)
+	defer kv.Close()
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c, err1 := tx.RwCursor(dbutils.HeaderCanonicalBucket)
+	if err1 != nil {
+		return err1
+	}
+	defer c.Close()
+	var prevHeaderKey [40]byte
+	var k, v []byte
+	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
+		var headerKey [40]byte
+		copy(headerKey[:], k)
+		copy(headerKey[8:], v)
+		hv, herr := tx.GetOne(dbutils.HeadersBucket, headerKey[:])
+		if herr != nil {
+			return herr
+		}
+		if hv == nil {
+			return fmt.Errorf("missing header record for %x", headerKey)
+		}
+		var header types.Header
+		if err = rlp.DecodeBytes(hv, &header); err != nil {
+			return fmt.Errorf("decoding header from %x: %v", v, err)
+		}
+		if header.Number.Uint64() == 0 {
+			continue
+		}
+		var parentK [40]byte
+		binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
+		copy(parentK[8:], header.ParentHash[:])
+		if !bytes.Equal(parentK[:], prevHeaderKey[:]) {
+			fmt.Printf("broken ancestry from %d %x (parent hash %x): prevKey %x\n", header.Number.Uint64(), v, header.ParentHash, prevHeaderKey)
+		}
+		copy(prevHeaderKey[:], headerKey[:])
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func main() {
 	flag.Parse()
 
@@ -1945,6 +1992,9 @@ func main() {
 
 	case "advanceExec":
 		err = advanceExec(*chaindata)
+
+	case "fixState":
+		err = fixState(*chaindata)
 	}
 
 	if err != nil {
