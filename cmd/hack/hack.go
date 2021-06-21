@@ -1992,10 +1992,10 @@ func trimTxs(chaindata string) error {
 			break
 		}
 		fmt.Printf("Committing after deleting %d records\n", deleted)
-		txs.Close()
 		if err = tx.Commit(); err != nil {
 			return err
 		}
+		txs.Close()
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err
