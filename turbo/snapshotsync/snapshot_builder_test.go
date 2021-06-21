@@ -16,10 +16,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
-
-	"github.com/stretchr/testify/require"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
