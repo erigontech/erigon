@@ -1996,7 +1996,7 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		txs.Close()
-		tx, err := db.BeginRw(context.Background())
+		tx, err = db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
