@@ -1983,7 +1983,7 @@ func trimTxs(chaindata string) error {
 				return err
 			}
 			deleted++
-			if deleted >= 100000 {
+			if deleted >= 10_000_000 {
 				break
 			}
 		}
