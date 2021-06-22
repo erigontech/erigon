@@ -641,8 +641,12 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
 	for i := range s.sentries {
-		go download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
-		go download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+		go func(i int) {
+			download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+		}(i)
+		go func(i int) {
+			download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+		}(i)
 	}
 
 	go Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
