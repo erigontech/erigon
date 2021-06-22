@@ -20,6 +20,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
@@ -39,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -2028,6 +2030,54 @@ func trimTxs(chaindata string) error {
 	return nil
 }
 
+func scanReceipts(chaindata string) error {
+	db := kv2.MustOpen(chaindata).RwKV()
+	defer db.Close()
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c, err := tx.Cursor(dbutils.BlockReceiptsPrefix)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	count := 0
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		var receipts types.Receipts
+		var oldReceipts migrations.OldReceipts
+		if err = cbor.Unmarshal(&receipts, bytes.NewReader(v)); err != nil {
+			if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
+				log.Error("receipt unmarshal failed", "block", blockNum, "k", fmt.Sprintf("%x", k), "err", err)
+				return nil
+			}
+			var blockHash common.Hash
+			if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+				return err
+			}
+			body := rawdb.ReadBody(tx, blockHash, blockNum)
+			receipts = make(types.Receipts, len(oldReceipts))
+			for i, oldReceipt := range oldReceipts {
+				receipts[i] = new(types.Receipt)
+				receipts[i].PostState = oldReceipt.PostState
+				receipts[i].Status = oldReceipt.Status
+				receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
+				receipts[i].Type = body.Transactions[i].Type()
+			}
+		}
+		count++
+		if count%100000 == 0 {
+			fmt.Printf("Done %d\n", count)
+		}
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2181,6 +2231,9 @@ func main() {
 
 	case "trimTxs":
 		err = trimTxs(*chaindata)
+
+	case "scanReceipts":
+		err = scanReceipts(*chaindata)
 	}
 
 	if err != nil {
