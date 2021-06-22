@@ -202,14 +202,13 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 	} else {
 		log.Info("Timings", timings...)
 	}
-	if err := printBucketsSize(db, tx); err != nil {
+	if err := printBucketsSize(tx); err != nil {
 		return err
 	}
-	tx.CollectMetrics()
 	return nil
 }
 
-func printBucketsSize(db ethdb.RoKV, tx ethdb.Tx) error {
+func printBucketsSize(tx ethdb.RwTx) error {
 	if tx == nil {
 		return nil
 	}
@@ -230,6 +229,7 @@ func printBucketsSize(db ethdb.RoKV, tx ethdb.Tx) error {
 		bucketSizes = append(bucketSizes, bucket, common.StorageSize(sz))
 	}
 	log.Info("Tables", bucketSizes...)
+	tx.CollectMetrics()
 	return nil
 }
 
