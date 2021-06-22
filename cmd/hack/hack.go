@@ -2064,6 +2064,7 @@ func scanReceipts(chaindata string) error {
 		return err
 	}
 	for blockNum := uint64(1); blockNum <= to; blockNum++ {
+		fmt.Printf("blockNum = %d\n")
 		binary.BigEndian.PutUint64(key[:], blockNum)
 		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
 			return err
