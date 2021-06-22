@@ -335,7 +335,10 @@ func (f *TxFetcher) Drop(peer string) error {
 // Start boots up the announcement based synchroniser, accepting and processing
 // hash notifications and block fetches until termination requested.
 func (f *TxFetcher) Start() {
-	go f.loop()
+	go func() {
+		defer debug.LogPanic()
+		f.loop()
+	}()
 }
 
 // Stop terminates the announcement based synchroniser, canceling all pending
@@ -345,7 +348,6 @@ func (f *TxFetcher) Stop() {
 }
 
 func (f *TxFetcher) loop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	var (
 		waitTimer    = new(mclock.Timer)
 		timeoutTimer = new(mclock.Timer)

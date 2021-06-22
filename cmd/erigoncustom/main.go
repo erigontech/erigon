@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/node"
 
@@ -26,6 +27,7 @@ const (
 
 // the regular main function
 func main() {
+	defer debug.LogPanic()
 	// initializing Erigon application here and providing our custom flag
 	app := erigoncli.MakeApp(runErigon,
 		append(erigoncli.DefaultFlags, flag), // always use DefaultFlags, but add a new one in the end.

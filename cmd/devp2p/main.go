@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	debug2 "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
@@ -66,6 +67,7 @@ func init() {
 }
 
 func main() {
+	defer debug2.LogPanic()
 	exit(app.Run(os.Args))
 }
 

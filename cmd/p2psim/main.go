@@ -45,6 +45,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -57,6 +58,7 @@ import (
 var client *simulations.Client
 
 func main() {
+	defer debug.LogPanic()
 	app := cli.NewApp()
 	app.Usage = "devp2p simulation command-line client"
 	app.Flags = []cli.Flag{

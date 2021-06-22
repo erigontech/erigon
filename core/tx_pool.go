@@ -302,7 +302,10 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 
 	// Start the reorg loop early so it can handle requests generated during journal loading.
 	pool.wg.Add(1)
-	go pool.scheduleReorgLoop()
+	go func() {
+		defer debug.LogPanic()
+		pool.scheduleReorgLoop()
+	}()
 
 	// If local transactions and journaling is enabled, load from disk
 	if !pool.config.NoLocals && pool.config.Journal != "" {
@@ -317,7 +320,10 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 	}
 
 	pool.wg.Add(1)
-	go pool.loop()
+	go func() {
+		defer debug.LogPanic()
+		pool.loop()
+	}()
 
 	pool.isStarted = true
 
@@ -329,7 +335,6 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 // outside blockchain events as well as for various reporting and transaction
 // eviction events.
 func (pool *TxPool) loop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer pool.wg.Done()
 
 	var (
@@ -1029,7 +1034,6 @@ func (pool *TxPool) queueTxEvent(tx types.Transaction) {
 // call those methods directly, but request them being run using requestReset and
 // requestPromoteExecutables instead.
 func (pool *TxPool) scheduleReorgLoop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer pool.wg.Done()
 
 	var (
@@ -1044,7 +1048,10 @@ func (pool *TxPool) scheduleReorgLoop() {
 		// Launch next background reorg if needed
 		if curDone == nil && launchNextRun {
 			// Run the background reorg and announcements
-			go pool.runReorg(nextDone, dirtyAccounts, queuedEvents, reset)
+			go func() {
+				defer debug.LogPanic()
+				pool.runReorg(nextDone, dirtyAccounts, queuedEvents, reset)
+			}()
 
 			// Prepare everything for the next round of reorg
 			curDone, nextDone = nextDone, make(chan struct{})
@@ -1097,7 +1104,6 @@ func (pool *TxPool) scheduleReorgLoop() {
 
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
 func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap, reset bool) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer close(done)
 
 	var promoteAddrs []common.Address

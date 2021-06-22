@@ -223,7 +223,10 @@ func NewBlockFetcher(getHeader HeaderRetrievalFn, getBlock blockRetrievalFn, ver
 // Start boots up the announcement based synchroniser, accepting and processing
 // hash notifications and block fetches until termination requested.
 func (f *BlockFetcher) Start() {
-	go f.loop()
+	go func() {
+		defer debug.LogPanic()
+		f.loop()
+	}()
 }
 
 // Stop terminates the announcement based synchroniser, canceling all pending
@@ -328,7 +331,6 @@ func (f *BlockFetcher) loop() {
 	// Iterate the block fetching until a quit is requested
 	fetchTimer := time.NewTimer(0)
 	completeTimer := time.NewTimer(0)
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer fetchTimer.Stop()
 	defer completeTimer.Stop()
 
@@ -449,7 +451,7 @@ func (f *BlockFetcher) loop() {
 				// Create a closure of the fetch and schedule in on a new thread
 				fetchHeader, hashes := f.fetching[hashes[0]].fetchHeader, hashes
 				go func() {
-					defer func() { debug.LogPanic(nil, true, recover()) }()
+					defer debug.LogPanic()
 					if f.fetchingHook != nil {
 						f.fetchingHook(hashes)
 					}

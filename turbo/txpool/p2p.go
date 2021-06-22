@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"runtime/debug"
-	"strings"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -259,7 +258,9 @@ func RecvTxMessageLoop(ctx context.Context,
 		}
 
 		download.SentryHandshake(ctx, sentry, cs)
-		RecvTxMessage(ctx, sentry, handleInboundMessage, wg)
+		if err := RecvTxMessage(ctx, sentry, handleInboundMessage, wg); err != nil {
+			log.Error("[ReceiveTx]", "error", err)
+		}
 	}
 }
 
@@ -269,20 +270,8 @@ func RecvTxMessage(ctx context.Context,
 	sentry remote.SentryClient,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
-) {
-	// avoid crash because Erigon's core does many things
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			default:
-				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			}
-		}
-	}()
+) (err error) {
+	defer func() { err = debug.ReportPanicAndRecover() }()
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

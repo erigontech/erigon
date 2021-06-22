@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/t8ntool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/urfave/cli"
@@ -190,6 +191,7 @@ func init() {
 }
 
 func main() {
+	defer debug.LogPanic()
 	if err := app.Run(os.Args); err != nil {
 		code := 1
 		if ec, ok := err.(*t8ntool.NumberedError); ok {

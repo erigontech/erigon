@@ -30,6 +30,7 @@ import (
 	"text/tabwriter"
 	"text/template"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
@@ -914,6 +915,9 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	} else {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
+	// Check for uncaught crashes from the previous boot and notify the user if
+	// there are any
+	debug.CheckForCrashes(cfg.DataDir)
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
@@ -930,6 +934,9 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	} else {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
 	}
+	// Check for uncaught crashes from the previous boot and notify the user if
+	// there are any
+	debug.CheckForCrashes(cfg.DataDir)
 }
 
 func setGPO(ctx *cli.Context, cfg *gasprice.Config) {

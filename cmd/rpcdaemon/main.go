@@ -7,12 +7,14 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 
 func main() {
+	defer debug.LogPanic()
 	raiseFdLimit()
 	cmd, cfg := cli.RootCommand()
 	rootCtx, rootCancel := utils.RootContext()

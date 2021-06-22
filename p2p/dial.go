@@ -181,8 +181,14 @@ func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupF
 	d.lastStatsLog = d.clock.Now()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.wg.Add(2)
-	go d.readNodes(it)
-	go d.loop(it)
+	go func() {
+		defer debug.LogPanic()
+		d.readNodes(it)
+	}()
+	go func() {
+		defer debug.LogPanic()
+		d.loop(it)
+	}()
 	return d
 }
 
@@ -226,7 +232,6 @@ func (d *dialScheduler) peerRemoved(c *conn) {
 
 // loop is the main loop of the dialer.
 func (d *dialScheduler) loop(it enode.Iterator) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	var (
 		nodesCh    chan *enode.Node
 		historyExp = make(chan struct{}, 1)
@@ -323,7 +328,6 @@ loop:
 // readNodes runs in its own goroutine and delivers nodes from
 // the input iterator to the nodesIn channel.
 func (d *dialScheduler) readNodes(it enode.Iterator) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer d.wg.Done()
 
 	for it.Next() {
@@ -463,7 +467,7 @@ func (d *dialScheduler) startDial(task *dialTask) {
 	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
 	d.dialing[task.dest.ID()] = task
 	go func() {
-		defer func() { debug.LogPanic(nil, true, recover()) }()
+		defer debug.LogPanic()
 		task.run(d)
 		d.doneCh <- task
 	}()

@@ -112,8 +112,7 @@ func StageLoopStep(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
-	// avoid crash because Erigon's core does many things -
-	defer func() { err = debug.LogPanic(err, false, recover()) }()
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
 	var sm ethdb.StorageMode
 	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
@@ -218,8 +217,7 @@ func StageLoopStep(
 }
 
 func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
-	// avoid crash because TG's core does many things -
-	defer func() { err = debug.LogPanic(err, false, recover()) }()
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because TG's core does many things
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {

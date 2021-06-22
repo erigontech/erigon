@@ -362,7 +362,7 @@ func (es *EventSystem) eventLoop() {
 		es.rmLogsSub.Unsubscribe()
 		//es.pendingLogsSub.Unsubscribe()
 		es.chainSub.Unsubscribe()
-		debug.LogPanic(nil, true, recover())
+		debug.LogPanic()
 	}()
 
 	index := make(filterIndex)

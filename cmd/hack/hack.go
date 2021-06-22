@@ -20,6 +20,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common/debug"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
@@ -2011,6 +2012,7 @@ func trimTxs(chaindata string) error {
 }
 
 func main() {
+	defer debug.LogPanic()
 	flag.Parse()
 
 	log.SetupDefaultTerminalLogger(log.Lvl(*verbosity), "", "")

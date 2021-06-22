@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/visual"
@@ -401,6 +402,7 @@ func prefixGroups8() {
 }
 
 func main() {
+	defer debug.LogPanic()
 	flag.Parse()
 	switch *pic {
 	case "prefix_groups_1":

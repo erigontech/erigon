@@ -69,7 +69,10 @@ func (c *crawler) run(timeout time.Duration) nodeSet {
 	)
 	defer timeoutTimer.Stop()
 	for _, it := range c.iters {
-		go c.runIterator(doneCh, it)
+		go func() {
+			debug.LogPanic()
+			c.runIterator(doneCh, it)
+		}()
 	}
 
 loop:
@@ -104,7 +107,6 @@ loop:
 }
 
 func (c *crawler) runIterator(done chan<- enode.Iterator, it enode.Iterator) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	defer func() { done <- it }()
 	for it.Next() {
 		select {

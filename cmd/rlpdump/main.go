@@ -26,6 +26,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -46,6 +47,7 @@ If the filename is omitted, data is read from stdin.`)
 }
 
 func main() {
+	defer debug.LogPanic()
 	flag.Parse()
 
 	var r io.Reader

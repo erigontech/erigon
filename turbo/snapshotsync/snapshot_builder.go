@@ -129,8 +129,8 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 	}
 	if async {
 		go func() {
+			defer debug.LogPanic()
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
-			defer func() { debug.LogPanic(nil, true, recover()) }()
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
 				//return fmt.Errorf("begin err: %w", err)
