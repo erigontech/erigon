@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	debug2 "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -70,7 +69,9 @@ func RecvUploadMessageLoop(ctx context.Context,
 		}
 
 		SentryHandshake(ctx, sentry, cs)
-		RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg)
+		if err := RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
+			log.Error("[RecvUploadMessage]", "err", err)
+		}
 	}
 }
 
@@ -78,21 +79,8 @@ func RecvUploadMessage(ctx context.Context,
 	sentry remote.SentryClient,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
-) {
-	// avoid crash because Erigon's core does many things
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				log.Error("[RecvUploadMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			default:
-				log.Error("[RecvUploadMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			}
-		}
-	}()
-
+) (err error) {
+	defer func() { err = debug2.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -112,10 +100,10 @@ func RecvUploadMessage(ctx context.Context,
 		if errors.Is(err, io.EOF) {
 			return
 		}
-		log.Error("Receive upload messages failed", "error", err)
-		return
+		return err
 	}
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var req *proto_sentry.InboundMessage
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -128,8 +116,7 @@ func RecvUploadMessage(ctx context.Context,
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			log.Error("[RecvUploadMessage] Sentry disconnected", "error", err)
-			return
+			return err
 		}
 		if req == nil {
 			return
@@ -157,7 +144,10 @@ func RecvMessageLoop(ctx context.Context,
 		}
 
 		SentryHandshake(ctx, sentry, cs)
-		RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg)
+		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
+			log.Error("[RecvMessage]", "err", err)
+
+		}
 	}
 }
 
@@ -169,20 +159,8 @@ func RecvMessage(
 	sentry remote.SentryClient,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
-) {
-	// avoid crash because Erigon's core does many things -
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				log.Error("[RecvMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			default:
-				log.Error("[RecvMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			}
-		}
-	}()
+) (err error) {
+	defer func() { err = debug2.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
@@ -205,11 +183,11 @@ func RecvMessage(
 		if errors.Is(err, io.EOF) {
 			return
 		}
-		log.Error("Receive messages failed", "error", err)
-		return
+		return err
 	}
 
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var req *proto_sentry.InboundMessage
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -222,15 +200,14 @@ func RecvMessage(
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			log.Error("[RecvMessage] Sentry disconnected", "error", err)
-			return
+			return err
 		}
 		if req == nil {
 			return
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("RecvMessage: Handling incoming message", "error", err)
+			return err
 		}
 
 		if wg != nil {

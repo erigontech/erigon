@@ -292,7 +292,7 @@ func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan str
 	}
 	// Wait for the signal to start reading
 	go func() {
-		defer func() { debug.LogPanic(nil, true, recover()) }()
+		defer debug.LogPanic()
 		defer tx1.Rollback()
 		<-startCh
 		c, err := tx1.Cursor("t")

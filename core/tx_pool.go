@@ -329,7 +329,7 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 // outside blockchain events as well as for various reporting and transaction
 // eviction events.
 func (pool *TxPool) loop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer pool.wg.Done()
 
 	var (
@@ -1029,7 +1029,7 @@ func (pool *TxPool) queueTxEvent(tx types.Transaction) {
 // call those methods directly, but request them being run using requestReset and
 // requestPromoteExecutables instead.
 func (pool *TxPool) scheduleReorgLoop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer pool.wg.Done()
 
 	var (
@@ -1097,7 +1097,7 @@ func (pool *TxPool) scheduleReorgLoop() {
 
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
 func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap, reset bool) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer close(done)
 
 	var promoteAddrs []common.Address

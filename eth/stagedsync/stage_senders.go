@@ -122,7 +122,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	defer cancelWorkers()
 	for i := 0; i < cfg.numOfGoroutines; i++ {
 		go func(threadNo int) {
-			defer func() { debug.LogPanic(nil, true, recover()) }()
+			defer debug.LogPanic()
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
 			recoverSenders(ctx, logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
@@ -133,7 +133,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 
 	errCh := make(chan senderRecoveryError)
 	go func() {
-		defer func() { debug.LogPanic(nil, true, recover()) }()
+		defer debug.LogPanic()
 		defer close(errCh)
 		defer cancelWorkers()
 		var ok bool
