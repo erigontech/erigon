@@ -69,9 +69,8 @@ var receiptCbor = Migration{
 				return err
 			}
 			if v == nil {
-				break
+				continue
 			}
-			blockNum++
 			select {
 			default:
 			case <-logEvery.C:
