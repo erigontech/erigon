@@ -289,7 +289,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 		if staleReaders, err := db.env.ReaderCheck(); err != nil {
 			db.log.Error("failed ReaderCheck", "err", err)
 		} else if staleReaders > 0 {
-			db.log.Debug("cleared reader slots from dead processes", "amount", staleReaders)
+			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
 		}
 	}
 	return db, nil
