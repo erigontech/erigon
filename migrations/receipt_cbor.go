@@ -2,8 +2,8 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
-	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -38,62 +38,69 @@ type OldReceipts []*OldReceipt
 var receiptCbor = Migration{
 	Name: "receipt_cbor",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		var tx ethdb.Tx
-		if hasTx, ok := db.(ethdb.HasTx); ok {
-			tx = hasTx.Tx()
-		} else {
-			return fmt.Errorf("no transaction")
-		}
-		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
-		if err != nil {
-			return err
-		}
-		chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-		if cerr != nil {
-			return cerr
-		}
-		c, err := tx.Cursor(dbutils.BlockReceiptsPrefix)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		logInterval := 30 * time.Second
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if upErr := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+			genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 			if err != nil {
 				return err
 			}
-			blockNum := binary.BigEndian.Uint64(k)
-			select {
-			default:
-			case <-logEvery.C:
-				log.Info("Scanned receipts up to", "block", blockNum)
+			chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+			if cerr != nil {
+				return cerr
 			}
-			var receipts types.Receipts
-			var oldReceipts OldReceipts
-			if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
-				continue
-			}
-
-			var blockHash common.Hash
-			if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+			c, err := tx.RwCursor(dbutils.BlockReceiptsPrefix)
+			if err != nil {
 				return err
 			}
-			var body *types.Body
-			if chainConfig.IsBerlin(blockNum) {
-				body = rawdb.ReadBody(tx, blockHash, blockNum)
-			}
-			receipts = make(types.Receipts, len(oldReceipts))
-			for i, oldReceipt := range oldReceipts {
-				receipts[i] = new(types.Receipt)
-				receipts[i].PostState = oldReceipt.PostState
-				receipts[i].Status = oldReceipt.Status
-				receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
-				if body != nil {
-					receipts[i].Type = body.Transactions[i].Type()
+			defer c.Close()
+			logInterval := 30 * time.Second
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+			var buf bytes.Buffer
+			for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				blockNum := binary.BigEndian.Uint64(k)
+				select {
+				default:
+				case <-logEvery.C:
+					log.Info("Scanned receipts up to", "block", blockNum)
+				}
+				var receipts types.Receipts
+				var oldReceipts OldReceipts
+				if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
+					continue
+				}
+
+				var blockHash common.Hash
+				if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+					return err
+				}
+				var body *types.Body
+				if chainConfig.IsBerlin(blockNum) {
+					body = rawdb.ReadBody(tx, blockHash, blockNum)
+				}
+				receipts = make(types.Receipts, len(oldReceipts))
+				for i, oldReceipt := range oldReceipts {
+					receipts[i] = new(types.Receipt)
+					receipts[i].PostState = oldReceipt.PostState
+					receipts[i].Status = oldReceipt.Status
+					receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
+					if body != nil {
+						receipts[i].Type = body.Transactions[i].Type()
+					}
+				}
+				buf.Reset()
+				if err = cbor.Marshal(&buf, receipts); err != nil {
+					return err
+				}
+				if err = c.Put(k, common.CopyBytes(buf.Bytes())); err != nil {
+					return err
 				}
 			}
+			return nil
+		}); upErr != nil {
+			return upErr
 		}
 		return CommitProgress(db, nil, true)
 	},
