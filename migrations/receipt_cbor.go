@@ -52,24 +52,19 @@ var receiptCbor = Migration{
 		if cerr != nil {
 			return cerr
 		}
-		c, err := tx.RwCursor(dbutils.BlockReceiptsPrefix)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
 		logInterval := 30 * time.Second
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 		var buf bytes.Buffer
 		var blockNum uint64 = 1
 		var key [8]byte
-		var k, v []byte
+		var v []byte
 		for {
 			binary.BigEndian.PutUint64(key[:], blockNum)
-			if k, v, err = c.SeekExact(key[:]); err != nil {
+			if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
 				return err
 			}
-			if k == nil {
+			if v == nil {
 				break
 			}
 			blockNum++

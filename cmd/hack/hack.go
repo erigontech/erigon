@@ -2060,7 +2060,7 @@ func scanReceipts(chaindata string) error {
 		//if err = tx.Commit(); err != nil {
 		//	return err
 		//}
-		return nil
+		//return nil
 	}
 
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
