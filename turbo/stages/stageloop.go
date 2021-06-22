@@ -112,8 +112,7 @@ func StageLoopStep(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
-	// avoid crash because Erigon's core does many things -
-	defer func() { err = debug.LogPanic(err, false, recover()) }()
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 	var sm ethdb.StorageMode
 	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
@@ -218,8 +217,7 @@ func StageLoopStep(
 }
 
 func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
-	// avoid crash because TG's core does many things -
-	defer func() { err = debug.LogPanic(err, false, recover()) }()
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
@@ -313,8 +311,10 @@ func NewStagedSync2(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
-			for _, s := range txPoolServer.Sentries {
-				go txpool.RecvTxMessageLoop(ctx, s, controlServer, txPoolServer.HandleInboundMessage, nil)
+			for i := range txPoolServer.Sentries {
+				go func(i int) {
+					txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
+				}(i)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),

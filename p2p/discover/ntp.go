@@ -45,8 +45,8 @@ func (s durationSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 // checkClockDrift queries an NTP server for clock drifts and warns the user if
 // one large enough is detected.
 func checkClockDrift() {
+	defer debug.LogPanic()
 	drift, err := sntpDrift(ntpChecks)
-	defer func() { debug.LogPanic(nil, true, recover()) }()
 	if err != nil {
 		return
 	}

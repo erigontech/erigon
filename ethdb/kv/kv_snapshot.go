@@ -167,10 +167,6 @@ func (s *SnapshotKV) StateSnapshot() ethdb.RoKV {
 	return s.stateSnapshot
 }
 
-func (s *SnapshotKV) CollectMetrics() {
-	s.db.CollectMetrics()
-}
-
 func (s *SnapshotKV) snapsthotsTx(ctx context.Context) (ethdb.Tx, ethdb.Tx, ethdb.Tx, error) {
 	var headersTX, bodiesTX, stateTX ethdb.Tx
 	var err error
@@ -402,7 +398,9 @@ func (s *snTX) Delete(bucket string, k, v []byte) error {
 }
 
 func (s *snTX) CollectMetrics() {
-	s.dbTX.CollectMetrics()
+	if rw, ok := s.dbTX.(ethdb.RwTx); ok {
+		rw.CollectMetrics()
+	}
 }
 
 func (s *snTX) getSnapshotTX(bucket string) (ethdb.Tx, error) {
@@ -532,12 +530,8 @@ func (s *snTX) Rollback() {
 	s.dbTX.Rollback()
 }
 
-func (s *snTX) BucketSize(name string) (uint64, error) {
-	panic("implement me")
-}
-
-func (s *snTX) Comparator(bucket string) dbutils.CmpFunc {
-	return s.dbTX.Comparator(bucket)
+func (s *snTX) BucketSize(bucket string) (uint64, error) {
+	return s.dbTX.BucketSize(bucket)
 }
 
 func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {

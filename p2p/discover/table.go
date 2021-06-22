@@ -225,7 +225,7 @@ func (tab *Table) loop() {
 		revalidateDone chan struct{}                   // where doRevalidate reports completion
 		waiting        = []chan struct{}{tab.initDone} // holds waiting callers while doRefresh runs
 	)
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer refresh.Stop()
 	defer revalidate.Stop()
 	defer copyNodes.Stop()
@@ -281,7 +281,7 @@ loop:
 // doRefresh performs a lookup for a random target to keep buckets full. seed nodes are
 // inserted if the table is empty (initial bootstrap or discarded faulty peers).
 func (tab *Table) doRefresh(done chan struct{}) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer close(done)
 
 	// Load nodes from the database and insert
@@ -317,7 +317,7 @@ func (tab *Table) loadSeedNodes() {
 // doRevalidate checks that the last node in a random bucket is still live and replaces or
 // deletes the node if it isn't.
 func (tab *Table) doRevalidate(done chan<- struct{}) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer func() { done <- struct{}{} }()
 
 	last, bi := tab.nodeToRevalidate()
@@ -383,7 +383,7 @@ func (tab *Table) nextRevalidateTime() time.Duration {
 // longer than seedMinTableTime.
 func (tab *Table) copyLiveNodes() {
 	tab.mutex.Lock()
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer tab.mutex.Unlock()
 
 	now := time.Now()
