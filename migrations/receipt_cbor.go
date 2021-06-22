@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/log"
@@ -56,10 +57,13 @@ var receiptCbor = Migration{
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 		var buf bytes.Buffer
-		var blockNum uint64 = 1
 		var key [8]byte
 		var v []byte
-		for {
+		var to uint64
+		if to, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+			return err
+		}
+		for blockNum := uint64(1); blockNum <= to; blockNum++ {
 			binary.BigEndian.PutUint64(key[:], blockNum)
 			if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
 				return err
