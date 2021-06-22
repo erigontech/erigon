@@ -28,6 +28,7 @@ var _ DbCopier = &MdbxKV{}
 
 const expectMdbxVersionMajor = 0
 const expectMdbxVersionMinor = 10
+const pageSize = 4 * 1024
 
 const NonExistingDBI dbutils.DBI = 999_999_999
 
@@ -148,7 +149,6 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 			opts.mapSize = 2 * datasize.TB
 		}
 	}
-	const pageSize = 4 * 1024
 	if opts.flags&mdbx.Accede == 0 {
 		if opts.inMem {
 			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.MB), 0, 4*1024); err != nil {
@@ -206,13 +206,12 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 	}
 
 	db := &MdbxKV{
-		opts:     opts,
-		env:      env,
-		log:      logger,
-		wg:       &sync.WaitGroup{},
-		buckets:  dbutils.BucketsCfg{},
-		pageSize: pageSize,
-		txSize:   dirtyPagesLimit * pageSize,
+		opts:    opts,
+		env:     env,
+		log:     logger,
+		wg:      &sync.WaitGroup{},
+		buckets: dbutils.BucketsCfg{},
+		txSize:  dirtyPagesLimit * pageSize,
 	}
 	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
@@ -305,13 +304,12 @@ func (opts MdbxOpts) MustOpen() ethdb.RwKV {
 }
 
 type MdbxKV struct {
-	env      *mdbx.Env
-	log      log.Logger
-	wg       *sync.WaitGroup
-	buckets  dbutils.BucketsCfg
-	opts     MdbxOpts
-	txSize   uint64
-	pageSize uint64
+	env     *mdbx.Env
+	log     log.Logger
+	wg      *sync.WaitGroup
+	buckets dbutils.BucketsCfg
+	opts    MdbxOpts
+	txSize  uint64
 }
 
 func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
@@ -520,14 +518,50 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 	ethdb.GcLeafMetric.Update(int64(gc.LeafPages))
 	ethdb.GcOverflowMetric.Update(int64(gc.OverflowPages))
-	ethdb.GcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * tx.db.pageSize / 8))
+	ethdb.GcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * pageSize / 8))
 
-	state, err := tx.BucketStat(dbutils.PlainStateBucket)
-	if err != nil {
-		return
+	{
+		st, err := tx.BucketStat(dbutils.PlainStateBucket)
+		if err != nil {
+			return
+		}
+		ethdb.TableStateLeaf.Update(int64(st.LeafPages))
+		ethdb.TableStateBranch.Update(int64(st.BranchPages))
+		ethdb.TableStateEntries.Update(int64(st.Entries))
+		ethdb.TableStateSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
 	}
-	ethdb.StateLeafMetric.Update(int64(state.LeafPages))
-	ethdb.StateBranchesMetric.Update(int64(state.BranchPages))
+	{
+		st, err := tx.BucketStat(dbutils.StorageChangeSetBucket)
+		if err != nil {
+			return
+		}
+		ethdb.TableScsLeaf.Update(int64(st.LeafPages))
+		ethdb.TableScsBranch.Update(int64(st.BranchPages))
+		ethdb.TableScsEntries.Update(int64(st.Entries))
+		ethdb.TableScsSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+	}
+	{
+		st, err := tx.BucketStat(dbutils.EthTx)
+		if err != nil {
+			return
+		}
+		ethdb.TableTxLeaf.Update(int64(st.LeafPages))
+		ethdb.TableTxBranch.Update(int64(st.BranchPages))
+		ethdb.TableTxOverflow.Update(int64(st.OverflowPages))
+		ethdb.TableTxEntries.Update(int64(st.Entries))
+		ethdb.TableTxSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+	}
+	{
+		st, err := tx.BucketStat(dbutils.Log)
+		if err != nil {
+			return
+		}
+		ethdb.TableLogLeaf.Update(int64(st.LeafPages))
+		ethdb.TableLogBranch.Update(int64(st.BranchPages))
+		ethdb.TableLogOverflow.Update(int64(st.OverflowPages))
+		ethdb.TableLogEntries.Update(int64(st.Entries))
+		ethdb.TableLogSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+	}
 }
 
 func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
@@ -956,7 +990,7 @@ func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return (st.LeafPages + st.BranchPages + st.OverflowPages) * uint64(os.Getpagesize()), nil
+	return (st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize, nil
 }
 
 func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {

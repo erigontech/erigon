@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -201,6 +202,36 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 	} else {
 		log.Info("Timings", timings...)
 	}
+	if err := printBucketsSize(tx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func printBucketsSize(tx ethdb.RwTx) error {
+	if tx == nil {
+		return nil
+	}
+	buckets := []string{
+		"freelist",
+		dbutils.PlainStateBucket,
+		dbutils.AccountChangeSetBucket,
+		dbutils.StorageChangeSetBucket,
+		dbutils.EthTx,
+		dbutils.Log,
+	}
+	bucketSizes := make([]interface{}, 0, 2*len(buckets))
+	for _, bucket := range buckets {
+		sz, err1 := tx.BucketSize(bucket)
+		if err1 != nil {
+			return err1
+		}
+		bucketSizes = append(bucketSizes, bucket, common.StorageSize(sz))
+	}
+	if len(bucketSizes) == 0 {
+		return nil
+	}
+	log.Info("Tables", bucketSizes...)
 	return nil
 }
 

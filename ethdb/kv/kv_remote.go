@@ -243,9 +243,8 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) (er
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
-func (tx *remoteTx) Comparator(bucket string) dbutils.CmpFunc { panic("not implemented yet") }
-func (tx *remoteTx) CollectMetrics()                          {}
-func (tx *remoteTx) CHandle() unsafe.Pointer                  { panic("not implemented yet") }
+func (tx *remoteTx) CollectMetrics()         {}
+func (tx *remoteTx) CHandle() unsafe.Pointer { panic("not implemented yet") }
 
 func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")
@@ -282,6 +281,8 @@ func (tx *remoteTx) statelessCursor(bucket string) (ethdb.Cursor, error) {
 	}
 	return c, nil
 }
+
+func (tx *remoteTx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 // TODO: this must be optimized - and implemented as single command on server, with server-side buffered streaming
 func (tx *remoteTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {

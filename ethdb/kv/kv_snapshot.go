@@ -465,12 +465,8 @@ func (s *snTX) Rollback() {
 
 }
 
-func (s *snTX) BucketSize(name string) (uint64, error) {
-	panic("implement me")
-}
-
-func (s *snTX) Comparator(bucket string) dbutils.CmpFunc {
-	return s.dbTX.Comparator(bucket)
+func (s *snTX) BucketSize(bucket string) (uint64, error) {
+	return s.dbTX.BucketSize(bucket)
 }
 
 func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
