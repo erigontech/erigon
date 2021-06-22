@@ -16,8 +16,11 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 )
+
+var stageTranspileGauge = metrics.NewRegisteredGauge("stage/tevm", nil)
 
 type TranspileCfg struct {
 	db            ethdb.RwKV
@@ -156,6 +159,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		case <-logEvery.C:
 			prevContract, logTime = logTEVMProgress(logPrefix, prevContract, logTime, stageProgress)
 			tx.CollectMetrics()
+			stageTranspileGauge.Inc(int64(stageProgress))
 		default:
 		}
 
