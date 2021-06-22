@@ -154,22 +154,33 @@ func ParseTransaction(payload []byte) (*TxSlot, error) {
 		return nil, fmt.Errorf("%s: size prefix: %v", errorPrefix, err)
 	}
 	payloadLen := len(payload)
-	if dataPos+dataLen >= payloadLen {
-		return nil, fmt.Errorf("%s: unexpected end of payload after size prefix", errorPrefix)
+	if dataPos+dataLen != payloadLen {
+		return nil, fmt.Errorf("%s: transaction must be either 1 list or 1 string", errorPrefix)
 	}
-	pos := dataPos + dataLen
+	pos := dataPos
 
 	var txType int
-	// If it is non-legacy transaction, the transaction type follows
+	var list bool
+	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
 		txType = int(payload[pos])
 		pos++
 		if pos >= payloadLen {
 			return nil, fmt.Errorf("%s: unexpected end of payload after txType", errorPrefix)
 		}
+		dataPos, dataLen, list, err = prefix(payload, pos)
+		if err != nil {
+			return nil, fmt.Errorf("%s: envelope prefix: %v", errorPrefix, err)
+		}
+		if !list {
+			return nil, fmt.Errorf("%s: envelop must be a list, not string", errorPrefix)
+		}
+		if dataPos+dataLen != payloadLen {
+			return nil, fmt.Errorf("%s: transaction must be fully enveloped", errorPrefix)
+		}
+		pos = dataPos
 	}
 	// If it is non-legacy tx, chainId follows, but we skip it
-	var list bool
 	if !legacy {
 		dataPos, dataLen, list, err = prefix(payload, pos)
 		if err != nil {
@@ -247,64 +258,66 @@ func ParseTransaction(payload []byte) (*TxSlot, error) {
 	slot.dataLen = dataLen
 	pos = dataPos + dataLen
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
-	dataPos, dataLen, list, err = prefix(payload, pos)
-	if err != nil {
-		return nil, fmt.Errorf("%s: access list len: %w", errorPrefix, err)
-	}
-	if !list {
-		return nil, fmt.Errorf("%s: access list must be a list, not string", errorPrefix)
-	}
-	if dataPos+dataLen >= payloadLen {
-		return nil, fmt.Errorf("%s: unexpected end of payload after access list", errorPrefix)
-	}
-	tuplePos := dataPos
-	var tupleLen int
-	for tuplePos < dataPos+dataLen {
-		tuplePos, tupleLen, list, err = prefix(payload, tuplePos)
+	if !legacy {
+		dataPos, dataLen, list, err = prefix(payload, pos)
 		if err != nil {
-			return nil, fmt.Errorf("%s: tuple len: %w", errorPrefix, err)
+			return nil, fmt.Errorf("%s: access list len: %w", errorPrefix, err)
 		}
 		if !list {
-			return nil, fmt.Errorf("%s: tuple must be a list, not string", errorPrefix)
+			return nil, fmt.Errorf("%s: access list must be a list, not string", errorPrefix)
 		}
-		if tuplePos+tupleLen > dataPos+dataLen {
-			return nil, fmt.Errorf("%s: unexpected end of access list after tuple", errorPrefix)
+		if dataPos+dataLen >= payloadLen {
+			return nil, fmt.Errorf("%s: unexpected end of payload after access list", errorPrefix)
 		}
-		var addrPos, addrLen int
-		addrPos, addrLen, list, err = prefix(payload, tuplePos)
-		if err != nil {
-			return nil, fmt.Errorf("%s: tuple addr len: %w", errorPrefix, err)
-		}
-		if list {
-			return nil, fmt.Errorf("%s: tuple addr must be a string, not list", errorPrefix)
-		}
-		if addrPos+addrLen > tuplePos+tupleLen {
-			return nil, fmt.Errorf("%s: unexpected end of tuple after address ", errorPrefix)
-		}
-		if addrLen != 20 {
-			return nil, fmt.Errorf("%s: unexpected length of tuple address: %d", errorPrefix, addrLen)
-		}
-		slot.alAddrCount++
-		skeyPos := addrPos + addrLen
-		var skeyLen int
-		for skeyPos < tuplePos+tupleLen {
-			skeyPos, skeyLen, list, err = prefix(payload, tuplePos)
+		tuplePos := dataPos
+		var tupleLen int
+		for tuplePos < dataPos+dataLen {
+			tuplePos, tupleLen, list, err = prefix(payload, tuplePos)
 			if err != nil {
-				return nil, fmt.Errorf("%s: tuple storage key len: %w", errorPrefix, err)
+				return nil, fmt.Errorf("%s: tuple len: %w", errorPrefix, err)
+			}
+			if !list {
+				return nil, fmt.Errorf("%s: tuple must be a list, not string", errorPrefix)
+			}
+			if tuplePos+tupleLen > dataPos+dataLen {
+				return nil, fmt.Errorf("%s: unexpected end of access list after tuple", errorPrefix)
+			}
+			var addrPos, addrLen int
+			addrPos, addrLen, list, err = prefix(payload, tuplePos)
+			if err != nil {
+				return nil, fmt.Errorf("%s: tuple addr len: %w", errorPrefix, err)
 			}
 			if list {
-				return nil, fmt.Errorf("%s: tuple storage key must be a string, not list", errorPrefix)
+				return nil, fmt.Errorf("%s: tuple addr must be a string, not list", errorPrefix)
 			}
-			if skeyPos+skeyPos > tuplePos+tuplePos {
-				return nil, fmt.Errorf("%s: unexpected end of tuple after storage key", errorPrefix)
+			if addrPos+addrLen > tuplePos+tupleLen {
+				return nil, fmt.Errorf("%s: unexpected end of tuple after address ", errorPrefix)
 			}
-			if skeyLen != 32 {
-				return nil, fmt.Errorf("%s: unexpected length of tuple storage key: %d", errorPrefix, skeyLen)
+			if addrLen != 20 {
+				return nil, fmt.Errorf("%s: unexpected length of tuple address: %d", errorPrefix, addrLen)
 			}
-			slot.alStorCount++
-			skeyPos = skeyPos + skeyLen
+			slot.alAddrCount++
+			skeyPos := addrPos + addrLen
+			var skeyLen int
+			for skeyPos < tuplePos+tupleLen {
+				skeyPos, skeyLen, list, err = prefix(payload, tuplePos)
+				if err != nil {
+					return nil, fmt.Errorf("%s: tuple storage key len: %w", errorPrefix, err)
+				}
+				if list {
+					return nil, fmt.Errorf("%s: tuple storage key must be a string, not list", errorPrefix)
+				}
+				if skeyPos+skeyPos > tuplePos+tuplePos {
+					return nil, fmt.Errorf("%s: unexpected end of tuple after storage key", errorPrefix)
+				}
+				if skeyLen != 32 {
+					return nil, fmt.Errorf("%s: unexpected length of tuple storage key: %d", errorPrefix, skeyLen)
+				}
+				slot.alStorCount++
+				skeyPos = skeyPos + skeyLen
+			}
+			tuplePos = tuplePos + tupleLen
 		}
-		tuplePos = tuplePos + tupleLen
 	}
 	return &slot, nil
 }
