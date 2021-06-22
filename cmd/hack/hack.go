@@ -2033,12 +2033,12 @@ func trimTxs(chaindata string) error {
 func scanReceipts(chaindata string) error {
 	db := kv2.MustOpen(chaindata).RwKV()
 	defer db.Close()
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	c, err := tx.Cursor(dbutils.BlockReceiptsPrefix)
+	c, err := tx.RwCursor(dbutils.BlockReceiptsPrefix)
 	if err != nil {
 		return err
 	}
@@ -2054,6 +2054,13 @@ func scanReceipts(chaindata string) error {
 	}
 	if k, _, err := c.Last(); err == nil {
 		fmt.Printf("Last receipt key: %x\n", k)
+		if err = c.DeleteCurrent(); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
