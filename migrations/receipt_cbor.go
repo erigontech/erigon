@@ -61,11 +61,18 @@ var receiptCbor = Migration{
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 		var buf bytes.Buffer
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
+		var blockNum uint64 = 1
+		var key [8]byte
+		var k, v []byte
+		for {
+			binary.BigEndian.PutUint64(key[:], blockNum)
+			if k, v, err = c.SeekExact(key[:]); err != nil {
 				return err
 			}
-			blockNum := binary.BigEndian.Uint64(k)
+			if k == nil {
+				break
+			}
+			blockNum++
 			select {
 			default:
 			case <-logEvery.C:
@@ -99,7 +106,7 @@ var receiptCbor = Migration{
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			if err = c.Put(k, common.CopyBytes(buf.Bytes())); err != nil {
+			if err = c.Put(common.CopyBytes(k), common.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 		}

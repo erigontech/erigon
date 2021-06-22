@@ -2052,6 +2052,10 @@ func scanReceipts(chaindata string) error {
 	if cerr != nil {
 		return cerr
 	}
+	if k, _, err := c.Last(); err == nil {
+		fmt.Printf("Last receipt key: %x\n", k)
+	}
+
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
