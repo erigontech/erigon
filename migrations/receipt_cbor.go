@@ -1,8 +1,19 @@
 package migrations
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"time"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/log"
 
 	"errors"
 	pkg2_big "math/big"
@@ -27,14 +38,68 @@ type OldReceipts []*OldReceipt
 var receiptCbor = Migration{
 	Name: "receipt_cbor",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
+		var tx ethdb.Tx
+		if hasTx, ok := db.(ethdb.HasTx); ok {
+			tx = hasTx.Tx()
+		} else {
+			return fmt.Errorf("no transaction")
+		}
+		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+		if err != nil {
+			return err
+		}
+		chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+		if cerr != nil {
+			return cerr
+		}
+		c, err := tx.Cursor(dbutils.BlockReceiptsPrefix)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		logInterval := 30 * time.Second
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k)
+			select {
+			default:
+			case <-logEvery.C:
+				log.Info("Scanned receipts up to", "block", blockNum)
+			}
+			var receipts types.Receipts
+			var oldReceipts OldReceipts
+			if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
+				continue
+			}
+
+			var blockHash common.Hash
+			if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+				return err
+			}
+			var body *types.Body
+			if chainConfig.IsBerlin(blockNum) {
+				body = rawdb.ReadBody(tx, blockHash, blockNum)
+			}
+			receipts = make(types.Receipts, len(oldReceipts))
+			for i, oldReceipt := range oldReceipts {
+				receipts[i] = new(types.Receipt)
+				receipts[i].PostState = oldReceipt.PostState
+				receipts[i].Status = oldReceipt.Status
+				receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
+				if body != nil {
+					receipts[i].Type = body.Transactions[i].Type()
+				}
+			}
+		}
 		return CommitProgress(db, nil, true)
 	},
 }
 
 const (
-	// ----- content types ----
-	codecSelferCcUTF82 = 1
-	codecSelferCcRAW2  = 255
 	// ----- value types used ----
 	codecSelferValueTypeArray2     = 10
 	codecSelferValueTypeMap2       = 9
@@ -52,9 +117,6 @@ var (
 )
 
 type codecSelfer2 struct{}
-
-func codecSelfer2False() bool { return false }
-func codecSelfer2True() bool  { return true }
 
 func init() {
 	if codec1978.GenVersion != 19 {
@@ -77,7 +139,6 @@ func (x *OldReceipt) CodecEncodeSelf(e *codec1978.Encoder) {
 	} else {
 		yy2arr2 := z.EncBasicHandle().StructToArray
 		_ = yy2arr2
-		const yyr2 bool = false // struct tag has 'toArray'
 		z.EncWriteArrayStart(3)
 		z.EncWriteArrayElem()
 		if x.PostState == nil {
@@ -331,142 +392,4 @@ func (x codecSelfer2) decReceipts(v *OldReceipts, d *codec1978.Decoder) {
 	if yyc1 {
 		*v = yyv1
 	}
-}
-
-func (x codecSelfer2) enccommon_Address(v *pkg1_common.Address, e *codec1978.Encoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperEncoder(e)
-	_, _, _ = h, z, r
-	if v == nil {
-		r.EncodeNil()
-		return
-	}
-	r.EncodeStringBytesRaw(((*[20]byte)(v))[:])
-}
-
-func (x codecSelfer2) deccommon_Address(v *pkg1_common.Address, d *codec1978.Decoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperDecoder(d)
-	_, _, _ = h, z, r
-	r.DecodeBytes(((*[20]byte)(v))[:], true)
-}
-
-func (x codecSelfer2) encSlicecommon_Hash(v []pkg1_common.Hash, e *codec1978.Encoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperEncoder(e)
-	_, _, _ = h, z, r
-	if v == nil {
-		r.EncodeNil()
-		return
-	}
-	z.EncWriteArrayStart(len(v))
-	for _, yyv1 := range v {
-		z.EncWriteArrayElem()
-		yy2 := &yyv1
-		if !z.EncBinary() {
-			z.EncTextMarshal(*yy2)
-		} else {
-			h.enccommon_Hash((*pkg1_common.Hash)(yy2), e)
-		}
-	}
-	z.EncWriteArrayEnd()
-}
-
-func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.Decoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperDecoder(d)
-	_, _, _ = h, z, r
-
-	yyv1 := *v
-	yyh1, yyl1 := z.DecSliceHelperStart()
-	var yyc1 bool
-	_ = yyc1
-	if yyh1.IsNil {
-		if yyv1 != nil {
-			yyv1 = nil
-			yyc1 = true
-		}
-	} else if yyl1 == 0 {
-		if yyv1 == nil {
-			yyv1 = []pkg1_common.Hash{}
-			yyc1 = true
-		} else if len(yyv1) != 0 {
-			yyv1 = yyv1[:0]
-			yyc1 = true
-		}
-	} else {
-		yyhl1 := yyl1 > 0
-		var yyrl1 int
-		_ = yyrl1
-		if yyhl1 {
-			if yyl1 > cap(yyv1) {
-				yyrl1 = z.DecInferLen(yyl1, z.DecBasicHandle().MaxInitLen, 32)
-				if yyrl1 <= cap(yyv1) {
-					yyv1 = yyv1[:yyrl1]
-				} else {
-					yyv1 = make([]pkg1_common.Hash, yyrl1)
-				}
-				yyc1 = true
-			} else if yyl1 != len(yyv1) {
-				yyv1 = yyv1[:yyl1]
-				yyc1 = true
-			}
-		}
-		var yyj1 int
-		for yyj1 = 0; (yyhl1 && yyj1 < yyl1) || !(yyhl1 || z.DecCheckBreak()); yyj1++ { // bounds-check-elimination
-			if yyj1 == 0 && yyv1 == nil {
-				if yyhl1 {
-					yyrl1 = z.DecInferLen(yyl1, z.DecBasicHandle().MaxInitLen, 32)
-				} else {
-					yyrl1 = 8
-				}
-				yyv1 = make([]pkg1_common.Hash, yyrl1)
-				yyc1 = true
-			}
-			yyh1.ElemContainerState(yyj1)
-			var yydb1 bool
-			if yyj1 >= len(yyv1) {
-				yyv1 = append(yyv1, pkg1_common.Hash{})
-				yyc1 = true
-			}
-			if yydb1 {
-				z.DecSwallow()
-			} else {
-				if !z.DecBinary() && z.IsJSONHandle() {
-					z.DecJSONUnmarshal(&yyv1[yyj1])
-				} else {
-					h.deccommon_Hash((*pkg1_common.Hash)(&yyv1[yyj1]), d)
-				}
-			}
-		}
-		if yyj1 < len(yyv1) {
-			yyv1 = yyv1[:yyj1]
-			yyc1 = true
-		} else if yyj1 == 0 && yyv1 == nil {
-			yyv1 = make([]pkg1_common.Hash, 0)
-			yyc1 = true
-		}
-	}
-	yyh1.End()
-	if yyc1 {
-		*v = yyv1
-	}
-}
-
-func (x codecSelfer2) enccommon_Hash(v *pkg1_common.Hash, e *codec1978.Encoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperEncoder(e)
-	_, _, _ = h, z, r
-	if v == nil {
-		r.EncodeNil()
-		return
-	}
-	r.EncodeStringBytesRaw(((*[32]byte)(v))[:])
-}
-
-func (x codecSelfer2) deccommon_Hash(v *pkg1_common.Hash, d *codec1978.Decoder) {
-	var h codecSelfer2
-	z, r := codec1978.GenHelperDecoder(d)
-	_, _, _ = h, z, r
-	r.DecodeBytes(((*[32]byte)(v))[:], true)
 }
