@@ -231,8 +231,8 @@ func generateHeaderHashToNumberIndex(ctx context.Context, tx ethdb.DbWithPending
 	if innerErr != nil {
 		return innerErr
 	}
-	headNumberBytes:= lastHeader[:8]
-	headHashBytes:=lastHeader[8:]
+	headNumberBytes := lastHeader[:8]
+	headHashBytes := lastHeader[8:]
 
 	headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
 	headHash := common.BytesToHash(headHashBytes)

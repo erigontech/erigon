@@ -40,16 +40,11 @@ func NewSnapshotKV() snapshotOpts {
 	return snapshotOpts{}
 }
 
-type snapshotData struct {
-	snapshot ethdb.RoKV
-	buckets  []string
-}
 type snapshotOpts struct {
-	db        ethdb.RwKV
-	snapshots []snapshotData
+	db              ethdb.RwKV
 	headersSnapshot ethdb.RoKV
-	bodiesSnapshot ethdb.RoKV
-	stateSnapshot ethdb.RoKV
+	bodiesSnapshot  ethdb.RoKV
+	stateSnapshot   ethdb.RoKV
 }
 
 //func (opts snapshotOpts) SnapshotDB(buckets []string, db ethdb.RoKV) snapshotOpts {
@@ -80,18 +75,18 @@ func (opts snapshotOpts) DB(db ethdb.RwKV) snapshotOpts {
 func (opts snapshotOpts) Open() *SnapshotKV {
 	return &SnapshotKV{
 		headersSnapshot: opts.headersSnapshot,
-		bodiesSnapshot: opts.bodiesSnapshot,
-		stateSnapshot: opts.stateSnapshot,
-		db:        opts.db,
+		bodiesSnapshot:  opts.bodiesSnapshot,
+		stateSnapshot:   opts.stateSnapshot,
+		db:              opts.db,
 	}
 }
 
 type SnapshotKV struct {
-	db        ethdb.RwKV
+	db              ethdb.RwKV
 	headersSnapshot ethdb.RoKV
-	bodiesSnapshot ethdb.RoKV
-	stateSnapshot ethdb.RoKV
-	mtx       sync.RWMutex
+	bodiesSnapshot  ethdb.RoKV
+	stateSnapshot   ethdb.RoKV
+	mtx             sync.RWMutex
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx ethdb.Tx) error) error {
@@ -121,13 +116,13 @@ func (s *SnapshotKV) Close() {
 	defer s.db.Close()
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	if s.headersSnapshot!=nil {
+	if s.headersSnapshot != nil {
 		defer s.headersSnapshot.Close()
 	}
-	if s.bodiesSnapshot!=nil {
+	if s.bodiesSnapshot != nil {
 		defer s.bodiesSnapshot.Close()
 	}
-	if s.stateSnapshot!=nil {
+	if s.stateSnapshot != nil {
 		defer s.stateSnapshot.Close()
 	}
 }
@@ -136,14 +131,14 @@ func (s *SnapshotKV) UpdateSnapshots2(tp string, snapshotKV ethdb.RoKV, done cha
 	var toClose ethdb.RoKV
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	switch  {
-	case tp=="headers":
+	switch {
+	case tp == "headers":
 		toClose = s.headersSnapshot
 		s.headersSnapshot = snapshotKV
-	case tp=="bodies":
+	case tp == "bodies":
 		toClose = s.bodiesSnapshot
 		s.bodiesSnapshot = snapshotKV
-	case tp=="state":
+	case tp == "state":
 		toClose = s.stateSnapshot
 		s.stateSnapshot = snapshotKV
 	default:
@@ -151,11 +146,11 @@ func (s *SnapshotKV) UpdateSnapshots2(tp string, snapshotKV ethdb.RoKV, done cha
 	}
 
 	go func() {
-		if toClose!= nil {
+		if toClose != nil {
 			toClose.Close()
 		}
 		done <- struct{}{}
-		log.Info("old snapshot closed","tp", tp)
+		log.Info("old snapshot closed", "tp", tp)
 	}()
 }
 
@@ -172,7 +167,6 @@ func (s *SnapshotKV) StateSnapshot() ethdb.RoKV {
 	return s.stateSnapshot
 }
 
-
 func (s *SnapshotKV) CollectMetrics() {
 	s.db.CollectMetrics()
 }
@@ -181,31 +175,31 @@ func (s *SnapshotKV) snapsthotsTx(ctx context.Context) (ethdb.Tx, ethdb.Tx, ethd
 	var headersTX, bodiesTX, stateTX ethdb.Tx
 	var err error
 	defer func() {
-		if err!=nil {
-			if headersTX!=nil {
+		if err != nil {
+			if headersTX != nil {
 				headersTX.Rollback()
 			}
-			if bodiesTX!=nil {
+			if bodiesTX != nil {
 				bodiesTX.Rollback()
 			}
-			if stateTX!=nil {
+			if stateTX != nil {
 				stateTX.Rollback()
 			}
 		}
 	}()
-	if s.headersSnapshot!=nil {
+	if s.headersSnapshot != nil {
 		headersTX, err = s.headersSnapshot.BeginRo(ctx)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	if s.bodiesSnapshot!=nil {
+	if s.bodiesSnapshot != nil {
 		bodiesTX, err = s.bodiesSnapshot.BeginRo(ctx)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	if s.stateSnapshot!=nil {
+	if s.stateSnapshot != nil {
 		stateTX, err = s.stateSnapshot.BeginRo(ctx)
 		if err != nil {
 			return nil, nil, nil, err
@@ -218,15 +212,15 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	headersTX, bodiesTX, stateTX, err:=s.snapsthotsTx(ctx)
-	if err!=nil {
-	    return nil, err
+	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
+	if err != nil {
+		return nil, err
 	}
 	return &snTX{
 		dbTX:      dbTx,
 		headersTX: headersTX,
-		bodiesTX: bodiesTX,
-		stateTX: stateTX,
+		bodiesTX:  bodiesTX,
+		stateTX:   stateTX,
 	}, nil
 }
 
@@ -236,16 +230,16 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 		return nil, err
 	}
 
-	headersTX, bodiesTX, stateTX, err:=s.snapsthotsTx(ctx)
-	if err!=nil {
+	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
+	if err != nil {
 		return nil, err
 	}
 
 	return &snTX{
 		dbTX:      dbTx,
 		headersTX: headersTX,
-		bodiesTX: bodiesTX,
-		stateTX: stateTX,
+		bodiesTX:  bodiesTX,
+		stateTX:   stateTX,
 	}, nil
 }
 
@@ -258,8 +252,8 @@ var ErrUnavailableSnapshot = errors.New("unavailable snapshot")
 type snTX struct {
 	dbTX      ethdb.Tx
 	headersTX ethdb.Tx
-	bodiesTX ethdb.Tx
-	stateTX ethdb.Tx
+	bodiesTX  ethdb.Tx
+	stateTX   ethdb.Tx
 }
 
 type DBTX interface {
@@ -425,9 +419,9 @@ func (s *snTX) getSnapshotTX(bucket string) (ethdb.Tx, error) {
 	case dbutils.PlainContractCodeBucket:
 		fallthrough
 	case dbutils.CodeBucket:
-		tx =  s.stateTX
+		tx = s.stateTX
 	}
-	if tx==nil {
+	if tx == nil {
 		return nil, fmt.Errorf("%s  %w", bucket, ErrUnavailableSnapshot)
 	}
 	return tx, nil
@@ -522,14 +516,14 @@ func (s *snTX) Commit() error {
 	defer s.snapshotsRollback()
 	return s.dbTX.Commit()
 }
-func (s *snTX) snapshotsRollback()  {
-	if s.headersTX!=nil {
+func (s *snTX) snapshotsRollback() {
+	if s.headersTX != nil {
 		defer s.headersTX.Rollback()
 	}
-	if s.bodiesTX!=nil {
+	if s.bodiesTX != nil {
 		defer s.bodiesTX.Rollback()
 	}
-	if s.stateTX!=nil {
+	if s.stateTX != nil {
 		defer s.stateTX.Rollback()
 	}
 }

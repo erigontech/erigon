@@ -67,12 +67,11 @@ func TestMatreshkaStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-
 	snkv := kv2.NewSnapshotKV().DB(kv).
 		//broken
 		//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).
 		Open()
-	_=chaindata
+	_ = chaindata
 	defer snkv.Close()
 	db := kv2.NewObjectDatabase(snkv)
 

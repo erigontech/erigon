@@ -189,9 +189,9 @@ const IntermediateTrieHashBucketOld2 = "iTh2"
 
 const (
 	// DatabaseInfoBucket is used to store information about data layout.
-	DatabaseInfoBucket        = "DbInfo"
-	SnapshotInfoBucket        = "SnapshotInfo"
-	BittorrentInfoBucket      = "BittorrentInfo"
+	DatabaseInfoBucket   = "DbInfo"
+	SnapshotInfoBucket   = "SnapshotInfo"
+	BittorrentInfoBucket = "BittorrentInfo"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefixOld    = "h"            // block_num_u64 + hash -> header

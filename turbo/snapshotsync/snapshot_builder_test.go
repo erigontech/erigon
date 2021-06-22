@@ -156,13 +156,13 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}()
 	//wait until migration start
 	wg.Wait()
-	tm:=time.After(time.Second*1000)
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10  {
+	tm := time.After(time.Second * 1000)
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
 		select {
 		case <-tm:
 			t.Fatal("timeout")
 		default:
-			time.Sleep(time.Millisecond*100)
+			time.Sleep(time.Millisecond * 100)
 		}
 	}
 
@@ -279,7 +279,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	rollbacked := false
 	//3s - just to be sure that it blocks here
 	c := time.After(time.Second * 3)
-	tm=time.After(time.Second*20)
+	tm = time.After(time.Second * 20)
 
 	for atomic.LoadUint64(&sb.started) > 0 || atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 20 {
 		select {
@@ -477,8 +477,8 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	writeStep(10)
 
-	tm:=time.After(time.Second*10)
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=10 {
+	tm := time.After(time.Second * 10)
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -493,7 +493,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		case <-tm:
 			t.Fatal("timeout")
 		default:
-			time.Sleep(time.Millisecond*100)
+			time.Sleep(time.Millisecond * 100)
 		}
 	}
 
@@ -641,9 +641,9 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	writeStep(20)
 
-	tm=time.After(time.Second*10)
+	tm = time.After(time.Second * 10)
 
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot)==20 {
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) == 20 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -657,7 +657,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		case <-tm:
 			t.Fatal("timeout")
 		default:
-			time.Sleep(time.Millisecond*100)
+			time.Sleep(time.Millisecond * 100)
 		}
 	}
 
@@ -1382,8 +1382,8 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 	}
 	writeStep(10)
 
-	tm:=time.After(time.Second*5)
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=10 {
+	tm := time.After(time.Second * 5)
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -1398,7 +1398,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		case <-tm:
 			t.Fatal("timeout")
 		default:
-			time.Sleep(time.Millisecond*100)
+			time.Sleep(time.Millisecond * 100)
 		}
 	}
 

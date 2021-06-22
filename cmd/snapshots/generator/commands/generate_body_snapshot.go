@@ -37,7 +37,7 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 	kv := kv2.NewMDBX().Path(dbPath).MustOpen()
 	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
+			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
