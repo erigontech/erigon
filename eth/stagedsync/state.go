@@ -194,6 +194,13 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 		timings = append(timings, string(stage.ID), time.Since(t))
 	}
 
+	if err := printLogs(tx, timings); err != nil {
+		return err
+	}
+	return nil
+}
+
+func printLogs(tx ethdb.RwTx, timings []interface{}) error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
@@ -202,13 +209,7 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 	} else {
 		log.Info("Timings", timings...)
 	}
-	if err := printBucketsSize(tx); err != nil {
-		return err
-	}
-	return nil
-}
 
-func printBucketsSize(tx ethdb.RwTx) error {
 	if tx == nil {
 		return nil
 	}
