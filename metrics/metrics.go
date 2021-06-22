@@ -84,7 +84,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 	if !Enabled {
 		return
 	}
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	refreshFreq := int64(refresh / time.Second)
 
 	// Create the various data collectors
