@@ -2028,6 +2028,37 @@ func trimTxs(chaindata string) error {
 	return nil
 }
 
+func scanTxs(chaindata string) error {
+	db := kv2.MustOpen(chaindata).RwKV()
+	defer db.Close()
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c, err := tx.Cursor(dbutils.EthTx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	trTypes := make(map[byte]int)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		var tr types.Transaction
+		if tr, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
+			return err
+		}
+		if _, ok := trTypes[tr.Type()]; !ok {
+			fmt.Printf("Example for type %d:\n%x\n", tr.Type(), v)
+		}
+		trTypes[tr.Type()]++
+	}
+	fmt.Printf("Transaction types: %v\n", trTypes)
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2181,6 +2212,9 @@ func main() {
 
 	case "trimTxs":
 		err = trimTxs(*chaindata)
+
+	case "scanTxs":
+		err = scanTxs(*chaindata)
 	}
 
 	if err != nil {
