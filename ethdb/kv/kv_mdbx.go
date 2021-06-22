@@ -289,7 +289,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 		if staleReaders, err := db.env.ReaderCheck(); err != nil {
 			db.log.Error("failed ReaderCheck", "err", err)
 		} else if staleReaders > 0 {
-			db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
+			db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
 		}
 	}
 	return db, nil
@@ -335,28 +335,6 @@ func (db *MdbxKV) Close() {
 	} else {
 		db.log.Info("database closed (MDBX)")
 	}
-}
-
-func (db *MdbxKV) CollectMetrics() {
-	if !metrics.Enabled {
-		return
-	}
-	if db.opts.label != ethdb.Chain {
-		return
-	}
-	info, err := db.env.Info()
-	if err != nil {
-		return // ignore error for metrics collection
-	}
-	ethdb.DbSize.Update(int64(info.Geo.Current))
-	ethdb.DbPgopsNewly.Update(int64(info.PageOps.Newly))
-	ethdb.DbPgopsCow.Update(int64(info.PageOps.Cow))
-	ethdb.DbPgopsClone.Update(int64(info.PageOps.Clone))
-	ethdb.DbPgopsSplit.Update(int64(info.PageOps.Split))
-	ethdb.DbPgopsMerge.Update(int64(info.PageOps.Merge))
-	ethdb.DbPgopsSpill.Update(int64(info.PageOps.Spill))
-	ethdb.DbPgopsUnspill.Update(int64(info.PageOps.Unspill))
-	ethdb.DbPgopsWops.Update(int64(info.PageOps.Wops))
 }
 
 func (db *MdbxKV) BeginRo(_ context.Context) (txn ethdb.Tx, err error) {
@@ -496,12 +474,35 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 }
 
 func (tx *MdbxTx) CollectMetrics() {
-	if !metrics.Enabled {
-		return
-	}
 	if tx.db.opts.label != ethdb.Chain {
 		return
 	}
+
+	info, err := tx.db.env.Info()
+	if err != nil {
+		return
+	}
+	if info.SinceReaderCheck.Hours() > 1 {
+		if staleReaders, err := tx.db.env.ReaderCheck(); err != nil {
+			tx.db.log.Error("failed ReaderCheck", "err", err)
+		} else if staleReaders > 0 {
+			tx.db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
+		}
+	}
+
+	if !metrics.Enabled {
+		return
+	}
+	ethdb.DbSize.Update(int64(info.Geo.Current))
+	ethdb.DbPgopsNewly.Update(int64(info.PageOps.Newly))
+	ethdb.DbPgopsCow.Update(int64(info.PageOps.Cow))
+	ethdb.DbPgopsClone.Update(int64(info.PageOps.Clone))
+	ethdb.DbPgopsSplit.Update(int64(info.PageOps.Split))
+	ethdb.DbPgopsMerge.Update(int64(info.PageOps.Merge))
+	ethdb.DbPgopsSpill.Update(int64(info.PageOps.Spill))
+	ethdb.DbPgopsUnspill.Update(int64(info.PageOps.Unspill))
+	ethdb.DbPgopsWops.Update(int64(info.PageOps.Wops))
+
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return

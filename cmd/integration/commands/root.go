@@ -8,7 +8,6 @@ import (
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/spf13/cobra"
 )
@@ -56,7 +55,6 @@ func openDB(path string, applyMigrations bool) ethdb.RwKV {
 			db = kv2.NewObjectDatabase(openKV(label, path, false))
 		}
 	}
-	metrics.AddCallback(db.RwKV().CollectMetrics)
 	return db.RwKV()
 }
 
@@ -69,6 +67,5 @@ func openKV(label ethdb.Label, path string, exclusive bool) ethdb.RwKV {
 		opts = opts.DBVerbosity(ethdb.DBVerbosityLvl(databaseVerbosity))
 	}
 	kv := opts.MustOpen()
-	metrics.AddCallback(kv.CollectMetrics)
 	return kv
 }

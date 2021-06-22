@@ -129,8 +129,6 @@ type RoKV interface {
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
-
-	CollectMetrics()
 }
 
 // RwKV low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
@@ -211,7 +209,6 @@ type Tx interface {
 	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
-	CollectMetrics()
 }
 
 type RwTx interface {
@@ -221,6 +218,10 @@ type RwTx interface {
 
 	RwCursor(bucket string) (RwCursor, error)
 	RwCursorDupSort(bucket string) (RwCursorDupSort, error)
+
+	// CollectMetrics - does collect all DB-related and Tx-related metrics
+	// this method exists only in RwTx to avoid concurrency
+	CollectMetrics()
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code

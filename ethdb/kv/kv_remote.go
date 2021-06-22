@@ -213,8 +213,6 @@ func (db *RemoteKV) Close() {
 	}
 }
 
-func (db *RemoteKV) CollectMetrics() {}
-
 func (db *RemoteKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
