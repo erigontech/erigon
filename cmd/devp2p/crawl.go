@@ -68,11 +68,11 @@ func (c *crawler) run(timeout time.Duration) nodeSet {
 		liveIters    = len(c.iters)
 	)
 	defer timeoutTimer.Stop()
-	for _, it := range c.iters {
-		go func() {
+	for i := range c.iters {
+		go func(i int) {
 			debug.LogPanic()
-			c.runIterator(doneCh, it)
-		}()
+			c.runIterator(doneCh, c.iters[i])
+		}(i)
 	}
 
 loop:

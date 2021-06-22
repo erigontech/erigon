@@ -302,7 +302,8 @@ func RecvTxMessage(ctx context.Context,
 		return
 	}
 
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var req *proto_sentry.InboundMessage
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			select {
 			case <-ctx.Done():

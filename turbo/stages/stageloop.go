@@ -311,8 +311,10 @@ func NewStagedSync2(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
-			for _, s := range txPoolServer.Sentries {
-				go txpool.RecvTxMessageLoop(ctx, s, controlServer, txPoolServer.HandleInboundMessage, nil)
+			for i := range txPoolServer.Sentries {
+				go func(i int) {
+					txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
+				}(i)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),

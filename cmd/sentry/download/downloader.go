@@ -102,7 +102,8 @@ func RecvUploadMessage(ctx context.Context,
 		}
 		return err
 	}
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var req *proto_sentry.InboundMessage
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -183,7 +184,8 @@ func RecvMessage(
 		return err
 	}
 
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var req *proto_sentry.InboundMessage
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			select {
 			case <-ctx.Done():

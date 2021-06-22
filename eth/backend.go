@@ -643,14 +643,14 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
 	for i := range s.sentries {
-		go func() {
+		go func(i int) {
 			defer debug.LogPanic()
 			download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
-		}()
-		go func() {
+		}(i)
+		go func(i int) {
 			defer debug.LogPanic()
 			download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
-		}()
+		}(i)
 	}
 
 	go func() {
