@@ -97,9 +97,7 @@ func transpileBatch(logPrefix string, s *StageState, fromBlock uint64, toBlock u
 		select {
 		case <-logEvery.C:
 			logBlock, logTime = logTEVMProgress(logPrefix, logBlock, logTime, stageProgress)
-			if hasTx, ok := tx.(ethdb.HasTx); ok {
-				hasTx.Tx().CollectMetrics()
-			}
+			tx.CollectMetrics()
 		default:
 		}
 
