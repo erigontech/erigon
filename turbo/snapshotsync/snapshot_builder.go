@@ -95,7 +95,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 					return err
 				}
 
-				db.(kv.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, sm.replaceChan)
+				db.(kv.SnapshotUpdater).UpdateSnapshots2("headers", snapshotKV, sm.replaceChan)
 				return nil
 			},
 		}
@@ -114,7 +114,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 					return err
 				}
 
-				db.(kv.SnapshotUpdater).UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, snapshotKV, sm.replaceChan)
+				db.(kv.SnapshotUpdater).UpdateSnapshots2("bodies", snapshotKV, sm.replaceChan)
 				return nil
 			},
 		}
@@ -186,6 +186,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			}
 		}()
 		for i := range stages {
+			log.Info("Stage", "i", i)
 			innerErr = stages[i](dbi, tx, migrateToBlock)
 			if innerErr != nil {
 				return innerErr
@@ -197,20 +198,6 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 		go func() {
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
 			defer func() { debug.LogPanic(nil, true, recover()) }()
-			var innerErr error
-			defer func() {
-				if innerErr != nil {
-					atomic.StoreUint64(&sm.started, 0)
-					switch snapshotName {
-					case "headers":
-						atomic.StoreUint64(&sm.HeadersNewSnapshot, atomic.LoadUint64(&sm.HeadersCurrentSnapshot))
-					case "bodies":
-						atomic.StoreUint64(&sm.BodiesNewSnapshot, atomic.LoadUint64(&sm.BodiesCurrentSnapshot))
-					}
-
-					log.Error("Error on stage. Rollback", "type", snapshotName, "err", innerErr)
-				}
-			}()
 
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
@@ -219,9 +206,9 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			}
 			defer readTX.Rollback()
 
-			innerErr = startStages(readTX)
+			innerErr := startStages(readTX)
 			if innerErr != nil {
-				log.Error("Error ", "err", innerErr)
+				log.Error("Async stages", "err", innerErr)
 				return
 			}
 		}()

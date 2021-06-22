@@ -57,8 +57,15 @@ func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*Sn
 			for bucket := range BucketConfigs[k] {
 				buckets = append(buckets, bucket)
 			}
+			switch k {
+			case SnapshotType_headers:
+				snKV = snKV.HeadersSnapshot(snapshotKV)
+			case SnapshotType_bodies:
+				snKV = snKV.BodiesSnapshot(snapshotKV)
+			case SnapshotType_state:
+				snKV = snKV.StateSnapshot(snapshotKV)
+			}
 
-			snKV = snKV.SnapshotDB(buckets, snapshotKV)
 		}
 	}
 
@@ -76,7 +83,7 @@ func WrapSnapshots(chainDb ethdb.Database, snapshotsDir string) error {
 		if innerErr != nil {
 			return innerErr
 		}
-		snKVOpts = snKVOpts.SnapshotDB([]string{dbutils.HeadersBucket}, snKV)
+		snKVOpts = snKVOpts.HeadersSnapshot(snKV)
 	}
 	//manually wrap current db for snapshot generation
 	chainDb.(ethdb.HasRwKV).SetRwKV(snKVOpts.Open())

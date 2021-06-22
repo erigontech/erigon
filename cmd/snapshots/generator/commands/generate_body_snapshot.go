@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"os"
 	"time"
 
@@ -39,7 +38,6 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.BlockBodyPrefix:          dbutils.BucketConfigItem{},
-			dbutils.BodiesSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -73,17 +71,6 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 				log.Info("progress", "bucket", dbutils.BlockBodyPrefix, "block num", i)
 			default:
 			}
-		}
-
-		err = sntx.Put(dbutils.BodiesSnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
-		if err != nil {
-			log.Crit("SnapshotBodyHeadNumber error", "err", err)
-			return err
-		}
-		err = sntx.Put(dbutils.BodiesSnapshotInfoBucket, []byte(dbutils.SnapshotBodyHeadHash), hash.Bytes())
-		if err != nil {
-			log.Crit("SnapshotBodyHeadHash error", "err", err)
-			return err
 		}
 		return nil
 	}); err != nil {

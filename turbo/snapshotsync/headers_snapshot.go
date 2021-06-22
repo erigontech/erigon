@@ -97,10 +97,9 @@ func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapsho
 	if _, ok := db.(kv.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	headerSnapshot := db.(kv.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
+	headerSnapshot := db.(kv.SnapshotUpdater).HeadersSnapshot()
 	if headerSnapshot == nil {
-		log.Info("headerSnapshot is empty")
-		return nil
+		return errors.New("empty headers snapshot")
 	}
 	writeTX := tx.(kv.DBTX).DBTX()
 	c, err := writeTX.RwCursor(dbutils.HeadersBucket)

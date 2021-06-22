@@ -81,9 +81,12 @@ var cmdSnapshotCheck = &cobra.Command{
 		tmpDb := kv2.NewMDBX().Path(path).MustOpen()
 		kv := kv2.NewSnapshotKV().
 			DB(tmpDb).
-			SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
-			SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
+			//broken
+			//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
+			//SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
 			Open()
+		_=mainDB
+		_=stateSnapshot
 
 		if isNew {
 			if err := kv.Update(ctx, func(tx ethdb.RwTx) error {

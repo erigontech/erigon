@@ -133,7 +133,7 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 	if _, ok := db.(kv.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	bodiesSnapshot := db.(kv.SnapshotUpdater).SnapshotKV(dbutils.BlockBodyPrefix)
+	bodiesSnapshot := db.(kv.SnapshotUpdater).BodiesSnapshot()
 	if bodiesSnapshot == nil {
 		log.Info("bodiesSnapshot is empty")
 		return nil

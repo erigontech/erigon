@@ -65,7 +65,6 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	btCli.trackers = [][]string{}
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
-	defer db.Close()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -157,13 +156,16 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}()
 	//wait until migration start
 	wg.Wait()
-	for atomic.LoadUint64(&sb.started) > 0 {
-		time.Sleep(time.Millisecond * 100)
+	tm:=time.After(time.Second*1000)
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10  {
+		select {
+		case <-tm:
+			t.Fatal("timeout")
+		default:
+			time.Sleep(time.Millisecond*100)
+		}
 	}
 
-	if sb.HeadersCurrentSnapshot != 10 {
-		t.Fatal("incorrect headers snapshot", sb.HeadersCurrentSnapshot)
-	}
 	//note. We need here only main database.
 	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
@@ -186,7 +188,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 	rotx.Rollback()
 
-	snokv := db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)
+	snokv := db.HeadersSnapshot().(ethdb.RoKV)
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
@@ -276,22 +278,22 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 
 	rollbacked := false
 	//3s - just to be sure that it blocks here
-	c := time.After(time.Second * 5)
+	c := time.After(time.Second * 3)
+	tm=time.After(time.Second*20)
+
 	for atomic.LoadUint64(&sb.started) > 0 || atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 20 {
 		select {
 		case <-c:
 			roTX.Rollback()
 			rollbacked = true
+		case <-tm:
+			t.Fatal("timeout")
 		default:
+			time.Sleep(time.Millisecond * 100)
 		}
-		time.Sleep(time.Millisecond * 100)
 	}
 	if !rollbacked {
 		t.Log("it's not possible to close db without rollback. something went wrong")
-	}
-
-	if sb.HeadersCurrentSnapshot != 20 {
-		t.Fatal("incorrect headers snapshot", sb.HeadersCurrentSnapshot)
 	}
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
@@ -309,7 +311,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 
 	headerNumber = 0
-	snRoTx, err = db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV).BeginRo(context.Background())
+	snRoTx, err = db.HeadersSnapshot().(ethdb.RoKV).BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
@@ -386,7 +388,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 }
 
 func TestSnapshotMigratorStageSyncMode(t *testing.T) {
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
 
@@ -414,10 +416,6 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	defer db.Close()
-	quit := make(chan struct{})
-	defer func() {
-		close(quit)
-	}()
 
 	sb := &SnapshotMigrator{
 		snapshotsDir: snapshotsDir,
@@ -463,8 +461,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		t.Helper()
 		rotx, err := db.BeginRo(context.Background())
 		if err != nil {
-			t.Error(err)
-			panic(err)
+			t.Fatal()
 		}
 		defer rotx.Rollback()
 
@@ -480,7 +477,8 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	writeStep(10)
 
-	for atomic.LoadUint64(&sb.started) > 0 {
+	tm:=time.After(time.Second*10)
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=10 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -491,10 +489,12 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		roTx.Rollback()
-		time.Sleep(time.Millisecond * 100)
-	}
-	if sb.HeadersCurrentSnapshot != 10 {
-		t.Fatal("incorrect headers snapshot", sb.HeadersCurrentSnapshot)
+		select {
+		case <-tm:
+			t.Fatal("timeout")
+		default:
+			time.Sleep(time.Millisecond*100)
+		}
 	}
 
 	//note. We need here only main database.
@@ -519,7 +519,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	rotx.Rollback()
 
-	snokv := db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV)
+	snokv := db.HeadersSnapshot().(ethdb.RoKV)
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
@@ -641,7 +641,9 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	writeStep(20)
 
-	for atomic.LoadUint64(&sb.started) > 0 {
+	tm=time.After(time.Second*10)
+
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot)==20 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -651,14 +653,16 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		roTx.Rollback()
-		time.Sleep(time.Millisecond * 1000)
+		select {
+		case <-tm:
+			t.Fatal("timeout")
+		default:
+			time.Sleep(time.Millisecond*100)
+		}
 	}
 
 	if !rollbacked {
 		t.Log("it's not possible to close db without rollback. something went wrong")
-	}
-	if sb.HeadersCurrentSnapshot != 20 {
-		t.Fatal("incorrect headers snapshot", sb.HeadersCurrentSnapshot)
 	}
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
@@ -676,7 +680,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	rotx.Rollback()
 	headerNumber = 0
-	snRoTx, err = db.SnapshotKV(dbutils.HeadersBucket).(ethdb.RwKV).BeginRo(context.Background())
+	snRoTx, err = db.HeadersSnapshot().(ethdb.RoKV).BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
@@ -1069,11 +1073,6 @@ func TestPruneBlocks(t *testing.T) {
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
-	quit := make(chan struct{})
-	defer func() {
-		close(quit)
-	}()
-
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1125,7 +1124,7 @@ func TestPruneBlocks(t *testing.T) {
 
 	bodySnapshotTX.Rollback()
 	ch := make(chan struct{})
-	db.UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, kvSnapshot, ch)
+	db.UpdateSnapshots2("bodies", kvSnapshot, ch)
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 5):
@@ -1222,7 +1221,7 @@ func TestPruneBlocks(t *testing.T) {
 
 	bodySnapshotTX.Rollback()
 	ch = make(chan struct{})
-	db.UpdateSnapshots([]string{dbutils.BlockBodyPrefix, dbutils.EthTx}, kvSnapshot, ch)
+	db.UpdateSnapshots2("bodies", kvSnapshot, ch)
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 5000):
@@ -1327,11 +1326,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 	}
 
 	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
-	quit := make(chan struct{})
 	defer db.Close()
-	defer func() {
-		close(quit)
-	}()
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1367,7 +1362,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		}
 	}
 
-	StageSyncStep := func(currentSnapshotBlock uint64) {
+	readStep := func(currentSnapshotBlock uint64) {
 		t.Helper()
 		rotx, err := db.BeginRo(context.Background())
 		if err != nil {
@@ -1381,13 +1376,39 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		}
 		rotx.Rollback()
 	}
-	StageSyncStep(10)
+	readStep(10)
 	for !sb.Replaced() {
 		//wait until all txs of old snapshot closed
 	}
 	writeStep(10)
 
-	for atomic.LoadUint64(&sb.started) > 0 {
+	tm:=time.After(time.Second*5)
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot)!=10 {
+		roTx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = sb.Final(roTx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roTx.Rollback()
+		select {
+		case <-tm:
+			t.Fatal("timeout")
+		default:
+			time.Sleep(time.Millisecond*100)
+		}
+	}
+
+	readStep(10)
+	for !sb.Replaced() {
+		//wait until all txs of old snapshot closed
+	}
+	writeStep(10)
+
+	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.BodiesCurrentSnapshot) != 10 {
 		roTx, err := db.BeginRo(context.Background())
 		if err != nil {
 			t.Fatal(err)
@@ -1400,31 +1421,11 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		roTx.Rollback()
 		time.Sleep(time.Millisecond * 100)
 	}
-
-	StageSyncStep(10)
-	for !sb.Replaced() {
-		//wait until all txs of old snapshot closed
-	}
-	writeStep(10)
-
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.BodiesCurrentSnapshot) == 10 {
-		roTx, err := db.BeginRo(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		err = sb.Final(roTx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		roTx.Rollback()
-		time.Sleep(time.Millisecond * 100)
-	}
-	headersKV := db.SnapshotKV(dbutils.HeadersBucket)
+	headersKV := db.HeadersSnapshot()
 	if headersKV == nil {
 		t.Fatal("empty headers snapshot")
 	}
-	bodiesKV := db.SnapshotKV(dbutils.BlockBodyPrefix)
+	bodiesKV := db.BodiesSnapshot()
 	if bodiesKV == nil {
 		t.Fatal("empty bodies snapshot")
 	}

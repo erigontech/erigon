@@ -192,9 +192,6 @@ const (
 	DatabaseInfoBucket        = "DbInfo"
 	SnapshotInfoBucket        = "SnapshotInfo"
 	BittorrentInfoBucket      = "BittorrentInfo"
-	HeadersSnapshotInfoBucket = "HeadersSnapshotInfo"
-	BodiesSnapshotInfoBucket  = "BodiesSnapshotInfo"
-	StateSnapshotInfoBucket   = "StateSnapshotInfo"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefixOld    = "h"            // block_num_u64 + hash -> header
@@ -280,11 +277,6 @@ var (
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
-	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
-	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
-	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
-	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
-
 	BittorrentPeerID            = "peerID"
 	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")
 	CurrentHeadersSnapshotBlock = []byte("CurrentHeadersSnapshotBlock")
@@ -326,9 +318,6 @@ var Buckets = []string{
 	LogTopicIndex,
 	LogAddressIndex,
 	SnapshotInfoBucket,
-	HeadersSnapshotInfoBucket,
-	BodiesSnapshotInfoBucket,
-	StateSnapshotInfoBucket,
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,

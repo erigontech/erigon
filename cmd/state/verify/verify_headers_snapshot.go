@@ -16,7 +16,6 @@ func HeadersSnapshot(snapshotPath string) error {
 	snKV := kv.NewMDBX().Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket:             dbutils.BucketConfigItem{},
-			dbutils.HeadersSnapshotInfoBucket: dbutils.BucketConfigItem{},
 		}
 	}).MustOpen()
 	var prevHeader *types.Header
