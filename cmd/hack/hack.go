@@ -2054,12 +2054,12 @@ func scanReceipts(chaindata string) error {
 	}
 	if k, _, err := c.Last(); err == nil {
 		fmt.Printf("Last receipt key: %x\n", k)
-		if err = c.DeleteCurrent(); err != nil {
-			return err
-		}
-		if err = tx.Commit(); err != nil {
-			return err
-		}
+		//if err = c.DeleteCurrent(); err != nil {
+		//	return err
+		//}
+		//if err = tx.Commit(); err != nil {
+		//	return err
+		//}
 		return nil
 	}
 
