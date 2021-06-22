@@ -753,7 +753,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 }
 
 func nodeKey(keyfile string) *ecdsa.PrivateKey {
-	if err := os.MkdirAll(path.Dir(keyfile), 0755); err != nil {
+	if err := os.MkdirAll(path.Dir(keyfile), 0755); err != nil && !os.IsExist(err) {
 		panic(err)
 	}
 	if key, err := crypto.LoadECDSA(keyfile); err == nil {
