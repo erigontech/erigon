@@ -106,9 +106,9 @@ var receiptCbor = Migration{
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			if err = c.Put(common.CopyBytes(k), common.CopyBytes(buf.Bytes())); err != nil {
-				return err
-			}
+			//if err = c.Put(common.CopyBytes(k), common.CopyBytes(buf.Bytes())); err != nil {
+			//	return err
+			//}
 		}
 		return CommitProgress(db, nil, true)
 	},
