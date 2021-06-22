@@ -9,7 +9,6 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"path"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -414,7 +413,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	btCli.trackers = [][]string{}
 	defer btCli.Close()
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 
 	sb := &SnapshotMigrator{
