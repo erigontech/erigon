@@ -2044,6 +2044,14 @@ func scanReceipts(chaindata string) error {
 	}
 	defer c.Close()
 	count := 0
+	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	if err != nil {
+		return err
+	}
+	cc, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	if cerr != nil {
+		return cerr
+	}
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -2060,14 +2068,19 @@ func scanReceipts(chaindata string) error {
 			if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
 				return err
 			}
-			body := rawdb.ReadBody(tx, blockHash, blockNum)
+			var body *types.Body
+			if cc.IsBerlin(blockNum) {
+				body = rawdb.ReadBody(tx, blockHash, blockNum)
+			}
 			receipts = make(types.Receipts, len(oldReceipts))
 			for i, oldReceipt := range oldReceipts {
 				receipts[i] = new(types.Receipt)
 				receipts[i].PostState = oldReceipt.PostState
 				receipts[i].Status = oldReceipt.Status
 				receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
-				receipts[i].Type = body.Transactions[i].Type()
+				if body != nil {
+					receipts[i].Type = body.Transactions[i].Type()
+				}
 			}
 		}
 		count++
