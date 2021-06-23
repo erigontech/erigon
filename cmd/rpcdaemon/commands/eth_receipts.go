@@ -1,10 +1,11 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
@@ -19,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
@@ -95,12 +96,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
-	start := time.Now()
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Topic bitmap size %d, produced in %s\n", topicsBitmap.GetCardinality(), time.Since(start))
 	if topicsBitmap != nil {
 		if blockNumbers == nil {
 			blockNumbers = topicsBitmap
@@ -134,51 +133,50 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return returnLogs(logs), nil
 	}
 
-	//cc, err := api.chainConfig(tx)
-	//if err != nil {
-	//	return returnLogs(logs), err
-	//}
-	var readbody, getreceipts, derive, filtering time.Duration
-	for _, blockNToMatch := range blockNumbers.ToArray() {
-		start := time.Now()
-		b, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, uint64(blockNToMatch))
-		if err != nil {
-			return nil, err
-		}
-		readbody += time.Since(start)
-		if b == nil {
-			return nil, fmt.Errorf("block not found %d", uint64(blockNToMatch))
-		}
-		start = time.Now()
-		// We're deriving many fields from the block body, retrieve beside the receipt
-		receipts := rawdb.ReadRawReceipts(tx, b.NumberU64())
-		getreceipts += time.Since(start)
-		if receipts != nil {
-			//b.Body().SendersToTxs(senders)
-			start = time.Now()
-			if err := receipts.DeriveFields(b.Hash(), b.NumberU64(), b.Transactions(), senders); err != nil {
-				log.Error("Failed to derive block receipts fields", "hash", b.Hash(), "number", b.NumberU64(), "err", err)
-				return nil, fmt.Errorf("Derive failed %d", uint64(blockNToMatch))
+	iter := blockNumbers.Iterator()
+	for iter.HasNext() {
+		blockNToMatch := uint64(iter.Next())
+		prefix := make([]byte, 8)
+		binary.BigEndian.PutUint64(prefix, blockNToMatch)
+		var logIndex uint
+		var blockLogs types.Logs
+		if err := tx.ForPrefix(dbutils.Log, prefix, func(k, v []byte) error {
+			var logs types.Logs
+			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+				return fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
-			derive += time.Since(start)
+			for _, log := range logs {
+				log.Index = logIndex
+			}
+			filtered := filterLogs(logs, nil, nil, crit.Addresses, crit.Topics)
+			if len(filtered) > 0 {
+				txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+				for _, log := range filtered {
+					log.TxIndex = txIndex
+				}
+				logs = append(logs, filtered...)
+			}
+			return nil
+		}); err != nil {
+			return returnLogs(logs), err
 		}
-		/*
-			receipts, err := getReceipts(ctx, tx, cc, b, senders)
+		if len(blockLogs) > 0 {
+			b, err := rawdb.ReadBlockByNumber(tx, blockNToMatch)
 			if err != nil {
-				return returnLogs(logs), err
+				return nil, err
 			}
-		*/
-		unfiltered := make([]*types.Log, 0, len(receipts))
-		for _, receipt := range receipts {
-			unfiltered = append(unfiltered, receipt.Logs...)
+			if b == nil {
+				return nil, fmt.Errorf("block not found %d", blockNToMatch)
+			}
+			blockHash := b.Hash()
+			for _, log := range blockLogs {
+				log.BlockNumber = blockNToMatch
+				log.BlockHash = blockHash
+				log.TxHash = b.Transactions()[log.TxIndex].Hash()
+			}
+			logs = append(logs, blockLogs...)
 		}
-		start = time.Now()
-		unfiltered = filterLogs(unfiltered, nil, nil, crit.Addresses, crit.Topics)
-		filtering += time.Since(start)
-		logs = append(logs, unfiltered...)
 	}
-	fmt.Printf("Time spend on reading bodies: %s, getReceipts: %s, derive: %s, filtering: %s\n", readbody, getreceipts, derive, filtering)
-
 	return returnLogs(logs), nil
 }
 
