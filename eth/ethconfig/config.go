@@ -29,7 +29,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/aura/chainspec"
+	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -213,7 +213,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
 			spec := aura.JsonSpec{}
-			err := json.Unmarshal(chainspec.Sokol, &spec)
+			err := json.Unmarshal(consensusconfig.Sokol, &spec)
 			if err != nil {
 				panic(err)
 			}

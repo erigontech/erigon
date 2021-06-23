@@ -1,4 +1,4 @@
-package chainspec
+package consensusconfig
 
 import (
 	_ "embed"
