@@ -106,7 +106,7 @@ Windows users may run erigon in 3 possible ways:
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's been reported some anti-virus programs detect
   those files as possibly infected by `Win64/Kryptic.CIS` trojan horse (or a variant of it). Although those are false positives we have no control over 100+ vendors of
   security products for Windows and their respective detection algorythms and we understand this might make your experience with Windows builds uncomfortable. To
-  workaround the issue you might either set exlusions for your antivirus specifically for `ethdb\mdbx\dist\CMakeFiles` folder or you can run erigon on Docker or WSL
+  workaround the issue you might either set exlusions for your antivirus specifically for `build\bin\mdbx\CMakeFiles` sub-folder of the cloned repo or you can run erigon using the following other two options
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
