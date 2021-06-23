@@ -62,6 +62,7 @@ type Transaction interface {
 	GetTo() *common.Address
 	AsMessage(s Signer, baseFee *big.Int) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
+	FakeSign(address common.Address) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash
 	Size() common.StorageSize

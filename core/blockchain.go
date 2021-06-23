@@ -191,7 +191,8 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
 	var from common.Address
 	nonce := ibs.GetNonce(from)
-	return types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data), nil
+	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
+	return tx.FakeSign(from)
 }
 
 func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
