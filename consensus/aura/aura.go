@@ -129,35 +129,37 @@ type AuRa struct {
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
 
-	step                           PermissionedStep
-	OurSigningAddress              common.Address // Same as Etherbase in Mining
-	Validators                     ValidatorSet
-	ValidateScoreTransition        uint64
-	ValidateStepTransition         uint64
-	EmptyStepsSet                  *EmptyStepSet
-	EpochManager                   EpochManager // Mutex<EpochManager>,
-	immediateTransitions           bool
-	blockReward                    map[uint64]*uint256.Int
-	blockRewardContractTransitions BlockRewardContractList
-	maximumUncleCountTransition    uint64
-	maximumUncleCount              uint
-	emptyStepsTransition           uint64
-	strictEmptyStepsTransition     uint64
-	twoThirdsMajorityTransition    uint64 //  BlockNumber
-	maximumEmptySteps              uint
-	//machine: EthereumMachine,
-	// History of step hashes recently received from peers.
-	receivedStepHashes map[uint64]map[common.Address]common.Hash // RwLock<BTreeMap<(u64, Address), H256>>
-	// If set, enables random number contract integration. It maps the transition block to the contract address.
-	randomnessContractAddress map[uint64]common.Address
-	// The addresses of contracts that determine the block gas limit.
-	blockGasLimitContractTransitions map[uint64]common.Address
-	// Memoized gas limit overrides, by block hash.
-	gasLimitOverrideCache *GasLimitOverride //Mutex<LruCache<H256, Option<U256>>>,
-	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
-	// modifications. For details about POSDAO, see the whitepaper:
-	// https://www.xdaichain.com/for-validators/posdao-whitepaper
-	posdaoTransition *uint64 // Option<BlockNumber>,
+	step              PermissionedStep
+	OurSigningAddress common.Address // Same as Etherbase in Mining
+	cfg               AuthorityRoundParams
+	EmptyStepsSet     *EmptyStepSet
+
+	//Validators                     ValidatorSet
+	//ValidateScoreTransition        uint64
+	//ValidateStepTransition         uint64
+	//EpochManager                   EpochManager // Mutex<EpochManager>,
+	//immediateTransitions           bool
+	//blockReward                    map[uint64]*uint256.Int
+	//blockRewardContractTransitions BlockRewardContractList
+	//maximumUncleCountTransition    uint64
+	//maximumUncleCount              uint
+	//emptyStepsTransition           uint64
+	//strictEmptyStepsTransition     uint64
+	//twoThirdsMajorityTransition    uint64 //  BlockNumber
+	//maximumEmptySteps              uint
+	////machine: EthereumMachine,
+	//// History of step hashes recently received from peers.
+	//receivedStepHashes map[uint64]map[common.Address]common.Hash // RwLock<BTreeMap<(u64, Address), H256>>
+	//// If set, enables random number contract integration. It maps the transition block to the contract address.
+	//randomnessContractAddress map[uint64]common.Address
+	//// The addresses of contracts that determine the block gas limit.
+	//blockGasLimitContractTransitions map[uint64]common.Address
+	//// Memoized gas limit overrides, by block hash.
+	//gasLimitOverrideCache *GasLimitOverride //Mutex<LruCache<H256, Option<U256>>>,
+	//// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
+	//// modifications. For details about POSDAO, see the whitepaper:
+	//// https://www.xdaichain.com/for-validators/posdao-whitepaper
+	//posdaoTransition *uint64 // Option<BlockNumber>,
 }
 
 type GasLimitOverride struct {
@@ -267,13 +269,9 @@ func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Ad
 		        empty_steps_transition: our_params.empty_steps_transition,
 		        maximum_empty_steps: our_params.maximum_empty_steps,
 		        two_thirds_majority_transition: our_params.two_thirds_majority_transition,
-		        strict_empty_steps_transition: our_params.strict_empty_steps_transition,
 		        machine: machine,
 		        received_step_hashes: RwLock::new(Default::default()),
-		        randomness_contract_address: our_params.randomness_contract_address,
-		        block_gas_limit_contract_transitions: our_params.block_gas_limit_contract_transitions,
 		        gas_limit_override_cache: Mutex::new(LruCache::new(GAS_LIMIT_OVERRIDE_CACHE_CAPACITY)),
-		        posdao_transition: our_params.posdao_transition,
 		    })
 			// Do not initialize timeouts for tests.
 		    if should_timeout {
@@ -294,8 +292,7 @@ func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Ad
 		exitCh:            exitCh,
 		step:              PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
 		OurSigningAddress: ourSigningAddress,
-		Validators:        auraParams.Validators,
-		//caller:            caller,
+		cfg:               auraParams,
 	}
 	_ = config
 
@@ -610,10 +607,10 @@ func (c *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.
 func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header, syscall consensus.SystemCall) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
-	if header.Number.Uint64() == aura.twoThirdsMajorityTransition {
-		log.Info("Transitioning to 2/3 quorum", "block", aura.twoThirdsMajorityTransition)
+	if header.Number.Uint64() == aura.cfg.TwoThirdsMajorityTransition {
+		log.Info("Transitioning to 2/3 quorum", "block", aura.cfg.TwoThirdsMajorityTransition)
 	}
-	if header.Number.Uint64() >= aura.emptyStepsTransition {
+	if header.Number.Uint64() >= aura.cfg.EmptyStepsTransition {
 		var emptySteps []EmptyStep
 		if len(header.Seal) == 0 {
 			// this is a new block, calculate rewards based on the empty steps messages we have accumulated
@@ -622,7 +619,7 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 				if parent == nil {
 					return fmt.Errorf("parent not found: %d,%x\n", header.Number.Uint64(), header.ParentHash)
 				}
-				parentStep, err := headerStep(parent, aura.emptyStepsTransition)
+				parentStep, err := headerStep(parent, aura.cfg.EmptyStepsTransition)
 				if err != nil {
 					return err
 				}
@@ -656,7 +653,7 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 	beneficiaries = append(beneficiaries, header.Coinbase)
 	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 
-	rewardContractAddress := aura.blockRewardContractTransitions.GreaterOrEqual(header.Number.Uint64())
+	rewardContractAddress := aura.cfg.BlockRewardContractTransitions.GreaterOrEqual(header.Number.Uint64())
 	if rewardContractAddress != nil {
 		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.Address, syscall, beneficiaries, rewardKind)
 		rewardKind = rewardKind[:len(beneficiaries)]
@@ -667,7 +664,7 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 		// find: n <= header.number
 		var foundNum uint64
 		var found bool
-		for n := range aura.blockReward {
+		for n := range aura.cfg.BlockReward {
 			if n > header.Number.Uint64() {
 				continue
 			}
@@ -679,7 +676,7 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 		if !found {
 			panic("Current block's reward is not found; this indicates a chain config error")
 		}
-		reward := aura.blockReward[foundNum]
+		reward := aura.cfg.BlockReward[foundNum]
 		rewards = append(rewards, reward)
 	}
 

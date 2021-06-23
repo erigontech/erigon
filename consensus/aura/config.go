@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
 )
 
 type StepDuration struct {
@@ -176,7 +175,7 @@ type AuthorityRoundParams struct {
 	// Block reward in base units.
 	BlockReward map[uint64]*uint256.Int
 	// Block reward contract addresses with their associated starting block numbers.
-	BlockRewardContractTransitions map[uint64]*auraabi.BlockRewardCaller
+	BlockRewardContractTransitions BlockRewardContractList
 	// Number of accepted uncles transition block.
 	MaximumUncleCountTransition uint64
 	// Number of accepted uncles.
@@ -251,11 +250,7 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		   );
 		*/
 	} else if jsonParams.BlockRewardContractAddress != nil {
-		var err error
-		params.BlockRewardContractTransitions[transitionBlockNum], err = auraabi.NewBlockRewardCaller(*jsonParams.BlockRewardContractAddress, nil)
-		if err != nil {
-			return params, err
-		}
+		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, &BlockRewardContract{BlockNum: transitionBlockNum, Address: *jsonParams.BlockRewardContractAddress})
 	}
 
 	if jsonParams.ValidateScoreTransition != nil {
