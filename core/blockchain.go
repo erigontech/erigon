@@ -24,10 +24,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -96,6 +98,7 @@ func ExecuteBlockEphemerally(
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	checkTEVM func(codeHash common.Hash) (bool, error),
+	backend bind.ContractCaller,
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
 	block.Uncles()
@@ -159,7 +162,7 @@ func ExecuteBlockEphemerally(
 		}
 	}
 	if !vmConfig.ReadOnly {
-		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs); err != nil {
+		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, backend); err != nil {
 			return nil, err
 		}
 	}
@@ -194,7 +197,9 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data), nil
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
+func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, caller bind.ContractCaller) error {
+	contractAddress := common.Address{}
+	abi := auraabi.NewBlockRewardCaller(contractAddress, caller)
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	engine.Finalize(cc, header, ibs, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return CallContract(contract, data, *cc, ibs, header, engine)

@@ -176,7 +176,7 @@ func (s *Multi) Less(i, j int) bool { return s.sorted[i].num < s.sorted[j].num }
 func (s *Multi) Len() int           { return len(s.sorted) }
 func (s *Multi) Swap(i, j int)      { s.sorted[i], s.sorted[j] = s.sorted[j], s.sorted[i] }
 
-func NewMulti(m map[uint64]ValidatorSet, parent func(common.Hash) *types.Header) *Multi {
+func NewMulti(m map[uint64]ValidatorSet) *Multi {
 	if _, ok := m[0]; !ok {
 		panic("ValidatorSet has to be specified from block 0")
 	}
@@ -186,7 +186,7 @@ func NewMulti(m map[uint64]ValidatorSet, parent func(common.Hash) *types.Header)
 		list[i] = MultiItem{num: n, set: v}
 		i++
 	}
-	multi := &Multi{sorted: list, parent: parent}
+	multi := &Multi{sorted: list}
 	sort.Sort(multi)
 	return multi
 }
@@ -197,6 +197,10 @@ func (s *Multi) defaultCaller(blockHash common.Hash) (Call, error) {
 		return nil, fmt.Errorf("no validator set for given blockHash: %x", blockHash)
 	}
 	return set.defaultCaller(blockHash)
+}
+
+func (s *Multi) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
+	panic("not implemented")
 }
 
 func (s *Multi) correctSet(blockHash common.Hash) (ValidatorSet, bool) {
@@ -442,4 +446,15 @@ type ValidatorContract struct {
 	contractAddress  common.Address
 	validators       ValidatorSafeContract
 	posdaoTransition *uint64
+}
+
+func (s *ValidatorContract) defaultCaller(blockHash common.Hash) (Call, error) {
+	return s.validators.defaultCaller(blockHash)
+}
+
+func (s *ValidatorContract) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
+	return s.validators.getWithCaller(parentHash, nonce, caller)
+}
+func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Address) error {
+	return s.validators.onCloseBlock(header, address)
 }
