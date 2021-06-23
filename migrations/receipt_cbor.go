@@ -114,10 +114,9 @@ var receiptCbor = Migration{
 
 const (
 	// ----- value types used ----
-	codecSelferValueTypeArray2  = 10
-	codecSelferValueTypeMap2    = 9
-	codecSelferValueTypeString2 = 6
-	codecSelferValueTypeNil2    = 1
+	codecSelferValueTypeArray2 = 10
+	codecSelferValueTypeMap2   = 9
+	codecSelferValueTypeNil2   = 1
 )
 
 var (
