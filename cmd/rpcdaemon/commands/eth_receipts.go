@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
@@ -93,10 +94,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	blockNumbers := roaring.New()
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
+	start := time.Now()
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("Topic bitmap size %d, produced in %s\n", topicsBitmap.GetCardinality(), time.Since(start))
 	if topicsBitmap != nil {
 		if blockNumbers == nil {
 			blockNumbers = topicsBitmap
@@ -180,7 +183,7 @@ func getTopicsBitmap(c ethdb.Tx, topics [][]common.Hash, from, to uint32) (*roar
 			if bitmapForORing == nil {
 				bitmapForORing = m
 			} else {
-				bitmapForORing = roaring.FastOr(bitmapForORing, m)
+				bitmapForORing.Or(m)
 			}
 		}
 
