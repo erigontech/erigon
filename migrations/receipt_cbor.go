@@ -49,6 +49,10 @@ var receiptCbor = Migration{
 		if err != nil {
 			return err
 		}
+		if genesisBlock == nil {
+			// Empty database check
+			return CommitProgress(db, nil, true)
+		}
 		chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 		if cerr != nil {
 			return cerr
