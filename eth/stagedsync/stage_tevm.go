@@ -81,13 +81,10 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 
 	lastKey := dbutils.EncodeBlockNumber(s.BlockNumber + 1)
 
-	excludedAddress := common.Address{}
-	excludedAddress[len(excludedAddress)-1] = 1
 	empty := common.Address{}
 
 	observedAddresses := map[common.Address]struct{}{
-		empty:           {},
-		excludedAddress: {},
+		empty: {},
 	}
 	observedCodeHashes := map[common.Hash]struct{}{}
 
