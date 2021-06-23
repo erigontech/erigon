@@ -305,11 +305,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]in
 	}
 
 	// Assign receipt status.
-	if len(receipt.PostState) > 0 {
-		fields["status"] = hexutil.Uint(1)
-	} else {
-		fields["status"] = hexutil.Uint(0)
-	}
+	fields["status"] = receipt.Status
 	if receipt.Logs == nil {
 		fields["logs"] = [][]*types.Log{}
 	}
