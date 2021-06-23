@@ -100,7 +100,7 @@ Windows users may run erigon in 3 possible ways:
   There are some requirements for a successful native build on windows :
   * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very likely you already have it
   * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
-  * If you need to build MDBX tools then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
+  * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`) then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's been reported some anti-virus programs detect
