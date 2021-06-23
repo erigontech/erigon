@@ -2071,7 +2071,7 @@ func scanReceipts(chaindata string) error {
 		if v == nil {
 			continue
 		}
-		fmt.Printf("blockNum = %d\n", blockNum)
+		//fmt.Printf("blockNum = %d\n", blockNum)
 		select {
 		default:
 		case <-logEvery.C:

@@ -39,9 +39,9 @@ type OldReceipts []*OldReceipt
 var receiptCbor = Migration{
 	Name: "receipt_cbor",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		var tx ethdb.Tx
+		var tx ethdb.RwTx
 		if hasTx, ok := db.(ethdb.HasTx); ok {
-			tx = hasTx.Tx()
+			tx = hasTx.Tx().(ethdb.RwTx)
 		} else {
 			return fmt.Errorf("no transaction")
 		}
@@ -104,9 +104,9 @@ var receiptCbor = Migration{
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			//if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
-			//	return err
-			//}
+			if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
 		}
 		return CommitProgress(db, nil, true)
 	},
