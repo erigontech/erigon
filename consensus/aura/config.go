@@ -143,7 +143,7 @@ func (r BlockRewardContractList) Less(i, j int) bool { return r[i].BlockNum < r[
 func (r BlockRewardContractList) Len() int           { return len(r) }
 func (r BlockRewardContractList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
 func (r BlockRewardContractList) GreaterOrEqual(block uint64) *BlockRewardContract {
-	return r[sort.Search(len(r), func(i int) bool { return block >= r[i].BlockNum })]
+	return r[sort.Search(len(r), func(i int) bool { return block >= r[i].BlockNum })-1]
 }
 
 type AuthorityRoundParams struct {
