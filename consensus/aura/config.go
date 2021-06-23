@@ -22,6 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
 )
@@ -120,7 +121,7 @@ type JsonSpec struct {
 	// Strict validation of empty steps transition block.
 	StrictEmptyStepsTransition *uint
 	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition *uint
+	TwoThirdsMajorityTransition *uint64
 	// The random number contract's address, or a map of contract transitions.
 	RandomnessContractAddress map[uint64]common.Address
 	// The addresses of contracts that determine the block gas limit starting from the block number
@@ -294,16 +295,18 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		}
 	}
 
-	/*
-	   AuthorityRoundParams {
-	       block_reward_contract_transitions: br_transitions,
-	       empty_steps_transition: p
-	           .empty_steps_transition
-	           .map_or(u64::max_value(), |n| ::std::cmp::max(n.into(), 1)),
-	       two_thirds_majority_transition: p
-	           .two_thirds_majority_transition
-	           .map_or_else(BlockNumber::max_value, Into::into),
-	   }
-	*/
+	params.EmptyStepsTransition = math.MaxUint64
+	if jsonParams.EmptyStepsTransition != nil {
+		if *jsonParams.EmptyStepsTransition < 1 {
+			params.EmptyStepsTransition = 1
+		} else {
+			params.EmptyStepsTransition = *jsonParams.EmptyStepsTransition
+		}
+	}
+
+	params.TwoThirdsMajorityTransition = math.MaxUint64
+	if jsonParams.TwoThirdsMajorityTransition != nil {
+		params.TwoThirdsMajorityTransition = *jsonParams.TwoThirdsMajorityTransition
+	}
 	return params, nil
 }
