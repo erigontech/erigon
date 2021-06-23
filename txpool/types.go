@@ -121,7 +121,7 @@ func parseUint256(payload []byte, pos int, x *uint256.Int) (int, error) {
 	if list {
 		return 0, fmt.Errorf("uint256 must be a string, not list")
 	}
-	if dataPos+dataLen >= len(payload) {
+	if dataPos+dataLen > len(payload) {
 		return 0, fmt.Errorf("unexpected end of payload")
 	}
 	if dataLen > 32 {
@@ -318,6 +318,31 @@ func ParseTransaction(payload []byte) (*TxSlot, error) {
 			}
 			tuplePos = tuplePos + tupleLen
 		}
+		pos = dataPos + dataLen
+	}
+	// Next follows V of the signature
+	var v uint64
+	pos, v, err = parseUint64(payload, pos)
+	if err != nil {
+		return nil, fmt.Errorf("%s: V: %w", errorPrefix, err)
+	}
+	if v >= 256 {
+		return nil, fmt.Errorf("%s: V is loo large: %d", errorPrefix, v)
+	}
+	// Next follows R of the signature
+	var r uint256.Int
+	pos, err = parseUint256(payload, pos, &r)
+	if err != nil {
+		return nil, fmt.Errorf("%s: R: %w", errorPrefix, err)
+	}
+	// New follows S of the signature
+	var s uint256.Int
+	pos, err = parseUint256(payload, pos, &s)
+	if err != nil {
+		return nil, fmt.Errorf("%s: S: %w", errorPrefix, err)
+	}
+	if pos != payloadLen {
+		return nil, fmt.Errorf("%s: unexpected data after end of signature", errorPrefix)
 	}
 	return &slot, nil
 }
