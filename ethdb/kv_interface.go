@@ -37,14 +37,30 @@ var (
 	DbPgopsUnspill = metrics.GetOrRegisterGauge("db/pgops/unspill", metrics.DefaultRegistry) //nolint
 	DbPgopsWops    = metrics.GetOrRegisterGauge("db/pgops/wops", metrics.DefaultRegistry)    //nolint
 
+	DbCommitBigBatchTimer = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
+
 	GcLeafMetric     = metrics.GetOrRegisterGauge("db/gc/leaf", metrics.DefaultRegistry)     //nolint
 	GcOverflowMetric = metrics.GetOrRegisterGauge("db/gc/overflow", metrics.DefaultRegistry) //nolint
 	GcPagesMetric    = metrics.GetOrRegisterGauge("db/gc/pages", metrics.DefaultRegistry)    //nolint
 
-	StateLeafMetric     = metrics.GetOrRegisterGauge("db/state/leaf", metrics.DefaultRegistry)   //nolint
-	StateBranchesMetric = metrics.GetOrRegisterGauge("db/state/branch", metrics.DefaultRegistry) //nolint
-
-	DbCommitBigBatchTimer = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
+	TableScsLeaf      = metrics.GetOrRegisterGauge("table/scs/leaf", metrics.DefaultRegistry)      //nolint
+	TableScsBranch    = metrics.GetOrRegisterGauge("table/scs/branch", metrics.DefaultRegistry)    //nolint
+	TableScsEntries   = metrics.GetOrRegisterGauge("table/scs/entries", metrics.DefaultRegistry)   //nolint
+	TableScsSize      = metrics.GetOrRegisterGauge("table/scs/size", metrics.DefaultRegistry)      //nolint
+	TableStateLeaf    = metrics.GetOrRegisterGauge("table/state/leaf", metrics.DefaultRegistry)    //nolint
+	TableStateBranch  = metrics.GetOrRegisterGauge("table/state/branch", metrics.DefaultRegistry)  //nolint
+	TableStateEntries = metrics.GetOrRegisterGauge("table/state/entries", metrics.DefaultRegistry) //nolint
+	TableStateSize    = metrics.GetOrRegisterGauge("table/state/size", metrics.DefaultRegistry)    //nolint
+	TableLogLeaf      = metrics.GetOrRegisterGauge("table/log/leaf", metrics.DefaultRegistry)      //nolint
+	TableLogBranch    = metrics.GetOrRegisterGauge("table/log/branch", metrics.DefaultRegistry)    //nolint
+	TableLogOverflow  = metrics.GetOrRegisterGauge("table/log/overflow", metrics.DefaultRegistry)  //nolint
+	TableLogEntries   = metrics.GetOrRegisterGauge("table/log/entries", metrics.DefaultRegistry)   //nolint
+	TableLogSize      = metrics.GetOrRegisterGauge("table/log/size", metrics.DefaultRegistry)      //nolint
+	TableTxLeaf       = metrics.GetOrRegisterGauge("table/tx/leaf", metrics.DefaultRegistry)       //nolint
+	TableTxBranch     = metrics.GetOrRegisterGauge("table/tx/branch", metrics.DefaultRegistry)     //nolint
+	TableTxOverflow   = metrics.GetOrRegisterGauge("table/tx/overflow", metrics.DefaultRegistry)   //nolint
+	TableTxEntries    = metrics.GetOrRegisterGauge("table/tx/entries", metrics.DefaultRegistry)    //nolint
+	TableTxSize       = metrics.GetOrRegisterGauge("table/tx/size", metrics.DefaultRegistry)       //nolint
 )
 
 type DBVerbosityLvl int8
@@ -92,7 +108,7 @@ type Closer interface {
 	Close()
 }
 
-// Read-only version of KV.
+// RoKV - Read-only version of KV.
 type RoKV interface {
 	Closer
 
@@ -113,11 +129,9 @@ type RoKV interface {
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
 	AllBuckets() dbutils.BucketsCfg
-
-	CollectMetrics()
 }
 
-// KV low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
+// RwKV low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
 //
 // Common pattern for short-living transactions:
 //
@@ -160,6 +174,8 @@ type StatelessReadTx interface {
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
 	ReadSequence(bucket string) (uint64, error)
+
+	BucketSize(bucket string) (uint64, error)
 }
 
 type StatelessWriteTx interface {
@@ -192,10 +208,7 @@ type Tx interface {
 	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
-	Comparator(bucket string) dbutils.CmpFunc
-
 	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
-	CollectMetrics()
 }
 
 type RwTx interface {
@@ -205,6 +218,10 @@ type RwTx interface {
 
 	RwCursor(bucket string) (RwCursor, error)
 	RwCursorDupSort(bucket string) (RwCursorDupSort, error)
+
+	// CollectMetrics - does collect all DB-related and Tx-related metrics
+	// this method exists only in RwTx to avoid concurrency
+	CollectMetrics()
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code

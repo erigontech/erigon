@@ -47,8 +47,8 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
+		defer debug.LogPanic()
 		headers := make(chan *types.Header, 1)
-		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer close(headers)
 		id := api.filters.SubscribeNewHeads(headers)
 		defer api.filters.UnsubscribeHeads(id)
@@ -79,8 +79,8 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
+		defer debug.LogPanic()
 		txsCh := make(chan []types.Transaction, 1)
-		defer func() { debug.LogPanic(nil, true, recover()) }()
 		defer close(txsCh)
 		id := api.filters.SubscribePendingTxs(txsCh)
 		defer api.filters.UnsubscribePendingTxs(id)

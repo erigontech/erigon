@@ -76,8 +76,6 @@ func New(
 
 	ethereum := RegisterEthService(node, ethConfig)
 
-	metrics.AddCallback(ethereum.ChainKV().CollectMetrics)
-
 	return &ErigonNode{stack: node, backend: ethereum}
 }
 
