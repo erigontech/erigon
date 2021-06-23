@@ -138,7 +138,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	//if err != nil {
 	//	return returnLogs(logs), err
 	//}
-	var readbody, getreceipts, filtering time.Duration
+	var readbody, getreceipts, derive, filtering time.Duration
 	for _, blockNToMatch := range blockNumbers.ToArray() {
 		start := time.Now()
 		b, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, uint64(blockNToMatch))
@@ -154,11 +154,13 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		receipts := rawdb.ReadRawReceipts(tx, b.NumberU64())
 		getreceipts += time.Since(start)
 		if receipts != nil {
-			b.Body().SendersToTxs(senders)
+			//b.Body().SendersToTxs(senders)
+			start = time.Now()
 			if err := receipts.DeriveFields(b.Hash(), b.NumberU64(), b.Transactions(), senders); err != nil {
 				log.Error("Failed to derive block receipts fields", "hash", b.Hash(), "number", b.NumberU64(), "err", err)
 				return nil, fmt.Errorf("Derive failed %d", uint64(blockNToMatch))
 			}
+			derive += time.Since(start)
 		}
 		/*
 			receipts, err := getReceipts(ctx, tx, cc, b, senders)
@@ -175,7 +177,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		filtering += time.Since(start)
 		logs = append(logs, unfiltered...)
 	}
-	fmt.Printf("Time spend on reading bodies: %s, getReceipts: %s, filtering: %s\n", readbody, getreceipts, filtering)
+	fmt.Printf("Time spend on reading bodies: %s, getReceipts: %s, derive: %s, filtering: %s\n", readbody, getreceipts, derive, filtering)
 
 	return returnLogs(logs), nil
 }
