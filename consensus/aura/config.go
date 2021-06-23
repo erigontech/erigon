@@ -22,14 +22,10 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 )
-
-type StepDuration struct {
-	Single      *uint64           // Duration of all steps.
-	Transitions map[uint64]uint64 // Step duration transitions: a mapping of timestamp to step durations.
-}
 
 // Draws an validator nonce modulo number of validators.
 func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint) (common.Address, error) {
@@ -38,11 +34,6 @@ func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint) (comm
 		return common.Address{}, err
 	}
 	return set.getWithCaller(parent, nonce, d)
-}
-
-type BlockReward struct {
-	Single *uint64
-	Multi  map[uint64]uint64
 }
 
 // Different ways of specifying validators.
@@ -78,25 +69,26 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 	return nil
 }
 
+//TODO: StepDuration and BlockReward - now are uint64, but it can be an object in non-sokol consensus
 type JsonSpec struct {
-	StepDuration StepDuration      // Block duration, in seconds.
-	Validators   *ValidatorSetJson // Valid authorities
+	StepDuration *uint64           `json:"stepDuration"` // Block duration, in seconds.
+	Validators   *ValidatorSetJson `json:"validators"`   // Valid authorities
 
 	// Starting step. Determined automatically if not specified.
 	// To be used for testing only.
-	StartStep               *uint64
-	ValidateScoreTransition *uint64      // Block at which score validation should start.
-	ValidateStepTransition  *uint64      // Block from which monotonic steps start.
-	ImmediateTransitions    *bool        // Whether transitions should be immediate.
-	BlockReward             *BlockReward // Reward per block in wei.
+	StartStep               *uint64         `json:"startStep"`
+	ValidateScoreTransition *uint64         `json:"validateScoreTransition"` // Block at which score validation should start.
+	ValidateStepTransition  *uint64         `json:"validateStepTransition"`  // Block from which monotonic steps start.
+	ImmediateTransitions    *bool           `json:"immediateTransitions"`    // Whether transitions should be immediate.
+	BlockReward             *hexutil.Uint64 `json:"blockReward"`             // Reward per block in wei.
 	// Block at which the block reward contract should start being used. This option allows one to
 	// add a single block reward contract transition and is compatible with the multiple address
 	// option `block_reward_contract_transitions` below.
-	BlockRewardContractTransition *uint64
+	BlockRewardContractTransition *uint64 `json:"blockRewardContractTransition"`
 	/// Block reward contract address which overrides the `block_reward` setting. This option allows
 	/// one to add a single block reward contract address and is compatible with the multiple
 	/// address option `block_reward_contract_transitions` below.
-	BlockRewardContractAddress *common.Address
+	BlockRewardContractAddress *common.Address `json:"blockRewardContractAddress"`
 	// Block reward contract addresses with their associated starting block numbers.
 	//
 	// Setting the block reward contract overrides `block_reward`. If the single block reward
@@ -106,29 +98,29 @@ type JsonSpec struct {
 	// used simulataneously in the same configuration. In such a case the code requires that the
 	// block number of the single transition is strictly less than any of the block numbers in the
 	// map.
-	BlockRewardContractTransitions map[uint]common.Address
+	BlockRewardContractTransitions map[uint]common.Address `json:"blockRewardContractTransitions"`
 	/// Block reward code. This overrides the block reward contract address.
-	BlockRewardContractCode []byte
+	BlockRewardContractCode []byte `json:"blockRewardContractCode"`
 	// Block at which maximum uncle count should be considered.
-	MaximumUncleCountTransition *uint64
+	MaximumUncleCountTransition *uint64 `json:"maximumUncleCountTransition"`
 	// Maximum number of accepted uncles.
-	MaximumUncleCount *uint
+	MaximumUncleCount *uint `json:"maximumUncleCount"`
 	// Block at which empty step messages should start.
-	EmptyStepsTransition *uint64
+	EmptyStepsTransition *uint64 `json:"emptyStepsTransition"`
 	// Maximum number of accepted empty steps.
-	MaximumEmptySteps *uint
+	MaximumEmptySteps *uint `json:"maximumEmptySteps"`
 	// Strict validation of empty steps transition block.
-	StrictEmptyStepsTransition *uint
+	StrictEmptyStepsTransition *uint `json:"strictEmptyStepsTransition"`
 	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition *uint64
+	TwoThirdsMajorityTransition *uint64 `json:"twoThirdsMajorityTransition"`
 	// The random number contract's address, or a map of contract transitions.
-	RandomnessContractAddress map[uint64]common.Address
+	RandomnessContractAddress map[uint64]common.Address `json:"randomnessContractAddress"`
 	// The addresses of contracts that determine the block gas limit starting from the block number
 	// associated with each of those contracts.
-	BlockGasLimitContractTransitions map[uint64]common.Address
+	BlockGasLimitContractTransitions map[uint64]common.Address `json:"blockGasLimitContractTransitions"`
 	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
 	// modifications.
-	PosdaoTransition *uint64
+	PosdaoTransition *uint64 `json:"PosdaoTransition"`
 }
 
 type Code struct {
@@ -206,10 +198,9 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		BlockGasLimitContractTransitions: jsonParams.BlockGasLimitContractTransitions,
 		PosdaoTransition:                 jsonParams.PosdaoTransition,
 	}
-	if jsonParams.StepDuration.Single != nil {
-		params.StepDurations[0] = *jsonParams.StepDuration.Single
-	} else if jsonParams.StepDuration.Transitions != nil {
-		params.StepDurations = jsonParams.StepDuration.Transitions
+	params.StepDurations = map[uint64]uint64{}
+	if jsonParams.StepDuration != nil {
+		params.StepDurations[0] = *jsonParams.StepDuration
 	}
 
 	//TODO: jsonParams.BlockRewardContractTransitions
@@ -279,14 +270,8 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 	if jsonParams.BlockReward == nil {
 		params.BlockReward[0] = u256.Num0
 	} else {
-		if jsonParams.BlockReward.Single != nil {
-			params.BlockReward[0] = uint256.NewInt(*jsonParams.BlockReward.Single)
-		} else if jsonParams.BlockReward.Multi != nil {
-			// add block reward from genesis and put reward to zero.
-			params.BlockReward[0] = u256.Num0
-			for block, reward := range jsonParams.BlockReward.Multi {
-				params.BlockReward[block] = uint256.NewInt(reward)
-			}
+		if jsonParams.BlockReward != nil {
+			params.BlockReward[0] = uint256.NewInt(uint64(*jsonParams.BlockReward))
 		}
 	}
 

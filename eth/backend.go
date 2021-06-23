@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -189,9 +188,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		consensusConfig = &config.Clique
 	} else if chainConfig.Aura != nil {
 		config.Aura.Etherbase = config.Miner.Etherbase
-		auraabi.NewBlockRewardCaller(config.Miner.Etherbase)
-		config.Aura.RewardAbi = nil
-		config.Aura.ValidatorSedAbi = nil
 		consensusConfig = &config.Aura
 	} else {
 		consensusConfig = &config.Ethash

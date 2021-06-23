@@ -748,6 +748,10 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 	}
 	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
 	var chainConfig *params.ChainConfig
+
+	var engine consensus.Engine
+	engine = ethash.NewFaker()
+
 	var genesis *core.Genesis
 	switch chain {
 	case "", params.MainnetChainName:
@@ -768,6 +772,8 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 	case params.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
+
+		engine = ethconfig.CreateConsensusEngine(chainConfig, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
 	}
 	events := remotedbserver.NewEvents()
 
@@ -783,7 +789,6 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 	bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
-	engine := ethash.NewFaker()
 	blockDownloaderWindow := 65536
 	downloadServer, err := download.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow)
 	if err != nil {

@@ -441,7 +441,6 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
-
 	// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 	beneficiaries, _, rewards, err := AccumulateRewards(cc, c, header, uncles, syscall)
 	if err != nil {
