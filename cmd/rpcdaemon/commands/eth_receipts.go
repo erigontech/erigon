@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
@@ -133,10 +134,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return returnLogs(logs), nil
 	}
 
-	cc, err := api.chainConfig(tx)
-	if err != nil {
-		return returnLogs(logs), err
-	}
+	//cc, err := api.chainConfig(tx)
+	//if err != nil {
+	//	return returnLogs(logs), err
+	//}
 	var readbody, getreceipts, filtering time.Duration
 	for _, blockNToMatch := range blockNumbers.ToArray() {
 		start := time.Now()
@@ -149,11 +150,22 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			return nil, fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
 		start = time.Now()
-		receipts, err := getReceipts(ctx, tx, cc, b, senders)
-		if err != nil {
-			return returnLogs(logs), err
-		}
+		// We're deriving many fields from the block body, retrieve beside the receipt
+		receipts := rawdb.ReadRawReceipts(tx, b.NumberU64())
 		getreceipts += time.Since(start)
+		if receipts != nil {
+			b.Body().SendersToTxs(senders)
+			if err := receipts.DeriveFields(b.Hash(), b.NumberU64(), b.Transactions(), senders); err != nil {
+				log.Error("Failed to derive block receipts fields", "hash", b.Hash(), "number", b.NumberU64(), "err", err)
+				return nil, fmt.Errorf("Derive failed %d", uint64(blockNToMatch))
+			}
+		}
+		/*
+			receipts, err := getReceipts(ctx, tx, cc, b, senders)
+			if err != nil {
+				return returnLogs(logs), err
+			}
+		*/
 		unfiltered := make([]*types.Log, 0, len(receipts))
 		for _, receipt := range receipts {
 			unfiltered = append(unfiltered, receipt.Logs...)
