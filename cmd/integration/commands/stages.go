@@ -414,6 +414,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 		if err := db.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) }); err != nil {
 			return err
 		}
+		return nil
 	}
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction

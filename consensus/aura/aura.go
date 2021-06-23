@@ -28,9 +28,11 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
+	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -128,8 +130,6 @@ type AuRa struct {
 	lock   sync.RWMutex // Protects the signer fields
 
 	step                           PermissionedStep
-	rewardAbi                      aurainterfaces.BlockRewardABI
-	validatorSetAbi                aurainterfaces.ValidatorSetABI
 	OurSigningAddress              common.Address // Same as Etherbase in Mining
 	Validators                     ValidatorSet
 	ValidateScoreTransition        uint64
@@ -194,7 +194,7 @@ func (pb *GasLimitOverride) Add(hash common.Hash, b *uint256.Int) {
 
 // NewAuRa creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Address, rewardAbi aurainterfaces.BlockRewardABI, validatorSedAbi aurainterfaces.ValidatorSetABI, auraParams AuthorityRoundParams) (*AuRa, error) {
+func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Address, auraParams AuthorityRoundParams) (*AuRa, error) {
 	config := cfg.Aura
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
@@ -242,6 +242,7 @@ func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Ad
 		durations: durations,
 	}
 	step.doCalibrate()
+
 	/*
 		    let engine = Arc::new(AuthorityRound {
 		        transition_service: IoService::<()>::start("AuRa")?,
@@ -293,8 +294,8 @@ func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Ad
 		exitCh:            exitCh,
 		step:              PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
 		OurSigningAddress: ourSigningAddress,
-		rewardAbi:         rewardAbi,
-		validatorSetAbi:   validatorSedAbi,
+		Validators:        auraParams.Validators,
+		//caller:            caller,
 	}
 	_ = config
 
@@ -443,6 +444,7 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+
 	// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 	beneficiaries, _, rewards, err := AccumulateRewards(cc, c, header, uncles, syscall)
 	if err != nil {
@@ -654,12 +656,9 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 	beneficiaries = append(beneficiaries, header.Coinbase)
 	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 
-	rewardContract := aura.blockRewardContractTransitions.GreaterOrEqual(header.Number.Uint64())
-	if rewardContract != nil {
-		beneficiaries, rewards, err = aura.rewardAbi.Reward(beneficiaries, rewardKind)
-		if err != nil {
-			return
-		}
+	rewardContractAddress := aura.blockRewardContractTransitions.GreaterOrEqual(header.Number.Uint64())
+	if rewardContractAddress != nil {
+		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.Address, syscall, beneficiaries, rewardKind)
 		rewardKind = rewardKind[:len(beneficiaries)]
 		for i := 0; i < len(rewardKind); i++ {
 			rewardKind[i] = aurainterfaces.RewardExternal
@@ -689,6 +688,37 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 	//	return
 	//}
 	return
+}
+
+func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCall, beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind) ([]common.Address, []*uint256.Int) {
+	castedKind := make([]uint16, len(rewardKind))
+	for i := range rewardKind {
+		castedKind[i] = uint16(rewardKind[i])
+	}
+	packed, err := blockRewardAbi().Pack("reward", beneficiaries, castedKind)
+	if err != nil {
+		panic(err)
+	}
+	out, err := syscall(contractAddr, packed)
+	if err != nil {
+		panic(err)
+	}
+	res, err := blockRewardAbi().Unpack("reward", out)
+	if err != nil {
+		panic(err)
+	}
+	_ = res[0]
+	_ = res[1]
+	fmt.Printf("aaaaa: %#v, %#v\n", res[0], res[1])
+	return nil, nil
+}
+
+func blockRewardAbi() abi.ABI {
+	a, err := abi.JSON(bytes.NewReader(contracts.BlockReward))
+	if err != nil {
+		panic(err)
+	}
+	return a
 }
 
 // An empty step message that is included in a seal, the only difference is that it doesn't include

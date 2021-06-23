@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -121,8 +120,7 @@ func executeBlock(
 	}
 	type ContractCaller struct{}
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(core.DefaultSokolGenesisBlock().Alloc, cfg.chainConfig, 50_000_000)
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, checkTEVM, contractBackend)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, checkTEVM)
 	if err != nil {
 		return err
 	}

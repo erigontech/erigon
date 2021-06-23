@@ -18,6 +18,7 @@
 package ethconfig
 
 import (
+	"encoding/json"
 	"math/big"
 	"os"
 	"os/user"
@@ -28,6 +29,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
+	"github.com/ledgerwatch/erigon/consensus/aura/chainspec"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -210,8 +212,16 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
-			var err error
-			eng, err = aura.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory), chainConfig.Aura.Etherbase, chainConfig.Aura.RewardAbi, chainConfig.Aura.ValidatorSedAbi, aura.AuthorityRoundParams{})
+			spec := aura.JsonSpec{}
+			err := json.Unmarshal(chainspec.Sokol, &spec)
+			if err != nil {
+				panic(err)
+			}
+			cfg, err := aura.FromJson(spec)
+			if err != nil {
+				panic(err)
+			}
+			eng, err = aura.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory), chainConfig.Aura.Etherbase, cfg)
 			if err != nil {
 				panic(err)
 			}
