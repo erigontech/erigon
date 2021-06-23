@@ -304,12 +304,8 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]in
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
-	// Assign receipt status or post state.
-	if len(receipt.PostState) > 0 {
-		fields["root"] = hexutil.Bytes(receipt.PostState)
-	} else {
-		fields["status"] = hexutil.Uint(receipt.Status)
-	}
+	// Assign receipt status.
+	fields["status"] = receipt.Status
 	if receipt.Logs == nil {
 		fields["logs"] = [][]*types.Log{}
 	}
