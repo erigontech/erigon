@@ -2044,6 +2044,7 @@ func scanTxs(chaindata string) error {
 	}
 	defer c.Close()
 	trTypes := make(map[byte]int)
+	trTypesAl := make(map[byte]int)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -2056,6 +2057,12 @@ func scanTxs(chaindata string) error {
 			fmt.Printf("Example for type %d:\n%x\n", tr.Type(), v)
 		}
 		trTypes[tr.Type()]++
+		if tr.GetAccessList().StorageKeys() > 0 {
+			if _, ok := trTypesAl[tr.Type()]; !ok {
+				fmt.Printf("Example for type %d with AL:\n%x\n", tr.Type(), v)
+			}
+			trTypesAl[tr.Type()]++
+		}
 	}
 	fmt.Printf("Transaction types: %v\n", trTypes)
 	return nil
