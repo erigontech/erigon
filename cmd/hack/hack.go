@@ -20,7 +20,9 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -2059,6 +2061,88 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
+func scanReceipts(chaindata string) error {
+	dbdb := kv2.MustOpen(chaindata).RwKV()
+	defer dbdb.Close()
+	txtx, err := dbdb.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer txtx.Rollback()
+	var db ethdb.Database = kv2.WrapIntoTxDB(txtx)
+	var tx ethdb.Tx
+	if hasTx, ok := db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		return fmt.Errorf("no transaction")
+	}
+	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	if err != nil {
+		return err
+	}
+	chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	if cerr != nil {
+		return cerr
+	}
+	logInterval := 30 * time.Second
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	var buf bytes.Buffer
+	var key [8]byte
+	var v []byte
+	var to uint64
+	if to, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		return err
+	}
+	for blockNum := uint64(1); blockNum <= to; blockNum++ {
+		binary.BigEndian.PutUint64(key[:], blockNum)
+		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+			return err
+		}
+		if v == nil {
+			continue
+		}
+		//fmt.Printf("blockNum = %d\n", blockNum)
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Scanned receipts up to", "block", blockNum)
+		}
+		var receipts types.Receipts
+		var oldReceipts migrations.OldReceipts
+		if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
+			continue
+		}
+
+		var blockHash common.Hash
+		if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+			return err
+		}
+		var body *types.Body
+		if chainConfig.IsBerlin(blockNum) {
+			body = rawdb.ReadBody(tx, blockHash, blockNum)
+		}
+		receipts = make(types.Receipts, len(oldReceipts))
+		for i, oldReceipt := range oldReceipts {
+			receipts[i] = new(types.Receipt)
+			receipts[i].PostState = oldReceipt.PostState
+			receipts[i].Status = oldReceipt.Status
+			receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
+			if body != nil {
+				receipts[i].Type = body.Transactions[i].Type()
+			}
+		}
+		buf.Reset()
+		if err = cbor.Marshal(&buf, receipts); err != nil {
+			return err
+		}
+		//if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+		//	return err
+		//}
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -2215,6 +2299,9 @@ func main() {
 
 	case "scanTxs":
 		err = scanTxs(*chaindata)
+
+	case "scanReceipts":
+		err = scanReceipts(*chaindata)
 	}
 
 	if err != nil {
