@@ -70,7 +70,7 @@ func discoverPMP() Interface {
 	for i := range gws {
 		gw := gws[i]
 		go func() {
-			defer func() { debug.LogPanic(nil, true, recover()) }()
+			defer debug.LogPanic()
 			c := natpmp.NewClient(gw)
 			if _, err := c.GetExternalAddress(); err != nil {
 				found <- nil
