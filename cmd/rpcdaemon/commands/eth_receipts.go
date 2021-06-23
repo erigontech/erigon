@@ -147,6 +147,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			}
 			for _, log := range logs {
 				log.Index = logIndex
+				logIndex++
 			}
 			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
 			if len(filtered) > 0 {
@@ -154,7 +155,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 				for _, log := range filtered {
 					log.TxIndex = txIndex
 				}
-				logs = append(logs, filtered...)
+				blockLogs = append(blockLogs, filtered...)
 			}
 			return nil
 		}); err != nil {
