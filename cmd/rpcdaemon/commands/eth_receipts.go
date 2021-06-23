@@ -137,25 +137,33 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	if err != nil {
 		return returnLogs(logs), err
 	}
+	var readbody, getreceipts, filtering time.Duration
 	for _, blockNToMatch := range blockNumbers.ToArray() {
+		start := time.Now()
 		b, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, uint64(blockNToMatch))
 		if err != nil {
 			return nil, err
 		}
+		readbody += time.Since(start)
 		if b == nil {
 			return nil, fmt.Errorf("block not found %d", uint64(blockNToMatch))
 		}
+		start = time.Now()
 		receipts, err := getReceipts(ctx, tx, cc, b, senders)
 		if err != nil {
 			return returnLogs(logs), err
 		}
+		getreceipts += time.Since(start)
 		unfiltered := make([]*types.Log, 0, len(receipts))
 		for _, receipt := range receipts {
 			unfiltered = append(unfiltered, receipt.Logs...)
 		}
+		start = time.Now()
 		unfiltered = filterLogs(unfiltered, nil, nil, crit.Addresses, crit.Topics)
+		filtering += time.Since(start)
 		logs = append(logs, unfiltered...)
 	}
+	fmt.Printf("Time spend on reading bodies: %s, getReceipts: %s, filtering: %s\n", readbody, getreceipts, filtering)
 
 	return returnLogs(logs), nil
 }
