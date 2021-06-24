@@ -85,7 +85,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,6 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 
 	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	// Create a new context to be used in the EVM environment
-	context := NewEVMBlockContext(header, getHeader, engine, author, evm.Context.CheckTEVM)
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = tx.Hash()
@@ -101,12 +100,11 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
-	vmenv := vm.NewEVM(context, txContext, statedb, config, cfg)
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, statedb)
 	// If the transaction created a contract, store the creation address in the receipt.
-	result, err := ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
+	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +130,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
-			receipt.ContractAddress = crypto.CreateAddress(vmenv.TxContext.Origin, tx.GetNonce())
+			receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = statedb.GetLogs(tx.Hash())
@@ -148,12 +146,8 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, getHeader f
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, checkTEVM func(contractHash common.Hash) (bool, error)) (*types.Receipt, error) {
-	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
-	if err != nil {
-		return nil, err
-	}
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, getHeader, engine, author, checkTEVM)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
-	return applyTransaction(msg, config, getHeader, engine, author, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }

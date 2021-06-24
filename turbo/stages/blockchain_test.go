@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -363,7 +364,7 @@ func testBadHashes(t *testing.T) {
 	t.Skip("to support this error in Erigon")
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 	var err error
 
@@ -563,7 +564,7 @@ func TestEIP155Transition(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	chain, chainErr := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
@@ -758,14 +759,6 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 			numberOfEntries--
 		}
 
-		if bucketName == dbutils.PreimagePrefix {
-			// we will always have 2 preimages because core.GenerateChain interface does not
-			// allow us to set it to ignore them
-			// but if the preimages are enabled in BlockChain, we will have more than 2.
-			// TODO: with a better interface to core.GenerateChain allow to check preimages
-			numberOfEntries -= 2
-		}
-
 		if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
 			return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
 		}
@@ -821,7 +814,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
@@ -886,7 +879,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, bankKey)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	var theAddr common.Address
@@ -1064,7 +1057,6 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //  - https://github.com/ethereum/go-ethereum/issues/18977
 //  - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
-	t.Skip("Find better bugfix")
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	// Generate a canonical chain to act as the main dataset
@@ -1279,7 +1271,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1361,7 +1353,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
@@ -1485,7 +1477,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 	var nonce uint64
 
@@ -1672,7 +1664,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 	nonce := uint64(0)
 
@@ -1746,7 +1738,7 @@ func TestEIP2718Transition(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
@@ -1843,7 +1835,7 @@ func TestEIP1559Transition(t *testing.T) {
 		signer = types.LatestSigner(gspec.Config)
 	)
 	m := stages.MockWithGenesis(t, gspec, key1)
-	db := ethdb.NewObjectDatabase(m.DB)
+	db := kv.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *core.BlockGen) {

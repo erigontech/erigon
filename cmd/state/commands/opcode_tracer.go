@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/spf13/cobra"
@@ -392,7 +393,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
-	chainDb := ethdb.MustOpen(chaindata)
+	chainDb := kv.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
 	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
@@ -415,7 +416,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		defer close(chanOpcodes)
 
 		go func() {
-			defer func() { debug.LogPanic(nil, true, recover()) }()
+			defer debug.LogPanic()
 			var fops *os.File
 			var fopsWriter *bufio.Writer
 			var fopsEnc *gob.Encoder

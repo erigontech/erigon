@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
@@ -30,10 +31,10 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 			log.Fatal(err)
 		}
 	}
-	resultsKV := ethdb.NewMDBX().Path(tmpDataDir).MustOpen()
-	gethKV := ethdb.NewMDBX().Path(gethDataDir).MustOpen()
-	resultsDB := ethdb.NewObjectDatabase(resultsKV)
-	gethResultsDB := ethdb.NewObjectDatabase(gethKV)
+	resultsKV := kv.NewMDBX().Path(tmpDataDir).MustOpen()
+	gethKV := kv.NewMDBX().Path(gethDataDir).MustOpen()
+	resultsDB := kv.NewObjectDatabase(resultsKV)
+	gethResultsDB := kv.NewObjectDatabase(gethKV)
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,

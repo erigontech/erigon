@@ -447,7 +447,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// Wait until sealing is terminated or delay timeout.
 	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
-		defer func() { debug.LogPanic(nil, true, recover()) }()
+		defer debug.LogPanic()
 		select {
 		case <-stop:
 			return

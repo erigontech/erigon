@@ -3,10 +3,13 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -166,6 +169,11 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 
 		_, stage := s.CurrentStage()
 
+		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
+			log.Error("STOP_BEFORE_STAGE env flag forced to stop app")
+			os.Exit(1)
+		}
+
 		if stage.Disabled {
 			logPrefix := s.LogPrefix()
 			message := fmt.Sprintf(
@@ -186,6 +194,13 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 		timings = append(timings, string(stage.ID), time.Since(t))
 	}
 
+	if err := printLogs(tx, timings); err != nil {
+		return err
+	}
+	return nil
+}
+
+func printLogs(tx ethdb.RwTx, timings []interface{}) error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
@@ -194,6 +209,28 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 	} else {
 		log.Info("Timings", timings...)
 	}
+
+	if tx == nil {
+		return nil
+	}
+	buckets := []string{
+		"freelist",
+		dbutils.PlainStateBucket,
+		dbutils.AccountChangeSetBucket,
+		dbutils.StorageChangeSetBucket,
+		dbutils.EthTx,
+		dbutils.Log,
+	}
+	bucketSizes := make([]interface{}, 0, 2*len(buckets))
+	for _, bucket := range buckets {
+		sz, err1 := tx.BucketSize(bucket)
+		if err1 != nil {
+			return err1
+		}
+		bucketSizes = append(bucketSizes, bucket, common.StorageSize(sz))
+	}
+	log.Info("Tables", bucketSizes...)
+	tx.CollectMetrics()
 	return nil
 }
 

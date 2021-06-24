@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/ugorji/go/codec"
 )
@@ -81,7 +82,7 @@ func TestNextKeyErr(t *testing.T) {
 
 func TestFileDataProviders(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
@@ -112,7 +113,7 @@ func TestFileDataProviders(t *testing.T) {
 
 func TestRAMDataProviders(t *testing.T) {
 	// test invariant when we go through memory (1 buffer)
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
@@ -131,7 +132,7 @@ func TestRAMDataProviders(t *testing.T) {
 
 func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +157,7 @@ func TestTransformRAMOnly(t *testing.T) {
 }
 
 func TestEmptySourceBucket(t *testing.T) {
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +181,7 @@ func TestEmptySourceBucket(t *testing.T) {
 
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +206,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +233,7 @@ func TestTransformThroughFiles(t *testing.T) {
 
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +258,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)

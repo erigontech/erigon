@@ -24,14 +24,14 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/integrity"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestIHCursor(t *testing.T) {
-	db, require := ethdb.NewTestDB(t), require.New(t)
+	db, require := kv.NewTestDB(t), require.New(t)
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
 	newV := make([]byte, 0, 1024)

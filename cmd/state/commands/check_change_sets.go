@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -64,15 +65,15 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		interruptCh <- true
 	}()
 
-	kv, err := ethdb.NewMDBX().Path(chaindata).Open()
+	kv, err := kv2.NewMDBX().Path(chaindata).Open()
 	if err != nil {
 		return err
 	}
-	chainDb := ethdb.NewObjectDatabase(kv)
+	chainDb := kv2.NewObjectDatabase(kv)
 	defer chainDb.Close()
 	historyDb := chainDb
 	if chaindata != historyfile {
-		historyDb = ethdb.MustOpen(historyfile)
+		historyDb = kv2.MustOpen(historyfile)
 	}
 	historyTx, err1 := historyDb.RwKV().BeginRo(context.Background())
 	if err1 != nil {

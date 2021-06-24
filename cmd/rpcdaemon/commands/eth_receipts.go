@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
@@ -80,7 +83,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			return nil, err
 		}
 
-		begin = latest
+		begin = 0
 		if crit.FromBlock != nil && crit.FromBlock.Sign() > 0 {
 			begin = crit.FromBlock.Uint64()
 		}
@@ -130,30 +133,51 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return returnLogs(logs), nil
 	}
 
-	cc, err := api.chainConfig(tx)
-	if err != nil {
-		return returnLogs(logs), err
-	}
-	for _, blockNToMatch := range blockNumbers.ToArray() {
-		b, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, uint64(blockNToMatch))
-		if err != nil {
-			return nil, err
-		}
-		if b == nil {
-			return nil, fmt.Errorf("block not found %d", uint64(blockNToMatch))
-		}
-		receipts, err := getReceipts(ctx, tx, cc, b, senders)
-		if err != nil {
+	iter := blockNumbers.Iterator()
+	for iter.HasNext() {
+		blockNToMatch := uint64(iter.Next())
+		prefix := make([]byte, 8)
+		binary.BigEndian.PutUint64(prefix, blockNToMatch)
+		var logIndex uint
+		var blockLogs types.Logs
+		if err := tx.ForPrefix(dbutils.Log, prefix, func(k, v []byte) error {
+			var logs types.Logs
+			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+				return fmt.Errorf("receipt unmarshal failed:  %w", err)
+			}
+			for _, log := range logs {
+				log.Index = logIndex
+				logIndex++
+			}
+			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
+			if len(filtered) > 0 {
+				txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+				for _, log := range filtered {
+					log.TxIndex = txIndex
+				}
+				blockLogs = append(blockLogs, filtered...)
+			}
+			return nil
+		}); err != nil {
 			return returnLogs(logs), err
 		}
-		unfiltered := make([]*types.Log, 0, len(receipts))
-		for _, receipt := range receipts {
-			unfiltered = append(unfiltered, receipt.Logs...)
+		if len(blockLogs) > 0 {
+			b, err := rawdb.ReadBlockByNumber(tx, blockNToMatch)
+			if err != nil {
+				return nil, err
+			}
+			if b == nil {
+				return nil, fmt.Errorf("block not found %d", blockNToMatch)
+			}
+			blockHash := b.Hash()
+			for _, log := range blockLogs {
+				log.BlockNumber = blockNToMatch
+				log.BlockHash = blockHash
+				log.TxHash = b.Transactions()[log.TxIndex].Hash()
+			}
+			logs = append(logs, blockLogs...)
 		}
-		unfiltered = filterLogs(unfiltered, nil, nil, crit.Addresses, crit.Topics)
-		logs = append(logs, unfiltered...)
 	}
-
 	return returnLogs(logs), nil
 }
 
@@ -180,7 +204,7 @@ func getTopicsBitmap(c ethdb.Tx, topics [][]common.Hash, from, to uint32) (*roar
 			if bitmapForORing == nil {
 				bitmapForORing = m
 			} else {
-				bitmapForORing = roaring.FastOr(bitmapForORing, m)
+				bitmapForORing.Or(m)
 			}
 		}
 
@@ -304,12 +328,8 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]in
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
-	// Assign receipt status or post state.
-	if len(receipt.PostState) > 0 {
-		fields["root"] = hexutil.Bytes(receipt.PostState)
-	} else {
-		fields["status"] = hexutil.Uint(receipt.Status)
-	}
+	// Assign receipt status.
+	fields["status"] = receipt.Status
 	if receipt.Logs == nil {
 		fields["logs"] = [][]*types.Log{}
 	}
@@ -331,16 +351,10 @@ func includes(addresses []common.Address, a common.Address) bool {
 }
 
 // filterLogs creates a slice of logs matching the given criteria.
-func filterLogs(logs []*types.Log, fromBlock, toBlock *big.Int, addresses []common.Address, topics [][]common.Hash) []*types.Log {
+func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
 	var ret []*types.Log
 Logs:
 	for _, log := range logs {
-		if fromBlock != nil && fromBlock.Int64() >= 0 && fromBlock.Uint64() > log.BlockNumber {
-			continue
-		}
-		if toBlock != nil && toBlock.Int64() >= 0 && toBlock.Uint64() < log.BlockNumber {
-			continue
-		}
 
 		if len(addresses) > 0 && !includes(addresses, log.Address) {
 			continue

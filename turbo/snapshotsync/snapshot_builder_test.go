@@ -8,11 +8,13 @@ import (
 	"math"
 	"os"
 	"path"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 
 	"github.com/stretchr/testify/require"
@@ -32,6 +34,10 @@ import (
 // Step 5. We need to check that the new snapshot contains headers from 0 to 20, the headers bucket in the main database is empty,
 // it started seeding a new snapshot and removed the old one.
 func TestSnapshotMigratorStage(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
+	}
+
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
@@ -57,7 +63,7 @@ func TestSnapshotMigratorStage(t *testing.T) {
 	}
 	btCli.trackers = [][]string{}
 
-	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -374,6 +380,9 @@ func TestSnapshotMigratorStage(t *testing.T) {
 }
 
 func TestSnapshotMigratorStageSyncMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
@@ -399,7 +408,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	btCli.trackers = [][]string{}
 
-	db := ethdb.NewSnapshotKV().DB(ethdb.MustOpenKV(path.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(path.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)

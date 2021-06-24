@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -65,7 +66,7 @@ type stateWriterGen func(uint64) state.WriterWithChangeSets
 
 func hashedWriterGen(tx ethdb.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewDbStateWriter(ethdb.WrapIntoTxDB(tx), blockNum)
+		return state.NewDbStateWriter(kv.WrapIntoTxDB(tx), blockNum)
 	}
 }
 

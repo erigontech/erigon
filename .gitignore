@@ -67,3 +67,4 @@ docker-compose.dev.yml
 *.tmp
 
 /ethdb/*.fail
+

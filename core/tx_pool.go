@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -277,7 +278,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 		reorgShutdownCh: make(chan struct{}, 1),
 		gasPrice:        new(uint256.Int).SetUint64(config.PriceLimit),
 		stopCh:          make(chan struct{}),
-		chaindb:         ethdb.NewObjectDatabase(chaindb),
+		chaindb:         kv.NewObjectDatabase(chaindb),
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {
@@ -328,7 +329,7 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 // outside blockchain events as well as for various reporting and transaction
 // eviction events.
 func (pool *TxPool) loop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer pool.wg.Done()
 
 	var (
@@ -1028,7 +1029,7 @@ func (pool *TxPool) queueTxEvent(tx types.Transaction) {
 // call those methods directly, but request them being run using requestReset and
 // requestPromoteExecutables instead.
 func (pool *TxPool) scheduleReorgLoop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer pool.wg.Done()
 
 	var (
@@ -1096,7 +1097,7 @@ func (pool *TxPool) scheduleReorgLoop() {
 
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
 func (pool *TxPool) runReorg(done chan struct{}, dirtyAccounts *accountSet, events map[common.Address]*txSortedMap, reset bool) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer close(done)
 
 	var promoteAddrs []common.Address

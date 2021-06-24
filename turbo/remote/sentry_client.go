@@ -77,6 +77,10 @@ func (c *SentryClientRemote) Messages(ctx context.Context, in *proto_sentry.Mess
 	return c.SentryClient.Messages(ctx, in, opts...)
 }
 
+func (c *SentryClientRemote) PeerCount(ctx context.Context, in *proto_sentry.PeerCountRequest, opts ...grpc.CallOption) (*proto_sentry.PeerCountReply, error) {
+	return c.SentryClient.PeerCount(ctx, in)
+}
+
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
 // SentryClient is linked directly to the SentryServer, for example, so any function call on the instance of the SentryClient
 // cause invocations directly on the corresponding instance of the SentryServer. However, the link between SentryClient and
@@ -124,6 +128,10 @@ func (c *SentryClientDirect) SendMessageToAll(ctx context.Context, in *proto_sen
 
 func (c *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
 	return c.server.SetStatus(ctx, in)
+}
+
+func (c *SentryClientDirect) PeerCount(ctx context.Context, in *proto_sentry.PeerCountRequest, opts ...grpc.CallOption) (*proto_sentry.PeerCountReply, error) {
+	return c.server.PeerCount(ctx, in)
 }
 
 // implements proto_sentry.Sentry_ReceiveMessagesServer

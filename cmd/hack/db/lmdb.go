@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -291,7 +292,7 @@ func launchReader(kv ethdb.RwKV, tx ethdb.Tx, expectVal string, startCh chan str
 	}
 	// Wait for the signal to start reading
 	go func() {
-		defer func() { debug.LogPanic(nil, true, recover()) }()
+		defer debug.LogPanic()
 		defer tx1.Rollback()
 		<-startCh
 		c, err := tx1.Cursor("t")
@@ -337,20 +338,20 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...f
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
 	defer os.RemoveAll(dir)
-	var kv ethdb.RwKV
-	kv, err = ethdb.NewMDBX().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
+	var db ethdb.RwKV
+	db, err = kv2.NewMDBX().Path(dir).WithBucketsConfig(func(dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return bucketsCfg
 	}).Open()
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
-	defer kv.Close()
+	defer db.Close()
 	for gi, generateF := range generateFs {
 		var display bool
-		if err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		if err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
 			var err1 error
 			//nolint:scopelint
-			display, err1 = generateF(kv, tx)
+			display, err1 = generateF(db, tx)
 			return err1
 		}); err != nil {
 			return fmt.Errorf("generating data in temp db - function %d, file: %s: %w", gi, filename, err)

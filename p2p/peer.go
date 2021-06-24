@@ -272,7 +272,7 @@ loop:
 }
 
 func (p *Peer) pingLoop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	ping := time.NewTimer(pingInterval)
 	defer p.wg.Done()
 	defer ping.Stop()
@@ -291,7 +291,7 @@ func (p *Peer) pingLoop() {
 }
 
 func (p *Peer) readLoop(errc chan<- error) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer p.wg.Done()
 	for {
 		msg, err := p.rw.ReadMsg()
@@ -393,7 +393,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 		}
 		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
 		go func() {
-			defer func() { debug.LogPanic(nil, true, recover()) }()
+			defer debug.LogPanic()
 			defer p.wg.Done()
 			err := proto.Run(p, rw)
 			if err == nil {

@@ -5,12 +5,12 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestUnwindStackLoadFromDb(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	stack := NewPersistentUnwindStack()
 
@@ -34,7 +34,7 @@ func TestUnwindStackLoadFromDb(t *testing.T) {
 }
 
 func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	stack := NewPersistentUnwindStack()
 
@@ -63,7 +63,7 @@ func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
 }
 
 func TestUnwindStackLoadFromDbNoDone(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	stack := NewPersistentUnwindStack()
 
@@ -90,7 +90,7 @@ func TestUnwindStackLoadFromDbNoDone(t *testing.T) {
 }
 
 func TestUnwindStackPopAndEmpty(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	stack := NewPersistentUnwindStack()
 
@@ -123,7 +123,7 @@ func TestUnwindStackPopAndEmpty(t *testing.T) {
 }
 
 func TestUnwindOverrideWithLower(t *testing.T) {
-	db := ethdb.NewTestDB(t)
+	db := kv.NewTestDB(t)
 
 	stack := NewPersistentUnwindStack()
 
@@ -146,7 +146,7 @@ func TestUnwindOverrideWithLower(t *testing.T) {
 }
 
 func TestUnwindOverrideWithHigher(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	stack := NewPersistentUnwindStack()
 
@@ -169,7 +169,7 @@ func TestUnwindOverrideWithHigher(t *testing.T) {
 }
 
 func TestUnwindOverrideWithTheSame(t *testing.T) {
-	_, tx := ethdb.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	stack := NewPersistentUnwindStack()
 

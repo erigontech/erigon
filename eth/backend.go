@@ -53,6 +53,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -87,8 +88,6 @@ type Ethereum struct {
 	etherbase common.Address
 
 	networkID uint64
-
-	p2pServer *p2p.Server
 
 	torrentClient *snapshotsync.Client
 
@@ -174,7 +173,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		p2pServer:            stack.Server(),
 		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
@@ -414,7 +412,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
 
 	go func() {
-		defer func() { debug.LogPanic(nil, true, recover()) }()
+		defer debug.LogPanic()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
@@ -452,7 +450,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 const txChanSize int = 4096
 
 func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	if notifier == nil {
 		return
 	}
@@ -567,7 +565,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 	}
 
 	go func() {
-		defer func() { debug.LogPanic(nil, true, recover()) }()
+		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 		newTransactions := make(chan core.NewTxsEvent, txChanSize)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
@@ -612,6 +610,22 @@ func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
 func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+func (s *Ethereum) NetPeerCount() (uint64, error) {
+	var sentryPc uint64 = 0
+
+	log.Trace("sentry", "peer count", sentryPc)
+	for _, sc := range s.sentries {
+		ctx := context.Background()
+		reply, err := sc.PeerCount(ctx, &sentry.PeerCountRequest{})
+		if err != nil {
+			log.Warn("sentry", "err", err)
+			return 0, nil
+		}
+		sentryPc += reply.Count
+	}
+
+	return sentryPc, nil
+}
 
 // Protocols returns all the currently configured
 // network protocols to start.
@@ -627,8 +641,12 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
 	for i := range s.sentries {
-		go download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
-		go download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+		go func(i int) {
+			download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+		}(i)
+		go func(i int) {
+			download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+		}(i)
 	}
 
 	go Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
@@ -673,7 +691,7 @@ func (s *Ethereum) Stop() error {
 
 //Deprecated - use stages.StageLoop
 func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *download.ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	stages2.StageLoop(
 		ctx,
 		db,

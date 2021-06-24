@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -58,7 +59,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 		},
 		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
 			//replace snapshot
-			if _, ok := db.(ethdb.SnapshotUpdater); !ok {
+			if _, ok := db.(kv.SnapshotUpdater); !ok {
 				return errors.New("db don't implement snapshotUpdater interface")
 			}
 			snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
@@ -66,7 +67,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 				return err
 			}
 
-			db.(ethdb.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, sm.replaceChan)
+			db.(kv.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, sm.replaceChan)
 			return nil
 		},
 		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
@@ -129,7 +130,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 	if async {
 		go func() {
 			//@todo think about possibility that write tx has uncommited data that we don't have in readTXs
-			defer func() { debug.LogPanic(nil, true, recover()) }()
+			defer debug.LogPanic()
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
 				//return fmt.Errorf("begin err: %w", err)
@@ -300,7 +301,7 @@ func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
 }
 
 func OpenHeadersSnapshot(dbPath string) (ethdb.RwKV, error) {
-	return ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	return kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		}
@@ -314,7 +315,7 @@ func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64,
 		return err
 	}
 	var snKV ethdb.RwKV
-	snKV, err = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	snKV, err = kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		}
@@ -380,15 +381,15 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, 
 
 func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
 	log.Info("Remove data", "from", currentSnapshot, "to", newSnapshot)
-	if _, ok := db.(ethdb.SnapshotUpdater); !ok {
+	if _, ok := db.(kv.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	headerSnapshot := db.(ethdb.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
+	headerSnapshot := db.(kv.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
 	if headerSnapshot == nil {
 		log.Info("headerSnapshot is empty")
 		return nil
 	}
-	writeTX := tx.(ethdb.DBTX).DBTX()
+	writeTX := tx.(kv.DBTX).DBTX()
 	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
 	if err != nil {
 		return fmt.Errorf("get headers cursor %w", err)

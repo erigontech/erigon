@@ -5,16 +5,16 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func TestPromoteHashedStateClearState(t *testing.T) {
-	_, tx1 := ethdb.NewTestTx(t)
-	db2, tx2 := ethdb.NewTestTx(t)
+	_, tx1 := kv.NewTestTx(t)
+	db2, tx2 := kv.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
@@ -28,8 +28,8 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
-	_, tx1 := ethdb.NewTestTx(t)
-	db2, tx2 := ethdb.NewTestTx(t)
+	_, tx1 := kv.NewTestTx(t)
+	db2, tx2 := kv.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
@@ -52,8 +52,8 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
-	_, tx1 := ethdb.NewTestTx(t)
-	db2, tx2 := ethdb.NewTestTx(t)
+	_, tx1 := kv.NewTestTx(t)
+	db2, tx2 := kv.NewTestTx(t)
 
 	generateBlocks(t, 1, 100, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
@@ -67,8 +67,8 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 }
 
 func TestUnwindHashed(t *testing.T) {
-	_, tx1 := ethdb.NewTestTx(t)
-	db2, tx2 := ethdb.NewTestTx(t)
+	_, tx1 := kv.NewTestTx(t)
+	db2, tx2 := kv.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
@@ -106,7 +106,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 			if tc.cancelFuncExec {
 				cancel()
 			}
-			db, tx := ethdb.NewTestTx(t)
+			db, tx := kv.NewTestTx(t)
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx, StageHashStateCfg(db, t.TempDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateIncrementally, got: %v, expected: %v", err, tc.errExp)
@@ -138,7 +138,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 				cancel()
 			}
 
-			db, tx := ethdb.NewTestTx(t)
+			db, tx := kv.NewTestTx(t)
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 
@@ -172,7 +172,7 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 				cancel()
 			}
 
-			db, tx := ethdb.NewTestTx(t)
+			db, tx := kv.NewTestTx(t)
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 			cfg := StageHashStateCfg(db, t.TempDir())

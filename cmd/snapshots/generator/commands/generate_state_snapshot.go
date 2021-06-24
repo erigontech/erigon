@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/spf13/cobra"
 )
@@ -45,8 +46,8 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	}
 	var kv, snkv ethdb.RwKV
 
-	kv = ethdb.NewMDBX().Path(dbPath).MustOpen()
-	snkv = ethdb.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	kv = kv2.NewMDBX().Path(dbPath).MustOpen()
+	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return dbutils.BucketsCfg{
 			dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
 			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},

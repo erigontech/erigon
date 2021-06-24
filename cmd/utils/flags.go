@@ -31,6 +31,7 @@ import (
 	"text/template"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -920,11 +921,14 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	if err != nil {
 		panic(err)
 	}
-	chain := f.String(ChainFlag.Name, ChainFlag.Value, ChainFlag.Usage)
+	chain, err := f.GetString(ChainFlag.Name)
+	if err != nil {
+		panic(err)
+	}
 	if dirname != "" {
 		cfg.DataDir = dirname
-	} else if chain != nil {
-		cfg.DataDir = DataDirForNetwork(cfg.DataDir, *chain)
+	} else {
+		cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
 	}
 }
 
@@ -1339,7 +1343,7 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *ethdb.ObjectDatabase {
+func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *kv.ObjectDatabase {
 	chainDb, err := stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)

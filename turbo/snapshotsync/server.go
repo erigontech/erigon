@@ -9,6 +9,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 var (
@@ -20,7 +21,7 @@ var (
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
-	db := ethdb.MustOpen(dir + "/db")
+	db := kv.MustOpen(dir + "/db")
 	peerID, err := db.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, fmt.Errorf("get peer id: %w", err)

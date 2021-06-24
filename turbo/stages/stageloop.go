@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -111,8 +112,7 @@ func StageLoopStep(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
-	// avoid crash because Erigon's core does many things -
-	defer func() { err = debug.LogPanic(err, false, recover()) }()
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 	var sm ethdb.StorageMode
 	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
@@ -146,7 +146,7 @@ func StageLoopStep(
 		return err
 	}
 
-	st, err1 := sync.Prepare(nil, chainConfig, nil, &vm.Config{}, ethdb.NewObjectDatabase(db), nil, "downloader", sm, ".", 512*datasize.MB, ctx.Done(), nil, nil, initialCycle, nil, accumulator)
+	st, err1 := sync.Prepare(&vm.Config{}, kv.NewObjectDatabase(db), nil, sm, ctx.Done(), initialCycle, nil, accumulator)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
@@ -217,8 +217,7 @@ func StageLoopStep(
 }
 
 func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
-	// avoid crash because TG's core does many things -
-	defer func() { err = debug.LogPanic(err, false, recover()) }()
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
@@ -228,17 +227,9 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 	miningState, err := mining.Prepare(
 		nil,
 		nil,
-		nil,
-		nil,
-		nil,
 		tx,
-		"",
 		ethdb.DefaultStorageMode,
-		".",
-		0,
 		ctx.Done(),
-		nil,
-		nil,
 		false,
 		stagedsync.StageMiningCfg(true),
 		nil,
@@ -320,8 +311,10 @@ func NewStagedSync2(
 		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
-			for _, s := range txPoolServer.Sentries {
-				go txpool.RecvTxMessageLoop(ctx, s, controlServer, txPoolServer.HandleInboundMessage, nil)
+			for i := range txPoolServer.Sentries {
+				go func(i int) {
+					txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
+				}(i)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),

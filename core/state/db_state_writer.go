@@ -27,14 +27,12 @@ func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
 	return &DbStateWriter{
 		db:      db,
 		blockNr: blockNr,
-		pw:      &PreimageWriter{db: db, savePreimages: false},
 		csw:     NewChangeSetWriter(),
 	}
 }
 
 type DbStateWriter struct {
 	db      ethdb.Database
-	pw      *PreimageWriter
 	blockNr uint64
 	csw     *ChangeSetWriter
 }
@@ -66,7 +64,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err := dsw.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
-	addrHash, err := dsw.pw.HashAddress(address, true /*save*/)
+	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
 	}
@@ -82,7 +80,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.csw.DeleteAccount(ctx, address, original); err != nil {
 		return err
 	}
-	addrHash, err := dsw.pw.HashAddress(address, true /*save*/)
+	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
 	}
@@ -126,11 +124,11 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if *original == *value {
 		return nil
 	}
-	seckey, err := dsw.pw.HashKey(key, true /*save*/)
+	seckey, err := common.HashData(key[:])
 	if err != nil {
 		return err
 	}
-	addrHash, err := dsw.pw.HashAddress(address, false /*save*/)
+	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
 	}

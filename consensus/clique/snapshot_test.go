@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -417,7 +417,7 @@ func TestClique(t *testing.T) {
 				Epoch:  tt.epoch,
 			}
 
-			cliqueDB := ethdb.NewTestKV(t)
+			cliqueDB := kv.NewTestKV(t)
 
 			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB)
 			engine.FakeDiff = true
@@ -503,7 +503,7 @@ func TestClique(t *testing.T) {
 			// No failure was produced or requested, generate the final voting snapshot
 			head := chain.Blocks[len(chain.Blocks)-1]
 
-			snap, err := engine.Snapshot(stagedsync.ChainReader{Cfg: config, Db: ethdb.NewObjectDatabase(m.DB)}, head.NumberU64(), head.Hash(), nil)
+			snap, err := engine.Snapshot(stagedsync.ChainReader{Cfg: config, Db: kv.NewObjectDatabase(m.DB)}, head.NumberU64(), head.Hash(), nil)
 			if err != nil {
 				t.Errorf("test %d: failed to retrieve voting snapshot %d(%s): %v",
 					i, head.NumberU64(), head.Hash().Hex(), err)
