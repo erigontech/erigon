@@ -34,6 +34,10 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, err
 	}
 
+	if uint64(*args.Gas) == 0 {
+		args.Gas = (*hexutil.Uint64)(&api.GasCap)
+	}
+
 	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.filters)
 	if err != nil {
 		return nil, err
