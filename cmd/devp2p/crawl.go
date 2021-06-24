@@ -104,7 +104,7 @@ loop:
 }
 
 func (c *crawler) runIterator(done chan<- enode.Iterator, it enode.Iterator) {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	defer func() { done <- it }()
 	for it.Next() {
 		select {

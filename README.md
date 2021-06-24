@@ -100,13 +100,13 @@ Windows users may run erigon in 3 possible ways:
   There are some requirements for a successful native build on windows :
   * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very likely you already have it
   * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
-  * If you need to build MDBX tools then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
+  * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`) then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's been reported some anti-virus programs detect
   those files as possibly infected by `Win64/Kryptic.CIS` trojan horse (or a variant of it). Although those are false positives we have no control over 100+ vendors of
   security products for Windows and their respective detection algorythms and we understand this might make your experience with Windows builds uncomfortable. To
-  workaround the issue you might either set exlusions for your antivirus specifically for `ethdb\mdbx\dist\CMakeFiles` folder or you can run erigon on Docker or WSL
+  workaround the issue you might either set exlusions for your antivirus specifically for `build\bin\mdbx\CMakeFiles` sub-folder of the cloned repo or you can run erigon using the following other two options
 
 * Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 

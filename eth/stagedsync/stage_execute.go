@@ -326,11 +326,9 @@ Loop:
 		case <-logEvery.C:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
 			gas = 0
-			if hasTx, ok := tx.(ethdb.HasTx); ok {
-				hasTx.Tx().CollectMetrics()
-			}
+			tx.CollectMetrics()
+			stageExecutionGauge.Update(int64(blockNum))
 		}
-		stageExecutionGauge.Update(int64(blockNum))
 	}
 
 	if err := s.Update(batch, stageProgress); err != nil {

@@ -20,7 +20,9 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -1972,6 +1974,24 @@ func trimTxs(chaindata string) error {
 		toDelete.RemoveRange(body.BaseTxId, body.BaseTxId+uint64(body.TxAmount))
 	}
 	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	// Takes 20min to iterate 1.4b
+	toDelete2 := roaring64.New()
+	var iterated int
+	for k, _, err := txs.First(); k != nil; k, _, err = txs.Next() {
+		if err != nil {
+			return err
+		}
+		toDelete2.Add(binary.BigEndian.Uint64(k))
+		iterated++
+		if iterated%100_000_000 == 0 {
+			fmt.Printf("Iterated %d\n", iterated)
+		}
+	}
+	fmt.Printf("Number of tx records: %d\n", toDelete2.GetCardinality())
+	toDelete.And(toDelete2)
+	fmt.Printf("Number of tx records to delete: %d\n", toDelete.GetCardinality())
+	fmt.Printf("Roaring size: %d\n", toDelete.GetSizeInBytes())
+
 	iter := toDelete.Iterator()
 	for {
 		var deleted int
@@ -2006,6 +2026,126 @@ func trimTxs(chaindata string) error {
 			return err
 		}
 		defer txs.Close()
+	}
+	return nil
+}
+
+func scanTxs(chaindata string) error {
+	db := kv2.MustOpen(chaindata).RwKV()
+	defer db.Close()
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c, err := tx.Cursor(dbutils.EthTx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	trTypes := make(map[byte]int)
+	trTypesAl := make(map[byte]int)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		var tr types.Transaction
+		if tr, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), 0)); err != nil {
+			return err
+		}
+		if _, ok := trTypes[tr.Type()]; !ok {
+			fmt.Printf("Example for type %d:\n%x\n", tr.Type(), v)
+		}
+		trTypes[tr.Type()]++
+		if tr.GetAccessList().StorageKeys() > 0 {
+			if _, ok := trTypesAl[tr.Type()]; !ok {
+				fmt.Printf("Example for type %d with AL:\n%x\n", tr.Type(), v)
+			}
+			trTypesAl[tr.Type()]++
+		}
+	}
+	fmt.Printf("Transaction types: %v\n", trTypes)
+	return nil
+}
+
+func scanReceipts(chaindata string) error {
+	dbdb := kv2.MustOpen(chaindata).RwKV()
+	defer dbdb.Close()
+	txtx, err := dbdb.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer txtx.Rollback()
+	var db ethdb.Database = kv2.WrapIntoTxDB(txtx)
+	var tx ethdb.Tx
+	if hasTx, ok := db.(ethdb.HasTx); ok {
+		tx = hasTx.Tx()
+	} else {
+		return fmt.Errorf("no transaction")
+	}
+	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	if err != nil {
+		return err
+	}
+	chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	if cerr != nil {
+		return cerr
+	}
+	logInterval := 30 * time.Second
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	var buf bytes.Buffer
+	var key [8]byte
+	var v []byte
+	var to uint64
+	if to, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		return err
+	}
+	for blockNum := uint64(1); blockNum <= to; blockNum++ {
+		binary.BigEndian.PutUint64(key[:], blockNum)
+		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+			return err
+		}
+		if v == nil {
+			continue
+		}
+		//fmt.Printf("blockNum = %d\n", blockNum)
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Scanned receipts up to", "block", blockNum)
+		}
+		var receipts types.Receipts
+		var oldReceipts migrations.OldReceipts
+		if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
+			continue
+		}
+
+		var blockHash common.Hash
+		if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+			return err
+		}
+		var body *types.Body
+		if chainConfig.IsBerlin(blockNum) {
+			body = rawdb.ReadBody(tx, blockHash, blockNum)
+		}
+		receipts = make(types.Receipts, len(oldReceipts))
+		for i, oldReceipt := range oldReceipts {
+			receipts[i] = new(types.Receipt)
+			receipts[i].PostState = oldReceipt.PostState
+			receipts[i].Status = oldReceipt.Status
+			receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
+			if body != nil {
+				receipts[i].Type = body.Transactions[i].Type()
+			}
+		}
+		buf.Reset()
+		if err = cbor.Marshal(&buf, receipts); err != nil {
+			return err
+		}
+		//if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+		//	return err
+		//}
 	}
 	return nil
 }
@@ -2163,6 +2303,12 @@ func main() {
 
 	case "trimTxs":
 		err = trimTxs(*chaindata)
+
+	case "scanTxs":
+		err = scanTxs(*chaindata)
+
+	case "scanReceipts":
+		err = scanReceipts(*chaindata)
 	}
 
 	if err != nil {

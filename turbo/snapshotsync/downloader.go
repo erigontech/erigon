@@ -220,7 +220,7 @@ func (cli *Client) Download() {
 	for i := range torrents {
 		t := torrents[i]
 		go func(t *torrent.Torrent) {
-			defer func() { debug.LogPanic(nil, true, recover()) }()
+			defer debug.LogPanic()
 			t.AllowDataDownload()
 			t.DownloadAll()
 

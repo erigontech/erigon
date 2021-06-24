@@ -345,7 +345,7 @@ func (f *TxFetcher) Stop() {
 }
 
 func (f *TxFetcher) loop() {
-	defer func() { debug.LogPanic(nil, true, recover()) }()
+	defer debug.LogPanic()
 	var (
 		waitTimer    = new(mclock.Timer)
 		timeoutTimer = new(mclock.Timer)
