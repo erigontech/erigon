@@ -17,11 +17,37 @@
 package txpool
 
 import (
+	"encoding/binary"
 	"fmt"
+	"hash"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 )
+
+// TxContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
+// usage of TxContext helps avoid extra memory allocations
+type TxParseContext struct {
+	keccak1       hash.Hash
+	keccak2       hash.Hash
+	v, r, s       uint256.Int // Signature values
+	n27, n28, n35 uint256.Int
+	buf           [33]byte
+	sighash       [32]byte
+	sig           [65]byte
+}
+
+func NewTxParseContext() *TxParseContext {
+	ctx := &TxParseContext{
+		keccak1: sha3.NewLegacyKeccak256(),
+		keccak2: sha3.NewLegacyKeccak256(),
+	}
+	ctx.n27.SetUint64(27)
+	ctx.n28.SetUint64(28)
+	ctx.n35.SetUint64(35)
+	return ctx
+}
 
 // TxSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxillary information, like ephemeral fields, and indices within priority queues
@@ -41,6 +67,7 @@ type TxSlot struct {
 	worstIdx    int         // Index of the transaction in the worst priority queue (of whatever pook it currently belongs to)
 	local       bool        // Whether transaction has been injected locally (and hence needs priority when mining or proposing a block)
 	idHash      [32]byte    // Transaction hash for the purposes of using it as a transaction Id
+	sender      [20]byte    // Sender address for the transaction, recovered from the signature
 }
 
 // beInt parses Big Endian representation of an integer from given payload at given position
@@ -144,13 +171,13 @@ const (
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
-func ParseTransaction(payload []byte, pos int) (*TxSlot, int, error) {
+func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, int, error) {
 	errorPrefix := "parse transaction payload"
 	if len(payload) == 0 {
 		return nil, 0, fmt.Errorf("%s: empty rlp", errorPrefix)
 	}
 	// Compute transaction hash
-	keccak := sha3.NewLegacyKeccak256()
+	ctx.keccak1.Reset()
 	var slot TxSlot
 	// Legacy transations have list prefix, whereas EIP-2718 transactions have string prefix
 	// therefore we assign the first returned value of prefix function (list) to legacy variable
@@ -169,8 +196,11 @@ func ParseTransaction(payload []byte, pos int) (*TxSlot, int, error) {
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
 		txType = int(payload[p])
-		if _, err = keccak.Write(payload[p : p+1]); err != nil {
+		if _, err = ctx.keccak1.Write(payload[p : p+1]); err != nil {
 			return nil, 0, fmt.Errorf("%s: computing idHash (hashing type prefix): %w", errorPrefix, err)
+		}
+		if _, err = ctx.keccak2.Write(payload[p : p+1]); err != nil {
+			return nil, 0, fmt.Errorf("%s: computing signHash (hashing type prefix): %w", errorPrefix, err)
 		}
 		p++
 		if p >= payloadLen {
@@ -187,11 +217,13 @@ func ParseTransaction(payload []byte, pos int) (*TxSlot, int, error) {
 			return nil, 0, fmt.Errorf("%s: unexpected end of payload after envelope", errorPrefix)
 		}
 		// Hash the envelope, not the full payload
-		if _, err = keccak.Write(payload[p : dataPos+dataLen]); err != nil {
+		if _, err = ctx.keccak1.Write(payload[p : dataPos+dataLen]); err != nil {
 			return nil, 0, fmt.Errorf("%s: computing idHash (hashing the envelope): %w", errorPrefix, err)
 		}
 		p = dataPos
 	}
+	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
+	sigHashPos := p
 	// If it is non-legacy tx, chainId follows, but we skip it
 	if !legacy {
 		dataPos, dataLen, list, err = prefix(payload, p)
@@ -348,34 +380,109 @@ func ParseTransaction(payload []byte, pos int) (*TxSlot, int, error) {
 		}
 		p = dataPos + dataLen
 	}
+	// This is where the data for sighash ends
 	// Next follows V of the signature
-	var v uint64
-	p, v, err = parseUint64(payload, p)
-	if err != nil {
-		return nil, 0, fmt.Errorf("%s: V: %w", errorPrefix, err)
-	}
-	if v >= 256 {
-		return nil, 0, fmt.Errorf("%s: V is loo large: %d", errorPrefix, v)
+	var vByte byte
+	sigHashEnd := p
+	sigHashLen := uint(sigHashEnd - sigHashPos)
+	var chainIdBits, chainIdLen int
+	if legacy {
+		p, err = parseUint256(payload, p, &ctx.v)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%s: V: %w", errorPrefix, err)
+		}
+		// Compute chainId from V
+		if ctx.v.Eq(&ctx.n27) || ctx.v.Eq(&ctx.n28) {
+			// Do not add chain id
+			vByte = byte(ctx.v.Uint64() & 1)
+		} else {
+			ctx.v.Sub(&ctx.v, &ctx.n35)
+			vByte = byte(ctx.v.Uint64() & 1)
+			ctx.v.Rsh(&ctx.v, 1)
+			chainIdBits = ctx.v.BitLen()
+			if chainIdBits <= 7 {
+				chainIdLen = 1
+			} else {
+				chainIdLen = (chainIdBits + 7) / 8 // It is always < 56 bytes
+				sigHashLen++                       // For chainId len prefix
+			}
+			sigHashLen += uint(chainIdLen) // For chainId
+		}
+	} else {
+		var v uint64
+		p, v, err = parseUint64(payload, p)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%s: V: %w", errorPrefix, err)
+		}
+		if v > 1 {
+			return nil, 0, fmt.Errorf("%s: V is loo large: %d", errorPrefix, v)
+		}
+		vByte = byte(v)
 	}
 	// Next follows R of the signature
-	var r uint256.Int
-	p, err = parseUint256(payload, p, &r)
+	p, err = parseUint256(payload, p, &ctx.r)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: R: %w", errorPrefix, err)
 	}
 	// New follows S of the signature
-	var s uint256.Int
-	p, err = parseUint256(payload, p, &s)
+	p, err = parseUint256(payload, p, &ctx.s)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: S: %w", errorPrefix, err)
 	}
 	// For legacy transactions, hash the full payload
 	if legacy {
-		// Hash the envelope, not the full payload
-		if _, err = keccak.Write(payload[pos:p]); err != nil {
+		if _, err = ctx.keccak1.Write(payload[pos:p]); err != nil {
 			return nil, 0, fmt.Errorf("%s: computing idHash: %w", errorPrefix, err)
 		}
 	}
-	keccak.Sum(slot.idHash[:0])
+	ctx.keccak1.Sum(slot.idHash[:0])
+	// Computing sigHash (hash used to recover sender from the signature)
+	// Write len prefix to the sighash
+	if sigHashLen < 56 {
+		ctx.buf[0] = byte(sigHashLen) + 128
+		if _, err := ctx.keccak2.Write(ctx.buf[:1]); err != nil {
+			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len prefix): %w", errorPrefix, err)
+		}
+	} else {
+		beLen := (bits.Len(uint(sigHashLen)) + 7) / 8
+		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
+		ctx.buf[8-beLen] = byte(beLen) + 183
+		if _, err := ctx.keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {
+			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len prefix): %w", errorPrefix, err)
+		}
+	}
+	if legacy {
+		if chainIdLen > 0 {
+			if chainIdBits <= 7 {
+				ctx.buf[0] = byte(ctx.v.Uint64())
+				if _, err := ctx.keccak2.Write(ctx.buf[:1]); err != nil {
+					return nil, 0, fmt.Errorf("%s: computing signHash (hashing legacy chainId): %w", errorPrefix, err)
+				}
+			} else {
+				binary.BigEndian.PutUint64(ctx.buf[1:9], ctx.v[3])
+				binary.BigEndian.PutUint64(ctx.buf[9:17], ctx.v[2])
+				binary.BigEndian.PutUint64(ctx.buf[17:25], ctx.v[1])
+				binary.BigEndian.PutUint64(ctx.buf[25:33], ctx.v[0])
+				ctx.buf[32-chainIdLen] = 128 + byte(chainIdLen)
+				if _, err = ctx.keccak2.Write(ctx.buf[32-chainIdLen : 33]); err != nil {
+					return nil, 0, fmt.Errorf("%s: computing signHash (hashing legacy chainId): %w", errorPrefix, err)
+				}
+			}
+		}
+	}
+	if _, err = ctx.keccak2.Write(payload[sigHashPos:sigHashEnd]); err != nil {
+		return nil, 0, fmt.Errorf("%s: computing signHash: %w", errorPrefix, err)
+	}
+	// Squeeze sighash
+	ctx.keccak2.Sum(ctx.sighash[:0])
+	binary.BigEndian.PutUint64(ctx.sig[0:8], ctx.r[3])
+	binary.BigEndian.PutUint64(ctx.sig[8:16], ctx.r[2])
+	binary.BigEndian.PutUint64(ctx.sig[16:24], ctx.r[1])
+	binary.BigEndian.PutUint64(ctx.sig[24:32], ctx.r[0])
+	binary.BigEndian.PutUint64(ctx.sig[32:40], ctx.s[3])
+	binary.BigEndian.PutUint64(ctx.sig[40:48], ctx.s[2])
+	binary.BigEndian.PutUint64(ctx.sig[48:56], ctx.s[1])
+	binary.BigEndian.PutUint64(ctx.sig[56:64], ctx.s[0])
+	ctx.sig[64] = vByte
 	return &slot, p, nil
 }
