@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 )
 
 // TxSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
@@ -39,6 +40,7 @@ type TxSlot struct {
 	bestIdx     int         // Index of the transaction in the best priority queue (of whatever pool it currently belongs to)
 	worstIdx    int         // Index of the transaction in the worst priority queue (of whatever pook it currently belongs to)
 	local       bool        // Whether transaction has been injected locally (and hence needs priority when mining or proposing a block)
+	idHash      [32]byte    // Transaction hash for the purposes of using it as a transaction Id
 }
 
 // beInt parses Big Endian representation of an integer from given payload at given position
@@ -142,69 +144,78 @@ const (
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
-func ParseTransaction(payload []byte) (*TxSlot, error) {
+func ParseTransaction(payload []byte, pos int) (*TxSlot, int, error) {
 	errorPrefix := "parse transaction payload"
 	if len(payload) == 0 {
-		return nil, fmt.Errorf("%s: empty rlp", errorPrefix)
+		return nil, 0, fmt.Errorf("%s: empty rlp", errorPrefix)
 	}
+	// Compute transaction hash
+	keccak := sha3.NewLegacyKeccak256()
+	var slot TxSlot
 	// Legacy transations have list prefix, whereas EIP-2718 transactions have string prefix
 	// therefore we assign the first returned value of prefix function (list) to legacy variable
-	dataPos, dataLen, legacy, err := prefix(payload, 0)
+	dataPos, dataLen, legacy, err := prefix(payload, pos)
 	if err != nil {
-		return nil, fmt.Errorf("%s: size prefix: %v", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: size prefix: %v", errorPrefix, err)
 	}
 	payloadLen := len(payload)
 	if dataPos+dataLen != payloadLen {
-		return nil, fmt.Errorf("%s: transaction must be either 1 list or 1 string", errorPrefix)
+		return nil, 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", errorPrefix)
 	}
-	pos := dataPos
+	p := dataPos
 
 	var txType int
 	var list bool
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
-		txType = int(payload[pos])
-		pos++
-		if pos >= payloadLen {
-			return nil, fmt.Errorf("%s: unexpected end of payload after txType", errorPrefix)
+		txType = int(payload[p])
+		if _, err = keccak.Write(payload[p : p+1]); err != nil {
+			return nil, 0, fmt.Errorf("%s: computing idHash (hashing type prefix): %w", errorPrefix, err)
 		}
-		dataPos, dataLen, list, err = prefix(payload, pos)
+		p++
+		if p >= payloadLen {
+			return nil, 0, fmt.Errorf("%s: unexpected end of payload after txType", errorPrefix)
+		}
+		dataPos, dataLen, list, err = prefix(payload, p)
 		if err != nil {
-			return nil, fmt.Errorf("%s: envelope prefix: %v", errorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: envelope prefix: %v", errorPrefix, err)
 		}
 		if !list {
-			return nil, fmt.Errorf("%s: envelop must be a list, not string", errorPrefix)
+			return nil, 0, fmt.Errorf("%s: envelope must be a list, not string", errorPrefix)
 		}
-		if dataPos+dataLen != payloadLen {
-			return nil, fmt.Errorf("%s: transaction must be fully enveloped", errorPrefix)
+		if dataPos+dataLen > payloadLen {
+			return nil, 0, fmt.Errorf("%s: unexpected end of payload after envelope", errorPrefix)
 		}
-		pos = dataPos
+		// Hash the envelope, not the full payload
+		if _, err = keccak.Write(payload[p : dataPos+dataLen]); err != nil {
+			return nil, 0, fmt.Errorf("%s: computing idHash (hashing the envelope): %w", errorPrefix, err)
+		}
+		p = dataPos
 	}
 	// If it is non-legacy tx, chainId follows, but we skip it
 	if !legacy {
-		dataPos, dataLen, list, err = prefix(payload, pos)
+		dataPos, dataLen, list, err = prefix(payload, p)
 		if err != nil {
-			return nil, fmt.Errorf("%s: chainId len: %w", errorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: chainId len: %w", errorPrefix, err)
 		}
 		if list {
-			return nil, fmt.Errorf("%s: chainId must be a string, not list", errorPrefix)
+			return nil, 0, fmt.Errorf("%s: chainId must be a string, not list", errorPrefix)
 		}
 		if dataPos+dataLen >= payloadLen {
-			return nil, fmt.Errorf("%s: unexpected end of payload after chainId", errorPrefix)
+			return nil, 0, fmt.Errorf("%s: unexpected end of payload after chainId", errorPrefix)
 		}
-		pos = dataPos + dataLen
+		p = dataPos + dataLen
 	}
 	// Next follows the nonce, which we need to parse
-	var slot TxSlot
-	pos, slot.nonce, err = parseUint64(payload, pos)
+	p, slot.nonce, err = parseUint64(payload, p)
 	if err != nil {
-		return nil, fmt.Errorf("%s: nonce: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: nonce: %w", errorPrefix, err)
 	}
 	// Next follows gas price or tip
 	// Although consensus rules specify that tip can be up to 256 bit long, we narrow it to 64 bit
-	pos, slot.tip, err = parseUint64(payload, pos)
+	p, slot.tip, err = parseUint64(payload, p)
 	if err != nil {
-		return nil, fmt.Errorf("%s: tip: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: tip: %w", errorPrefix, err)
 	}
 	// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
 	// equal to tip
@@ -212,137 +223,159 @@ func ParseTransaction(payload []byte) (*TxSlot, error) {
 		slot.feeCap = slot.tip
 	} else {
 		// Although consensus rules specify that feeCap can be up to 256 bit long, we narrow it to 64 bit
-		pos, slot.feeCap, err = parseUint64(payload, pos)
+		p, slot.feeCap, err = parseUint64(payload, p)
 		if err != nil {
-			return nil, fmt.Errorf("%s: feeCap: %w", errorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: feeCap: %w", errorPrefix, err)
 		}
 	}
 	// Next follows gas
-	pos, slot.gas, err = parseUint64(payload, pos)
+	p, slot.gas, err = parseUint64(payload, p)
 	if err != nil {
-		return nil, fmt.Errorf("%s: gas: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: gas: %w", errorPrefix, err)
 	}
 	// Next follows the destrination address (if present)
-	dataPos, dataLen, list, err = prefix(payload, pos)
+	dataPos, dataLen, list, err = prefix(payload, p)
 	if err != nil {
-		return nil, fmt.Errorf("%s: to len: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: to len: %w", errorPrefix, err)
 	}
 	if list {
-		return nil, fmt.Errorf("%s: to must be a string, not list", errorPrefix)
+		return nil, 0, fmt.Errorf("%s: to must be a string, not list", errorPrefix)
 	}
 	if dataPos+dataLen >= payloadLen {
-		return nil, fmt.Errorf("%s: unexpected end of payload after to", errorPrefix)
+		return nil, 0, fmt.Errorf("%s: unexpected end of payload after to", errorPrefix)
 	}
 	if dataLen != 0 && dataLen != 20 {
-		return nil, fmt.Errorf("%s: unexpected length of to field: %d", errorPrefix, dataLen)
+		return nil, 0, fmt.Errorf("%s: unexpected length of to field: %d", errorPrefix, dataLen)
 	}
 	// Only note if To field is empty or not
 	slot.creation = dataLen == 0
-	pos = dataPos + dataLen
+	p = dataPos + dataLen
 	// Next follows value
-	pos, err = parseUint256(payload, pos, &slot.value)
+	p, err = parseUint256(payload, p, &slot.value)
 	if err != nil {
-		return nil, fmt.Errorf("%s: value: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: value: %w", errorPrefix, err)
 	}
 	// Next goes data, but we are only interesting in its length
-	dataPos, dataLen, list, err = prefix(payload, pos)
+	dataPos, dataLen, list, err = prefix(payload, p)
 	if err != nil {
-		return nil, fmt.Errorf("%s: data len: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: data len: %w", errorPrefix, err)
 	}
 	if list {
-		return nil, fmt.Errorf("%s: data must be a string, not list", errorPrefix)
+		return nil, 0, fmt.Errorf("%s: data must be a string, not list", errorPrefix)
 	}
 	if dataPos+dataLen >= payloadLen {
-		return nil, fmt.Errorf("%s: unexpected end of payload after data", errorPrefix)
+		return nil, 0, fmt.Errorf("%s: unexpected end of payload after data", errorPrefix)
 	}
 	slot.dataLen = dataLen
-	pos = dataPos + dataLen
+	p = dataPos + dataLen
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
 	if !legacy {
-		dataPos, dataLen, list, err = prefix(payload, pos)
+		dataPos, dataLen, list, err = prefix(payload, p)
 		if err != nil {
-			return nil, fmt.Errorf("%s: access list len: %w", errorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: access list len: %w", errorPrefix, err)
 		}
 		if !list {
-			return nil, fmt.Errorf("%s: access list must be a list, not string", errorPrefix)
+			return nil, 0, fmt.Errorf("%s: access list must be a list, not string", errorPrefix)
 		}
 		if dataPos+dataLen >= payloadLen {
-			return nil, fmt.Errorf("%s: unexpected end of payload after access list", errorPrefix)
+			return nil, 0, fmt.Errorf("%s: unexpected end of payload after access list", errorPrefix)
 		}
 		tuplePos := dataPos
 		var tupleLen int
 		for tuplePos < dataPos+dataLen {
 			tuplePos, tupleLen, list, err = prefix(payload, tuplePos)
 			if err != nil {
-				return nil, fmt.Errorf("%s: tuple len: %w", errorPrefix, err)
+				return nil, 0, fmt.Errorf("%s: tuple len: %w", errorPrefix, err)
 			}
 			if !list {
-				return nil, fmt.Errorf("%s: tuple must be a list, not string", errorPrefix)
+				return nil, 0, fmt.Errorf("%s: tuple must be a list, not string", errorPrefix)
 			}
 			if tuplePos+tupleLen > dataPos+dataLen {
-				return nil, fmt.Errorf("%s: unexpected end of access list after tuple", errorPrefix)
+				return nil, 0, fmt.Errorf("%s: unexpected end of access list after tuple", errorPrefix)
 			}
 			var addrPos, addrLen int
 			addrPos, addrLen, list, err = prefix(payload, tuplePos)
 			if err != nil {
-				return nil, fmt.Errorf("%s: tuple addr len: %w", errorPrefix, err)
+				return nil, 0, fmt.Errorf("%s: tuple addr len: %w", errorPrefix, err)
 			}
 			if list {
-				return nil, fmt.Errorf("%s: tuple addr must be a string, not list", errorPrefix)
+				return nil, 0, fmt.Errorf("%s: tuple addr must be a string, not list", errorPrefix)
 			}
 			if addrPos+addrLen > tuplePos+tupleLen {
-				return nil, fmt.Errorf("%s: unexpected end of tuple after address ", errorPrefix)
+				return nil, 0, fmt.Errorf("%s: unexpected end of tuple after address ", errorPrefix)
 			}
 			if addrLen != 20 {
-				return nil, fmt.Errorf("%s: unexpected length of tuple address: %d", errorPrefix, addrLen)
+				return nil, 0, fmt.Errorf("%s: unexpected length of tuple address: %d", errorPrefix, addrLen)
 			}
 			slot.alAddrCount++
-			skeyPos := addrPos + addrLen
+			var storagePos, storageLen int
+			storagePos, storageLen, list, err = prefix(payload, addrPos+addrLen)
+			if err != nil {
+				return nil, 0, fmt.Errorf("%s: storage key list len: %w", errorPrefix, err)
+			}
+			if !list {
+				return nil, 0, fmt.Errorf("%s: storage key list must be a list, not string", errorPrefix)
+			}
+			if storagePos+storageLen > tuplePos+tupleLen {
+				return nil, 0, fmt.Errorf("%s: unexpected end of tuple after storage key list", errorPrefix)
+			}
+			skeyPos := storagePos
 			var skeyLen int
-			for skeyPos < tuplePos+tupleLen {
-				skeyPos, skeyLen, list, err = prefix(payload, tuplePos)
+			for skeyPos < storagePos+storageLen {
+				skeyPos, skeyLen, list, err = prefix(payload, skeyPos)
 				if err != nil {
-					return nil, fmt.Errorf("%s: tuple storage key len: %w", errorPrefix, err)
+					return nil, 0, fmt.Errorf("%s: tuple storage key len: %w", errorPrefix, err)
 				}
 				if list {
-					return nil, fmt.Errorf("%s: tuple storage key must be a string, not list", errorPrefix)
+					return nil, 0, fmt.Errorf("%s: tuple storage key must be a string, not list", errorPrefix)
 				}
-				if skeyPos+skeyPos > tuplePos+tuplePos {
-					return nil, fmt.Errorf("%s: unexpected end of tuple after storage key", errorPrefix)
+				if skeyPos+skeyLen > storagePos+storageLen {
+					return nil, 0, fmt.Errorf("%s: unexpected end of tuple after storage key", errorPrefix)
 				}
 				if skeyLen != 32 {
-					return nil, fmt.Errorf("%s: unexpected length of tuple storage key: %d", errorPrefix, skeyLen)
+					return nil, 0, fmt.Errorf("%s: unexpected length of tuple storage key: %d", errorPrefix, skeyLen)
 				}
 				slot.alStorCount++
 				skeyPos = skeyPos + skeyLen
 			}
+			if skeyPos != storagePos+storageLen {
+				return nil, 0, fmt.Errorf("%s: extraneous space in the tuple after storage key list", errorPrefix)
+			}
 			tuplePos = tuplePos + tupleLen
 		}
-		pos = dataPos + dataLen
+		if tuplePos != dataPos+dataLen {
+			return nil, 0, fmt.Errorf("%s: extraneous space in the access list after all tuples", errorPrefix)
+		}
+		p = dataPos + dataLen
 	}
 	// Next follows V of the signature
 	var v uint64
-	pos, v, err = parseUint64(payload, pos)
+	p, v, err = parseUint64(payload, p)
 	if err != nil {
-		return nil, fmt.Errorf("%s: V: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: V: %w", errorPrefix, err)
 	}
 	if v >= 256 {
-		return nil, fmt.Errorf("%s: V is loo large: %d", errorPrefix, v)
+		return nil, 0, fmt.Errorf("%s: V is loo large: %d", errorPrefix, v)
 	}
 	// Next follows R of the signature
 	var r uint256.Int
-	pos, err = parseUint256(payload, pos, &r)
+	p, err = parseUint256(payload, p, &r)
 	if err != nil {
-		return nil, fmt.Errorf("%s: R: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: R: %w", errorPrefix, err)
 	}
 	// New follows S of the signature
 	var s uint256.Int
-	pos, err = parseUint256(payload, pos, &s)
+	p, err = parseUint256(payload, p, &s)
 	if err != nil {
-		return nil, fmt.Errorf("%s: S: %w", errorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: S: %w", errorPrefix, err)
 	}
-	if pos != payloadLen {
-		return nil, fmt.Errorf("%s: unexpected data after end of signature", errorPrefix)
+	// For legacy transactions, hash the full payload
+	if legacy {
+		// Hash the envelope, not the full payload
+		if _, err = keccak.Write(payload[pos:p]); err != nil {
+			return nil, 0, fmt.Errorf("%s: computing idHash: %w", errorPrefix, err)
+		}
 	}
-	return &slot, nil
+	keccak.Sum(slot.idHash[:0])
+	return &slot, p, nil
 }
