@@ -99,6 +99,7 @@ type PermissionedStep struct {
 	canPropose *atomic.Bool
 }
 
+//nolint
 type EpochManager struct {
 	epochTransitionHash   common.Hash // H256,
 	epochTransitionNumber uint64      // BlockNumber
@@ -106,6 +107,7 @@ type EpochManager struct {
 	force                 bool
 }
 
+//nolint
 type unAssembledHeader struct {
 	h common.Hash // H256
 	n uint64      // BlockNumber
@@ -114,8 +116,9 @@ type unAssembledHeader struct {
 
 // RollingFinality checker for authority round consensus.
 // Stores a chain of unfinalized hashes that can be pushed onto.
+//nolint
 type RollingFinality struct {
-	headers    []unAssembledHeader
+	headers    []unAssembledHeader //nolint
 	signers    SimpleList
 	signCount  map[common.Address]uint
 	lastPushed *common.Hash // Option<H256>,
@@ -124,6 +127,7 @@ type RollingFinality struct {
 }
 
 // AuRa
+//nolint
 type AuRa struct {
 	db     ethdb.RwKV // Database to store and retrieve snapshot checkpoints
 	exitCh chan struct{}
@@ -813,7 +817,7 @@ func (s *EmptyStep) Less(other *EmptyStep) bool {
 }
 
 // Returns `true` if the message has a valid signature by the expected proposer in the message's step.
-func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) {
+func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 	//sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	//if err != nil {
 	//	return false, err

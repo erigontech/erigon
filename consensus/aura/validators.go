@@ -22,6 +22,7 @@ const (
 	CallHardCodedCode SystemOrCodeCallKind = 1
 )
 
+//nolint
 type CallResults struct {
 	data      []byte
 	proof     [][]byte
@@ -161,6 +162,7 @@ func get(s ValidatorSet, h common.Hash, nonce uint) (common.Address, error) {
 	return s.getWithCaller(h, nonce, d)
 }
 
+//nolint
 type MultiItem struct {
 	num  uint64
 	hash common.Hash
@@ -260,6 +262,7 @@ func NewSimpleList(validators []common.Address) *SimpleList {
 	return &SimpleList{validators: validators}
 }
 
+//nolint
 type ReportQueueItem struct {
 	addr     common.Address
 	blockNum uint64
@@ -270,6 +273,7 @@ type ReportQueue struct {
 	list *list.List
 }
 
+//nolint
 func (q *ReportQueue) push(addr common.Address, blockNum uint64, data []byte) {
 	q.Lock()
 	defer q.Unlock()
@@ -327,6 +331,7 @@ func (q *ReportQueue) truncate() {
 }
 
 // The validator contract should have the following interface:
+//nolint
 type ValidatorSafeContract struct {
 	contractAddress common.Address
 	validators      *lru.Cache  // RwLock<MemoryLruCache<H256, SimpleList>>,
