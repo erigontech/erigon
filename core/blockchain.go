@@ -24,6 +24,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -169,7 +170,7 @@ func ExecuteBlockEphemerally(
 
 func CallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
 	gp := new(GasPool)
-	gp.AddGas(50_0000_000)
+	gp.AddGas(50_000_000)
 	var gasUsed uint64
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
@@ -178,11 +179,15 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 	noop := state.NewNoopWriter()
 	tx, err := CallContractTx(contract, data, ibs)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("CallContract: %w ", err)
 	}
+	// Set infinite balance to the fake caller account.
+	from := ibs.GetOrNewStateObject(common.Address{})
+	from.SetBalance(uint256.NewInt(0).SetAllOne())
+
 	_, result, err = ApplyTransaction(&chainConfig, nil, engine, nil, gp, ibs, noop, header, tx, &gasUsed, vm.Config{}, nil)
 	if err != nil {
-		return result, err
+		return result, fmt.Errorf("CallContract: %w ", err)
 	}
 	return result, nil
 }
@@ -191,7 +196,7 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
 	var from common.Address
 	nonce := ibs.GetNonce(from)
-	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
+	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num1, data)
 	return tx.FakeSign(from)
 }
 
