@@ -34,7 +34,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, err
 	}
 
-	if uint64(*args.Gas) == 0 {
+	if args.Gas == nil || uint64(*args.Gas) == 0 {
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
