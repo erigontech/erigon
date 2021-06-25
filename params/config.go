@@ -299,13 +299,16 @@ var (
 							"eip214Transition": "0x0",  in Byzantium
 							"eip658Transition": "0x0",  in Byzantium
 			Byzantium also has EIP-100, EIP-196, EIP-197, EIP-198, EIP-649
+
 							"eip145Transition": 6464300,  in Constantinople
 							"eip1014Transition": 6464300, in Constantinople
 							"eip1052Transition": 6464300, in Constantinople
 							"eip1283Transition": 6464300, in Constantinople
 			Constantinople also has EIP-1234 (bomb)
+
 							"eip1283DisableTransition": 7026400, in Petersburg
 			Petersburg has nothing else
+
 							"eip1283ReenableTransition": 12095200, ????
 
 							"eip1344Transition": 12095200, in Istanbul
@@ -313,8 +316,9 @@ var (
 							"eip1884Transition": 12095200, in Istanbul
 							"eip2028Transition": 12095200, in Istanbul
 			Istanbul also has 152, 1108, 2200
-							"eip2929Transition": 21050600,
-							"eip2930Transition": 21050600
+
+							"eip2929Transition": 21050600, ???
+							"eip2930Transition": 21050600  ???
 			Berlin: not in list
 			London : not in list
 		*/
