@@ -188,13 +188,11 @@ func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*par
 
 func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
-		panic(1)
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
 	stored, storedErr := rawdb.ReadCanonicalHash(db, 0)
 	if storedErr != nil {
-		panic(storedErr)
 		return nil, nil, storedErr
 	}
 	if (stored == common.Hash{}) {
@@ -206,7 +204,6 @@ func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.C
 		}
 		block, _, err1 := genesis.Write(db, history)
 		if err1 != nil {
-			panic(err1)
 			return genesis.Config, nil, err1
 		}
 		if custom {
