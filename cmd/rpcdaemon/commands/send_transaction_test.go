@@ -28,10 +28,6 @@ func TestSendRawTransaction(t *testing.T) {
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-
-		tx, err := types.SignTx(types.NewTransaction(b.TxNonce(m.Address), common.Address{1}, uint256.NewInt(1234), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
-		require.NoError(err)
-		b.AddTx(tx)
 	}, false /* intemediateHashes */)
 	require.NoError(err)
 	{ // Do 1 step to start txPool
@@ -67,13 +63,7 @@ func TestSendRawTransaction(t *testing.T) {
 	}
 
 	expectValue := uint64(1234)
-	chain, err = core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
-		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(expectValue), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
-		require.NoError(err)
-		gen.AddTx(tx)
-
-	}, false /* intemediateHashes */)
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(err)
 
 	ctx, conn := createTestGrpcConn(t, m)
@@ -81,7 +71,6 @@ func TestSendRawTransaction(t *testing.T) {
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	api := NewEthAPI(NewBaseApi(ff), m.DB, nil, txPool, nil, 5000000)
 
-	txn := chain.TopBlock.Transactions()[0]
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
