@@ -59,6 +59,7 @@ Examples:
 		utils.SetupMinerCobra(cmd, &miningConfig)
 		db := openDB(path.Join(cfg.DataDir, "erigon", "chaindata"), true)
 		defer db.Close()
+
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
 			log.Error("Error", "err", err)
 			return nil
@@ -295,6 +296,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		defer tx.Rollback()
 
 		execAtBlock = progress(tx, stages.Execution)
+
 		if execAtBlock == stopAt {
 			break
 		}

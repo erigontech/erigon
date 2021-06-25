@@ -118,6 +118,7 @@ func executeBlock(
 		cfg.vmConfig.Debug = true
 		cfg.vmConfig.Tracer = callTracer
 	}
+
 	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, checkTEVM)
 	if err != nil {
 		return err
