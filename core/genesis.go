@@ -395,7 +395,6 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}
-
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
 	}
