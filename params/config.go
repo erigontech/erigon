@@ -294,7 +294,7 @@ var (
 		EIP155Block:         big.NewInt(0),
 		EIP158Block:         big.NewInt(0),
 		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(6464300),
 		PetersburgBlock:     big.NewInt(6464300),
 
 		IstanbulBlock:    big.NewInt(12095200),
