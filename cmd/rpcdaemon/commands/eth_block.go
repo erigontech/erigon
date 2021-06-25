@@ -155,7 +155,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	ret := map[string]interface{}{}
 	ret["results"] = results
-	ret["bundleHash"] = "0x" + common.Bytes2Hex(bundleHash.Sum(nil))
+	ret["bundleHash"] = hexutil.Encode(bundleHash.Sum(nil))
 	return ret, nil
 }
 
