@@ -186,6 +186,22 @@ func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*par
 	return c, b
 }
 
+func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+	stored, err := rawdb.ReadCanonicalHash(db, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = rawdb.DeleteCanonicalHash(db, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = rawdb.DeleteChainConfig(db, stored)
+	if err != nil {
+		return nil, nil, err
+	}
+	return WriteGenesisBlock(db, genesis, history)
+}
+
 func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
