@@ -139,6 +139,7 @@ func ExecuteBlockEphemerally(
 			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 		}
 		if !vmConfig.NoReceipts {
+			fmt.Printf("r: %#v\n", receipt)
 			receipts = append(receipts, receipt)
 		}
 	}

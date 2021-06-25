@@ -175,7 +175,7 @@ func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = core.WriteGenesisBlock(tx, g, sm.History)
+	_, _, err = g.Write(tx, sm.History)
 	if err != nil {
 		return err
 	}
