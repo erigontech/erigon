@@ -8,15 +8,16 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTxPoolContent(t *testing.T) {
-	db := createTestKV(t)
-	ctx, conn := createTestGrpcConn(t)
+	m := stages.Mock(t)
+	ctx, conn := createTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
-	api := NewTxPoolAPI(NewBaseApi(ff), db, txPool)
+	api := NewTxPoolAPI(NewBaseApi(ff), m.DB, txPool)
 
 	// Call GetTransactionReceipt for un-protected transaction
 	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

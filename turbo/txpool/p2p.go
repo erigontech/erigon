@@ -30,7 +30,7 @@ import (
 type P2PServer struct {
 	ctx       context.Context
 	Sentries  []remote.SentryClient
-	txPool    *core.TxPool
+	TxPool    *core.TxPool
 	TxFetcher *fetcher.TxFetcher
 }
 
@@ -38,7 +38,7 @@ func NewP2PServer(ctx context.Context, sentries []remote.SentryClient, txPool *c
 	cs := &P2PServer{
 		ctx:      ctx,
 		Sentries: sentries,
-		txPool:   txPool,
+		TxPool:   txPool,
 	}
 
 	return cs, nil
@@ -83,7 +83,7 @@ func (tp *P2PServer) transactions66(ctx context.Context, inreq *proto_sentry.Inb
 }
 
 func (tp *P2PServer) transactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
-	if tp.txPool == nil {
+	if tp.TxPool == nil {
 		return nil
 	}
 	var query eth.TransactionsPacket
@@ -94,14 +94,14 @@ func (tp *P2PServer) transactions65(ctx context.Context, inreq *proto_sentry.Inb
 }
 
 func (tp *P2PServer) getPooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
-	if tp.txPool == nil {
+	if tp.TxPool == nil {
 		return nil
 	}
 	var query eth.GetPooledTransactionsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding GetPooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
 	}
-	_, txs := eth.AnswerGetPooledTransactions(tp.txPool, query.GetPooledTransactionsPacket)
+	_, txs := eth.AnswerGetPooledTransactions(tp.TxPool, query.GetPooledTransactionsPacket)
 	b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
 		RequestId:                   query.RequestId,
 		PooledTransactionsRLPPacket: txs,
@@ -122,14 +122,14 @@ func (tp *P2PServer) getPooledTransactions66(ctx context.Context, inreq *proto_s
 }
 
 func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
-	if tp.txPool == nil {
+	if tp.TxPool == nil {
 		return nil
 	}
 	var query eth.GetPooledTransactionsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getPooledTransactions65: %v, data: %x", err, inreq.Data)
 	}
-	_, txs := eth.AnswerGetPooledTransactions(tp.txPool, query)
+	_, txs := eth.AnswerGetPooledTransactions(tp.TxPool, query)
 	b, err := rlp.EncodeToBytes(eth.PooledTransactionsRLPPacket(txs))
 	if err != nil {
 		return fmt.Errorf("encode getPooledTransactions65 response: %v", err)

@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/mock"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
@@ -204,12 +203,18 @@ type IsMiningMock struct{}
 
 func (*IsMiningMock) IsMining() bool { return false }
 
-func createTestGrpcConn(t *testing.T) (context.Context, *grpc.ClientConn) { //nolint
+func createTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ethashApi := ethash.NewFaker().APIs(nil)[1].Service.(*ethash.API)
+	apis := m.Engine.APIs(nil)
+	if len(apis) < 1 {
+		t.Fatal("couldn't instantiate Engine api")
+	}
+
+	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
-	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, mock.NewTestTxPool()))
+
+	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, m.TxPoolP2PServer.TxPool))
 	txpool.RegisterMiningServer(server, remotedbserver.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
 	listener := bufconn.Listen(1024 * 1024)
 
