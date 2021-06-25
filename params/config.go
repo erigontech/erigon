@@ -317,9 +317,9 @@ var (
 							"eip2028Transition": 12095200, in Istanbul
 			Istanbul also has 152, 1108, 2200
 
-							"eip2929Transition": 21050600, ???
-							"eip2930Transition": 21050600  ???
-			Berlin: not in list
+							"eip2929Transition": 21050600, in Berlin ?
+							"eip2930Transition": 21050600  in Berlin ?
+			Berlin also has  663, 1057, 1380, 1702, 1962, 1985, 2045, 2046
 			London : not in list
 		*/
 		ByzantiumBlock:      big.NewInt(0),
@@ -327,7 +327,7 @@ var (
 		PetersburgBlock:     big.NewInt(7026400),
 		IstanbulBlock:       big.NewInt(12095200),
 		MuirGlacierBlock:    nil,
-		//BerlinBlock:         big.NewInt(21050600),
+		BerlinBlock:         big.NewInt(21050600),
 		//LondonBlock:         big.NewInt(21050600),
 		Aura: &AuRaConfig{},
 	}
