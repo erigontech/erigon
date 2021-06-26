@@ -26,8 +26,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/crypto/secp256k1"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/secp256k1"
 )
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
