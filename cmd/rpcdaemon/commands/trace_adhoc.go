@@ -541,8 +541,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	usedGas := new(uint64)
-	sdMap := make(map[common.Address]*StateDiffAccount)
-	sd := &StateDiff{sdMap: sdMap}
+	var sd *StateDiff
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		var stateWriter state.StateWriter
@@ -551,6 +550,8 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		var initialIbs *state.IntraBlockState
 		if txn.Hash() == txHash {
 			if traceTypeStateDiff {
+				sdMap := make(map[common.Address]*StateDiffAccount)
+				sd = &StateDiff{sdMap: sdMap}
 				traceResult.StateDiff = sdMap
 				stateWriter = sd
 				initialIbs = ibs.Copy()
@@ -602,7 +603,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(tx)
 	} else {
-		stateReader = state.NewPlainKvState(tx, blockNumber)
+		stateReader = state.NewPlainKvState(tx, blockNumber-1)
 	}
 	ibs := state.New(stateReader)
 
@@ -655,7 +656,14 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	var sd *StateDiff
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		initialIbs = ibs.Copy()
+		if traceTypeStateDiff {
+			sdMap := make(map[common.Address]*StateDiffAccount)
+			sd = &StateDiff{sdMap: sdMap}
+			traceResult.StateDiff = sdMap
+			stateWriter = sd
+			initialIbs = ibs.Copy()
+			vmConfig = vm.Config{Debug: traceTypeTrace, Tracer: &ot}
+		}
 		_, execResult, err := core.ApplyTransaction(chainConfig, nil, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)

@@ -94,8 +94,8 @@ func TestReplayBlockTransactions(t *testing.T) {
 		t.Errorf("calling CallMany: %v", err)
 	}
 	require.NotNil(t, results)
-	require.NotNil(t, results[5].StateDiff)
-	addrDiff := results[5].StateDiff[common.HexToAddress("0x0000000000000006000000000000000000000000")]
+	require.NotNil(t, results[0].StateDiff)
+	addrDiff := results[0].StateDiff[common.HexToAddress("0x0000000000000006000000000000000000000000")]
 	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
