@@ -86,10 +86,10 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
-	BaseFee     *big.Int       `json:"baseFee"`
-	Eip1559     bool           // to avoid relying on BaseFee != nil for that
-	Seal        [][]byte       // AuRa POA network field
-	WithSeal    bool           // to avoid relying on Seal != nil for that
+	BaseFee     *big.Int       `json:"baseFeePerGas"`
+	Eip1559     bool     // to avoid relying on BaseFee != nil for that
+	Seal        [][]byte // AuRa POA network field
+	WithSeal    bool     // to avoid relying on Seal != nil for that
 }
 
 func (h Header) EncodingSize() int {
@@ -422,7 +422,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
-		//return fmt.Errorf("open header struct: %w", err)
+		// return fmt.Errorf("open header struct: %w", err)
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {

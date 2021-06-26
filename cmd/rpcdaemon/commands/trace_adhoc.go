@@ -46,8 +46,8 @@ type TraceCallParam struct {
 	To         *common.Address   `json:"to"`
 	Gas        *hexutil.Uint64   `json:"gas"`
 	GasPrice   *hexutil.Big      `json:"gasPrice"`
-	Tip        *hexutil.Big      `json:"tip"`
-	FeeCap     *hexutil.Big      `json:"feeCap"`
+	Tip        *hexutil.Big      `json:"maxPriorityFeePerGas"`
+	FeeCap     *hexutil.Big      `json:"maxFeePerGas"`
 	Value      *hexutil.Big      `json:"value"`
 	Data       hexutil.Bytes     `json:"data"`
 	AccessList *types.AccessList `json:"accessList"`

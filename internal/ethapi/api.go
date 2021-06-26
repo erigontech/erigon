@@ -329,8 +329,8 @@ type CallArgs struct {
 	To         *common.Address   `json:"to"`
 	Gas        *hexutil.Uint64   `json:"gas"`
 	GasPrice   *hexutil.Big      `json:"gasPrice"`
-	Tip        *hexutil.Big      `json:"tip"`
-	FeeCap     *hexutil.Big      `json:"feeCap"`
+	Tip        *hexutil.Big      `json:"maxPriorityFeePerGas"`
+	FeeCap     *hexutil.Big      `json:"maxFeePerGas"`
 	Value      *hexutil.Big      `json:"value"`
 	Data       *hexutil.Bytes    `json:"data"`
 	AccessList *types.AccessList `json:"accessList"`
@@ -729,7 +729,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 
 // RPCMarshalHeader converts the given header to the RPC output .
 func RPCMarshalHeader(head *types.Header) map[string]interface{} {
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"number":           (*hexutil.Big)(head.Number),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,
@@ -748,6 +748,11 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"transactionsRoot": head.TxHash,
 		"receiptsRoot":     head.ReceiptHash,
 	}
+	if head.BaseFee != nil {
+		result["baseFeePerGas"] = (*hexutil.Big)(head.BaseFee)
+	}
+
+	return result
 }
 
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
@@ -817,8 +822,8 @@ type RPCTransaction struct {
 	From             common.Address    `json:"from"`
 	Gas              hexutil.Uint64    `json:"gas"`
 	GasPrice         *hexutil.Big      `json:"gasPrice,omitempty"`
-	Tip              *hexutil.Big      `json:"tip,omitempty"`
-	FeeCap           *hexutil.Big      `json:"feeCap,omitempty"`
+	Tip              *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
+	FeeCap           *hexutil.Big      `json:"maxFeePerGas,omitempty"`
 	Hash             common.Hash       `json:"hash"`
 	Input            hexutil.Bytes     `json:"input"`
 	Nonce            hexutil.Uint64    `json:"nonce"`
