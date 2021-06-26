@@ -24,7 +24,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto/secp256k1"
+	"github.com/ledgerwatch/secp256k1"
 )
 
 // Ecrecover returns the uncompressed public key that created the given signature.
@@ -34,7 +34,7 @@ func Ecrecover(hash, sig []byte) ([]byte, error) {
 
 // Ecrecover returns the uncompressed public key that created the given signature.
 func EcrecoverWithContext(context *secp256k1.Context, hash, sig []byte) ([]byte, error) {
-	return secp256k1.RecoverPubkeyWithContext(context, hash, sig)
+	return secp256k1.RecoverPubkeyWithContext(context, hash, sig, nil)
 }
 
 // SigToPub returns the public key that created the given signature.
