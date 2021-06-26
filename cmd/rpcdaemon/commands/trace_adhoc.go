@@ -543,6 +543,9 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	usedGas := new(uint64)
 	var sd *StateDiff
 	for i, txn := range block.Transactions() {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		var stateWriter state.StateWriter
 		vmConfig := vm.Config{}
@@ -655,6 +658,9 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	stateWriter = state.NewNoopWriter()
 	var sd *StateDiff
 	for i, txn := range block.Transactions() {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		if traceTypeStateDiff {
 			sdMap := make(map[common.Address]*StateDiffAccount)
