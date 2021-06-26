@@ -31,7 +31,7 @@ import (
 type TxParseContext struct {
 	keccak1       hash.Hash
 	keccak2       hash.Hash
-	v, r, s       uint256.Int // Signature values
+	chainId, r, s uint256.Int // Signature values
 	n27, n28, n35 uint256.Int
 	buf           [33]byte
 	sighash       [32]byte
@@ -178,6 +178,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	}
 	// Compute transaction hash
 	ctx.keccak1.Reset()
+	ctx.keccak2.Reset()
 	var slot TxSlot
 	// Legacy transations have list prefix, whereas EIP-2718 transactions have string prefix
 	// therefore we assign the first returned value of prefix function (list) to legacy variable
@@ -387,19 +388,19 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	sigHashLen := uint(sigHashEnd - sigHashPos)
 	var chainIdBits, chainIdLen int
 	if legacy {
-		p, err = parseUint256(payload, p, &ctx.v)
+		p, err = parseUint256(payload, p, &ctx.chainId)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: V: %w", errorPrefix, err)
 		}
 		// Compute chainId from V
-		if ctx.v.Eq(&ctx.n27) || ctx.v.Eq(&ctx.n28) {
-			// Do not add chain id
-			vByte = byte(ctx.v.Uint64() & 1)
+		if ctx.chainId.Eq(&ctx.n27) || ctx.chainId.Eq(&ctx.n28) {
+			// Do not add chain id and two extra zeros
+			vByte = byte(ctx.chainId.Uint64() & 1)
 		} else {
-			ctx.v.Sub(&ctx.v, &ctx.n35)
-			vByte = byte(ctx.v.Uint64() & 1)
-			ctx.v.Rsh(&ctx.v, 1)
-			chainIdBits = ctx.v.BitLen()
+			ctx.chainId.Sub(&ctx.chainId, &ctx.n35)
+			vByte = byte(ctx.chainId.Uint64() & 1)
+			ctx.chainId.Rsh(&ctx.chainId, 1)
+			chainIdBits = ctx.chainId.BitLen()
 			if chainIdBits <= 7 {
 				chainIdLen = 1
 			} else {
@@ -407,6 +408,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 				sigHashLen++                       // For chainId len prefix
 			}
 			sigHashLen += uint(chainIdLen) // For chainId
+			sigHashLen += 2                // For two extra zeros
 		}
 	} else {
 		var v uint64
@@ -439,39 +441,45 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	// Computing sigHash (hash used to recover sender from the signature)
 	// Write len prefix to the sighash
 	if sigHashLen < 56 {
-		ctx.buf[0] = byte(sigHashLen) + 128
+		ctx.buf[0] = byte(sigHashLen) + 192
 		if _, err := ctx.keccak2.Write(ctx.buf[:1]); err != nil {
 			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len prefix): %w", errorPrefix, err)
 		}
 	} else {
 		beLen := (bits.Len(uint(sigHashLen)) + 7) / 8
 		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
-		ctx.buf[8-beLen] = byte(beLen) + 183
+		ctx.buf[8-beLen] = byte(beLen) + 247
 		if _, err := ctx.keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {
 			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len prefix): %w", errorPrefix, err)
 		}
 	}
+	if _, err = ctx.keccak2.Write(payload[sigHashPos:sigHashEnd]); err != nil {
+		return nil, 0, fmt.Errorf("%s: computing signHash: %w", errorPrefix, err)
+	}
 	if legacy {
 		if chainIdLen > 0 {
 			if chainIdBits <= 7 {
-				ctx.buf[0] = byte(ctx.v.Uint64())
+				ctx.buf[0] = byte(ctx.chainId.Uint64())
 				if _, err := ctx.keccak2.Write(ctx.buf[:1]); err != nil {
 					return nil, 0, fmt.Errorf("%s: computing signHash (hashing legacy chainId): %w", errorPrefix, err)
 				}
 			} else {
-				binary.BigEndian.PutUint64(ctx.buf[1:9], ctx.v[3])
-				binary.BigEndian.PutUint64(ctx.buf[9:17], ctx.v[2])
-				binary.BigEndian.PutUint64(ctx.buf[17:25], ctx.v[1])
-				binary.BigEndian.PutUint64(ctx.buf[25:33], ctx.v[0])
+				binary.BigEndian.PutUint64(ctx.buf[1:9], ctx.chainId[3])
+				binary.BigEndian.PutUint64(ctx.buf[9:17], ctx.chainId[2])
+				binary.BigEndian.PutUint64(ctx.buf[17:25], ctx.chainId[1])
+				binary.BigEndian.PutUint64(ctx.buf[25:33], ctx.chainId[0])
 				ctx.buf[32-chainIdLen] = 128 + byte(chainIdLen)
 				if _, err = ctx.keccak2.Write(ctx.buf[32-chainIdLen : 33]); err != nil {
 					return nil, 0, fmt.Errorf("%s: computing signHash (hashing legacy chainId): %w", errorPrefix, err)
 				}
 			}
+			// Encode two zeros
+			ctx.buf[0] = 128
+			ctx.buf[1] = 128
+			if _, err := ctx.keccak2.Write(ctx.buf[:2]); err != nil {
+				return nil, 0, fmt.Errorf("%s: computing signHash (hashing zeros after legacy chainId): %w", errorPrefix, err)
+			}
 		}
-	}
-	if _, err = ctx.keccak2.Write(payload[sigHashPos:sigHashEnd]); err != nil {
-		return nil, 0, fmt.Errorf("%s: computing signHash: %w", errorPrefix, err)
 	}
 	// Squeeze sighash
 	ctx.keccak2.Sum(ctx.sighash[:0])
