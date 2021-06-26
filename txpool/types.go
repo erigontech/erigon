@@ -23,6 +23,7 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -33,15 +34,17 @@ type TxParseContext struct {
 	keccak2       hash.Hash
 	chainId, r, s uint256.Int // Signature values
 	n27, n28, n35 uint256.Int
-	buf           [33]byte
+	buf           [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
 	sighash       [32]byte
 	sig           [65]byte
+	recCtx        *secp256k1.Context // Context for sender recovery
 }
 
 func NewTxParseContext() *TxParseContext {
 	ctx := &TxParseContext{
 		keccak1: sha3.NewLegacyKeccak256(),
 		keccak2: sha3.NewLegacyKeccak256(),
+		recCtx:  secp256k1.NewContext(),
 	}
 	ctx.n27.SetUint64(27)
 	ctx.n28.SetUint64(28)
@@ -392,13 +395,14 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: V: %w", errorPrefix, err)
 		}
+		fmt.Printf("Legacy V: %d\n", ctx.chainId)
 		// Compute chainId from V
 		if ctx.chainId.Eq(&ctx.n27) || ctx.chainId.Eq(&ctx.n28) {
 			// Do not add chain id and two extra zeros
-			vByte = byte(ctx.chainId.Uint64() & 1)
+			vByte = byte(ctx.chainId.Uint64() - 27)
 		} else {
 			ctx.chainId.Sub(&ctx.chainId, &ctx.n35)
-			vByte = byte(ctx.chainId.Uint64() & 1)
+			vByte = byte(1 - (ctx.chainId.Uint64() & 1))
 			ctx.chainId.Rsh(&ctx.chainId, 1)
 			chainIdBits = ctx.chainId.BitLen()
 			if chainIdBits <= 7 {
@@ -492,5 +496,18 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	binary.BigEndian.PutUint64(ctx.sig[48:56], ctx.s[1])
 	binary.BigEndian.PutUint64(ctx.sig[56:64], ctx.s[0])
 	ctx.sig[64] = vByte
+	// recover sender
+	if _, err = secp256k1.RecoverPubkeyWithContext(ctx.recCtx, ctx.sighash[:], ctx.sig[:], ctx.buf[:0]); err != nil {
+		return nil, 0, fmt.Errorf("%s: recovering sender from signature: %w", errorPrefix, err)
+	}
+	// apply keccak to the public key
+	ctx.keccak2.Reset()
+	if _, err = ctx.keccak2.Write(ctx.buf[1:65]); err != nil {
+		return nil, 0, fmt.Errorf("%s: computing sender from public key: %w", errorPrefix, err)
+	}
+	// squeeze the hash of the public key
+	ctx.keccak2.Sum(ctx.buf[:0])
+	// take last 20 bytes as address
+	copy(slot.sender[:], ctx.buf[12:32])
 	return &slot, p, nil
 }

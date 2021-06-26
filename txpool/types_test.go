@@ -80,17 +80,6 @@ func TestParseTransactionRLP(t *testing.T) {
 					t.Errorf("signHash expected %x, got %x", signHash, ctx.sighash)
 				}
 			}
-			/*
-				if tt.senderStr != "" {
-					var sender []byte
-					if sender, err = hex.DecodeString(tt.senderStr); err != nil {
-						t.Fatal(err)
-					}
-					if !bytes.Equal(sender, tx.sender[:]) {
-						t.Errorf("sender expected %x, got %x", sender, tx.sender)
-					}
-				}
-			*/
 			if tt.idHashStr != "" {
 				var idHash []byte
 				if idHash, err = hex.DecodeString(tt.idHashStr); err != nil {
@@ -98,6 +87,15 @@ func TestParseTransactionRLP(t *testing.T) {
 				}
 				if !bytes.Equal(idHash, tx.idHash[:]) {
 					t.Errorf("idHash expected %x, got %x", idHash, tx.idHash)
+				}
+			}
+			if tt.senderStr != "" {
+				var sender []byte
+				if sender, err = hex.DecodeString(tt.senderStr); err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(sender, tx.sender[:]) {
+					t.Errorf("sender expected %x, got %x", sender, tx.sender)
 				}
 			}
 			fmt.Printf("tx nonce: %d\n", tx.nonce)
