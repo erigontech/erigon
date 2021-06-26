@@ -88,14 +88,14 @@ func TestReplayBlockTransactions(t *testing.T) {
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
-	n := rpc.BlockNumber(5)
+	n := rpc.BlockNumber(6)
 	results, err := api.ReplayBlockTransactions(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"})
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)
-	addrDiff := results[0].StateDiff[common.HexToAddress("0x0000000000000006000000000000000000000000")]
+	addrDiff := results[0].StateDiff[common.HexToAddress("0x0000000000000020000000000000000000000000")]
 	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
