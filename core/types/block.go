@@ -87,9 +87,9 @@ type Header struct {
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFeePerGas"`
-	Eip1559     bool     // to avoid relying on BaseFee != nil for that
-	Seal        [][]byte // AuRa POA network field
-	WithSeal    bool     // to avoid relying on Seal != nil for that
+	Eip1559     bool           // to avoid relying on BaseFee != nil for that
+	Seal        [][]byte       // AuRa POA network field
+	WithSeal    bool           // to avoid relying on Seal != nil for that
 }
 
 func (h Header) EncodingSize() int {
