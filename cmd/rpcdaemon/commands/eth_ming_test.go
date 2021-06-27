@@ -9,11 +9,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPendingBlock(t *testing.T) {
-	ctx, conn := createTestGrpcConn(t)
+	ctx, conn := createTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
 	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)
@@ -38,7 +39,7 @@ func TestPendingBlock(t *testing.T) {
 }
 
 func TestPendingLogs(t *testing.T) {
-	ctx, conn := createTestGrpcConn(t)
+	ctx, conn := createTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
 	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)

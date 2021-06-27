@@ -41,28 +41,29 @@ import (
 
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
-	Ctx           context.Context
-	t             *testing.T
-	cancel        context.CancelFunc
-	DB            ethdb.RwKV
-	tmpdir        string
-	Engine        consensus.Engine
-	ChainConfig   *params.ChainConfig
-	Sync          *stagedsync.StagedSync
-	MiningSync    *stagedsync.StagedSync
-	PendingBlocks chan *types.Block
-	MinedBlocks   chan *types.Block
-	downloader    *download.ControlServerImpl
-	Key           *ecdsa.PrivateKey
-	Genesis       *types.Block
-	SentryClient  remote.SentryClient
-	PeerId        *ptypes.H512
-	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
-	streams       map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
-	sentMessages  []*proto_sentry.OutboundMessageData
-	StreamWg      sync.WaitGroup
-	ReceiveWg     sync.WaitGroup
-	Address       common.Address
+	Ctx             context.Context
+	t               *testing.T
+	cancel          context.CancelFunc
+	DB              ethdb.RwKV
+	tmpdir          string
+	Engine          consensus.Engine
+	ChainConfig     *params.ChainConfig
+	Sync            *stagedsync.StagedSync
+	MiningSync      *stagedsync.StagedSync
+	PendingBlocks   chan *types.Block
+	MinedBlocks     chan *types.Block
+	downloader      *download.ControlServerImpl
+	Key             *ecdsa.PrivateKey
+	Genesis         *types.Block
+	SentryClient    remote.SentryClient
+	PeerId          *ptypes.H512
+	TxPoolP2PServer *txpool.P2PServer
+	UpdateHead      func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
+	streams         map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
+	sentMessages    []*proto_sentry.OutboundMessageData
+	StreamWg        sync.WaitGroup
+	ReceiveWg       sync.WaitGroup
+	Address         common.Address
 }
 
 // Stream returns stream, waiting if necessary
@@ -173,7 +174,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	txPoolConfig.StartOnInit = true
 	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
 	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
-	txPoolP2PServer, err := txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
+	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -182,11 +183,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 	}
 	fetchTx := func(PeerId string, hashes []common.Hash) error {
-		txPoolP2PServer.SendTxsRequest(context.TODO(), PeerId, hashes)
+		mock.TxPoolP2PServer.SendTxsRequest(context.TODO(), PeerId, hashes)
 		return nil
 	}
 
-	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
+	mock.TxPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 	// Committed genesis will be shared between download and mock sentry
 	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, sm.History)
 	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
@@ -260,9 +261,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 			mock.StreamWg.Add(1)
-			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, txPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
 			mock.StreamWg.Wait()
-			txPoolP2PServer.TxFetcher.Start()
+			mock.TxPoolP2PServer.TxFetcher.Start()
 		}),
 		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
 		true, /* test */
@@ -300,7 +301,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		t.Cleanup(func() {
 			mock.cancel()
 			txPool.Stop()
-			txPoolP2PServer.TxFetcher.Stop()
+			mock.TxPoolP2PServer.TxFetcher.Stop()
 		})
 	}
 	return mock
