@@ -285,21 +285,49 @@ var (
 	}
 
 	SokolChainConfig = &ChainConfig{
-		ChainName:           SokolChainName,
-		ChainID:             big.NewInt(77),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
+		ChainName:      SokolChainName,
+		ChainID:        big.NewInt(77),
+		HomesteadBlock: big.NewInt(0),
+		DAOForkBlock:   nil,
+		DAOForkSupport: true,
+		EIP150Block:    big.NewInt(0),
+		EIP155Block:    big.NewInt(0),
+		EIP158Block:    big.NewInt(0),
+		/*
+							"eip140Transition": "0x0",  in Byzantium
+							"eip211Transition": "0x0",  in Byzantium
+							"eip214Transition": "0x0",  in Byzantium
+							"eip658Transition": "0x0",  in Byzantium
+			Byzantium also has EIP-100, EIP-196, EIP-197, EIP-198, EIP-649
+
+							"eip145Transition": 6464300,  in Constantinople
+							"eip1014Transition": 6464300, in Constantinople
+							"eip1052Transition": 6464300, in Constantinople
+							"eip1283Transition": 6464300, in Constantinople
+			Constantinople also has EIP-1234 (bomb)
+
+							"eip1283DisableTransition": 7026400, in Petersburg
+			Petersburg has nothing else
+
+							"eip1283ReenableTransition": 12095200, ????
+
+							"eip1344Transition": 12095200, in Istanbul
+							"eip1706Transition": 12095200,  ???? [EIP-2200] has superseded [EIP-1706]
+							"eip1884Transition": 12095200, in Istanbul
+							"eip2028Transition": 12095200, in Istanbul
+			Istanbul also has 152, 1108, 2200
+
+							"eip2929Transition": 21050600, in Berlin ?
+							"eip2930Transition": 21050600  in Berlin ?
+			Berlin also has  663, 1057, 1380, 1702, 1962, 1985, 2045, 2046
+			London : not in list
+		*/
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(6464300),
-		PetersburgBlock:     big.NewInt(6464300),
-
-		IstanbulBlock:    big.NewInt(12095200),
-		MuirGlacierBlock: nil,
-		BerlinBlock:      big.NewInt(21050600),
+		PetersburgBlock:     big.NewInt(7026400),
+		IstanbulBlock:       big.NewInt(12095200),
+		MuirGlacierBlock:    nil,
+		BerlinBlock:         big.NewInt(21050600),
 		//LondonBlock:         big.NewInt(21050600),
 		Aura: &AuRaConfig{},
 	}

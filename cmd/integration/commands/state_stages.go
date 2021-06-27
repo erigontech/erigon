@@ -378,9 +378,9 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 	return nil
 }
 
-func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db ethdb.Tx, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {
+func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, tx ethdb.Tx, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock uint64, historyEnabled bool) error {
 	for blockN := range expectedAccountChanges {
-		if err := checkChangeSet(db, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
+		if err := checkChangeSet(tx, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 			return err
 		}
 		delete(expectedAccountChanges, blockN)
@@ -388,10 +388,10 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, db eth
 	}
 
 	if historyEnabled {
-		if err := checkHistory(db, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(tx, dbutils.AccountChangeSetBucket, execAtBlock); err != nil {
 			return err
 		}
-		if err := checkHistory(db, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
+		if err := checkHistory(tx, dbutils.StorageChangeSetBucket, execAtBlock); err != nil {
 			return err
 		}
 	}
@@ -587,12 +587,16 @@ func checkChangeSet(db ethdb.Tx, blockNum uint64, expectedAccountChanges *change
 	return nil
 }
 
-func checkHistory(db ethdb.Tx, changeSetBucket string, blockNum uint64) error {
+func checkHistory(tx ethdb.Tx, changeSetBucket string, blockNum uint64) error {
 	indexBucket := changeset.Mapper[changeSetBucket].IndexBucket
 	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
-	if err := changeset.Walk(db, changeSetBucket, blockNumBytes, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, changeSetBucket, blockNumBytes, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		k := dbutils.CompositeKeyWithoutIncarnation(address)
-		bm, innerErr := bitmapdb.Get64(db, indexBucket, k, blockN-1, blockN+1)
+		from := blockN
+		if from > 0 {
+			from--
+		}
+		bm, innerErr := bitmapdb.Get64(tx, indexBucket, k, from, blockN+1)
 		if innerErr != nil {
 			return false, innerErr
 		}

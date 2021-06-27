@@ -176,8 +176,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | trace_call                                 | Yes     |                                            |
 | trace_callMany                             | Yes     |                                            |
 | trace_rawTransaction                       | -       | not yet implemented (come help!)           |
-| trace_replayBlockTransactions              | -       | not yet implemented (come help!)           |
-| trace_replayTransaction                    | -       | not yet implemented (come help!)           |
+| trace_replayBlockTransactions              | yes     | stateDiff only (come help!)                |
+| trace_replayTransaction                    | yes     | stateDiff only (come help!)                |
 | trace_block                                | Yes     |                                            |
 | trace_filter                               | Yes     | no pagination, but streaming               |
 | trace_get                                  | Yes     |                                            |
