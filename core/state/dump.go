@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -161,8 +160,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     strings.TrimPrefix(common.Bytes2Hex(emptyHash[:]), "0x"), // We cannot provide historical storage hash
-			CodeHash: strings.TrimPrefix(common.Bytes2Hex(emptyCodeHash[:]), "0x"),
+			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
