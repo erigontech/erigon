@@ -108,10 +108,10 @@ tracker:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
-db-tools:
+db-tools: libmdbx
 	@echo "Building db-tools"
-	cc --version
-	cd libmdbx && ls -la && MDBX_BUILD_TIMESTAMP=unknown make tools
+	git submodule update --init --recursive
+	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
 	cp libmdbx/mdbx_dump $(GOBIN)
