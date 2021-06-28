@@ -24,12 +24,14 @@ import (
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/remote"
@@ -321,6 +323,13 @@ func Mock(t *testing.T) *MockSentry {
 	return MockWithGenesis(t, gspec, key)
 }
 
+func (ms *MockSentry) EnableLogs() {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	ms.t.Cleanup(func() {
+		log.Root().SetHandler(log.Root().GetHandler())
+	})
+}
+
 func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	// Send NewBlock message
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
@@ -379,6 +388,13 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if err = ms.DB.View(ms.Ctx, func(tx ethdb.Tx) error {
 		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+		}
+		execAt, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if execAt == 0 {
+			return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress = 0")
 		}
 		return nil
 	}); err != nil {

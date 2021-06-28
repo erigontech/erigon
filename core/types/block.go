@@ -88,7 +88,7 @@ type Header struct {
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFee"`
 	Eip1559     bool           // to avoid relying on BaseFee != nil for that
-	Seal        [][]byte       // AuRa POA network field
+	Seal        []rlp.RawValue // AuRa POA network field
 	WithSeal    bool           // to avoid relying on Seal != nil for that
 }
 
@@ -984,7 +984,7 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.Extra, h.Extra)
 	}
 	if len(h.Seal) > 0 {
-		cpy.Seal = make([][]byte, len(h.Seal))
+		cpy.Seal = make([]rlp.RawValue, len(h.Seal))
 		for i := range h.Seal {
 			cpy.Seal[i] = common.CopyBytes(h.Seal[i])
 		}

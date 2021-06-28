@@ -20,6 +20,7 @@ package aura
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"sort"
@@ -198,10 +199,16 @@ func (pb *GasLimitOverride) Add(hash common.Hash, b *uint256.Int) {
 	pb.cache.ContainsOrAdd(hash, b)
 }
 
-// NewAuRa creates a Clique proof-of-authority consensus engine with the initial
-// signers set to the ones provided by the user.
-func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Address, auraParams AuthorityRoundParams) (*AuRa, error) {
-	config := cfg.Aura
+func NewAuRa(config *params.AuRaConfig, db ethdb.RwKV, ourSigningAddress common.Address, engineParamsJson []byte) (*AuRa, error) {
+	spec := JsonSpec{}
+	err := json.Unmarshal(engineParamsJson, &spec)
+	if err != nil {
+		return nil, err
+	}
+	auraParams, err := FromJson(spec)
+	if err != nil {
+		return nil, err
+	}
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
 		return nil, fmt.Errorf("authority Round step 0 duration is undefined")
@@ -456,14 +463,12 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	}
 }
 
-// FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
-// nor block rewards given, and returns the final block.
+// FinalizeAndAssemble implements consensus.Engine
 func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts []*types.Receipt, syscall consensus.SystemCall) (*types.Block, error) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	//header.UncleHash = types.CalcUncleHash(nil)
+	c.Finalize(chainConfig, header, state, txs, uncles, syscall)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts), nil
+	return types.NewBlock(header, txs, uncles, receipts), nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -549,17 +554,39 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	//return nil
 }
 
-// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-// that a new block should have:
-// * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
-// * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
-	return nil
-	//snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
-	//if err != nil {
-	//	return nil
-	//}
-	//return calcDifficulty(snap, c.signer)
+func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
+	var parentStep uint64
+	err := rlp.Decode(bytes.NewReader(parentSeal[0]), &parentStep)
+	if err != nil {
+		panic(err)
+	}
+	currentStep := c.step.inner.inner.Load()
+	currentEmptyStepsLen := 0
+	if time >= c.cfg.EmptyStepsTransition {
+		currentEmptyStepsLen = len(c.emptySteps(parentStep, currentStep, parentHash))
+	}
+	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
+
+	/* TODO: do I need gasLimit override logic here ?
+	if let Some(gas_limit) = self.gas_limit_override(header) {
+		trace!(target: "engine", "Setting gas limit to {} for block {}.", gas_limit, header.number());
+		let parent_gas_limit = *parent.gas_limit();
+		header.set_gas_limit(gas_limit);
+		if parent_gas_limit != gas_limit {
+			info!(target: "engine", "Block gas limit was changed from {} to {}.", parent_gas_limit, gas_limit);
+		}
+	}
+	*/
+}
+
+// calculateScore - analog of PoW difficulty: total weight is sqrt(U256::max_value())*height - step
+func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
+	maxU128 := uint256.NewInt(0).SetAllOne()
+	maxU128 = maxU128.Rsh(maxU128, 128)
+	res := maxU128.Add(maxU128, uint256.NewInt(parentStep))
+	res = res.Sub(res, uint256.NewInt(currentStep))
+	res = res.Add(res, uint256.NewInt(currentEmptySteps))
+	return res
 }
 
 func (c *AuRa) SealHash(header *types.Header) common.Hash {
@@ -585,11 +612,11 @@ func (c *AuRa) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
-func (c *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
+func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
 	from := EmptyStep{step: fromStep + 1, parentHash: parentHash}
 	to := EmptyStep{step: toStep}
 	res := []EmptyStep{}
-	if to.Less(&from) {
+	if to.LessOrEqual(&from) {
 		return res
 	}
 
@@ -627,7 +654,7 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 					return err
 				}
 				currentStep := aura.step.inner.inner.Load()
-				emptySteps = aura.EmptySteps(parentStep, currentStep, parent.Hash())
+				emptySteps = aura.emptySteps(parentStep, currentStep, parent.Hash())
 
 				return nil
 			}); err != nil {
@@ -811,6 +838,18 @@ func (s *EmptyStep) Less(other *EmptyStep) bool {
 		return true
 	}
 	if bytes.Compare(s.signature, other.signature) < 0 {
+		return true
+	}
+	return false
+}
+func (s *EmptyStep) LessOrEqual(other *EmptyStep) bool {
+	if s.step <= other.step {
+		return true
+	}
+	if bytes.Compare(s.parentHash[:], other.parentHash[:]) <= 0 {
+		return true
+	}
+	if bytes.Compare(s.signature, other.signature) <= 0 {
 		return true
 	}
 	return false
