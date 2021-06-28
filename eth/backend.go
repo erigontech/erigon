@@ -411,7 +411,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 	}
 
-	go txpropagate.SendPendingTxsToRpcDaemon(backend.downloadV2Ctx, backend.txPool, backend.events)
 	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadV2Ctx, backend.txPool, backend.downloadServer)
 
 	go func() {
