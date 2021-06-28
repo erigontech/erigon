@@ -359,24 +359,15 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		}
 	}()
 	wg.Wait()
-	decodeSeal := func(in []byte) []rlp.RawValue {
-		s := rlp.NewStream(bytes.NewReader(in), uint64(len(in)))
-		l, err := s.List()
+	decodeSeal := func(in []byte) (seal []rlp.RawValue) {
+		if len(in) == 0 {
+			return nil
+		}
+		err := rlp.Decode(bytes.NewReader(in), &seal)
 		if err != nil {
 			panic(err)
 		}
-		_ = l
-		r, err := s.Raw()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("list: %d, %d\n", l, len(r))
-		r, err = s.Raw()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("list: %d, %d\n", l, len(r))
-		return nil
+		return seal
 	}
 
 	head := &types.Header{
