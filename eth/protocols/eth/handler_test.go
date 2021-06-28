@@ -136,8 +136,8 @@ func (b *testBackend) GetBlockHashesFromHash(tx ethdb.Tx, hash common.Hash, max 
 }
 
 // Tests that block headers can be retrieved from a remote chain based on user queries.
+func TestGetBlockHeaders64(t *testing.T) { testGetBlockHeaders(t, 64) }
 func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
-func TestGetBlockHeaders66(t *testing.T) { testGetBlockHeaders(t, 66) }
 
 func testGetBlockHeaders(t *testing.T, protocol uint) {
 	backend := newTestBackend(t, eth.MaxHeadersServe+15)
@@ -310,8 +310,8 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 }
 
 // Tests that block contents can be retrieved from a remote chain based on their hashes.
+func TestGetBlockBodies64(t *testing.T) { testGetBlockBodies(t, 64) }
 func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
-func TestGetBlockBodies66(t *testing.T) { testGetBlockBodies(t, 66) }
 
 func testGetBlockBodies(t *testing.T, protocol uint) {
 	backend := newTestBackend(t, eth.MaxBodiesServe+15)
@@ -394,6 +394,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 }
 
 // Tests that the transaction receipts can be retrieved based on hashes.
+func TestGetBlockReceipts64(t *testing.T) { testGetBlockReceipts(t, 64) }
 func TestGetBlockReceipts65(t *testing.T) { testGetBlockReceipts(t, 65) }
 func TestGetBlockReceipts66(t *testing.T) { testGetBlockReceipts(t, 66) }
 
