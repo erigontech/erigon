@@ -108,6 +108,145 @@ type EpochManager struct {
 	force                 bool
 }
 
+// zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
+// It's analog of zoom_to_after function in OE, but doesn't require external locking
+func (e *EpochManager) zoomValidators(chain consensus.ChainHeaderReader, validators ValidatorSet, hash common.Hash) (ValidatorSet, uint64, bool) {
+	var last_was_parent bool
+	if e.finalityChecker.lastPushed != nil {
+		last_was_parent = *e.finalityChecker.lastPushed == hash
+	}
+
+	// early exit for current target == chain head, but only if the epochs are
+	// the same.
+	if last_was_parent && !e.force {
+		return true
+	}
+	e.force = false
+
+	// epoch_transition_for can be an expensive call, but in the absence of
+	// forks it will only need to be called for the block directly after
+	// epoch transition, in which case it will be O(1) and require a single
+	// DB lookup.
+	last_transition := client.epoch_transition_for(hash)
+	{
+		Some(t) => t,
+		None => {
+		// this really should never happen unless the block passed
+		// hasn't got a parent in the database.
+		debug
+		!(target: "engine", "No genesis transition found.")
+		return false
+	}
+	}
+	/*
+
+
+	       // extract other epoch set if it's not the same as the last.
+	       if last_transition.block_hash != self.epoch_transition_hash {
+	           let (signal_number, set_proof, _) = destructure_proofs(&last_transition.proof)
+	               .expect("proof produced by this engine; therefore it is valid; qed");
+
+	           trace!(
+	               target: "engine",
+	               "extracting epoch validator set for epoch ({}, {}) signalled at #{}",
+	               last_transition.block_number, last_transition.block_hash, signal_number
+	           );
+
+	           let first = signal_number == 0;
+	           let (list, _) = validators
+	               .epoch_set(
+	                   first,
+	                   machine,
+	                   signal_number, // use signal number so multi-set first calculation is correct.
+	                   set_proof,
+	               )
+	               .expect("proof produced by this engine; therefore it is valid; qed");
+	           trace!(
+	               target: "engine",
+	               "Updating finality checker with new validator set extracted from epoch ({}, {}): {:?}",
+	               last_transition.block_number, last_transition.block_hash, &list
+	           );
+	           let epoch_set = list.into_inner();
+	           let two_thirds_majority_transition =
+	               self.finality_checker.two_thirds_majority_transition();
+	           self.finality_checker =
+	               RollingFinality::blank(epoch_set, two_thirds_majority_transition);
+	       }
+
+	       self.epoch_transition_hash = last_transition.block_hash;
+	       self.epoch_transition_number = last_transition.block_number;
+
+	       true
+	   }
+	*/
+	return true
+}
+
+/// Get the transition to the epoch the given parent hash is part of
+/// or transitions to.
+/// This will give the epoch that any children of this parent belong to.
+///
+/// The block corresponding the the parent hash must be stored already.
+func epochTransitionFor(chain consensus.ChainHeaderReader, parent_hash common.Hash) common.Hash {
+	// slow path: loop back block by block
+	for {
+		h := chain.GetHeaderByHash(parent_hash)
+		if h == nil {
+			break
+		}
+
+		parent_hash = h.Hash()
+	}
+	/*
+	   pub fn epoch_transition_for(&self, parent_hash: H256) -> Option<EpochTransition> {
+	       for hash in self.ancestry_iter(parent_hash)? {
+	           let details = self.block_details(&hash)?;
+
+	           // look for transition in database.
+	           if let Some(transition) = self.epoch_transition(details.number, hash) {
+	               return Some(transition);
+	           }
+
+	           // canonical hash -> fast breakout:
+	           // get the last epoch transition up to this block.
+	           //
+	           // if `block_hash` is canonical it will only return transitions up to
+	           // the parent.
+	           if self.block_hash(details.number)? == hash {
+	               return self
+	                   .epoch_transitions()
+	                   .map(|(_, t)| t)
+	                   .take_while(|t| t.block_number <= details.number)
+	                   .last();
+	           }
+	       }
+
+	       // should never happen as the loop will encounter genesis before concluding.
+	       None
+	   }
+	*/
+}
+
+// epochTransition get a specific epoch transition by block number and provided block hash.
+func epochTransition(blockNum uint64, blockHash common.Hash)  {
+/*
+       pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
+           trace!(target: "blockchain", "Loading epoch transition at block {}, {}",
+   			block_num, block_hash);
+
+           self.db
+               .key_value()
+               .read(db::COL_EXTRA, &block_num)
+               .and_then(|transitions: EpochTransitions| {
+                   transitions
+                       .candidates
+                       .into_iter()
+                       .find(|c| c.block_hash == block_hash)
+               })
+       }
+ */
+}
+
 //nolint
 type unAssembledHeader struct {
 	h common.Hash // H256
@@ -138,11 +277,11 @@ type AuRa struct {
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
 	EmptyStepsSet     *EmptyStepSet
+	EpochManager      EpochManager // Mutex<EpochManager>,
 
 	//Validators                     ValidatorSet
 	//ValidateScoreTransition        uint64
 	//ValidateStepTransition         uint64
-	//EpochManager                   EpochManager // Mutex<EpochManager>,
 	//immediateTransitions           bool
 	//blockReward                    map[uint64]*uint256.Int
 	//blockRewardContractTransitions BlockRewardContractList
@@ -554,6 +693,192 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	//return nil
 }
 
+// GenerateSeal - Attempt to seal the block internally.
+//
+// This operation is synchronous and may (quite reasonably) not be available, in which case
+// `Seal::None` will be returned.
+func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header) []rlp.RawValue {
+	// first check to avoid generating signature most of the time
+	// (but there's still a race to the `compare_exchange`)
+	if !c.step.canPropose.Load() {
+		log.Trace("[engine] Aborting seal generation. Can't propose.")
+		return nil
+	}
+	parentStep, err := headerStep(parent, c.cfg.EmptyStepsTransition)
+	if err != nil {
+		panic(err)
+	}
+	step := c.step.inner.inner.Load()
+
+	// filter messages from old and future steps and different parents
+	var emptySteps []EmptyStep
+	if current.Number.Uint64() >= c.cfg.EmptyStepsTransition {
+		emptySteps = c.emptySteps(parentStep, step, current.ParentHash)
+	} else {
+		emptySteps = []EmptyStep{}
+	}
+
+	expectedDiff := calculateScore(parentStep, step, uint64(len(emptySteps)))
+	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
+		log.Debug(fmt.Sprintf("[engine] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
+		return nil
+	}
+
+	if parentStep > step {
+		log.Warn(fmt.Sprintf("[engine] Aborting seal generation for invalid step: %d > %d", parentStep, step))
+		return nil
+	}
+
+	c.epochSet(chain, current)
+
+	/*
+	   let (validators, set_number) = match self.epoch_set(header) {
+	      Err(err) => {
+	          warn!(target: "engine", "Unable to generate seal: {}", err);
+	          return Seal::None;
+	      }
+	      Ok(ok) => ok,
+	   };
+
+	   if is_step_proposer(&*validators, header.parent_hash(), step, header.author()) {
+	      // this is guarded against by `can_propose` unless the block was signed
+	      // on the same step (implies same key) and on a different node.
+	      if parent_step == step {
+	          warn!("Attempted to seal block on the same step as parent. Is this authority sealing with more than one node?");
+	          return Seal::None;
+	      }
+
+	      // if there are no transactions to include in the block, we don't seal and instead broadcast a signed
+	      // `EmptyStep(step, parent_hash)` message. If we exceed the maximum amount of `empty_step` rounds we proceed
+	      // with the seal.
+	      if header.number() >= self.empty_steps_transition
+	          && block.transactions.is_empty()
+	          && empty_steps.len() < self.maximum_empty_steps
+	      {
+	          if self
+	              .step
+	              .can_propose
+	              .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
+	              .is_ok()
+	          {
+	              self.generate_empty_step(header.parent_hash());
+	          }
+
+	          return Seal::None;
+	      }
+
+	      let empty_steps_rlp = if header.number() >= self.empty_steps_transition {
+	          let empty_steps: Vec<_> = empty_steps.iter().map(|e| e.sealed()).collect();
+	          Some(::rlp::encode_list(&empty_steps))
+	      } else {
+	          None
+	      };
+
+	      if let Ok(signature) = self.sign(header_seal_hash(
+	          header,
+	          empty_steps_rlp.as_ref().map(|e| &**e),
+	      )) {
+	          trace!(target: "engine", "generate_seal: Issuing a block for step {}.", step);
+
+	          // only issue the seal if we were the first to reach the compare_exchange.
+	          if self
+	              .step
+	              .can_propose
+	              .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
+	              .is_ok()
+	          {
+	              // we can drop all accumulated empty step messages that are
+	              // older than the parent step since we're including them in
+	              // the seal
+	              self.clear_empty_steps(parent_step);
+
+	              // report any skipped primaries between the parent block and
+	              // the block we're sealing, unless we have empty steps enabled
+	              if header.number() < self.empty_steps_transition {
+	                  self.report_skipped(header, step, parent_step, &*validators, set_number);
+	              }
+
+	              let mut fields =
+	                  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
+
+	              if let Some(empty_steps_rlp) = empty_steps_rlp {
+	                  fields.push(empty_steps_rlp);
+	              }
+
+	              return Seal::Regular(fields);
+	          }
+	      } else {
+	          warn!(target: "engine", "generate_seal: FAIL: Accounts secret key unavailable.");
+	      }
+	   } else {
+	      trace!(target: "engine", "generate_seal: {} not a proposer for step {}.",
+	       header.author(), step);
+	   }
+
+	   Seal::None
+	*/
+}
+
+// epochSet fetch correct validator set for epoch at header, taking into account
+// finality of previous transitions.
+func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (ValidatorSet, uint64, error) {
+	if c.cfg.ImmediateTransitions {
+		return c.cfg.Validators, h.Number.Uint64(), nil
+	}
+
+	validators, epochTransitionNumber, ok := !c.EpochManager.zoomValidators(chain, c.cfg.Validators, h)
+	if !ok {
+		return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
+	}
+	return validators, epochTransitionNumber
+	/*
+			fn epoch_set<'a>(
+		        &'a self,
+		        header: &Header,
+		    ) -> Result<(CowLike<dyn ValidatorSet, SimpleList>, BlockNumber), Error> {
+		        Ok(if self.immediate_transitions {
+		            (CowLike::Borrowed(&*self.validators), header.number())
+		        } else {
+		            let mut epoch_manager = self.epoch_manager.lock();
+		            let client = self.upgrade_client_or("Unable to verify sig")?;
+
+		            if !epoch_manager.zoom_to_after(
+		                &*client,
+		                &self.machine,
+		                &*self.validators,
+		                *header.parent_hash(),
+		            ) {
+		                debug!(target: "engine", "Unable to zoom to epoch.");
+		                return Err(EngineError::RequiresClient.into());
+		            }
+
+		            (
+		                CowLike::Owned(epoch_manager.validators().clone()),
+		                epoch_manager.epoch_transition_number,
+		            )
+		        })
+		    }
+	*/
+}
+
+func headerStep(current *types.Header, emptyStepsTransition uint64) (val uint64, err error) {
+	if len(current.Seal) < 1 {
+		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has {} fields; qed (Make sure the spec file has a correct genesis seal)", expectSealFields(current, emptyStepsTransition)))
+	}
+	err = rlp.Decode(bytes.NewReader(current.Seal[0]), &val)
+	if err != nil {
+		return val, err
+	}
+	return val, err
+}
+
+func expectSealFields(h *types.Header, emptyStepsTransition uint64) uint {
+	if h.Number.Uint64() >= emptyStepsTransition {
+		return 3
+	}
+	return 2
+}
+
 func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
 	var parentStep uint64
 	err := rlp.Decode(bytes.NewReader(parentSeal[0]), &parentStep)
@@ -791,22 +1116,6 @@ func headerEmptyStepsRaw(header *types.Header) []byte {
 		panic("was checked with verify_block_basic; has 3 fields; qed")
 	}
 	return header.Seal[2]
-}
-
-func headerStep(header *types.Header, emptyStepsTransition uint64) (uint64, error) {
-	if len(header.Seal) == 0 {
-		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has %v fields; qed (Make sure the spec file has a correct genesis seal)", headerExpectedSealFields(header, emptyStepsTransition)))
-	}
-	var val uint64
-	err := rlp.DecodeBytes(header.Seal[0], &val)
-	return val, err
-}
-
-func headerExpectedSealFields(header *types.Header, emptyStepsTransition uint64) uint {
-	if header.Number.Uint64() >= emptyStepsTransition {
-		return 3
-	}
-	return 2
 }
 
 // A message broadcast by authorities when it's their turn to seal a block but there are no
