@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,7 @@ import (
 // see https://github.com/ledgerwatch/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
-	db := createTestKV(t)
+	db := rpcdaemontest.CreateTestKV(t)
 	defer db.Close()
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	ctx := context.Background()

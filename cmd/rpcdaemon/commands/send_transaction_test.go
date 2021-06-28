@@ -1,4 +1,4 @@
-package commands
+package commands_test
 
 import (
 	"bytes"
@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
@@ -66,10 +68,10 @@ func TestSendRawTransaction(t *testing.T) {
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(err)
 
-	ctx, conn := createTestGrpcConn(t, m)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
-	api := NewEthAPI(NewBaseApi(ff), m.DB, nil, txPool, nil, 5000000)
+	api := commands.NewEthAPI(commands.NewBaseApi(ff), m.DB, nil, txPool, nil, 5000000)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
@@ -77,8 +79,8 @@ func TestSendRawTransaction(t *testing.T) {
 
 	txsCh := make(chan []types.Transaction, 1)
 	defer close(txsCh)
-	id := api.filters.SubscribePendingTxs(txsCh)
-	defer api.filters.UnsubscribePendingTxs(id)
+	id := ff.SubscribePendingTxs(txsCh)
+	defer ff.UnsubscribePendingTxs(id)
 
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
@@ -90,6 +92,12 @@ func TestSendRawTransaction(t *testing.T) {
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.NotNil(err)
 	require.Equal("ALREADY_EXISTS: already known", err.Error())
+	m.ReceiveWg.Wait()
+
+	//TODO: make propagation easy to test - now race
+	//time.Sleep(time.Second)
+	//sent := m.SentMessage(0)
+	//require.Equal(eth.ToProto[m.SentryClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
