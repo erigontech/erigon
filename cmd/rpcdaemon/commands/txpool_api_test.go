@@ -2,36 +2,82 @@ package commands
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTxPoolContent(t *testing.T) {
-	db := createTestKV(t)
-	ctx, conn := createTestGrpcConn(t)
+	m, require := stages.Mock(t), require.New(t)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intemediateHashes */)
+	require.NoError(err)
+	{ // Do 1 step to start txPool
+
+		// Send NewBlock message
+		b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
+			Block: chain.TopBlock,
+			TD:    big.NewInt(1), // This is ignored anyway
+		})
+		require.NoError(err)
+		m.ReceiveWg.Add(1)
+		for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
+			require.NoError(err)
+		}
+		// Send all the headers
+		b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+			RequestId:          1,
+			BlockHeadersPacket: chain.Headers,
+		})
+		require.NoError(err)
+		m.ReceiveWg.Add(1)
+		for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+			require.NoError(err)
+		}
+		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
+
+		notifier := &remotedbserver.Events{}
+		initialCycle := true
+		highestSeenHeader := chain.TopBlock.NumberU64()
+		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx, conn := createTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
-	api := NewTxPoolAPI(NewBaseApi(ff), db, txPool)
+	api := NewTxPoolAPI(NewBaseApi(ff), m.DB, txPool)
 
-	// Call GetTransactionReceipt for un-protected transaction
-	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	expect := uint64(40)
-	txn := transaction(expect, 1000000, testKey)
+	expectValue := uint64(1234)
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(err)
+
 	buf := bytes.NewBuffer(nil)
-	err := txn.MarshalBinary(buf)
-	require.NoError(t, err)
+	err = txn.MarshalBinary(buf)
+	require.NoError(err)
 
 	_, err = txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
-	require.NoError(t, err)
+	require.NoError(err)
 	content, err := api.Content(ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 
-	sender := (common.Address{}).String()
-	require.Equal(t, 1, len(content["pending"][sender]))
-	require.Equal(t, expect, uint64(content["pending"][sender]["40"].Nonce))
+	sender := m.Address.String()
+	require.Equal(1, len(content["pending"][sender]))
+	require.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
 }

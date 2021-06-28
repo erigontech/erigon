@@ -18,8 +18,8 @@ type txJSON struct {
 	// Common transaction fields:
 	Nonce    *hexutil.Uint64 `json:"nonce"`
 	GasPrice *hexutil.Big    `json:"gasPrice"`
-	FeeCap   *hexutil.Big    `json:"feeCap"`
-	Tip      *hexutil.Big    `json:"tip"`
+	FeeCap   *hexutil.Big    `json:"maxFeePerGas"`
+	Tip      *hexutil.Big    `json:"maxPriorityFeePerGas"`
 	Gas      *hexutil.Uint64 `json:"gas"`
 	Value    *hexutil.Big    `json:"value"`
 	Data     *hexutil.Bytes  `json:"input"`
