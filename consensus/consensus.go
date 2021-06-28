@@ -116,7 +116,7 @@ type Engine interface {
 	// that a new block should have.
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int
 
-	GenerateSeal(currnt, parent *types.Header) []rlp.RawValue
+	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header) []rlp.RawValue
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API

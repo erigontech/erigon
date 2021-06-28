@@ -110,16 +110,16 @@ type EpochManager struct {
 
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
-func (e *EpochManager) zoomValidators(chain consensus.ChainHeaderReader, validators ValidatorSet, hash common.Hash) (ValidatorSet, uint64, bool) {
-	var last_was_parent bool
+func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators ValidatorSet, h *types.Header) (RollingFinality, uint64, bool) {
+	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
-		last_was_parent = *e.finalityChecker.lastPushed == hash
+		lastWasParent = *e.finalityChecker.lastPushed == h.Hash()
 	}
 
 	// early exit for current target == chain head, but only if the epochs are
 	// the same.
-	if last_was_parent && !e.force {
-		return true
+	if lastWasParent && !e.force {
+		return e.finalityChecker, e.epochTransitionNumber, true
 	}
 	e.force = false
 
@@ -127,20 +127,12 @@ func (e *EpochManager) zoomValidators(chain consensus.ChainHeaderReader, validat
 	// forks it will only need to be called for the block directly after
 	// epoch transition, in which case it will be O(1) and require a single
 	// DB lookup.
-	last_transition := client.epoch_transition_for(hash)
-	{
-		Some(t) => t,
-		None => {
-		// this really should never happen unless the block passed
-		// hasn't got a parent in the database.
-		debug
-		!(target: "engine", "No genesis transition found.")
-		return false
+	last_transition, ok := epochTransitionFor(chain, h.ParentHash)
+	if !ok {
+		return e.finalityChecker, e.epochTransitionNumber, false
 	}
-	}
+	_ = last_transition
 	/*
-
-
 	       // extract other epoch set if it's not the same as the last.
 	       if last_transition.block_hash != self.epoch_transition_hash {
 	           let (signal_number, set_proof, _) = destructure_proofs(&last_transition.proof)
@@ -179,7 +171,7 @@ func (e *EpochManager) zoomValidators(chain consensus.ChainHeaderReader, validat
 	       true
 	   }
 	*/
-	return true
+	return e.finalityChecker, e.epochTransitionNumber, true
 }
 
 /// Get the transition to the epoch the given parent hash is part of
@@ -187,64 +179,62 @@ func (e *EpochManager) zoomValidators(chain consensus.ChainHeaderReader, validat
 /// This will give the epoch that any children of this parent belong to.
 ///
 /// The block corresponding the the parent hash must be stored already.
-func epochTransitionFor(chain consensus.ChainHeaderReader, parent_hash common.Hash) common.Hash {
+func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (common.Hash, bool) {
 	// slow path: loop back block by block
 	for {
-		h := chain.GetHeaderByHash(parent_hash)
+		h := chain.GetHeaderByHash(parentHash)
 		if h == nil {
-			break
+			return parentHash, false
 		}
 
-		parent_hash = h.Hash()
+		// look for transition in database.
+		transitionHash, ok := epochTransition(h.Number.Uint64(), h.Hash())
+		if ok {
+			return transitionHash, true
+		}
+
+		// canonical hash -> fast breakout:
+		// get the last epoch transition up to this block.
+		//
+		// if `block_hash` is canonical it will only return transitions up to
+		// the parent.
+		canonical := chain.GetHeaderByNumber(h.Number.Uint64())
+		if canonical == nil {
+			return parentHash, false
+		}
+		if canonical.Hash() == parentHash {
+			/* TODO: whaaaat????
+			   return self
+			       .epoch_transitions()
+			       .map(|(_, t)| t)
+			       .take_while(|t| t.block_number <= details.number)
+			       .last();
+			*/
+		}
+
+		parentHash = h.Hash()
 	}
-	/*
-	   pub fn epoch_transition_for(&self, parent_hash: H256) -> Option<EpochTransition> {
-	       for hash in self.ancestry_iter(parent_hash)? {
-	           let details = self.block_details(&hash)?;
-
-	           // look for transition in database.
-	           if let Some(transition) = self.epoch_transition(details.number, hash) {
-	               return Some(transition);
-	           }
-
-	           // canonical hash -> fast breakout:
-	           // get the last epoch transition up to this block.
-	           //
-	           // if `block_hash` is canonical it will only return transitions up to
-	           // the parent.
-	           if self.block_hash(details.number)? == hash {
-	               return self
-	                   .epoch_transitions()
-	                   .map(|(_, t)| t)
-	                   .take_while(|t| t.block_number <= details.number)
-	                   .last();
-	           }
-	       }
-
-	       // should never happen as the loop will encounter genesis before concluding.
-	       None
-	   }
-	*/
 }
 
 // epochTransition get a specific epoch transition by block number and provided block hash.
-func epochTransition(blockNum uint64, blockHash common.Hash)  {
-/*
-       pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
-           trace!(target: "blockchain", "Loading epoch transition at block {}, {}",
-   			block_num, block_hash);
+func epochTransition(blockNum uint64, blockHash common.Hash) (common.Hash, bool) {
+	return blockHash, true
+	/*
+		pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
+		   trace!(target: "blockchain", "Loading epoch transition at block {}, {}",
+		    block_num, block_hash);
 
-           self.db
-               .key_value()
-               .read(db::COL_EXTRA, &block_num)
-               .and_then(|transitions: EpochTransitions| {
-                   transitions
-                       .candidates
-                       .into_iter()
-                       .find(|c| c.block_hash == block_hash)
-               })
-       }
- */
+		   self.db
+		       .key_value()
+		       .read(db::COL_EXTRA, &block_num)
+		       .and_then(|transitions: EpochTransitions| {
+		           transitions
+		               .candidates
+		               .into_iter()
+		               .find(|c| c.block_hash == block_hash)
+		       })
+		}
+	*/
 }
 
 //nolint
@@ -826,11 +816,11 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (Val
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
 
-	validators, epochTransitionNumber, ok := !c.EpochManager.zoomValidators(chain, c.cfg.Validators, h)
+	finalityChecker, epochTransitionNumber, ok := !c.EpochManager.zoom(chain, c.cfg.Validators, h)
 	if !ok {
 		return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
 	}
-	return validators, epochTransitionNumber
+	return finalityChecker.validators(), epochTransitionNumber
 	/*
 			fn epoch_set<'a>(
 		        &'a self,
