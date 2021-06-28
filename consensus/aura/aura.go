@@ -816,7 +816,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (Val
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
 
-	finalityChecker, epochTransitionNumber, ok := !c.EpochManager.zoom(chain, c.cfg.Validators, h)
+	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoom(chain, c.cfg.Validators, h)
 	if !ok {
 		return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
 	}
