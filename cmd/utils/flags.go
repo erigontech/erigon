@@ -1087,7 +1087,7 @@ func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string) {
 }
 
 func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
-	cfg.DBPath = path.Join(datadir, "aura/db")
+	cfg.DBPath = path.Join(datadir, "aura")
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {

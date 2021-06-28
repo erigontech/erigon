@@ -138,7 +138,7 @@ func runCmd(ctx *cli.Context) error {
 	db := kv.NewMemDatabase()
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
-		_, _, err := gen.Commit(db, false)
+		_, err := gen.Commit(db, false)
 		if err != nil {
 			return err
 		}

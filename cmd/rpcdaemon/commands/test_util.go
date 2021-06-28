@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/mock"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
@@ -108,7 +107,7 @@ func createTestKV(t *testing.T) ethdb.RwKV {
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
-				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
+				txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1_000_000_000_000_000), 21000, new(uint256.Int), nil), *signer, key)
 				if err != nil {
 					panic(err)
 				}
@@ -204,12 +203,18 @@ type IsMiningMock struct{}
 
 func (*IsMiningMock) IsMining() bool { return false }
 
-func createTestGrpcConn(t *testing.T) (context.Context, *grpc.ClientConn) { //nolint
+func createTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ethashApi := ethash.NewFaker().APIs(nil)[1].Service.(*ethash.API)
+	apis := m.Engine.APIs(nil)
+	if len(apis) < 1 {
+		t.Fatal("couldn't instantiate Engine api")
+	}
+
+	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
-	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, mock.NewTestTxPool()))
+
+	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, m.TxPoolP2PServer.TxPool))
 	txpool.RegisterMiningServer(server, remotedbserver.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
 	listener := bufconn.Listen(1024 * 1024)
 

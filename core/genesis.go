@@ -186,6 +186,22 @@ func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*par
 	return c, b
 }
 
+func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+	stored, err := rawdb.ReadCanonicalHash(db, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = rawdb.DeleteCanonicalHash(db, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = rawdb.DeleteChainConfig(db, stored)
+	if err != nil {
+		return nil, nil, err
+	}
+	return WriteGenesisBlock(db, genesis, history)
+}
+
 func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
@@ -309,7 +325,10 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		r, w := state.NewDbStateReader(kv.WrapIntoTxDB(tx)), state.NewDbStateWriter(kv.WrapIntoTxDB(tx), 0)
 		statedb = state.New(r)
 		for addr, account := range g.Alloc {
-			balance, _ := uint256.FromBig(account.Balance)
+			balance, overflow := uint256.FromBig(account.Balance)
+			if overflow {
+				panic("overflow at genesis allocs")
+			}
 			statedb.AddBalance(addr, balance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
@@ -392,7 +411,6 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}
-
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
 	}
@@ -451,20 +469,20 @@ func (g *Genesis) Write(tx ethdb.RwTx, history bool) (*types.Block, *state.Intra
 	return block, statedb, nil
 }
 
-func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, error) {
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer tx.Rollback()
-	block, statedb, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
+	block, _, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
 	if err != nil {
-		return block, statedb, err
+		return block, err
 	}
 	if err := tx.Commit(); err != nil {
-		return block, statedb, err
+		return block, err
 	}
-	return block, statedb, nil
+	return block, nil
 }
 
 // MustCommit writes the genesis block and state to db, panicking on error.

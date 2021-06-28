@@ -368,21 +368,32 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
         exit 1
     }
 
-    # Enter MDBX directory and build libmdbx.dll
-    Set-Location (Join-Path $MyContext.Directory "libmdbx")
-    if(!$?) {
-        Write-Host @" 
-     
-       Error ! Can't locate ""libmdbx"" folder
-       Are you sure you have cloned the repository properly ?
-     
+    $Erigon.MDBXSourcePath = [string](Join-Path $MyContext.StartDir "\libmdbx")
+    if (!Test-Path -Path $Erigon.MDBXSourcePath -PathType Directory) {
+        Write-Host @"
+
+        Error ! Can't locate ""libmdbx"" folder
+        Are you sure you have cloned the repository properly ?
 "@
-    exit 1
-     }
-     
+        exit 1
+    }
+
+    if (!Test-Path -Path [string](Join-Path $Erigon.MDBXSourcePath "\.git") -PathType Directory) {
+        git.exe submodule update --init --recursive
+        if($LASTEXITCODE) {
+            Write-Host "An error has occurred while updating libmdbx submodule"
+            exit $LASTEXITCODE
+        }
+    }
+
+    # Create build directory for mdbx and enter it
+    $Erigon.MDBXBuildPath = [string](Join-Path $Erigon.BinPath "\mdbx")
+    New-Item -Path $Erigon.MDBXBuildPath -ItemType Directory -Force | Out-Null
+    Set-Location $Erigon.MDBXBuildPath
+
     Write-Host " Building db-tools ..."
 
-    cmake -G "MinGW Makefiles" . `
+    cmake -G "MinGW Makefiles" "$($Erigon.MDBXSourcePath)" `
     -D CMAKE_MAKE_PROGRAM:PATH=""$(Join-Path $chocolateyBinPath "make.exe")"" `
     -D CMAKE_C_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "gcc.exe")"" `
     -D CMAKE_CXX_COMPILER:PATH=""$(Join-Path $chocolateyBinPath "g++.exe")"" `
@@ -402,25 +413,21 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
                      -or !(Test-Path "mdbx_copy.exe" -PathType leaf) `
                      -or !(Test-Path "mdbx_dump.exe" -PathType leaf) `
                      -or !(Test-Path "mdbx_load.exe" -PathType leaf) `
-                     -or !(Test-Path "mdbx_drop.exe" -PathType leaf)) {
+                     -or !(Test-Path "mdbx_drop.exe" -PathType leaf) `
+                     -or !(Test-Path "mdbx_test.exe" -PathType leaf)) {
         Write-Host "An error has occurred while building MDBX tools"
         exit $LASTEXITCODE
     }
 
     Set-Location $MyContext.Directory
     # Eventually move all mdbx_*.exe to ./build/bin directory
-    Move-Item -Path "./libmdbx/mdbx_*.exe" -Destination $Erigon.BinPath -Force
+    Move-Item -Path "$($Erigon.MDBXBuildPath)/mdbx_*.exe" -Destination $Erigon.BinPath -Force
 
 }
     
 if ($BuildTarget -eq "clean") {
 
     Write-Host " Cleaning ..."
-
-    # Clean ./libmdbx/mdbx_*.exe
-    Remove-Item -Path "./libmdbx/mdbx_*.exe" -Force
-    Remove-Item -Path "./libmdbx/CMakeCache.txt" -Force
-    Remove-Item -Path "./libmdbx/CMakeFiles" -Recurse -Force
 
     # Remove ./build/bin directory
     Remove-Item -Path "./build" -Recurse -Force

@@ -187,6 +187,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
 	} else if chainConfig.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
 	} else {
 		consensusConfig = &config.Ethash

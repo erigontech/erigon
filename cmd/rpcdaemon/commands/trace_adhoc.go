@@ -46,8 +46,8 @@ type TraceCallParam struct {
 	To         *common.Address   `json:"to"`
 	Gas        *hexutil.Uint64   `json:"gas"`
 	GasPrice   *hexutil.Big      `json:"gasPrice"`
-	Tip        *hexutil.Big      `json:"tip"`
-	FeeCap     *hexutil.Big      `json:"feeCap"`
+	Tip        *hexutil.Big      `json:"maxPriorityFeePerGas"`
+	FeeCap     *hexutil.Big      `json:"maxFeePerGas"`
 	Value      *hexutil.Big      `json:"value"`
 	Data       hexutil.Bytes     `json:"data"`
 	AccessList *types.AccessList `json:"accessList"`
@@ -467,6 +467,227 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 	}
 }
 
+func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) (*TraceCallResult, error) {
+	tx, err := api.kv.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	txn, blockHash, blockNumber, _ := rawdb.ReadTransaction(tx, txHash)
+	if txn == nil {
+		return nil, nil
+	}
+	stateReader := state.NewPlainKvState(tx, blockNumber-1)
+	ibs := state.New(stateReader)
+
+	block := rawdb.ReadBlock(tx, blockHash, blockNumber)
+	if block == nil {
+		return nil, fmt.Errorf("block %d not found", blockNumber)
+	}
+
+	// Setup context so it may be cancelled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	var cancel context.CancelFunc
+	if callTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+
+	// Make sure the context is cancelled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+
+	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
+	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+	for _, traceType := range traceTypes {
+		switch traceType {
+		case TraceTypeTrace:
+			traceTypeTrace = true
+		case TraceTypeStateDiff:
+			traceTypeStateDiff = true
+		case TraceTypeVmTrace:
+			traceTypeVmTrace = true
+		default:
+			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+		}
+	}
+	var ot OeTracer
+	ot.compat = api.compatibility
+	if traceTypeTrace {
+		ot.r = traceResult
+		ot.traceAddr = []int{}
+	}
+
+	gp := new(core.GasPool)
+	gp.AddGas(block.GasLimit())
+
+	if traceTypeStateDiff {
+		sdMap := make(map[common.Address]*StateDiffAccount)
+		traceResult.StateDiff = sdMap
+		sd := &StateDiff{sdMap: sdMap}
+		if err = ibs.FinalizeTx(ctx, sd); err != nil {
+			return nil, err
+		}
+	}
+	if traceTypeVmTrace {
+		return nil, fmt.Errorf("vmTrace not implemented yet")
+	}
+
+	usedGas := new(uint64)
+	var sd *StateDiff
+	for i, txn := range block.Transactions() {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
+		ibs.Prepare(txn.Hash(), block.Hash(), i)
+		var stateWriter state.StateWriter
+		vmConfig := vm.Config{}
+		stateWriter = state.NewNoopWriter()
+		var initialIbs *state.IntraBlockState
+		if txn.Hash() == txHash {
+			if traceTypeStateDiff {
+				sdMap := make(map[common.Address]*StateDiffAccount)
+				sd = &StateDiff{sdMap: sdMap}
+				traceResult.StateDiff = sdMap
+				stateWriter = sd
+				initialIbs = ibs.Copy()
+				vmConfig = vm.Config{Debug: traceTypeTrace, Tracer: &ot}
+			}
+		}
+		_, execResult, err := core.ApplyTransaction(chainConfig, nil, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
+		if err != nil {
+			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
+		}
+		traceResult.Output = common.CopyBytes(execResult)
+		if txn.Hash() == txHash {
+			if traceTypeStateDiff {
+				sd.CompareStates(initialIbs, ibs)
+			}
+			break
+		}
+	}
+
+	if traceTypeVmTrace {
+		return nil, fmt.Errorf("vmTrace not implemented yet")
+	}
+
+	return traceResult, nil
+}
+
+func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, traceTypes []string) ([]*TraceCallResult, error) {
+	tx, err := api.kv.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	blockNumber, blockHash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	block := rawdb.ReadBlock(tx, blockHash, blockNumber)
+	if block == nil {
+		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, blockHash)
+	}
+
+	var stateReader state.StateReader
+	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+		stateReader = state.NewPlainStateReader(tx)
+	} else {
+		stateReader = state.NewPlainKvState(tx, blockNumber-1)
+	}
+	ibs := state.New(stateReader)
+
+	// Setup context so it may be cancelled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	var cancel context.CancelFunc
+	if callTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+
+	// Make sure the context is cancelled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+	var traceResults = make([]*TraceCallResult, block.Transactions().Len())
+	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
+	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+	for _, traceType := range traceTypes {
+		switch traceType {
+		case TraceTypeTrace:
+			traceTypeTrace = true
+		case TraceTypeStateDiff:
+			traceTypeStateDiff = true
+		case TraceTypeVmTrace:
+			traceTypeVmTrace = true
+		default:
+			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+		}
+	}
+	var ot OeTracer
+	ot.compat = api.compatibility
+	if traceTypeTrace {
+		ot.r = traceResult
+		ot.traceAddr = []int{}
+	}
+
+	gp := new(core.GasPool)
+	gp.AddGas(block.GasLimit())
+
+	if traceTypeVmTrace {
+		return nil, fmt.Errorf("vmTrace not implemented yet")
+	}
+	var initialIbs *state.IntraBlockState
+
+	usedGas := new(uint64)
+	var stateWriter state.StateWriter
+	vmConfig := vm.Config{}
+	stateWriter = state.NewNoopWriter()
+	var sd *StateDiff
+	for i, txn := range block.Transactions() {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
+		ibs.Prepare(txn.Hash(), block.Hash(), i)
+		if traceTypeStateDiff {
+			sdMap := make(map[common.Address]*StateDiffAccount)
+			sd = &StateDiff{sdMap: sdMap}
+			traceResult.StateDiff = sdMap
+			stateWriter = sd
+			initialIbs = ibs.Copy()
+			vmConfig = vm.Config{Debug: traceTypeTrace, Tracer: &ot}
+		}
+		_, execResult, err := core.ApplyTransaction(chainConfig, nil, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
+		if err != nil {
+			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
+		}
+		traceResult.Output = common.CopyBytes(execResult)
+		if traceTypeStateDiff {
+			sd.CompareStates(initialIbs, ibs)
+		}
+		traceResults[i] = traceResult
+	}
+
+	if traceTypeVmTrace {
+		return nil, fmt.Errorf("vmTrace not implemented yet")
+	}
+
+	return traceResults, nil
+}
+
 const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
@@ -766,16 +987,4 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_rawTransaction")
-}
-
-// ReplayBlockTransactions implements trace_replayBlockTransactions.
-func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumber, traceTypes []string) ([]interface{}, error) {
-	var stub []interface{}
-	return stub, fmt.Errorf(NotImplemented, "trace_replayBlockTransactions")
-}
-
-// ReplayTransaction implements trace_replayTransaction.
-func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error) {
-	var stub []interface{}
-	return stub, fmt.Errorf(NotImplemented, "trace_replayTransaction")
 }
