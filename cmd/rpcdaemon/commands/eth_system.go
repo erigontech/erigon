@@ -72,6 +72,11 @@ func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
 	return hexutil.Uint64(chainConfig.ChainID.Uint64()), nil
 }
 
+// ChainID alias of ChainId - just for convenience
+func (api *APIImpl) ChainID(ctx context.Context) (hexutil.Uint64, error) {
+	return api.ChainId(ctx)
+}
+
 // ProtocolVersion implements eth_protocolVersion. Returns the current ethereum protocol version.
 func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 	ver, err := api.ethBackend.ProtocolVersion(ctx)
