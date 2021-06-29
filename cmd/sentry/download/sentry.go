@@ -732,7 +732,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 
 func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Data.Id]
-	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
+	if msgcode != eth.NewBlockMsg &&
+		msgcode != eth.NewBlockHashesMsg &&
+		msgcode != eth.NewPooledTransactionHashesMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
@@ -775,7 +777,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Id]
 	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Id)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
 	var innerErr error
