@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -264,6 +265,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 			mock.StreamWg.Add(1)
 			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+			go txpropagate.BroadcastNewTxsToNetworks(mock.Ctx, txPool, mock.downloader)
 			mock.StreamWg.Wait()
 			mock.TxPoolP2PServer.TxFetcher.Start()
 		}),

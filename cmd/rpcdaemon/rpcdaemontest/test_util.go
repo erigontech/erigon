@@ -1,4 +1,4 @@
-package commands
+package rpcdaemontest
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func createTestKV(t *testing.T) ethdb.RwKV {
+func CreateTestKV(t *testing.T) ethdb.RwKV {
 	// Configure and generate a sample block chain
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -203,7 +203,7 @@ type IsMiningMock struct{}
 
 func (*IsMiningMock) IsMining() bool { return false }
 
-func createTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
+func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
 	apis := m.Engine.APIs(nil)
