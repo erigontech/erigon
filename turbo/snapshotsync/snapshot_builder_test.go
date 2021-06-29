@@ -628,6 +628,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		}
 		wg.Done()
 		<-c
+		//reproducable datarace between Rollback and Close
 		rollbacked = true
 		roTX.Rollback()
 	}()
@@ -1123,7 +1124,7 @@ func TestPruneBlocks(t *testing.T) {
 
 	bodySnapshotTX.Rollback()
 	ch := make(chan struct{})
-	db.UpdateSnapshots2("bodies", kvSnapshot, ch)
+	db.UpdateSnapshots("bodies", kvSnapshot, ch)
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 5):
@@ -1220,7 +1221,7 @@ func TestPruneBlocks(t *testing.T) {
 
 	bodySnapshotTX.Rollback()
 	ch = make(chan struct{})
-	db.UpdateSnapshots2("bodies", kvSnapshot, ch)
+	db.UpdateSnapshots("bodies", kvSnapshot, ch)
 	select {
 	case <-ch:
 	case <-time.After(time.Second * 5000):

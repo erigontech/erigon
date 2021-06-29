@@ -89,7 +89,7 @@ func OpenHeadersSnapshot(dbPath string) (ethdb.RoKV, error) {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		}
-	}).Path(dbPath).Open()
+	}).Readonly().Path(dbPath).Open()
 }
 
 func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {

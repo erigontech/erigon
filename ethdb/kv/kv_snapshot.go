@@ -24,8 +24,7 @@ var (
 )
 
 type SnapshotUpdater interface {
-	//UpdateSnapshots(buckets []string, snapshotKV ethdb.RoKV, done chan struct{})
-	UpdateSnapshots2(tp string, snapshotKV ethdb.RoKV, done chan struct{})
+	UpdateSnapshots(tp string, snapshotKV ethdb.RoKV, done chan struct{})
 	HeadersSnapshot() ethdb.RoKV
 	BodiesSnapshot() ethdb.RoKV
 	StateSnapshot() ethdb.RoKV
@@ -127,7 +126,7 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
-func (s *SnapshotKV) UpdateSnapshots2(tp string, snapshotKV ethdb.RoKV, done chan struct{}) {
+func (s *SnapshotKV) UpdateSnapshots(tp string, snapshotKV ethdb.RoKV, done chan struct{}) {
 	var toClose ethdb.RoKV
 	s.mtx.Lock()
 	defer s.mtx.Unlock()

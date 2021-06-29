@@ -1009,7 +1009,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	checkKVErr(t, k, v, err, []byte{1}, []byte{1})
 
 	done := make(chan struct{})
-	kv.UpdateSnapshots2("state", snapshotDB2, done)
+	kv.UpdateSnapshots("state", snapshotDB2, done)
 
 	tx2, err := kv.BeginRo(context.Background())
 	if err != nil {

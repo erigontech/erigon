@@ -95,7 +95,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 					return err
 				}
 
-				db.(kv.SnapshotUpdater).UpdateSnapshots2("headers", snapshotKV, sm.replaceChan)
+				db.(kv.SnapshotUpdater).UpdateSnapshots("headers", snapshotKV, sm.replaceChan)
 				return nil
 			},
 		}
@@ -114,7 +114,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 					return err
 				}
 
-				db.(kv.SnapshotUpdater).UpdateSnapshots2("bodies", snapshotKV, sm.replaceChan)
+				db.(kv.SnapshotUpdater).UpdateSnapshots("bodies", snapshotKV, sm.replaceChan)
 				return nil
 			},
 		}
