@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -89,7 +90,7 @@ func OpenHeadersSnapshot(dbPath string) (ethdb.RoKV, error) {
 		return dbutils.BucketsCfg{
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		}
-	}).Readonly().Path(dbPath).Open()
+	}).Readonly().MapSize(64 * datasize.MB).Path(dbPath).Open()
 }
 
 func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
