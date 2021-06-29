@@ -7,7 +7,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
@@ -60,7 +59,7 @@ func TestTxPoolContent(t *testing.T) {
 		}
 	}
 
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	ctx, conn := createTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	api := NewTxPoolAPI(NewBaseApi(ff), m.DB, txPool)

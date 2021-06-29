@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
@@ -36,7 +35,7 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceTransaction(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	db := createTestKV(t)
 	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -65,7 +64,7 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	db := createTestKV(t)
 	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
