@@ -247,6 +247,7 @@ func (s *Multi) onCloseBlock(header *types.Header, address common.Address) error
 }
 
 // TODO: do we need add `proof` argument?
+//nolint
 func (s *Multi) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
 	setBlock, set := s.correctSetByNumber(num)
 	first = setBlock == num
@@ -383,6 +384,7 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 //func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 
 func (s *ValidatorSafeContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
+	return SimpleList{}, nil, fmt.Errorf("ValidatorSafeContract.epochSet not implemented")
 	/*
 		    fn epoch_set(
 		        &self,

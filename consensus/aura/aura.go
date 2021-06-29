@@ -18,7 +18,6 @@ package aura
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -34,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -50,6 +48,8 @@ import (
 /*
 Not implemented features from OS:
  - two_thirds_majority_transition - because no chains in OE where this is != MaxUint64 - means 1/2 majority used everywhere
+ - emptyStepsTransition - same
+
 */
 
 type StepDurationInfo struct {
@@ -114,6 +114,7 @@ type EpochManager struct {
 
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
+//nolint
 func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators ValidatorSet, h *types.Header) (RollingFinality, uint64, bool) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
@@ -181,6 +182,7 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 /// This will give the epoch that any children of this parent belong to.
 ///
 /// The block corresponding the the parent hash must be stored already.
+//nolint
 func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (common.Hash, bool) {
 	// slow path: loop back block by block
 	for {
@@ -204,6 +206,7 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 		if canonical == nil {
 			return parentHash, false
 		}
+		//nolint
 		if canonical.Hash() == parentHash {
 			/* TODO: whaaaat????
 			   return self
@@ -219,6 +222,7 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 }
 
 // epochTransition get a specific epoch transition by block number and provided block hash.
+//nolint
 func epochTransition(blockNum uint64, blockHash common.Hash) (common.Hash, bool) {
 	return blockHash, true
 	/*
@@ -277,8 +281,6 @@ type AuRa struct {
 	//blockRewardContractTransitions BlockRewardContractList
 	//maximumUncleCountTransition    uint64
 	//maximumUncleCount              uint
-	//emptyStepsTransition           uint64
-	//strictEmptyStepsTransition     uint64
 	//maximumEmptySteps              uint
 	////machine: EthereumMachine,
 	//// History of step hashes recently received from peers.
@@ -679,21 +681,14 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 		log.Trace("[engine] Aborting seal generation. Can't propose.")
 		return nil
 	}
-	parentStep, err := headerStep(parent, c.cfg.EmptyStepsTransition)
+	parentStep, err := headerStep(parent)
 	if err != nil {
 		panic(err)
 	}
 	step := c.step.inner.inner.Load()
 
 	// filter messages from old and future steps and different parents
-	var emptySteps []EmptyStep
-	if current.Number.Uint64() >= c.cfg.EmptyStepsTransition {
-		emptySteps = c.emptySteps(parentStep, step, current.ParentHash)
-	} else {
-		emptySteps = []EmptyStep{}
-	}
-
-	expectedDiff := calculateScore(parentStep, step, uint64(len(emptySteps)))
+	expectedDiff := calculateScore(parentStep, step, 0)
 	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
 		log.Debug(fmt.Sprintf("[engine] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
 		return nil
@@ -728,68 +723,40 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 
 	_ = setNumber
 	/*
+		signature, err := c.sign(current.bareHash())
+			if err != nil {
+				log.Warn("[engine] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
+				return nil
+			}
+	*/
 
-		  // if there are no transactions to include in the block, we don't seal and instead broadcast a signed
-		  // `EmptyStep(step, parent_hash)` message. If we exceed the maximum amount of `empty_step` rounds we proceed
-		  // with the seal.
-		  if header.number() >= self.empty_steps_transition
-			  && block.transactions.is_empty()
-			  && empty_steps.len() < self.maximum_empty_steps
+	/*
+		  // only issue the seal if we were the first to reach the compare_exchange.
+		  if self
+			  .step
+			  .can_propose
+			  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
+			  .is_ok()
 		  {
-			  if self
-				  .step
-				  .can_propose
-				  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
-				  .is_ok()
-			  {
-				  self.generate_empty_step(header.parent_hash());
+			  // we can drop all accumulated empty step messages that are
+			  // older than the parent step since we're including them in
+			  // the seal
+			  self.clear_empty_steps(parent_step);
+
+			  // report any skipped primaries between the parent block and
+			  // the block we're sealing, unless we have empty steps enabled
+			  if header.number() < self.empty_steps_transition {
+				  self.report_skipped(header, step, parent_step, &*validators, set_number);
 			  }
 
-			  return Seal::None;
-		  }
+			  let mut fields =
+				  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
 
-		  let empty_steps_rlp = if header.number() >= self.empty_steps_transition {
-			  let empty_steps: Vec<_> = empty_steps.iter().map(|e| e.sealed()).collect();
-			  Some(::rlp::encode_list(&empty_steps))
-		  } else {
-			  None
-		  };
-
-		  if let Ok(signature) = self.sign(header_seal_hash(
-			  header,
-			  empty_steps_rlp.as_ref().map(|e| &**e),
-		  )) {
-			  trace!(target: "engine", "generate_seal: Issuing a block for step {}.", step);
-
-			  // only issue the seal if we were the first to reach the compare_exchange.
-			  if self
-				  .step
-				  .can_propose
-				  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
-				  .is_ok()
-			  {
-				  // we can drop all accumulated empty step messages that are
-				  // older than the parent step since we're including them in
-				  // the seal
-				  self.clear_empty_steps(parent_step);
-
-				  // report any skipped primaries between the parent block and
-				  // the block we're sealing, unless we have empty steps enabled
-				  if header.number() < self.empty_steps_transition {
-					  self.report_skipped(header, step, parent_step, &*validators, set_number);
-				  }
-
-				  let mut fields =
-					  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
-
-				  if let Some(empty_steps_rlp) = empty_steps_rlp {
-					  fields.push(empty_steps_rlp);
-				  }
-
-				  return Seal::Regular(fields);
+			  if let Some(empty_steps_rlp) = empty_steps_rlp {
+				  fields.push(empty_steps_rlp);
 			  }
-		  } else {
-			  warn!(target: "engine", "generate_seal: FAIL: Accounts secret key unavailable.");
+
+			  return Seal::Regular(fields);
 		  }
 	*/
 	return nil
@@ -802,11 +769,24 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (Val
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
 
-	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoom(chain, c.cfg.Validators, h)
-	if !ok {
-		return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
+	//TODO: hardcode for now
+	if h.Number.Uint64() <= 671 {
+		return &SimpleList{validators: []common.Address{
+			common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
+		}}, 0, nil
 	}
-	return finalityChecker.validators(), epochTransitionNumber
+	return &SimpleList{validators: []common.Address{
+		common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
+		common.HexToAddress("0x82e4e61e7f5139ff0a4157a5bc687ef42294c248"),
+	}}, 672, nil
+	/*
+		finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoom(chain, c.cfg.Validators, h)
+		if !ok {
+			return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
+		}
+		return finalityChecker.validators(), epochTransitionNumber
+	*/
+
 	/*
 			fn epoch_set<'a>(
 		        &'a self,
@@ -837,22 +817,16 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (Val
 	*/
 }
 
-func headerStep(current *types.Header, emptyStepsTransition uint64) (val uint64, err error) {
+//nolint
+func headerStep(current *types.Header) (val uint64, err error) {
 	if len(current.Seal) < 1 {
-		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has {} fields; qed (Make sure the spec file has a correct genesis seal)", expectSealFields(current, emptyStepsTransition)))
+		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has {} fields; qed (Make sure the spec file has a correct genesis seal)", 2))
 	}
 	err = rlp.Decode(bytes.NewReader(current.Seal[0]), &val)
 	if err != nil {
 		return val, err
 	}
 	return val, err
-}
-
-func expectSealFields(h *types.Header, emptyStepsTransition uint64) uint {
-	if h.Number.Uint64() >= emptyStepsTransition {
-		return 3
-	}
-	return 2
 }
 
 func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
@@ -863,9 +837,6 @@ func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTim
 	}
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
-	if time >= c.cfg.EmptyStepsTransition {
-		currentEmptyStepsLen = len(c.emptySteps(parentStep, currentStep, parentHash))
-	}
 	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
 
 	/* TODO: do I need gasLimit override logic here ?
@@ -914,6 +885,7 @@ func (c *AuRa) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
+//nolint
 func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
 	from := EmptyStep{step: fromStep + 1, parentHash: parentHash}
 	to := EmptyStep{step: toStep}
@@ -939,46 +911,6 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.
 func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header, syscall consensus.SystemCall) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
-	if header.Number.Uint64() >= aura.cfg.EmptyStepsTransition {
-		var emptySteps []EmptyStep
-		if len(header.Seal) == 0 {
-			// this is a new block, calculate rewards based on the empty steps messages we have accumulated
-			if err = aura.db.View(context.Background(), func(tx ethdb.Tx) error {
-				parent := rawdb.ReadHeader(tx, header.ParentHash, header.Number.Uint64())
-				if parent == nil {
-					return fmt.Errorf("parent not found: %d,%x\n", header.Number.Uint64(), header.ParentHash)
-				}
-				parentStep, err := headerStep(parent, aura.cfg.EmptyStepsTransition)
-				if err != nil {
-					return err
-				}
-				currentStep := aura.step.inner.inner.Load()
-				emptySteps = aura.emptySteps(parentStep, currentStep, parent.Hash())
-
-				return nil
-			}); err != nil {
-				return
-			}
-		} else {
-			// we're verifying a block, extract empty steps from the seal
-			emptySteps, err = headerEmptySteps(header)
-			if err != nil {
-				return
-			}
-		}
-
-		for _, s := range emptySteps {
-			var author common.Address
-			author, err = s.author()
-			if err != nil {
-				return
-			}
-
-			beneficiaries = append(beneficiaries, author)
-			rewardKind = append(rewardKind, aurainterfaces.RewardEmptyStep)
-		}
-	}
-
 	beneficiaries = append(beneficiaries, header.Coinbase)
 	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 
@@ -1054,11 +986,13 @@ func blockRewardAbi() abi.ABI {
 // the `parent_hash` in order to save space. The included signature is of the original empty step
 // message, which can be reconstructed by using the parent hash of the block in which this sealed
 // empty message is inc    luded.
+//nolint
 type SealedEmptyStep struct {
 	signature []byte // H520
 	step      uint64
 }
 
+/*
 // extracts the empty steps from the header seal. should only be called when there are 3 fields in the seal
 // (i.e. header.number() >= self.empty_steps_transition).
 func headerEmptySteps(header *types.Header) ([]EmptyStep, error) {
@@ -1091,6 +1025,7 @@ func headerEmptyStepsRaw(header *types.Header) []byte {
 	}
 	return header.Seal[2]
 }
+*/
 
 // A message broadcast by authorities when it's their turn to seal a block but there are no
 // transactions. Other authorities accumulate these messages and later include them in the seal as
@@ -1155,6 +1090,7 @@ func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 	return true, nil
 }
 
+//nolint
 func (s *EmptyStep) author() (common.Address, error) {
 	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	if err != nil {
