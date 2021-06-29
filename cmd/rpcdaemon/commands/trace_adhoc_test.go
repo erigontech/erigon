@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -16,7 +15,7 @@ import (
 )
 
 func TestEmptyQuery(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	db := createTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -32,7 +31,7 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 func TestCoinbaseBalance(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	db := createTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -58,7 +57,7 @@ func TestCoinbaseBalance(t *testing.T) {
 }
 
 func TestReplayTransaction(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	db := createTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	var txnHash common.Hash
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
@@ -85,7 +84,7 @@ func TestReplayTransaction(t *testing.T) {
 }
 
 func TestReplayBlockTransactions(t *testing.T) {
-	db := rpcdaemontest.CreateTestKV(t)
+	db := createTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
