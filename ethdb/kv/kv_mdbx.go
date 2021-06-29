@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -155,8 +156,14 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 				return nil, err
 			}
 		} else {
-			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
-				return nil, err
+			if filepath.Base(opts.path) == "headers10" {
+				if err = env.SetGeometry(int(datasize.MB), -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
+					return nil, err
+				}
+			} else {
+				if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
+					return nil, err
+				}
 			}
 		}
 		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
