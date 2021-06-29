@@ -157,7 +157,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 			}
 		} else {
 			if filepath.Base(opts.path) == "headers10" {
-				if err = env.SetGeometry(int(datasize.MB), -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
+				if err = env.SetGeometry(int(datasize.MB*16), -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
 					return nil, err
 				}
 			} else {
