@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-// Package clique implements the proof-of-authority consensus engine.
 package aura
 
 import (
@@ -47,6 +46,11 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"go.uber.org/atomic"
 )
+
+/*
+Not implemented features from OS:
+ - two_thirds_majority_transition - because no chains in OE where this is != MaxUint64 - means 1/2 majority used everywhere
+*/
 
 type StepDurationInfo struct {
 	TransitionStep      uint64
@@ -159,10 +163,8 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 	               last_transition.block_number, last_transition.block_hash, &list
 	           );
 	           let epoch_set = list.into_inner();
-	           let two_thirds_majority_transition =
-	               self.finality_checker.two_thirds_majority_transition();
 	           self.finality_checker =
-	               RollingFinality::blank(epoch_set, two_thirds_majority_transition);
+	               RollingFinality::blank(epoch_set);
 	       }
 
 	       self.epoch_transition_hash = last_transition.block_hash;
@@ -252,8 +254,6 @@ type RollingFinality struct {
 	signers    SimpleList
 	signCount  map[common.Address]uint
 	lastPushed *common.Hash // Option<H256>,
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	twoThirdsMajorityTransition uint64 //BlockNumber
 }
 
 // AuRa
@@ -279,7 +279,6 @@ type AuRa struct {
 	//maximumUncleCount              uint
 	//emptyStepsTransition           uint64
 	//strictEmptyStepsTransition     uint64
-	//twoThirdsMajorityTransition    uint64 //  BlockNumber
 	//maximumEmptySteps              uint
 	////machine: EthereumMachine,
 	//// History of step hashes recently received from peers.
@@ -387,29 +386,7 @@ func NewAuRa(config *params.AuRaConfig, db ethdb.RwKV, ourSigningAddress common.
 
 	/*
 		    let engine = Arc::new(AuthorityRound {
-		        transition_service: IoService::<()>::start("AuRa")?,
-		        step: Arc::new(PermissionedStep {
-		            inner: step,
-		            can_propose: AtomicBool::new(true),
-		        }),
-		        client: Arc::new(RwLock::new(None)),
-		        signer: RwLock::new(None),
-		        validators: our_params.validators,
-		        validate_score_transition: our_params.validate_score_transition,
-		        validate_step_transition: our_params.validate_step_transition,
-		        empty_steps: Default::default(),
-		        epoch_manager: Mutex::new(EpochManager::blank(
-		            our_params.two_thirds_majority_transition,
-		        )),
-		        immediate_transitions: our_params.immediate_transitions,
-		        block_reward: our_params.block_reward,
-		        block_reward_contract_transitions: our_params.block_reward_contract_transitions,
-		        maximum_uncle_count_transition: our_params.maximum_uncle_count_transition,
-		        maximum_uncle_count: our_params.maximum_uncle_count,
-		        empty_steps_transition: our_params.empty_steps_transition,
-		        maximum_empty_steps: our_params.maximum_empty_steps,
-		        two_thirds_majority_transition: our_params.two_thirds_majority_transition,
-		        machine: machine,
+		        epoch_manager: Mutex::new(EpochManager::blank()),
 		        received_step_hashes: RwLock::new(Default::default()),
 		        gas_limit_override_cache: Mutex::new(LruCache::new(GAS_LIMIT_OVERRIDE_CACHE_CAPACITY)),
 		    })
@@ -683,6 +660,14 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	//return nil
 }
 
+func stepProposer(validators ValidatorSet, blockHash common.Hash, step uint64) (common.Address, error) {
+	c, err := validators.defaultCaller(blockHash)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return validators.getWithCaller(blockHash, uint(step), c)
+}
+
 // GenerateSeal - Attempt to seal the block internally.
 //
 // This operation is synchronous and may (quite reasonably) not be available, in which case
@@ -719,94 +704,95 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 		return nil
 	}
 
-	c.epochSet(chain, current)
+	validators, setNumber, err := c.epochSet(chain, current)
+	if err != nil {
+		log.Warn("[engine] Unable to generate seal", "err", err)
+		return nil
+	}
 
+	stepProposerAddr, err := stepProposer(validators, current.ParentHash, step)
+	if err != nil {
+		log.Warn("[engine] Unable to get stepProposer", "err", err)
+		return nil
+	}
+	if stepProposerAddr != current.Coinbase {
+		return nil
+	}
+
+	// this is guarded against by `can_propose` unless the block was signed
+	// on the same step (implies same key) and on a different node.
+	if parentStep == step {
+		log.Warn("Attempted to seal block on the same step as parent. Is this authority sealing with more than one node?")
+		return nil
+	}
+
+	_ = setNumber
 	/*
-	   let (validators, set_number) = match self.epoch_set(header) {
-	      Err(err) => {
-	          warn!(target: "engine", "Unable to generate seal: {}", err);
-	          return Seal::None;
-	      }
-	      Ok(ok) => ok,
-	   };
 
-	   if is_step_proposer(&*validators, header.parent_hash(), step, header.author()) {
-	      // this is guarded against by `can_propose` unless the block was signed
-	      // on the same step (implies same key) and on a different node.
-	      if parent_step == step {
-	          warn!("Attempted to seal block on the same step as parent. Is this authority sealing with more than one node?");
-	          return Seal::None;
-	      }
+		  // if there are no transactions to include in the block, we don't seal and instead broadcast a signed
+		  // `EmptyStep(step, parent_hash)` message. If we exceed the maximum amount of `empty_step` rounds we proceed
+		  // with the seal.
+		  if header.number() >= self.empty_steps_transition
+			  && block.transactions.is_empty()
+			  && empty_steps.len() < self.maximum_empty_steps
+		  {
+			  if self
+				  .step
+				  .can_propose
+				  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
+				  .is_ok()
+			  {
+				  self.generate_empty_step(header.parent_hash());
+			  }
 
-	      // if there are no transactions to include in the block, we don't seal and instead broadcast a signed
-	      // `EmptyStep(step, parent_hash)` message. If we exceed the maximum amount of `empty_step` rounds we proceed
-	      // with the seal.
-	      if header.number() >= self.empty_steps_transition
-	          && block.transactions.is_empty()
-	          && empty_steps.len() < self.maximum_empty_steps
-	      {
-	          if self
-	              .step
-	              .can_propose
-	              .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
-	              .is_ok()
-	          {
-	              self.generate_empty_step(header.parent_hash());
-	          }
+			  return Seal::None;
+		  }
 
-	          return Seal::None;
-	      }
+		  let empty_steps_rlp = if header.number() >= self.empty_steps_transition {
+			  let empty_steps: Vec<_> = empty_steps.iter().map(|e| e.sealed()).collect();
+			  Some(::rlp::encode_list(&empty_steps))
+		  } else {
+			  None
+		  };
 
-	      let empty_steps_rlp = if header.number() >= self.empty_steps_transition {
-	          let empty_steps: Vec<_> = empty_steps.iter().map(|e| e.sealed()).collect();
-	          Some(::rlp::encode_list(&empty_steps))
-	      } else {
-	          None
-	      };
+		  if let Ok(signature) = self.sign(header_seal_hash(
+			  header,
+			  empty_steps_rlp.as_ref().map(|e| &**e),
+		  )) {
+			  trace!(target: "engine", "generate_seal: Issuing a block for step {}.", step);
 
-	      if let Ok(signature) = self.sign(header_seal_hash(
-	          header,
-	          empty_steps_rlp.as_ref().map(|e| &**e),
-	      )) {
-	          trace!(target: "engine", "generate_seal: Issuing a block for step {}.", step);
+			  // only issue the seal if we were the first to reach the compare_exchange.
+			  if self
+				  .step
+				  .can_propose
+				  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
+				  .is_ok()
+			  {
+				  // we can drop all accumulated empty step messages that are
+				  // older than the parent step since we're including them in
+				  // the seal
+				  self.clear_empty_steps(parent_step);
 
-	          // only issue the seal if we were the first to reach the compare_exchange.
-	          if self
-	              .step
-	              .can_propose
-	              .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
-	              .is_ok()
-	          {
-	              // we can drop all accumulated empty step messages that are
-	              // older than the parent step since we're including them in
-	              // the seal
-	              self.clear_empty_steps(parent_step);
+				  // report any skipped primaries between the parent block and
+				  // the block we're sealing, unless we have empty steps enabled
+				  if header.number() < self.empty_steps_transition {
+					  self.report_skipped(header, step, parent_step, &*validators, set_number);
+				  }
 
-	              // report any skipped primaries between the parent block and
-	              // the block we're sealing, unless we have empty steps enabled
-	              if header.number() < self.empty_steps_transition {
-	                  self.report_skipped(header, step, parent_step, &*validators, set_number);
-	              }
+				  let mut fields =
+					  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
 
-	              let mut fields =
-	                  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
+				  if let Some(empty_steps_rlp) = empty_steps_rlp {
+					  fields.push(empty_steps_rlp);
+				  }
 
-	              if let Some(empty_steps_rlp) = empty_steps_rlp {
-	                  fields.push(empty_steps_rlp);
-	              }
-
-	              return Seal::Regular(fields);
-	          }
-	      } else {
-	          warn!(target: "engine", "generate_seal: FAIL: Accounts secret key unavailable.");
-	      }
-	   } else {
-	      trace!(target: "engine", "generate_seal: {} not a proposer for step {}.",
-	       header.author(), step);
-	   }
-
-	   Seal::None
+				  return Seal::Regular(fields);
+			  }
+		  } else {
+			  warn!(target: "engine", "generate_seal: FAIL: Accounts secret key unavailable.");
+		  }
 	*/
+	return nil
 }
 
 // epochSet fetch correct validator set for epoch at header, taking into account
@@ -894,7 +880,8 @@ func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTim
 	*/
 }
 
-// calculateScore - analog of PoW difficulty: total weight is sqrt(U256::max_value())*height - step
+// calculateScore - analog of PoW difficulty:
+//    sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
 func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
 	maxU128 := uint256.NewInt(0).SetAllOne()
 	maxU128 = maxU128.Rsh(maxU128, 128)
@@ -952,9 +939,6 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.
 func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header, syscall consensus.SystemCall) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
-	if header.Number.Uint64() == aura.cfg.TwoThirdsMajorityTransition {
-		log.Info("Transitioning to 2/3 quorum", "block", aura.cfg.TwoThirdsMajorityTransition)
-	}
 	if header.Number.Uint64() >= aura.cfg.EmptyStepsTransition {
 		var emptySteps []EmptyStep
 		if len(header.Seal) == 0 {

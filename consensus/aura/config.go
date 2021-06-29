@@ -111,8 +111,6 @@ type JsonSpec struct {
 	MaximumEmptySteps *uint `json:"maximumEmptySteps"`
 	// Strict validation of empty steps transition block.
 	StrictEmptyStepsTransition *uint `json:"strictEmptyStepsTransition"`
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition *uint64 `json:"twoThirdsMajorityTransition"`
 	// The random number contract's address, or a map of contract transitions.
 	RandomnessContractAddress map[uint64]common.Address `json:"randomnessContractAddress"`
 	// The addresses of contracts that determine the block gas limit starting from the block number
@@ -174,8 +172,6 @@ type AuthorityRoundParams struct {
 	MaximumUncleCount uint
 	// Empty step messages transition block.
 	EmptyStepsTransition uint64
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition uint64
 	// Number of accepted empty steps.
 	MaximumEmptySteps uint
 	// Transition block to strict empty steps validation.
@@ -284,9 +280,5 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		}
 	}
 
-	params.TwoThirdsMajorityTransition = math.MaxUint64
-	if jsonParams.TwoThirdsMajorityTransition != nil {
-		params.TwoThirdsMajorityTransition = *jsonParams.TwoThirdsMajorityTransition
-	}
 	return params, nil
 }

@@ -57,6 +57,11 @@ func (c *powEngine) Seal(chain consensus.ChainHeaderReader, block *types.Block, 
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
 	panic("must not be called")
 }
+
+func (c *powEngine) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header) []rlp.RawValue {
+	return nil
+}
+
 func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, _ []rlp.RawValue) *big.Int {
 	panic("must not be called")
 }

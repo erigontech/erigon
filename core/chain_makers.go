@@ -409,7 +409,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
 		Time:     time,
 	}
-	header.Seal = engine.GenerateSeal(header, parent.Header())
+	header.Seal = engine.GenerateSeal(chain, header, parent.Header())
 
 	if chain.Config().IsLondon(header.Number.Uint64()) {
 		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
