@@ -29,6 +29,12 @@ var cmdResetState = &cobra.Command{
 			log.Error(err.Error())
 			return err
 		}
+		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
+			return clearUnwindStack(tx, ctx)
+		}); err != nil {
+			log.Error(err.Error())
+			return err
+		}
 
 		return nil
 	},

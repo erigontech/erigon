@@ -91,7 +91,6 @@ import (
     }
 */
 func TestRewardContract(t *testing.T) {
-	t.Skip("not ready yet")
 	auraDB, require := kv.NewTestKV(t), require.New(t)
 	engine, err := aura.NewAuRa(nil, auraDB, common.Address{}, test.AuthorityRoundBlockRewardContract)
 	require.NoError(err)
