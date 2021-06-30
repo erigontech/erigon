@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/holiman/uint256"
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
@@ -259,7 +260,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
 	}
-	return marshalReceipt(receipts[txIndex], block.Transactions()[txIndex]), nil
+	return marshalReceipt(receipts[txIndex], block.Transactions()[txIndex], cc, block), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -292,13 +293,13 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block))
 	}
 
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -328,6 +329,13 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]in
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
+	if !chainConfig.IsLondon(block.NumberU64()) {
+		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
+	} else {
+		baseFee, _ := uint256.FromBig(block.BaseFee())
+		gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
+		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
+	}
 	// Assign receipt status.
 	fields["status"] = receipt.Status
 	if receipt.Logs == nil {
