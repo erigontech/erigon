@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -113,13 +112,4 @@ func TestIsSequence(t *testing.T) {
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
 	}
 
-}
-
-func writeAccount(db ethdb.Putter, addrHash common.Hash, acc accounts.Account) error {
-	value := make([]byte, acc.EncodingLengthForStorage())
-	acc.EncodeForStorage(value)
-	if err := db.Put(dbutils.HashedAccountsBucket, addrHash[:], value); err != nil {
-		return err
-	}
-	return nil
 }
