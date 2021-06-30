@@ -820,7 +820,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (Val
 //nolint
 func headerStep(current *types.Header) (val uint64, err error) {
 	if len(current.Seal) < 1 {
-		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has {} fields; qed (Make sure the spec file has a correct genesis seal)", 2))
+		panic("was either checked with verify_block_basic or is genesis; has 2 fields; qed (Make sure the spec file has a correct genesis seal)")
 	}
 	err = rlp.Decode(bytes.NewReader(current.Seal[0]), &val)
 	if err != nil {
