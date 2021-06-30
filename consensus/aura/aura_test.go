@@ -116,6 +116,7 @@ func TestRewardContract(t *testing.T) {
 
 	fmt.Printf("balance: %d\n", accAfter.Balance.Uint64())
 	/*
+
 	   	let spec = Spec::new_test_round_block_reward_contract();
 	              let tap = Arc::new(AccountProvider::transient_provider());
 
