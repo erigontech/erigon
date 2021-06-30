@@ -1,7 +1,6 @@
 package dbutils
 
 import (
-	"bytes"
 	"sort"
 	"strings"
 
@@ -185,7 +184,6 @@ Invariants:
 */
 const TrieOfAccountsBucket = "TrieAccount"
 const TrieOfStorageBucket = "TrieStorage"
-const IntermediateTrieHashBucketOld2 = "iTh2"
 
 const (
 	// DatabaseInfoBucket is used to store information about data layout.
@@ -345,28 +343,11 @@ var Buckets = []string{
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
-	IntermediateTrieHashBucketOld2,
 	HeaderPrefixOld,
 	CliqueBucket,
 }
 
-type CustomComparator string
-
-const (
-	DefaultCmp     CustomComparator = ""
-	DupCmpSuffix32 CustomComparator = "dup_cmp_suffix32"
-)
-
 type CmpFunc func(k1, k2, v1, v2 []byte) int
-
-func DefaultCmpFunc(k1, k2, v1, v2 []byte) int { return bytes.Compare(k1, k2) }
-func DefaultDupCmpFunc(k1, k2, v1, v2 []byte) int {
-	cmp := bytes.Compare(k1, k2)
-	if cmp == 0 {
-		cmp = bytes.Compare(v1, v2)
-	}
-	return cmp
-}
 
 type BucketsCfg map[string]BucketConfigItem
 type Bucket string
@@ -396,10 +377,8 @@ type BucketConfigItem struct {
 	// k = k[:DupToLen]
 	// And opposite at retrieval
 	// Works only if AutoDupSortKeysConversion enabled
-	DupFromLen          int
-	DupToLen            int
-	CustomComparator    CustomComparator
-	CustomDupComparator CustomComparator
+	DupFromLen int
+	DupToLen   int
 }
 
 var BucketsConfigs = BucketsCfg{
@@ -420,10 +399,6 @@ var BucketsConfigs = BucketsCfg{
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                60,
 		DupToLen:                  28,
-	},
-	IntermediateTrieHashBucketOld2: {
-		Flags:               DupSort,
-		CustomDupComparator: DupCmpSuffix32,
 	},
 	CallTraceSet: {
 		Flags: DupSort,

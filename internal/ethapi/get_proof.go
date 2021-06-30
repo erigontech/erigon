@@ -172,7 +172,7 @@ func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Addre
 */
 
 type Receiver struct {
-	defaultReceiver *trie.DefaultReceiver
+	defaultReceiver *trie.RootHashAggregator
 	accountMap      map[string]*accounts.Account
 	storageMap      map[string][]byte
 	unfurlList      []string
