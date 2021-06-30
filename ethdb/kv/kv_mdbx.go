@@ -261,13 +261,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 				continue
 			}
 			cnfCopy := db.buckets[name]
-			var dcmp mdbx.CmpFunc
-			switch cnfCopy.CustomDupComparator {
-			case dbutils.DupCmpSuffix32:
-				dcmp = tx.GetCmpExcludeSuffix32()
-			}
-
-			dbi, createErr := tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+			dbi, createErr := tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
 			if createErr != nil {
 				if mdbx.IsNotFound(createErr) {
 					cnfCopy.DBI = NonExistingDBI
@@ -565,11 +559,6 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 }
 
-func (tx *MdbxTx) Comparator(bucket string) dbutils.CmpFunc {
-	b := tx.db.buckets[bucket]
-	return chooseComparator2(tx.tx, mdbx.DBI(b.DBI), b)
-}
-
 // ExistingBuckets - all buckets stored as keys of un-named bucket
 func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
 	var res []string
@@ -633,13 +622,7 @@ func (db *MdbxKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) (err 
 
 func (tx *MdbxTx) CreateBucket(name string) error {
 	cnfCopy := tx.db.buckets[name]
-	var dcmp mdbx.CmpFunc
-	switch cnfCopy.CustomDupComparator {
-	case dbutils.DupCmpSuffix32:
-		dcmp = tx.tx.GetCmpExcludeSuffix32()
-	}
-
-	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, dcmp)
+	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
 	if err != nil && !mdbx.IsNotFound(err) {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
@@ -672,7 +655,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("some not supported flag provided for bucket")
 	}
 
-	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, dcmp)
+	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
 
 	if err != nil {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
@@ -681,35 +664,6 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	tx.db.buckets[name] = cnfCopy
 	return nil
-}
-
-func chooseComparator2(tx *mdbx.Txn, dbi mdbx.DBI, cnfCopy dbutils.BucketConfigItem) dbutils.CmpFunc {
-	if cnfCopy.CustomComparator == dbutils.DefaultCmp && cnfCopy.CustomDupComparator == dbutils.DefaultCmp {
-		if cnfCopy.Flags&mdbx.DupSort == 0 {
-			return dbutils.DefaultCmpFunc
-		}
-		return dbutils.DefaultDupCmpFunc
-	}
-	if cnfCopy.Flags&mdbx.DupSort == 0 {
-		return CustomCmpFunc2(tx, dbi)
-	}
-	return CustomDupCmpFunc2(tx, dbi)
-}
-
-func CustomCmpFunc2(tx *mdbx.Txn, dbi mdbx.DBI) dbutils.CmpFunc {
-	return func(k1, k2, v1, v2 []byte) int {
-		return tx.Cmp(dbi, k1, k2)
-	}
-}
-
-func CustomDupCmpFunc2(tx *mdbx.Txn, dbi mdbx.DBI) dbutils.CmpFunc {
-	return func(k1, k2, v1, v2 []byte) int {
-		cmp := tx.Cmp(dbi, k1, k2)
-		if cmp == 0 {
-			cmp = tx.DCmp(dbi, v1, v2)
-		}
-		return cmp
-	}
 }
 
 func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {

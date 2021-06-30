@@ -921,7 +921,7 @@ func getModifiedAccounts(chaindata string) {
 }
 
 type Receiver struct {
-	defaultReceiver *trie.DefaultReceiver
+	defaultReceiver *trie.RootHashAggregator
 	accountMap      map[string]*accounts.Account
 	storageMap      map[string][]byte
 	unfurlList      []string
@@ -1137,8 +1137,8 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	if err != nil {
 		return err
 	}
-	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
-	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
+	r := &Receiver{defaultReceiver: trie.NewRootHashAggregator(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
+	r.defaultReceiver.Reset(nil, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
 	root, err := loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx(), nil, nil)
 	if err != nil {
