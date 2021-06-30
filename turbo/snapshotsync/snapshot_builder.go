@@ -45,12 +45,6 @@ type SnapshotMigrator struct {
 	replaced                   uint64
 }
 
-/*
-1) Проверить, что процесс миграции еще не начался
-2) Если для текущего блока нет снепшота хедеров то начать создавать его
-3) Если для текущего блока нет снепшота боди, то начать создавать его
-*/
-
 func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rwTX ethdb.Tx, bittorrent *Client, async bool) error {
 	if atomic.LoadUint64(&sm.started) > 0 {
 		return nil

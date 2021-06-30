@@ -28,7 +28,6 @@ type SnapshotUpdater interface {
 	HeadersSnapshot() ethdb.RoKV
 	BodiesSnapshot() ethdb.RoKV
 	StateSnapshot() ethdb.RoKV
-	//SnapshotKV(bucket string) ethdb.RoKV
 }
 
 type WriteDB interface {
@@ -46,13 +45,6 @@ type snapshotOpts struct {
 	stateSnapshot   ethdb.RoKV
 }
 
-//func (opts snapshotOpts) SnapshotDB(buckets []string, db ethdb.RoKV) snapshotOpts {
-//	opts.snapshots = append(opts.snapshots, snapshotData{
-//		buckets:  buckets,
-//		snapshot: db,
-//	})
-//	return opts
-//}
 func (opts snapshotOpts) HeadersSnapshot(kv ethdb.RoKV) snapshotOpts {
 	opts.headersSnapshot = kv
 	return opts
@@ -156,6 +148,8 @@ func (s *SnapshotKV) UpdateSnapshots(tp string, snapshotKV ethdb.RoKV, done chan
 func (s *SnapshotKV) WriteDB() ethdb.RwKV {
 	return s.db
 }
+
+//todo
 func (s *SnapshotKV) HeadersSnapshot() ethdb.RoKV {
 	return s.headersSnapshot
 }

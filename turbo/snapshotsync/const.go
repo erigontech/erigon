@@ -10,7 +10,7 @@ import (
 const (
 	DefaultChunkSize = 1024 * 1024
 	MdbxFilename     = "mdbx.dat"
-	EpochSize        = 1000
+	EpochSize        = 500_000
 
 	//todo It'll be changed after enabling new snapshot generation mechanism
 	HeadersSnapshotHash = "0000000000000000000000000000000000000000"
