@@ -61,6 +61,16 @@ type ValidatorSet interface {
 
 	// Draws an validator nonce modulo number of validators.
 	getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error)
+
+	// Recover the validator set from the given proof, the block number, and
+	// whether this header is first in its set.
+	//
+	// May fail if the given header doesn't kick off an epoch or
+	// the proof is invalid.
+	//
+	// Returns the set, along with a flag indicating whether finality of a specific
+	// hash should be proven.
+	epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error)
 	/*
 	 // Returns the current number of validators.
 	    fn count(&self, parent: &H256) -> usize {
@@ -236,6 +246,14 @@ func (s *Multi) onCloseBlock(header *types.Header, address common.Address) error
 	return set.onCloseBlock(header, address)
 }
 
+// TODO: do we need add `proof` argument?
+//nolint
+func (s *Multi) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
+	setBlock, set := s.correctSetByNumber(num)
+	first = setBlock == num
+	return set.epochSet(first, num, proof)
+}
+
 //func (s *Multi) onEpochBegin(first bool, header *types.Header, call SysCall) error {
 //	first, set := s.get(header.Number.Uint64())
 //	return set.onEpochBegin(first,header, address)
@@ -245,6 +263,9 @@ type SimpleList struct {
 	validators []common.Address
 }
 
+func (s *SimpleList) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
+	return *s, nil, nil
+}
 func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
 func (s *SimpleList) defaultCaller(blockHash common.Hash) (Call, error) {
 	return nil, fmt.Errorf("simple list doesn't require calls")
@@ -362,6 +383,60 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 // Returns a list of contract calls to be pushed onto the new block.
 //func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 
+func (s *ValidatorSafeContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
+	return SimpleList{}, nil, fmt.Errorf("ValidatorSafeContract.epochSet not implemented")
+	/*
+		    fn epoch_set(
+		        &self,
+		        first: bool,
+		        machine: &EthereumMachine,
+		        _number: ::types::BlockNumber,
+		        proof: &[u8],
+		    ) -> Result<(SimpleList, Option<H256>), ::error::Error> {
+		        let rlp = Rlp::new(proof);
+
+		        if first {
+		            trace!(target: "engine", "Recovering initial epoch set");
+
+		            let (old_header, state_items) = decode_first_proof(&rlp)?;
+		            let number = old_header.number();
+		            let old_hash = old_header.hash();
+		            let addresses =
+		                check_first_proof(machine, self.contract_address, old_header, &state_items)
+		                    .map_err(::engines::EngineError::InsufficientProof)?;
+
+		            trace!(target: "engine", "extracted epoch set at #{}: {} addresses",
+						number, addresses.len());
+
+		            Ok((SimpleList::new(addresses), Some(old_hash)))
+		        } else {
+		            let (old_header, receipts) = decode_proof(&rlp)?;
+
+		            // ensure receipts match header.
+		            // TODO: optimize? these were just decoded.
+		            let found_root = ::triehash::ordered_trie_root(receipts.iter().map(|r| r.encode()));
+		            if found_root != *old_header.receipts_root() {
+		                return Err(::error::BlockError::InvalidReceiptsRoot(Mismatch {
+		                    expected: *old_header.receipts_root(),
+		                    found: found_root,
+		                })
+		                .into());
+		            }
+
+		            let bloom = self.expected_bloom(&old_header);
+
+		            match self.extract_from_event(bloom, &old_header, &receipts) {
+		                Some(list) => Ok((list, Some(old_header.hash()))),
+		                None => Err(::engines::EngineError::InsufficientProof(
+		                    "No log event in proof.".into(),
+		                )
+		                .into()),
+		            }
+		        }
+		    }
+	*/
+}
+
 func (s *ValidatorSafeContract) defaultCaller(blockHash common.Hash) (Call, error) {
 	return func(addr common.Address, data []byte) (CallResults, error) {
 		return s.client.CallAtBlockHash(blockHash, addr, data)
@@ -446,11 +521,15 @@ func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress co
 	return nil
 }
 
-// A validator contract with reporting.
+// ValidatorContract a validator contract with reporting.
 type ValidatorContract struct {
 	contractAddress  common.Address
 	validators       ValidatorSafeContract
 	posdaoTransition *uint64
+}
+
+func (s *ValidatorContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
+	return s.validators.epochSet(first, num, proof)
 }
 
 func (s *ValidatorContract) defaultCaller(blockHash common.Hash) (Call, error) {

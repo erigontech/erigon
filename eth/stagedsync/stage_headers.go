@@ -114,7 +114,6 @@ func HeadersForward(
 	var peer []byte
 	stopped := false
 	prevProgress := headerProgress
-
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)

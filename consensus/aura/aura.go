@@ -14,12 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-// Package clique implements the proof-of-authority consensus engine.
 package aura
 
 import (
 	"bytes"
-	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"sort"
@@ -34,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
 	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -46,6 +44,13 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"go.uber.org/atomic"
 )
+
+/*
+Not implemented features from OS:
+ - two_thirds_majority_transition - because no chains in OE where this is != MaxUint64 - means 1/2 majority used everywhere
+ - emptyStepsTransition - same
+
+*/
 
 type StepDurationInfo struct {
 	TransitionStep      uint64
@@ -107,6 +112,137 @@ type EpochManager struct {
 	force                 bool
 }
 
+// zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
+// It's analog of zoom_to_after function in OE, but doesn't require external locking
+//nolint
+func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators ValidatorSet, h *types.Header) (RollingFinality, uint64, bool) {
+	var lastWasParent bool
+	if e.finalityChecker.lastPushed != nil {
+		lastWasParent = *e.finalityChecker.lastPushed == h.Hash()
+	}
+
+	// early exit for current target == chain head, but only if the epochs are
+	// the same.
+	if lastWasParent && !e.force {
+		return e.finalityChecker, e.epochTransitionNumber, true
+	}
+	e.force = false
+
+	// epoch_transition_for can be an expensive call, but in the absence of
+	// forks it will only need to be called for the block directly after
+	// epoch transition, in which case it will be O(1) and require a single
+	// DB lookup.
+	last_transition, ok := epochTransitionFor(chain, h.ParentHash)
+	if !ok {
+		return e.finalityChecker, e.epochTransitionNumber, false
+	}
+	_ = last_transition
+	/*
+	       // extract other epoch set if it's not the same as the last.
+	       if last_transition.block_hash != self.epoch_transition_hash {
+	           let (signal_number, set_proof, _) = destructure_proofs(&last_transition.proof)
+	               .expect("proof produced by this engine; therefore it is valid; qed");
+
+	           trace!(
+	               target: "engine",
+	               "extracting epoch validator set for epoch ({}, {}) signalled at #{}",
+	               last_transition.block_number, last_transition.block_hash, signal_number
+	           );
+
+	           let first = signal_number == 0;
+	           let (list, _) = validators
+	               .epoch_set(
+	                   first,
+	                   machine,
+	                   signal_number, // use signal number so multi-set first calculation is correct.
+	                   set_proof,
+	               )
+	               .expect("proof produced by this engine; therefore it is valid; qed");
+	           trace!(
+	               target: "engine",
+	               "Updating finality checker with new validator set extracted from epoch ({}, {}): {:?}",
+	               last_transition.block_number, last_transition.block_hash, &list
+	           );
+	           let epoch_set = list.into_inner();
+	           self.finality_checker =
+	               RollingFinality::blank(epoch_set);
+	       }
+
+	       self.epoch_transition_hash = last_transition.block_hash;
+	       self.epoch_transition_number = last_transition.block_number;
+
+	       true
+	   }
+	*/
+	return e.finalityChecker, e.epochTransitionNumber, true
+}
+
+/// Get the transition to the epoch the given parent hash is part of
+/// or transitions to.
+/// This will give the epoch that any children of this parent belong to.
+///
+/// The block corresponding the the parent hash must be stored already.
+//nolint
+func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (common.Hash, bool) {
+	// slow path: loop back block by block
+	for {
+		h := chain.GetHeaderByHash(parentHash)
+		if h == nil {
+			return parentHash, false
+		}
+
+		// look for transition in database.
+		transitionHash, ok := epochTransition(h.Number.Uint64(), h.Hash())
+		if ok {
+			return transitionHash, true
+		}
+
+		// canonical hash -> fast breakout:
+		// get the last epoch transition up to this block.
+		//
+		// if `block_hash` is canonical it will only return transitions up to
+		// the parent.
+		canonical := chain.GetHeaderByNumber(h.Number.Uint64())
+		if canonical == nil {
+			return parentHash, false
+		}
+		//nolint
+		if canonical.Hash() == parentHash {
+			/* TODO: whaaaat????
+			   return self
+			       .epoch_transitions()
+			       .map(|(_, t)| t)
+			       .take_while(|t| t.block_number <= details.number)
+			       .last();
+			*/
+		}
+
+		parentHash = h.Hash()
+	}
+}
+
+// epochTransition get a specific epoch transition by block number and provided block hash.
+//nolint
+func epochTransition(blockNum uint64, blockHash common.Hash) (common.Hash, bool) {
+	return blockHash, true
+	/*
+		pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
+		   trace!(target: "blockchain", "Loading epoch transition at block {}, {}",
+		    block_num, block_hash);
+
+		   self.db
+		       .key_value()
+		       .read(db::COL_EXTRA, &block_num)
+		       .and_then(|transitions: EpochTransitions| {
+		           transitions
+		               .candidates
+		               .into_iter()
+		               .find(|c| c.block_hash == block_hash)
+		       })
+		}
+	*/
+}
+
 //nolint
 type unAssembledHeader struct {
 	h common.Hash // H256
@@ -122,8 +258,6 @@ type RollingFinality struct {
 	signers    SimpleList
 	signCount  map[common.Address]uint
 	lastPushed *common.Hash // Option<H256>,
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	twoThirdsMajorityTransition uint64 //BlockNumber
 }
 
 // AuRa
@@ -137,19 +271,16 @@ type AuRa struct {
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
 	EmptyStepsSet     *EmptyStepSet
+	EpochManager      EpochManager // Mutex<EpochManager>,
 
 	//Validators                     ValidatorSet
 	//ValidateScoreTransition        uint64
 	//ValidateStepTransition         uint64
-	//EpochManager                   EpochManager // Mutex<EpochManager>,
 	//immediateTransitions           bool
 	//blockReward                    map[uint64]*uint256.Int
 	//blockRewardContractTransitions BlockRewardContractList
 	//maximumUncleCountTransition    uint64
 	//maximumUncleCount              uint
-	//emptyStepsTransition           uint64
-	//strictEmptyStepsTransition     uint64
-	//twoThirdsMajorityTransition    uint64 //  BlockNumber
 	//maximumEmptySteps              uint
 	////machine: EthereumMachine,
 	//// History of step hashes recently received from peers.
@@ -198,10 +329,16 @@ func (pb *GasLimitOverride) Add(hash common.Hash, b *uint256.Int) {
 	pb.cache.ContainsOrAdd(hash, b)
 }
 
-// NewAuRa creates a Clique proof-of-authority consensus engine with the initial
-// signers set to the ones provided by the user.
-func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Address, auraParams AuthorityRoundParams) (*AuRa, error) {
-	config := cfg.Aura
+func NewAuRa(config *params.AuRaConfig, db ethdb.RwKV, ourSigningAddress common.Address, engineParamsJson []byte) (*AuRa, error) {
+	spec := JsonSpec{}
+	err := json.Unmarshal(engineParamsJson, &spec)
+	if err != nil {
+		return nil, err
+	}
+	auraParams, err := FromJson(spec)
+	if err != nil {
+		return nil, err
+	}
 
 	if _, ok := auraParams.StepDurations[0]; !ok {
 		return nil, fmt.Errorf("authority Round step 0 duration is undefined")
@@ -251,29 +388,7 @@ func NewAuRa(cfg *params.ChainConfig, db ethdb.RwKV, ourSigningAddress common.Ad
 
 	/*
 		    let engine = Arc::new(AuthorityRound {
-		        transition_service: IoService::<()>::start("AuRa")?,
-		        step: Arc::new(PermissionedStep {
-		            inner: step,
-		            can_propose: AtomicBool::new(true),
-		        }),
-		        client: Arc::new(RwLock::new(None)),
-		        signer: RwLock::new(None),
-		        validators: our_params.validators,
-		        validate_score_transition: our_params.validate_score_transition,
-		        validate_step_transition: our_params.validate_step_transition,
-		        empty_steps: Default::default(),
-		        epoch_manager: Mutex::new(EpochManager::blank(
-		            our_params.two_thirds_majority_transition,
-		        )),
-		        immediate_transitions: our_params.immediate_transitions,
-		        block_reward: our_params.block_reward,
-		        block_reward_contract_transitions: our_params.block_reward_contract_transitions,
-		        maximum_uncle_count_transition: our_params.maximum_uncle_count_transition,
-		        maximum_uncle_count: our_params.maximum_uncle_count,
-		        empty_steps_transition: our_params.empty_steps_transition,
-		        maximum_empty_steps: our_params.maximum_empty_steps,
-		        two_thirds_majority_transition: our_params.two_thirds_majority_transition,
-		        machine: machine,
+		        epoch_manager: Mutex::new(EpochManager::blank()),
 		        received_step_hashes: RwLock::new(Default::default()),
 		        gas_limit_override_cache: Mutex::new(LruCache::new(GAS_LIMIT_OVERRIDE_CACHE_CAPACITY)),
 		    })
@@ -456,14 +571,12 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	}
 }
 
-// FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
-// nor block rewards given, and returns the final block.
+// FinalizeAndAssemble implements consensus.Engine
 func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts []*types.Receipt, syscall consensus.SystemCall) (*types.Block, error) {
-	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	//header.UncleHash = types.CalcUncleHash(nil)
+	c.Finalize(chainConfig, header, state, txs, uncles, syscall)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts), nil
+	return types.NewBlock(header, txs, uncles, receipts), nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -549,17 +662,204 @@ func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, resul
 	//return nil
 }
 
-// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
-// that a new block should have:
-// * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
-// * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash) *big.Int {
+func stepProposer(validators ValidatorSet, blockHash common.Hash, step uint64) (common.Address, error) {
+	c, err := validators.defaultCaller(blockHash)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return validators.getWithCaller(blockHash, uint(step), c)
+}
+
+// GenerateSeal - Attempt to seal the block internally.
+//
+// This operation is synchronous and may (quite reasonably) not be available, in which case
+// `Seal::None` will be returned.
+func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header) []rlp.RawValue {
+	// first check to avoid generating signature most of the time
+	// (but there's still a race to the `compare_exchange`)
+	if !c.step.canPropose.Load() {
+		log.Trace("[engine] Aborting seal generation. Can't propose.")
+		return nil
+	}
+	parentStep, err := headerStep(parent)
+	if err != nil {
+		panic(err)
+	}
+	step := c.step.inner.inner.Load()
+
+	// filter messages from old and future steps and different parents
+	expectedDiff := calculateScore(parentStep, step, 0)
+	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
+		log.Debug(fmt.Sprintf("[engine] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
+		return nil
+	}
+
+	if parentStep > step {
+		log.Warn(fmt.Sprintf("[engine] Aborting seal generation for invalid step: %d > %d", parentStep, step))
+		return nil
+	}
+
+	validators, setNumber, err := c.epochSet(chain, current)
+	if err != nil {
+		log.Warn("[engine] Unable to generate seal", "err", err)
+		return nil
+	}
+
+	stepProposerAddr, err := stepProposer(validators, current.ParentHash, step)
+	if err != nil {
+		log.Warn("[engine] Unable to get stepProposer", "err", err)
+		return nil
+	}
+	if stepProposerAddr != current.Coinbase {
+		return nil
+	}
+
+	// this is guarded against by `can_propose` unless the block was signed
+	// on the same step (implies same key) and on a different node.
+	if parentStep == step {
+		log.Warn("Attempted to seal block on the same step as parent. Is this authority sealing with more than one node?")
+		return nil
+	}
+
+	_ = setNumber
+	/*
+		signature, err := c.sign(current.bareHash())
+			if err != nil {
+				log.Warn("[engine] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
+				return nil
+			}
+	*/
+
+	/*
+		  // only issue the seal if we were the first to reach the compare_exchange.
+		  if self
+			  .step
+			  .can_propose
+			  .compare_exchange(true, false, AtomicOrdering::SeqCst, AtomicOrdering::SeqCst)
+			  .is_ok()
+		  {
+			  // we can drop all accumulated empty step messages that are
+			  // older than the parent step since we're including them in
+			  // the seal
+			  self.clear_empty_steps(parent_step);
+
+			  // report any skipped primaries between the parent block and
+			  // the block we're sealing, unless we have empty steps enabled
+			  if header.number() < self.empty_steps_transition {
+				  self.report_skipped(header, step, parent_step, &*validators, set_number);
+			  }
+
+			  let mut fields =
+				  vec![encode(&step), encode(&(H520::from(signature).as_bytes()))];
+
+			  if let Some(empty_steps_rlp) = empty_steps_rlp {
+				  fields.push(empty_steps_rlp);
+			  }
+
+			  return Seal::Regular(fields);
+		  }
+	*/
 	return nil
-	//snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
-	//if err != nil {
-	//	return nil
-	//}
-	//return calcDifficulty(snap, c.signer)
+}
+
+// epochSet fetch correct validator set for epoch at header, taking into account
+// finality of previous transitions.
+func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (ValidatorSet, uint64, error) {
+	if c.cfg.ImmediateTransitions {
+		return c.cfg.Validators, h.Number.Uint64(), nil
+	}
+
+	//TODO: hardcode for now
+	if h.Number.Uint64() <= 671 {
+		return &SimpleList{validators: []common.Address{
+			common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
+		}}, 0, nil
+	}
+	return &SimpleList{validators: []common.Address{
+		common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
+		common.HexToAddress("0x82e4e61e7f5139ff0a4157a5bc687ef42294c248"),
+	}}, 672, nil
+	/*
+		finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoom(chain, c.cfg.Validators, h)
+		if !ok {
+			return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
+		}
+		return finalityChecker.validators(), epochTransitionNumber
+	*/
+
+	/*
+			fn epoch_set<'a>(
+		        &'a self,
+		        header: &Header,
+		    ) -> Result<(CowLike<dyn ValidatorSet, SimpleList>, BlockNumber), Error> {
+		        Ok(if self.immediate_transitions {
+		            (CowLike::Borrowed(&*self.validators), header.number())
+		        } else {
+		            let mut epoch_manager = self.epoch_manager.lock();
+		            let client = self.upgrade_client_or("Unable to verify sig")?;
+
+		            if !epoch_manager.zoom_to_after(
+		                &*client,
+		                &self.machine,
+		                &*self.validators,
+		                *header.parent_hash(),
+		            ) {
+		                debug!(target: "engine", "Unable to zoom to epoch.");
+		                return Err(EngineError::RequiresClient.into());
+		            }
+
+		            (
+		                CowLike::Owned(epoch_manager.validators().clone()),
+		                epoch_manager.epoch_transition_number,
+		            )
+		        })
+		    }
+	*/
+}
+
+//nolint
+func headerStep(current *types.Header) (val uint64, err error) {
+	if len(current.Seal) < 1 {
+		panic("was either checked with verify_block_basic or is genesis; has 2 fields; qed (Make sure the spec file has a correct genesis seal)")
+	}
+	err = rlp.Decode(bytes.NewReader(current.Seal[0]), &val)
+	if err != nil {
+		return val, err
+	}
+	return val, err
+}
+
+func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
+	var parentStep uint64
+	err := rlp.Decode(bytes.NewReader(parentSeal[0]), &parentStep)
+	if err != nil {
+		panic(err)
+	}
+	currentStep := c.step.inner.inner.Load()
+	currentEmptyStepsLen := 0
+	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
+
+	/* TODO: do I need gasLimit override logic here ?
+	if let Some(gas_limit) = self.gas_limit_override(header) {
+		trace!(target: "engine", "Setting gas limit to {} for block {}.", gas_limit, header.number());
+		let parent_gas_limit = *parent.gas_limit();
+		header.set_gas_limit(gas_limit);
+		if parent_gas_limit != gas_limit {
+			info!(target: "engine", "Block gas limit was changed from {} to {}.", parent_gas_limit, gas_limit);
+		}
+	}
+	*/
+}
+
+// calculateScore - analog of PoW difficulty:
+//    sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
+func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
+	maxU128 := uint256.NewInt(0).SetAllOne()
+	maxU128 = maxU128.Rsh(maxU128, 128)
+	res := maxU128.Add(maxU128, uint256.NewInt(parentStep))
+	res = res.Sub(res, uint256.NewInt(currentStep))
+	res = res.Add(res, uint256.NewInt(currentEmptySteps))
+	return res
 }
 
 func (c *AuRa) SealHash(header *types.Header) common.Hash {
@@ -585,11 +885,12 @@ func (c *AuRa) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	}
 }
 
-func (c *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
+//nolint
+func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
 	from := EmptyStep{step: fromStep + 1, parentHash: parentHash}
 	to := EmptyStep{step: toStep}
 	res := []EmptyStep{}
-	if to.Less(&from) {
+	if to.LessOrEqual(&from) {
 		return res
 	}
 
@@ -610,49 +911,6 @@ func (c *AuRa) EmptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 // of the static blockReward plus a reward for each included uncle (if any). Individual
 // uncle rewards are also returned in an array.
 func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header, syscall consensus.SystemCall) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
-	if header.Number.Uint64() == aura.cfg.TwoThirdsMajorityTransition {
-		log.Info("Transitioning to 2/3 quorum", "block", aura.cfg.TwoThirdsMajorityTransition)
-	}
-	if header.Number.Uint64() >= aura.cfg.EmptyStepsTransition {
-		var emptySteps []EmptyStep
-		if len(header.Seal) == 0 {
-			// this is a new block, calculate rewards based on the empty steps messages we have accumulated
-			if err = aura.db.View(context.Background(), func(tx ethdb.Tx) error {
-				parent := rawdb.ReadHeader(tx, header.ParentHash, header.Number.Uint64())
-				if parent == nil {
-					return fmt.Errorf("parent not found: %d,%x\n", header.Number.Uint64(), header.ParentHash)
-				}
-				parentStep, err := headerStep(parent, aura.cfg.EmptyStepsTransition)
-				if err != nil {
-					return err
-				}
-				currentStep := aura.step.inner.inner.Load()
-				emptySteps = aura.EmptySteps(parentStep, currentStep, parent.Hash())
-
-				return nil
-			}); err != nil {
-				return
-			}
-		} else {
-			// we're verifying a block, extract empty steps from the seal
-			emptySteps, err = headerEmptySteps(header)
-			if err != nil {
-				return
-			}
-		}
-
-		for _, s := range emptySteps {
-			var author common.Address
-			author, err = s.author()
-			if err != nil {
-				return
-			}
-
-			beneficiaries = append(beneficiaries, author)
-			rewardKind = append(rewardKind, aurainterfaces.RewardEmptyStep)
-		}
-	}
-
 	beneficiaries = append(beneficiaries, header.Coinbase)
 	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 
@@ -728,11 +986,13 @@ func blockRewardAbi() abi.ABI {
 // the `parent_hash` in order to save space. The included signature is of the original empty step
 // message, which can be reconstructed by using the parent hash of the block in which this sealed
 // empty message is inc    luded.
+//nolint
 type SealedEmptyStep struct {
 	signature []byte // H520
 	step      uint64
 }
 
+/*
 // extracts the empty steps from the header seal. should only be called when there are 3 fields in the seal
 // (i.e. header.number() >= self.empty_steps_transition).
 func headerEmptySteps(header *types.Header) ([]EmptyStep, error) {
@@ -765,22 +1025,7 @@ func headerEmptyStepsRaw(header *types.Header) []byte {
 	}
 	return header.Seal[2]
 }
-
-func headerStep(header *types.Header, emptyStepsTransition uint64) (uint64, error) {
-	if len(header.Seal) == 0 {
-		panic(fmt.Errorf("was either checked with verify_block_basic or is genesis; has %v fields; qed (Make sure the spec file has a correct genesis seal)", headerExpectedSealFields(header, emptyStepsTransition)))
-	}
-	var val uint64
-	err := rlp.DecodeBytes(header.Seal[0], &val)
-	return val, err
-}
-
-func headerExpectedSealFields(header *types.Header, emptyStepsTransition uint64) uint {
-	if header.Number.Uint64() >= emptyStepsTransition {
-		return 3
-	}
-	return 2
-}
+*/
 
 // A message broadcast by authorities when it's their turn to seal a block but there are no
 // transactions. Other authorities accumulate these messages and later include them in the seal as
@@ -815,6 +1060,18 @@ func (s *EmptyStep) Less(other *EmptyStep) bool {
 	}
 	return false
 }
+func (s *EmptyStep) LessOrEqual(other *EmptyStep) bool {
+	if s.step <= other.step {
+		return true
+	}
+	if bytes.Compare(s.parentHash[:], other.parentHash[:]) <= 0 {
+		return true
+	}
+	if bytes.Compare(s.signature, other.signature) <= 0 {
+		return true
+	}
+	return false
+}
 
 // Returns `true` if the message has a valid signature by the expected proposer in the message's step.
 func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
@@ -833,6 +1090,7 @@ func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 	return true, nil
 }
 
+//nolint
 func (s *EmptyStep) author() (common.Address, error) {
 	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	if err != nil {

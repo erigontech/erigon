@@ -23,7 +23,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 )
 
@@ -105,14 +104,8 @@ type JsonSpec struct {
 	MaximumUncleCountTransition *uint64 `json:"maximumUncleCountTransition"`
 	// Maximum number of accepted uncles.
 	MaximumUncleCount *uint `json:"maximumUncleCount"`
-	// Block at which empty step messages should start.
-	EmptyStepsTransition *uint64 `json:"emptyStepsTransition"`
-	// Maximum number of accepted empty steps.
-	MaximumEmptySteps *uint `json:"maximumEmptySteps"`
 	// Strict validation of empty steps transition block.
 	StrictEmptyStepsTransition *uint `json:"strictEmptyStepsTransition"`
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition *uint64 `json:"twoThirdsMajorityTransition"`
 	// The random number contract's address, or a map of contract transitions.
 	RandomnessContractAddress map[uint64]common.Address `json:"randomnessContractAddress"`
 	// The addresses of contracts that determine the block gas limit starting from the block number
@@ -172,12 +165,6 @@ type AuthorityRoundParams struct {
 	MaximumUncleCountTransition uint64
 	// Number of accepted uncles.
 	MaximumUncleCount uint
-	// Empty step messages transition block.
-	EmptyStepsTransition uint64
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition uint64
-	// Number of accepted empty steps.
-	MaximumEmptySteps uint
 	// Transition block to strict empty steps validation.
 	StrictEmptyStepsTransition uint64
 	// If set, enables random number contract integration. It maps the transition block to the contract address.
@@ -259,12 +246,6 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 	if jsonParams.MaximumUncleCountTransition != nil {
 		params.MaximumUncleCountTransition = *jsonParams.MaximumUncleCountTransition
 	}
-	if jsonParams.MaximumEmptySteps != nil {
-		params.MaximumEmptySteps = *jsonParams.MaximumEmptySteps
-	}
-	if jsonParams.EmptyStepsTransition != nil {
-		params.EmptyStepsTransition = *jsonParams.EmptyStepsTransition
-	}
 
 	params.BlockReward = map[uint64]*uint256.Int{}
 	if jsonParams.BlockReward == nil {
@@ -275,18 +256,5 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		}
 	}
 
-	params.EmptyStepsTransition = math.MaxUint64
-	if jsonParams.EmptyStepsTransition != nil {
-		if *jsonParams.EmptyStepsTransition < 1 {
-			params.EmptyStepsTransition = 1
-		} else {
-			params.EmptyStepsTransition = *jsonParams.EmptyStepsTransition
-		}
-	}
-
-	params.TwoThirdsMajorityTransition = math.MaxUint64
-	if jsonParams.TwoThirdsMajorityTransition != nil {
-		params.TwoThirdsMajorityTransition = *jsonParams.TwoThirdsMajorityTransition
-	}
 	return params, nil
 }
