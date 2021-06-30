@@ -58,6 +58,15 @@ type StepDurationInfo struct {
 	StepDuration        uint64
 }
 
+type EpochTransition struct {
+	/// Block hash at which the transition occurred.
+	blockHash common.Hash
+	/// Block number at which the transition occurred.
+	blockNumber uint64
+	/// "transition/epoch" proof from the engine combined with a finality proof.
+	proof []byte
+}
+
 type Step struct {
 	calibrate bool // whether calibration is enabled.
 	inner     *atomic.Uint64
@@ -132,48 +141,43 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 	// forks it will only need to be called for the block directly after
 	// epoch transition, in which case it will be O(1) and require a single
 	// DB lookup.
-	last_transition, ok := epochTransitionFor(chain, h.ParentHash)
+	last_transition_hash, last_transition_num, ok := epochTransitionFor(chain, h.ParentHash)
 	if !ok {
 		return e.finalityChecker, e.epochTransitionNumber, false
 	}
-	_ = last_transition
-	/*
-	       // extract other epoch set if it's not the same as the last.
-	       if last_transition.block_hash != self.epoch_transition_hash {
-	           let (signal_number, set_proof, _) = destructure_proofs(&last_transition.proof)
-	               .expect("proof produced by this engine; therefore it is valid; qed");
+	// extract other epoch set if it's not the same as the last.
+	if last_transition_hash != e.epochTransitionHash {
+		/*
+		   let (signal_number, set_proof, _) = destructure_proofs(&last_transition.proof)
+		       .expect("proof produced by this engine; therefore it is valid; qed");
 
-	           trace!(
-	               target: "engine",
-	               "extracting epoch validator set for epoch ({}, {}) signalled at #{}",
-	               last_transition.block_number, last_transition.block_hash, signal_number
-	           );
+		   trace!(
+		       target: "engine",
+		       "extracting epoch validator set for epoch ({}, {}) signalled at #{}",
+		       last_transition.block_number, last_transition.block_hash, signal_number
+		   );
 
-	           let first = signal_number == 0;
-	           let (list, _) = validators
-	               .epoch_set(
-	                   first,
-	                   machine,
-	                   signal_number, // use signal number so multi-set first calculation is correct.
-	                   set_proof,
-	               )
-	               .expect("proof produced by this engine; therefore it is valid; qed");
-	           trace!(
-	               target: "engine",
-	               "Updating finality checker with new validator set extracted from epoch ({}, {}): {:?}",
-	               last_transition.block_number, last_transition.block_hash, &list
-	           );
-	           let epoch_set = list.into_inner();
-	           self.finality_checker =
-	               RollingFinality::blank(epoch_set);
-	       }
-
-	       self.epoch_transition_hash = last_transition.block_hash;
-	       self.epoch_transition_number = last_transition.block_number;
-
-	       true
-	   }
-	*/
+		   let first = signal_number == 0;
+		   let (list, _) = validators
+		       .epoch_set(
+		           first,
+		           machine,
+		           signal_number, // use signal number so multi-set first calculation is correct.
+		           set_proof,
+		       )
+		       .expect("proof produced by this engine; therefore it is valid; qed");
+		   trace!(
+		       target: "engine",
+		       "Updating finality checker with new validator set extracted from epoch ({}, {}): {:?}",
+		       last_transition.block_number, last_transition.block_hash, &list
+		   );
+		   let epoch_set = list.into_inner();
+		   self.finality_checker =
+		       RollingFinality::blank(epoch_set);
+		*/
+	}
+	e.epochTransitionHash = last_transition_hash
+	e.epochTransitionNumber = last_transition_num
 	return e.finalityChecker, e.epochTransitionNumber, true
 }
 
@@ -183,18 +187,18 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 ///
 /// The block corresponding the the parent hash must be stored already.
 //nolint
-func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (common.Hash, bool) {
+func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (common.Hash, uint64, bool) {
 	// slow path: loop back block by block
 	for {
 		h := chain.GetHeaderByHash(parentHash)
 		if h == nil {
-			return parentHash, false
+			return parentHash, 0, false
 		}
 
 		// look for transition in database.
-		transitionHash, ok := epochTransition(h.Number.Uint64(), h.Hash())
+		transitionHash, transitionNum, ok := epochTransition(h.Number.Uint64(), h.Hash())
 		if ok {
-			return transitionHash, true
+			return transitionHash, transitionNum, true
 		}
 
 		// canonical hash -> fast breakout:
@@ -204,7 +208,7 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 		// the parent.
 		canonical := chain.GetHeaderByNumber(h.Number.Uint64())
 		if canonical == nil {
-			return parentHash, false
+			return parentHash, h.Number.Uint64() - 1, false
 		}
 		//nolint
 		if canonical.Hash() == parentHash {
@@ -223,8 +227,8 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 
 // epochTransition get a specific epoch transition by block number and provided block hash.
 //nolint
-func epochTransition(blockNum uint64, blockHash common.Hash) (common.Hash, bool) {
-	return blockHash, true
+func epochTransition(blockNum uint64, blockHash common.Hash) (common.Hash, uint64, bool) {
+	return blockHash, blockNum, true
 	/*
 		pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
 		   trace!(target: "blockchain", "Loading epoch transition at block {}, {}",
@@ -914,34 +918,42 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 	beneficiaries = append(beneficiaries, header.Coinbase)
 	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 
-	rewardContractAddress := aura.cfg.BlockRewardContractTransitions.GreaterOrEqual(header.Number.Uint64())
-	if rewardContractAddress != nil {
-		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.Address, syscall, beneficiaries, rewardKind)
+	var rewardContractAddress BlockRewardContract
+	var foundContract bool
+	for _, c := range aura.cfg.BlockRewardContractTransitions {
+		if c.blockNum > header.Number.Uint64() {
+			break
+		}
+		foundContract = true
+		rewardContractAddress = c
+	}
+	if foundContract {
+		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
 		rewardKind = rewardKind[:len(beneficiaries)]
 		for i := 0; i < len(rewardKind); i++ {
 			rewardKind[i] = aurainterfaces.RewardExternal
 		}
 	} else {
-		// find: n <= header.number
-		var foundNum uint64
+		// block_reward.iter.rev().find(|&(block, _)| *block <= number)
+		var reward BlockReward
 		var found bool
-		for n := range aura.cfg.BlockReward {
-			if n > header.Number.Uint64() {
-				continue
+		for i := range aura.cfg.BlockReward {
+			if aura.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
+				break
 			}
-			if n > foundNum {
-				found = true
-				foundNum = n
-			}
+			found = true
+			reward = aura.cfg.BlockReward[i]
 		}
 		if !found {
 			panic("Current block's reward is not found; this indicates a chain config error")
 		}
-		reward := aura.cfg.BlockReward[foundNum]
-		rewards = append(rewards, reward)
+
+		for range beneficiaries {
+			rewards = append(rewards, reward.amount)
+		}
 	}
 
-	//err = aura.Validators.onCloseBlock(header, aura.OurSigningAddress)
+	//err = aura.cfg.Validators.onCloseBlock(header, aura.OurSigningAddress)
 	//if err != nil {
 	//	return
 	//}
