@@ -55,8 +55,8 @@ func NewTxParseContext() *TxParseContext {
 // TxSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxillary information, like ephemeral fields, and indices within priority queues
 type TxSlot struct {
-	txId        uint64      // Transaction id (distinct from transaction hash), used as a compact reference to a transaction accross data structures
-	senderId    uint64      // Sender id (distinct from sender address), used as a compact referecne to to a sender accross data structures
+	//txId        uint64      // Transaction id (distinct from transaction hash), used as a compact reference to a transaction accross data structures
+	//senderId    uint64      // Sender id (distinct from sender address), used as a compact referecne to to a sender accross data structures
 	nonce       uint64      // Nonce of the transaction
 	tip         uint64      // Maximum tip that transaction is giving to miner/block proposer
 	feeCap      uint64      // Maximum fee that transaction burns and gives to the miner/block proposer
@@ -66,11 +66,11 @@ type TxSlot struct {
 	dataLen     int         // Length of transaction's data (for calculation of intrinsic gas)
 	alAddrCount int         // Number of addresses in the access list
 	alStorCount int         // Number of storage keys in the access list
-	bestIdx     int         // Index of the transaction in the best priority queue (of whatever pool it currently belongs to)
-	worstIdx    int         // Index of the transaction in the worst priority queue (of whatever pook it currently belongs to)
-	local       bool        // Whether transaction has been injected locally (and hence needs priority when mining or proposing a block)
-	idHash      [32]byte    // Transaction hash for the purposes of using it as a transaction Id
-	sender      [20]byte    // Sender address for the transaction, recovered from the signature
+	//bestIdx     int         // Index of the transaction in the best priority queue (of whatever pool it currently belongs to)
+	//worstIdx    int         // Index of the transaction in the worst priority queue (of whatever pook it currently belongs to)
+	//local       bool        // Whether transaction has been injected locally (and hence needs priority when mining or proposing a block)
+	idHash [32]byte // Transaction hash for the purposes of using it as a transaction Id
+	sender [20]byte // Sender address for the transaction, recovered from the signature
 }
 
 // beInt parses Big Endian representation of an integer from given payload at given position
