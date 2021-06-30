@@ -60,11 +60,15 @@ type StepDurationInfo struct {
 
 type EpochTransition struct {
 	/// Block hash at which the transition occurred.
-	blockHash common.Hash
+	BlockHash common.Hash
 	/// Block number at which the transition occurred.
-	blockNumber uint64
+	BlockNumber uint64
 	/// "transition/epoch" proof from the engine combined with a finality proof.
-	proof []byte
+	Proof struct {
+		SignalNumber  uint64
+		SetProof      []byte
+		FinalityProof []byte
+	}
 }
 
 type Step struct {
@@ -124,10 +128,10 @@ type EpochManager struct {
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
 //nolint
-func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators ValidatorSet, h *types.Header) (RollingFinality, uint64, bool) {
+func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators ValidatorSet, hash common.Hash) (RollingFinality, uint64, bool) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
-		lastWasParent = *e.finalityChecker.lastPushed == h.Hash()
+		lastWasParent = *e.finalityChecker.lastPushed == hash
 	}
 
 	// early exit for current target == chain head, but only if the epochs are
@@ -141,43 +145,23 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 	// forks it will only need to be called for the block directly after
 	// epoch transition, in which case it will be O(1) and require a single
 	// DB lookup.
-	last_transition_hash, last_transition_num, ok := epochTransitionFor(chain, h.ParentHash)
+	lastTransition, ok := epochTransitionFor(chain, hash)
 	if !ok {
 		return e.finalityChecker, e.epochTransitionNumber, false
 	}
 	// extract other epoch set if it's not the same as the last.
-	if last_transition_hash != e.epochTransitionHash {
-		/*
-		   let (signal_number, set_proof, _) = destructure_proofs(&last_transition.proof)
-		       .expect("proof produced by this engine; therefore it is valid; qed");
-
-		   trace!(
-		       target: "engine",
-		       "extracting epoch validator set for epoch ({}, {}) signalled at #{}",
-		       last_transition.block_number, last_transition.block_hash, signal_number
-		   );
-
-		   let first = signal_number == 0;
-		   let (list, _) = validators
-		       .epoch_set(
-		           first,
-		           machine,
-		           signal_number, // use signal number so multi-set first calculation is correct.
-		           set_proof,
-		       )
-		       .expect("proof produced by this engine; therefore it is valid; qed");
-		   trace!(
-		       target: "engine",
-		       "Updating finality checker with new validator set extracted from epoch ({}, {}): {:?}",
-		       last_transition.block_number, last_transition.block_hash, &list
-		   );
-		   let epoch_set = list.into_inner();
-		   self.finality_checker =
-		       RollingFinality::blank(epoch_set);
-		*/
+	if lastTransition.BlockHash != e.epochTransitionHash {
+		first := lastTransition.Proof.SignalNumber == 0
+		// use signal number so multi-set first calculation is correct.
+		list, _, err := validators.epochSet(first, lastTransition.Proof.SignalNumber, lastTransition.Proof.SetProof)
+		if err != nil {
+			panic(fmt.Errorf("proof produced by this engine; therefore it is valid; qed. %w", err))
+		}
+		epochSet := list.validators
+		e.finalityChecker = NewRollingFinality(epochSet)
 	}
-	e.epochTransitionHash = last_transition_hash
-	e.epochTransitionNumber = last_transition_num
+	e.epochTransitionHash = lastTransition.BlockHash
+	e.epochTransitionNumber = lastTransition.BlockNumber
 	return e.finalityChecker, e.epochTransitionNumber, true
 }
 
@@ -187,18 +171,18 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 ///
 /// The block corresponding the the parent hash must be stored already.
 //nolint
-func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (common.Hash, uint64, bool) {
+func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
 	// slow path: loop back block by block
 	for {
 		h := chain.GetHeaderByHash(parentHash)
 		if h == nil {
-			return parentHash, 0, false
+			return transition, false
 		}
 
 		// look for transition in database.
-		transitionHash, transitionNum, ok := epochTransition(h.Number.Uint64(), h.Hash())
+		transition, ok = epochTransition(h.Number.Uint64(), h.Hash())
 		if ok {
-			return transitionHash, transitionNum, true
+			return transition, true
 		}
 
 		// canonical hash -> fast breakout:
@@ -208,10 +192,11 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 		// the parent.
 		canonical := chain.GetHeaderByNumber(h.Number.Uint64())
 		if canonical == nil {
-			return parentHash, h.Number.Uint64() - 1, false
+			return transition, false
 		}
 		//nolint
 		if canonical.Hash() == parentHash {
+
 			/* TODO: whaaaat????
 			   return self
 			       .epoch_transitions()
@@ -227,8 +212,8 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 
 // epochTransition get a specific epoch transition by block number and provided block hash.
 //nolint
-func epochTransition(blockNum uint64, blockHash common.Hash) (common.Hash, uint64, bool) {
-	return blockHash, blockNum, true
+func epochTransition(blockNum uint64, blockHash common.Hash) (transition EpochTransition, ok bool) {
+	return EpochTransition{}, true
 	/*
 		pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
 		   trace!(target: "blockchain", "Loading epoch transition at block {}, {}",
@@ -259,9 +244,19 @@ type unAssembledHeader struct {
 //nolint
 type RollingFinality struct {
 	headers    []unAssembledHeader //nolint
-	signers    SimpleList
+	signers    *SimpleList
 	signCount  map[common.Address]uint
 	lastPushed *common.Hash // Option<H256>,
+}
+
+/// Create a blank finality checker under the given validator set.
+func NewRollingFinality(signers []common.Address) RollingFinality {
+	return RollingFinality{
+		signers: NewSimpleList(signers),
+		//headers: VecDeque::new(),
+		//sign_count: HashMap::new(),
+		//last_pushed: None
+	}
 }
 
 // AuRa
@@ -452,7 +447,183 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	return nil
-	//return c.verifyHeader(chain, header, nil)
+}
+
+func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) bool {
+	/*
+		self
+			       .received_step_hashes
+			       .read()
+			       .get(&received_step_key)
+			       .map_or(false, |h| *h != new_hash)
+	*/
+	return false
+}
+func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
+	/*
+	   	    self.received_step_hashes
+	                      .write()
+	                      .insert(received_step_key, new_hash);
+	*/
+}
+
+/// Phase 3 verification. Check block information against parent. Returns either a null `Ok` or a general error detailing the problem with import.
+func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
+	step, err := headerStep(header)
+	if err != nil {
+		return err
+	}
+	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	parentStep, err := headerStep(parent)
+	if err != nil {
+		return err
+	}
+	validators, set_number, err := c.epochSet(chain, header)
+	if err != nil {
+		return err
+	}
+
+	// Ensure header is from the step after parent.
+	if step == parentStep ||
+		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
+		log.Debug("[engine] Multiple blocks proposed for step", "num", parentStep)
+		_ = set_number
+		/*
+			self.validators.report_malicious(
+				header.author(),
+				set_number,
+				header.number(),
+				Default::default(),
+			);
+			Err(EngineError::DoubleVote(*header.author()))?;
+		*/
+		return fmt.Errorf("double vote: %x", header.Coinbase)
+	}
+
+	// Report malice if the validator produced other sibling blocks in the same step.
+	if !c.hasReceivedStepHashes(step, header.Coinbase, header.Hash()) {
+		/*
+		   trace!(target: "engine", "Validator {} produced sibling blocks in the same step", header.author());
+		   self.validators.report_malicious(
+		       header.author(),
+		       set_number,
+		       header.number(),
+		       Default::default(),
+		   );
+		*/
+	} else {
+		c.insertReceivedStepHashes(step, header.Coinbase, header.Hash())
+	}
+
+	// Remove hash records older than two full rounds of steps (picked as a reasonable trade-off between
+	// memory consumption and fault-tolerance).
+	caller, err := validators.defaultCaller(parent.Hash())
+	if err != nil {
+		return err
+	}
+	cnt, err := validators.countWithCaller(parent.Hash(), caller)
+	if err != nil {
+		return err
+	}
+	sibling_malice_detection_period := uint64(2 * cnt)
+	oldest_step := uint64(0) //  let oldest_step = parent_step.saturating_sub(sibling_malice_detection_period);
+	if parentStep > sibling_malice_detection_period {
+		oldest_step = parentStep - sibling_malice_detection_period
+	}
+	if oldest_step > 0 {
+		/*
+		   let mut rsh = self.received_step_hashes.write();
+		   let new_rsh = rsh.split_off(&(oldest_step, Address::zero()));
+		   *rsh = new_rsh;
+		*/
+	}
+	/*
+
+	   // If empty step messages are enabled we will validate the messages in the seal, missing messages are not
+	   // reported as there's no way to tell whether the empty step message was never sent or simply not included.
+	   let empty_steps_len = if header.number() >= self.empty_steps_transition {
+	       let validate_empty_steps = || -> Result<usize, Error> {
+	           let strict_empty_steps = header.number() >= self.strict_empty_steps_transition;
+	           let empty_steps = header_empty_steps(header)?;
+	           let empty_steps_len = empty_steps.len();
+	           let mut prev_empty_step = 0;
+
+	           for empty_step in empty_steps {
+	               if empty_step.step <= parent_step || empty_step.step >= step {
+	                   Err(EngineError::InsufficientProof(format!(
+	                       "empty step proof for invalid step: {:?}",
+	                       empty_step.step
+	                   )))?;
+	               }
+
+	               if empty_step.parent_hash != *header.parent_hash() {
+	                   Err(EngineError::InsufficientProof(format!(
+	                       "empty step proof for invalid parent hash: {:?}",
+	                       empty_step.parent_hash
+	                   )))?;
+	               }
+
+	               if !empty_step.verify(&*validators).unwrap_or(false) {
+	                   Err(EngineError::InsufficientProof(format!(
+	                       "invalid empty step proof: {:?}",
+	                       empty_step
+	                   )))?;
+	               }
+
+	               if strict_empty_steps {
+	                   if empty_step.step <= prev_empty_step {
+	                       Err(EngineError::InsufficientProof(format!(
+	                           "{} empty step: {:?}",
+	                           if empty_step.step == prev_empty_step {
+	                               "duplicate"
+	                           } else {
+	                               "unordered"
+	                           },
+	                           empty_step
+	                       )))?;
+	                   }
+
+	                   prev_empty_step = empty_step.step;
+	               }
+	           }
+
+	           Ok(empty_steps_len)
+	       };
+
+	       match validate_empty_steps() {
+	           Ok(len) => len,
+	           Err(err) => {
+	               trace!(
+	                   target: "engine",
+	                   "Reporting benign misbehaviour (cause: invalid empty steps) \
+	                   at block #{}, epoch set number {}. Own address: {}",
+	                   header.number(), set_number, self.address().unwrap_or_default()
+	               );
+	               self.validators
+	                   .report_benign(header.author(), set_number, header.number());
+	               return Err(err);
+	           }
+	       }
+	   } else {
+	       self.report_skipped(header, step, parent_step, &*validators, set_number);
+
+	       0
+	   };
+
+	   if header.number() >= self.validate_score_transition {
+	       let expected_difficulty =
+	           calculate_score(parent_step.into(), step.into(), empty_steps_len.into());
+	       if header.difficulty() != &expected_difficulty {
+	           return Err(From::from(BlockError::InvalidDifficulty(Mismatch {
+	               expected: expected_difficulty,
+	               found: header.difficulty().clone(),
+	           })));
+	       }
+	   }
+
+	   Ok(())
+	*/
+	return nil
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
@@ -460,15 +631,6 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 // retrieve the async verifications (the order is that of the input slice).
 func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
 	return nil
-	//if len(headers) == 0 {
-	//	return nil
-	//}
-	//for i, header := range headers {
-	//	if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
-	//		return err
-	//	}
-	//}
-	//return nil
 }
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
@@ -773,52 +935,11 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (Val
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
 
-	//TODO: hardcode for now
-	if h.Number.Uint64() <= 671 {
-		return &SimpleList{validators: []common.Address{
-			common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
-		}}, 0, nil
+	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoomToAfter(chain, c.cfg.Validators, h.ParentHash)
+	if !ok {
+		return nil, 0, fmt.Errorf("unable to zoomToAfter to epoch")
 	}
-	return &SimpleList{validators: []common.Address{
-		common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
-		common.HexToAddress("0x82e4e61e7f5139ff0a4157a5bc687ef42294c248"),
-	}}, 672, nil
-	/*
-		finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoom(chain, c.cfg.Validators, h)
-		if !ok {
-			return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
-		}
-		return finalityChecker.validators(), epochTransitionNumber
-	*/
-
-	/*
-			fn epoch_set<'a>(
-		        &'a self,
-		        header: &Header,
-		    ) -> Result<(CowLike<dyn ValidatorSet, SimpleList>, BlockNumber), Error> {
-		        Ok(if self.immediate_transitions {
-		            (CowLike::Borrowed(&*self.validators), header.number())
-		        } else {
-		            let mut epoch_manager = self.epoch_manager.lock();
-		            let client = self.upgrade_client_or("Unable to verify sig")?;
-
-		            if !epoch_manager.zoom_to_after(
-		                &*client,
-		                &self.machine,
-		                &*self.validators,
-		                *header.parent_hash(),
-		            ) {
-		                debug!(target: "engine", "Unable to zoom to epoch.");
-		                return Err(EngineError::RequiresClient.into());
-		            }
-
-		            (
-		                CowLike::Owned(epoch_manager.validators().clone()),
-		                epoch_manager.epoch_transition_number,
-		            )
-		        })
-		    }
-	*/
+	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
 //nolint

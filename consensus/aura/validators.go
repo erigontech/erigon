@@ -61,6 +61,8 @@ type ValidatorSet interface {
 
 	// Draws an validator nonce modulo number of validators.
 	getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error)
+	// Returns the current number of validators.
+	countWithCaller(parentHash common.Hash, caller Call) (uint, error)
 
 	// Recover the validator set from the given proof, the block number, and
 	// whether this header is first in its set.
@@ -147,8 +149,6 @@ type ValidatorSet interface {
 	    // Draws an validator nonce modulo number of validators.
 	    fn get_with_caller(&self, parent_block_hash: &H256, nonce: usize, caller: &Call) -> Address;
 
-	    // Returns the current number of validators.
-	    fn count_with_caller(&self, parent_block_hash: &H256, caller: &Call) -> usize;
 
 	    // Notifies about malicious behaviour.
 	    fn report_malicious(
