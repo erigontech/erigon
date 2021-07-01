@@ -337,7 +337,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
 	}
 	// Assign receipt status.
-	fields["status"] = receipt.Status
+	fields["status"] = hexutil.Uint64(receipt.Status)
 	if receipt.Logs == nil {
 		fields["logs"] = [][]*types.Log{}
 	}
