@@ -261,6 +261,8 @@ const (
 
 	Sequence      = "Sequence" // tbl_name -> seq_u64
 	HeadHeaderKey = "LastHeader"
+
+	Epoch = "Epoch"
 )
 
 // Keys

@@ -58,10 +58,17 @@ type StepDurationInfo struct {
 	StepDuration        uint64
 }
 
+// Holds 2 proofs inside: ValidatorSetProof and FinalityProof
 type EpochTransitionProof struct {
 	SignalNumber  uint64
 	SetProof      []byte
 	FinalityProof []byte
+}
+
+// SetProof - validator set proof
+type ValidatorSetProof struct {
+	Header   *types.Header
+	Receipts types.Receipts
 }
 type EpochTransition struct {
 	/// Block hash at which the transition occurred.
@@ -267,7 +274,10 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 // epochTransition get a specific epoch transition by block number and provided block hash.
 //nolint
 func epochTransition(blockNum uint64, blockHash common.Hash) (transition EpochTransition, ok bool) {
-	return EpochTransition{}, true
+	if blockNum == 0 {
+		return EpochTransition{BlockNumber: 0, BlockHash: params.SokolGenesisHash, ProofRlp: params.SokolGenesisEpochProof}, true
+	}
+	return EpochTransition{}, false
 	/*
 		pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
 		   trace!(target: "blockchain", "Loading epoch transition at block {}, {}",

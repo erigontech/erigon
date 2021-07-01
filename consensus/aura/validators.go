@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
 	"go.uber.org/atomic"
 )
 
@@ -74,7 +75,7 @@ type ValidatorSet interface {
 	// Returns the set, along with a flag indicating whether finality of a specific
 	// hash should be proven.
 
-	epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error)
+	epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error)
 
 	// Extract genesis epoch data from the genesis state and header.
 	genesisEpochData(header *types.Header, call Call) ([]byte, error)
@@ -247,7 +248,7 @@ func (s *Multi) correctSet(blockHash common.Hash) (ValidatorSet, bool) {
 func (s *Multi) correctSetByNumber(parentNumber uint64) (uint64, ValidatorSet) {
 	// get correct set by block number, along with block number at which
 	// this set was activated.
-	for i := len(s.sorted); i >= 0; i-- {
+	for i := len(s.sorted) - 1; i >= 0; i-- {
 		if s.sorted[i].num <= parentNumber+1 {
 			return s.sorted[i].num, s.sorted[i].set
 		}
@@ -268,7 +269,7 @@ func (s *Multi) onCloseBlock(header *types.Header, address common.Address) error
 
 // TODO: do we need add `proof` argument?
 //nolint
-func (s *Multi) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
+func (s *Multi) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
 	setBlock, set := s.correctSetByNumber(num)
 	first = setBlock == num
 	return set.epochSet(first, num, proof)
@@ -287,8 +288,8 @@ type SimpleList struct {
 	validators []common.Address
 }
 
-func (s *SimpleList) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
-	return *s, nil, nil
+func (s *SimpleList) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
+	return *s, common.Hash{}, nil
 }
 func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
 func (s *SimpleList) defaultCaller(blockHash common.Hash) (Call, error) {
@@ -413,50 +414,153 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 // Returns a list of contract calls to be pushed onto the new block.
 //func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 
-func (s *ValidatorSafeContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
-	return SimpleList{}, nil, fmt.Errorf("ValidatorSafeContract.epochSet not implemented")
+func (s *ValidatorSafeContract) epochSet(first bool, num uint64, proofRlp []byte) (SimpleList, common.Hash, error) {
+	var proof EpochTransitionProof
+	if err := rlp.DecodeBytes(proofRlp, &proof); err != nil {
+		return SimpleList{}, common.Hash{}, fmt.Errorf("[ValidatorSafeContract.epochSet] %w", err)
+	}
+
+	if first {
+		oldHeader, state_items, err := decodeFirstValidatorSetProof(proof.SetProof)
+		if err != nil {
+			return SimpleList{}, common.Hash{}, err
+		}
+
+		addresses, err := checkFirstValidatorSetProof(s.contractAddress, oldHeader, state_items)
+		if err != nil {
+			return SimpleList{}, common.Hash{}, fmt.Errorf("insufitient proof: block=%d,%x: %w", oldHeader.Number.Uint64(), oldHeader.Hash(), err)
+		}
+		return *NewSimpleList(addresses), oldHeader.Hash(), nil
+	}
+	setProof, err := decodeValidatorSetProof(proof.SetProof)
+	if err != nil {
+		return SimpleList{}, common.Hash{}, err
+	}
+	_ = setProof
+	// ensure receipts match header.
+	// TODO: optimize? these were just decoded.
 	/*
-		        let rlp = Rlp::new(proof);
+	   let found_root = ::triehash::ordered_trie_root(receipts.iter().map(|r| r.encode()));
+	   if found_root != *old_header.receipts_root() {
+	       return Err(::error::BlockError::InvalidReceiptsRoot(Mismatch {
+	           expected: *old_header.receipts_root(),
+	           found: found_root,
+	       })
+	       .into());
+	   }
 
-		        if first {
-		            trace!(target: "engine", "Recovering initial epoch set");
+	   let bloom = self.expected_bloom(&old_header);
 
-		            let (old_header, state_items) = decode_first_proof(&rlp)?;
-		            let number = old_header.number();
-		            let old_hash = old_header.hash();
-		            let addresses =
-		                check_first_proof(machine, self.contract_address, old_header, &state_items)
-		                    .map_err(::engines::EngineError::InsufficientProof)?;
-
-		            trace!(target: "engine", "extracted epoch set at #{}: {} addresses",
-						number, addresses.len());
-
-		            Ok((SimpleList::new(addresses), Some(old_hash)))
-		        } else {
-		            let (old_header, receipts) = decode_proof(&rlp)?;
-
-		            // ensure receipts match header.
-		            // TODO: optimize? these were just decoded.
-		            let found_root = ::triehash::ordered_trie_root(receipts.iter().map(|r| r.encode()));
-		            if found_root != *old_header.receipts_root() {
-		                return Err(::error::BlockError::InvalidReceiptsRoot(Mismatch {
-		                    expected: *old_header.receipts_root(),
-		                    found: found_root,
-		                })
-		                .into());
-		            }
-
-		            let bloom = self.expected_bloom(&old_header);
-
-		            match self.extract_from_event(bloom, &old_header, &receipts) {
-		                Some(list) => Ok((list, Some(old_header.hash()))),
-		                None => Err(::engines::EngineError::InsufficientProof(
-		                    "No log event in proof.".into(),
-		                )
-		                .into()),
-		            }
-		        }
+	   match self.extract_from_event(bloom, &old_header, &receipts) {
+	       Some(list) => Ok((list, Some(old_header.hash()))),
+	       None => Err(::engines::EngineError::InsufficientProof(
+	           "No log event in proof.".into(),
+	       )
+	       .into()),
+	   }
 	*/
+
+	return SimpleList{}, common.Hash{}, fmt.Errorf("ValidatorSafeContract.epochSet not implemented")
+}
+
+// first proof is just a state proof call of `getValidators` at header's state.
+func encodeFirstValidatorSetProof(h *types.Header, dbItems [][]byte) (proofRlp []byte, err error) {
+	type S struct {
+		h       *types.Header
+		dbItems [][]byte
+	}
+	res := S{h: h, dbItems: dbItems}
+	return rlp.EncodeToBytes(res)
+}
+
+func decodeFirstValidatorSetProof(proofRlp []byte) (h *types.Header, dbItems [][]byte, err error) {
+	type S struct {
+		h       *types.Header
+		dbItems [][]byte
+	}
+	var res S
+	if err := rlp.DecodeBytes(proofRlp, &res); err != nil {
+		return nil, nil, err
+	}
+	return res.h, res.dbItems, nil
+}
+
+// check a first proof: fetch the validator set at the given block.
+func checkFirstValidatorSetProof(contract_address common.Address, oldHeader *types.Header, dbItems [][]byte) ([]common.Address, error) {
+	/*
+		fn check_first_proof(
+		    machine: &EthereumMachine,
+		    contract_address: Address,
+		    old_header: Header,
+		    state_items: &[DBValue],
+		) -> Result<Vec<Address>, String> {
+		    use types::transaction::{Action, Transaction, TypedTransaction};
+
+		    // TODO: match client contract_call_tx more cleanly without duplication.
+		    const PROVIDED_GAS: u64 = 50_000_000;
+
+		    let env_info = ::vm::EnvInfo {
+		        number: old_header.number(),
+		        author: *old_header.author(),
+		        difficulty: *old_header.difficulty(),
+		        gas_limit: PROVIDED_GAS.into(),
+		        timestamp: old_header.timestamp(),
+		        last_hashes: {
+		            // this will break if we don't inclue all 256 last hashes.
+		            let mut last_hashes: Vec<_> = (0..256).map(|_| H256::default()).collect();
+		            last_hashes[255] = *old_header.parent_hash();
+		            Arc::new(last_hashes)
+		        },
+		        gas_used: 0.into(),
+		    };
+
+		    // check state proof using given machine.
+		    let number = old_header.number();
+		    let (data, decoder) = validator_set::functions::get_validators::call();
+
+		    let from = Address::default();
+		    let tx = TypedTransaction::Legacy(Transaction {
+		        nonce: machine.account_start_nonce(number),
+		        action: Action::Call(contract_address),
+		        gas: PROVIDED_GAS.into(),
+		        gas_price: U256::default(),
+		        value: U256::default(),
+		        data,
+		    })
+		    .fake_sign(from);
+
+		    let res = ::state::check_proof(
+		        state_items,
+		        *old_header.state_root(),
+		        &tx,
+		        machine,
+		        &env_info,
+		    );
+
+		    match res {
+		        ::state::ProvedExecution::BadProof => Err("Bad proof".into()),
+		        ::state::ProvedExecution::Failed(e) => Err(format!("Failed call: {}", e)),
+		        ::state::ProvedExecution::Complete(e) => {
+		            decoder.decode(&e.output).map_err(|e| e.to_string())
+		        }
+		    }
+		}
+	*/
+	return nil, nil
+}
+
+// inter-contract proofs are a header and receipts.
+// checking will involve ensuring that the receipts match the header and
+// extracting the validator set from the receipts.
+func encodeValidatorSetProof(p ValidatorSetProof) (proofRlp []byte, err error) {
+	return rlp.EncodeToBytes(p)
+}
+func decodeValidatorSetProof(proofRlp []byte) (ValidatorSetProof, error) {
+	var res ValidatorSetProof
+	if err := rlp.DecodeBytes(proofRlp, &res); err != nil {
+		return res, err
+	}
+	return res, nil
 }
 
 func (s *ValidatorSafeContract) defaultCaller(blockHash common.Hash) (Call, error) {
@@ -567,7 +671,7 @@ type ValidatorContract struct {
 	posdaoTransition *uint64
 }
 
-func (s *ValidatorContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, *common.Hash, error) {
+func (s *ValidatorContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
 	return s.validators.epochSet(first, num, proof)
 }
 
