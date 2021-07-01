@@ -58,17 +58,18 @@ type StepDurationInfo struct {
 	StepDuration        uint64
 }
 
+type EpochTransitionProof struct {
+	SignalNumber  uint64
+	SetProof      []byte
+	FinalityProof []byte
+}
 type EpochTransition struct {
 	/// Block hash at which the transition occurred.
 	BlockHash common.Hash
 	/// Block number at which the transition occurred.
 	BlockNumber uint64
 	/// "transition/epoch" proof from the engine combined with a finality proof.
-	Proof struct {
-		SignalNumber  uint64
-		SetProof      []byte
-		FinalityProof []byte
-	}
+	ProofRlp []byte
 }
 
 type Step struct {
@@ -186,10 +187,14 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators
 	fmt.Printf("aa3: %x,%x\n", lastTransition.BlockHash, e.epochTransitionHash)
 	if lastTransition.BlockHash != e.epochTransitionHash {
 		fmt.Printf("aa2: %T\n", validators)
-		first := lastTransition.Proof.SignalNumber == 0
+		proof, err := destructure_proofs(lastTransition.ProofRlp)
+		if err != nil {
+			panic(err)
+		}
+		first := proof.SignalNumber == 0
 		// use signal number so multi-set first calculation is correct.
 		fmt.Printf("aa1: %T\n", validators)
-		list, _, err := validators.epochSet(first, lastTransition.Proof.SignalNumber, lastTransition.Proof.SetProof)
+		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof)
 		if err != nil {
 			panic(fmt.Errorf("proof produced by this engine; therefore it is valid; qed. %w", err))
 		}
@@ -199,6 +204,14 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators
 	e.epochTransitionHash = lastTransition.BlockHash
 	e.epochTransitionNumber = lastTransition.BlockNumber
 	return e.finalityChecker, e.epochTransitionNumber, true
+}
+func destructure_proofs(b []byte) (EpochTransitionProof, error) {
+	res := &EpochTransitionProof{}
+	err := rlp.DecodeBytes(b, res)
+	if err != nil {
+		return EpochTransitionProof{}, err
+	}
+	return *res, nil
 }
 
 /// Get the transition to the epoch the given parent hash is part of
@@ -233,7 +246,12 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 		//nolint
 		if canonical.Hash() == parentHash {
 
-			/* TODO: whaaaat????
+			return EpochTransition{
+				BlockNumber: 0,
+				BlockHash:   common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f"),
+				ProofRlp:    params.SokolGenesisEpochProof,
+			}, true
+			/* TODO:
 			   return self
 			       .epoch_transitions()
 			       .map(|(_, t)| t)
