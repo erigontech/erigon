@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/gointerfaces"
-	"github.com/ledgerwatch/erigon/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 )
 
 // DBSchemaVersion

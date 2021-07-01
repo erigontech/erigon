@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/ptypes/empty"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 
 	"google.golang.org/grpc"

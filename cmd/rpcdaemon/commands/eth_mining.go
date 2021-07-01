@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"google.golang.org/grpc/status"
 )
 
