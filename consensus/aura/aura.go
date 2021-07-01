@@ -545,15 +545,11 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 
 	// Remove hash records older than two full rounds of steps (picked as a reasonable trade-off between
 	// memory consumption and fault-tolerance).
-	caller, err := validators.defaultCaller(parent.Hash())
+	cnt, err := count(validators, parent.Hash())
 	if err != nil {
 		return err
 	}
-	cnt, err := validators.countWithCaller(parent.Hash(), caller)
-	if err != nil {
-		return err
-	}
-	siblingMaliceDetectionPeriod := uint64(2 * cnt)
+	siblingMaliceDetectionPeriod := 2 * cnt
 	oldestStep := uint64(0) //  let oldest_step = parent_step.saturating_sub(sibling_malice_detection_period);
 	if parentStep > siblingMaliceDetectionPeriod {
 		oldestStep = parentStep - siblingMaliceDetectionPeriod
