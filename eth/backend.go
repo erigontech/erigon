@@ -372,8 +372,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 	}
-	blockDownloaderWindow := 65536
-	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
+	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, config.BlockDownloaderWindow)
 	if err != nil {
 		return nil, err
 	}
