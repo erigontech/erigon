@@ -603,6 +603,6 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	return res, nil
 }
 
-func (c *Clique) VerifyFamily(chain consensus.ChainHeaderReader, header []*types.Header) error {
+func (c *Clique) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
 	return nil
 }

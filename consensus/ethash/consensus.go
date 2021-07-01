@@ -682,6 +682,6 @@ func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState,
 	state.AddBalance(header.Coinbase, &minerReward)
 }
 
-func (ethash *Ethash) VerifyFamily(chain consensus.ChainHeaderReader, header []*types.Header) error {
+func (ethash *Ethash) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
 	return nil
 }

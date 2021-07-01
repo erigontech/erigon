@@ -3,6 +3,7 @@ package aura
 import (
 	"container/list"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -62,7 +63,7 @@ type ValidatorSet interface {
 	// Draws an validator nonce modulo number of validators.
 	getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error)
 	// Returns the current number of validators.
-	countWithCaller(parentHash common.Hash, caller Call) (uint, error)
+	countWithCaller(parentHash common.Hash, caller Call) (uint64, error)
 
 	// Recover the validator set from the given proof, the block number, and
 	// whether this header is first in its set.
@@ -171,6 +172,13 @@ func get(s ValidatorSet, h common.Hash, nonce uint) (common.Address, error) {
 	}
 	return s.getWithCaller(h, nonce, d)
 }
+func count(s ValidatorSet, h common.Hash) (uint64, error) {
+	d, err := s.defaultCaller(h)
+	if err != nil {
+		return 0, err
+	}
+	return s.countWithCaller(h, d)
+}
 
 //nolint
 type MultiItem struct {
@@ -213,6 +221,13 @@ func (s *Multi) defaultCaller(blockHash common.Hash) (Call, error) {
 
 func (s *Multi) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
 	panic("not implemented")
+}
+func (s *Multi) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	set, ok := s.correctSet(parentHash)
+	if !ok {
+		return math.MaxUint64, nil
+	}
+	return set.countWithCaller(parentHash, caller)
 }
 
 func (s *Multi) correctSet(blockHash common.Hash) (ValidatorSet, bool) {
@@ -275,6 +290,9 @@ func (s *SimpleList) getWithCaller(parentHash common.Hash, nonce uint, caller Ca
 		return common.Address{}, fmt.Errorf("cannot operate with an empty validator set")
 	}
 	return s.validators[nonce%uint(len(s.validators))], nil
+}
+func (s *SimpleList) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	return uint64(len(s.validators)), nil
 }
 
 // Draws an validator nonce modulo number of validators.
@@ -452,7 +470,20 @@ func (s *ValidatorSafeContract) getWithCaller(blockHash common.Hash, nonce uint,
 	if !ok {
 		return common.Address{}, nil
 	}
+	s.validators.Add(blockHash, list)
 	return get(list, blockHash, nonce)
+}
+func (s *ValidatorSafeContract) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	set, ok := s.validators.Get(parentHash)
+	if ok {
+		return count(set.(ValidatorSet), parentHash)
+	}
+	list, ok := s.getList(caller)
+	if !ok {
+		return math.MaxUint64, nil
+	}
+	s.validators.Add(parentHash, list)
+	return count(list, parentHash)
 }
 
 func (s *ValidatorSafeContract) getList(caller Call) (*SimpleList, bool) {
@@ -538,6 +569,10 @@ func (s *ValidatorContract) defaultCaller(blockHash common.Hash) (Call, error) {
 
 func (s *ValidatorContract) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
 	return s.validators.getWithCaller(parentHash, nonce, caller)
+}
+
+func (s *ValidatorContract) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	return s.validators.countWithCaller(parentHash, caller)
 }
 func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Address) error {
 	return s.validators.onCloseBlock(header, address)

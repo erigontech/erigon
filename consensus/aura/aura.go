@@ -117,6 +117,32 @@ type PermissionedStep struct {
 	canPropose *atomic.Bool
 }
 
+type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
+
+func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
+	res, ok := r[step]
+	if !ok {
+		return common.Hash{}, false
+	}
+	result, ok := res[author]
+	return result, ok
+}
+func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash common.Hash) {
+	res, ok := r[step]
+	if !ok {
+		res = map[common.Address]common.Hash{}
+		r[step] = res
+	}
+	res[author] = blockHash
+}
+func (r ReceivedStepHashes) dropAncient(step uint64) {
+	for i := range r {
+		if i < step {
+			delete(r, i)
+		}
+	}
+}
+
 //nolint
 type EpochManager struct {
 	epochTransitionHash   common.Hash // H256,
@@ -266,7 +292,10 @@ type AuRa struct {
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
 
-	step              PermissionedStep
+	step PermissionedStep
+	// History of step hashes recently received from peers.
+	receivedStepHashes ReceivedStepHashes
+
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
 	EmptyStepsSet     *EmptyStepSet
@@ -282,8 +311,6 @@ type AuRa struct {
 	//maximumUncleCount              uint
 	//maximumEmptySteps              uint
 	////machine: EthereumMachine,
-	//// History of step hashes recently received from peers.
-	//receivedStepHashes map[uint64]map[common.Address]common.Hash // RwLock<BTreeMap<(u64, Address), H256>>
 	//// If set, enables random number contract integration. It maps the transition block to the contract address.
 	//randomnessContractAddress map[uint64]common.Address
 	//// The addresses of contracts that determine the block gas limit.
@@ -406,11 +433,12 @@ func NewAuRa(config *params.AuRaConfig, db ethdb.RwKV, ourSigningAddress common.
 	exitCh := make(chan struct{})
 
 	c := &AuRa{
-		db:                db,
-		exitCh:            exitCh,
-		step:              PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
-		OurSigningAddress: ourSigningAddress,
-		cfg:               auraParams,
+		db:                 db,
+		exitCh:             exitCh,
+		step:               PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
+		OurSigningAddress:  ourSigningAddress,
+		cfg:                auraParams,
+		receivedStepHashes: ReceivedStepHashes{},
 	}
 	_ = config
 
@@ -478,7 +506,7 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 	if err != nil {
 		return err
 	}
-	validators, set_number, err := c.epochSet(chain, header)
+	validators, setNumber, err := c.epochSet(chain, header)
 	if err != nil {
 		return err
 	}
@@ -487,7 +515,7 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 	if step == parentStep ||
 		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
 		log.Debug("[engine] Multiple blocks proposed for step", "num", parentStep)
-		_ = set_number
+		_ = setNumber
 		/*
 			self.validators.report_malicious(
 				header.author(),
@@ -525,20 +553,23 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 	if err != nil {
 		return err
 	}
-	sibling_malice_detection_period := uint64(2 * cnt)
-	oldest_step := uint64(0) //  let oldest_step = parent_step.saturating_sub(sibling_malice_detection_period);
-	if parentStep > sibling_malice_detection_period {
-		oldest_step = parentStep - sibling_malice_detection_period
+	siblingMaliceDetectionPeriod := uint64(2 * cnt)
+	oldestStep := uint64(0) //  let oldest_step = parent_step.saturating_sub(sibling_malice_detection_period);
+	if parentStep > siblingMaliceDetectionPeriod {
+		oldestStep = parentStep - siblingMaliceDetectionPeriod
 	}
-	if oldest_step > 0 {
+	if oldestStep > 0 {
 		/*
 		   let mut rsh = self.received_step_hashes.write();
 		   let new_rsh = rsh.split_off(&(oldest_step, Address::zero()));
 		   *rsh = new_rsh;
 		*/
 	}
-	/*
 
+	emptyStepLen := uint64(0)
+	//self.report_skipped(header, step, parent_step, &*validators, set_number);
+
+	/*
 	   // If empty step messages are enabled we will validate the messages in the seal, missing messages are not
 	   // reported as there's no way to tell whether the empty step message was never sent or simply not included.
 	   let empty_steps_len = if header.number() >= self.empty_steps_transition {
@@ -609,20 +640,13 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 
 	       0
 	   };
-
-	   if header.number() >= self.validate_score_transition {
-	       let expected_difficulty =
-	           calculate_score(parent_step.into(), step.into(), empty_steps_len.into());
-	       if header.difficulty() != &expected_difficulty {
-	           return Err(From::from(BlockError::InvalidDifficulty(Mismatch {
-	               expected: expected_difficulty,
-	               found: header.difficulty().clone(),
-	           })));
-	       }
-	   }
-
-	   Ok(())
 	*/
+	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
+		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
+		if header.Difficulty.Cmp(expectedDifficulty.ToBig()) != 0 {
+			return fmt.Errorf("invlid difficulty: expect=%s, found=%s\n", expectedDifficulty, header.Difficulty)
+		}
+	}
 	return nil
 }
 
