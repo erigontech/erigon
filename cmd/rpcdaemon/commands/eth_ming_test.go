@@ -6,14 +6,16 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
 
 func TestPendingBlock(t *testing.T) {
-	ctx, conn := createTestGrpcConn(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
 	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)
@@ -22,10 +24,10 @@ func TestPendingBlock(t *testing.T) {
 	require.NoError(t, err)
 	ch := make(chan *types.Block, 1)
 	defer close(ch)
-	id := api.filters.SubscribePendingBlock(ch)
-	defer api.filters.UnsubscribePendingBlock(id)
+	id := ff.SubscribePendingBlock(ch)
+	defer ff.UnsubscribePendingBlock(id)
 
-	api.filters.HandlePendingBlock(&txpool.OnPendingBlockReply{RplBlock: b})
+	ff.HandlePendingBlock(&txpool.OnPendingBlockReply{RplBlock: b})
 	block := api.pendingBlock()
 
 	require.Equal(t, block.Number().Uint64(), expect)
@@ -38,20 +40,19 @@ func TestPendingBlock(t *testing.T) {
 }
 
 func TestPendingLogs(t *testing.T) {
-	ctx, conn := createTestGrpcConn(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
-	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)
 	expect := []byte{211}
 
 	ch := make(chan types.Logs, 1)
 	defer close(ch)
-	id := api.filters.SubscribePendingLogs(ch)
-	defer api.filters.UnsubscribePendingLogs(id)
+	id := ff.SubscribePendingLogs(ch)
+	defer ff.UnsubscribePendingLogs(id)
 
 	b, err := rlp.EncodeToBytes([]*types.Log{{Data: expect}})
 	require.NoError(t, err)
-	api.filters.HandlePendingLogs(&txpool.OnPendingLogsReply{RplLogs: b})
+	ff.HandlePendingLogs(&txpool.OnPendingLogsReply{RplLogs: b})
 	select {
 	case logs := <-ch:
 		require.Equal(t, expect, logs[0].Data)

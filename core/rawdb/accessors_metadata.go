@@ -57,3 +57,8 @@ func WriteChainConfig(db ethdb.Putter, hash common.Hash, cfg *params.ChainConfig
 	}
 	return nil
 }
+
+// DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
+func DeleteChainConfig(db ethdb.Deleter, hash common.Hash) error {
+	return db.Delete(dbutils.ConfigPrefix, hash[:], nil)
+}

@@ -62,6 +62,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -187,6 +188,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
 	} else if chainConfig.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
 	} else {
 		consensusConfig = &config.Ethash
@@ -370,8 +372,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 	}
-	blockDownloaderWindow := 65536
-	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, blockDownloaderWindow)
+	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, config.BlockDownloaderWindow)
 	if err != nil {
 		return nil, err
 	}
@@ -409,17 +410,20 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 	}
 
-	go SendPendingTxsToRpcDaemon(backend.txPool, backend.events)
+	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadV2Ctx, backend.txPool, backend.downloadServer)
 
 	go func() {
 		defer debug.LogPanic()
 		for {
 			select {
 			case b := <-backend.minedBlocks:
-				// todo: broadcast p2p
+				//p2p
+				//backend.downloadServer.BroadcastNewBlock(context.Background(), b, b.Difficulty())
+				//rpcdaemon
 				if err := miningRPC.BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
+
 			case b := <-backend.pendingBlocks:
 				if err := miningRPC.BroadcastPendingBlock(b); err != nil {
 					log.Error("txpool rpc pending block broadcast", "err", err)
@@ -447,27 +451,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	return backend, nil
 }
 
-const txChanSize int = 4096
-
-func SendPendingTxsToRpcDaemon(txPool *core.TxPool, notifier *remotedbserver.Events) {
-	defer debug.LogPanic()
-	if notifier == nil {
-		return
-	}
-
-	txsCh := make(chan core.NewTxsEvent, txChanSize)
-	txsSub := txPool.SubscribeNewTxsEvent(txsCh)
-	defer txsSub.Unsubscribe()
-
-	for {
-		select {
-		case e := <-txsCh:
-			notifier.OnNewPendingTxs(e.Txs)
-		case <-txsSub.Err():
-			return
-		}
-	}
-}
 func (s *Ethereum) APIs() []rpc.API {
 	return []rpc.API{}
 }
@@ -567,7 +550,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 	go func() {
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
-		newTransactions := make(chan core.NewTxsEvent, txChanSize)
+		newTransactions := make(chan core.NewTxsEvent, 128)
 		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
 		defer sub.Unsubscribe()
 		defer close(newTransactions)

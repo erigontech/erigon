@@ -29,6 +29,12 @@ var cmdResetState = &cobra.Command{
 			log.Error(err.Error())
 			return err
 		}
+		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
+			return clearUnwindStack(tx, ctx)
+		}); err != nil {
+			log.Error(err.Error())
+			return err
+		}
 
 		return nil
 	},
@@ -75,14 +81,10 @@ func clearUnwindStack(db ethdb.RwTx, _ context.Context) error {
 }
 
 func resetState(kv ethdb.RwKV, ctx context.Context) error {
-	fmt.Printf("Before reset: \n")
 	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
 	// don't reset senders here
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx) }); err != nil {
-		return err
-	}
 	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetHashState(tx) }); err != nil {
 		return err
 	}
@@ -108,18 +110,12 @@ func resetState(kv ethdb.RwKV, ctx context.Context) error {
 		return err
 	}
 
-	// set genesis after reset all buckets
-	tx, err := kv.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	if _, _, err = core.DefaultGenesisBlock().WriteGenesisState(tx, false); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	genesis, _ := byChain()
+	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx, genesis) }); err != nil {
 		return err
 	}
 
+	// set genesis after reset all buckets
 	fmt.Printf("After reset: \n")
 	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
 		return err
@@ -140,7 +136,7 @@ func resetSenders(tx ethdb.RwTx) error {
 	return nil
 }
 
-func resetExec(tx ethdb.RwTx) error {
+func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedAccountsBucket); err != nil {
 		return err
 	}
@@ -178,6 +174,15 @@ func resetExec(tx ethdb.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
+		return err
+	}
+
+	sm, err := ethdb.GetStorageModeFromDB(tx)
+	if err != nil {
+		return err
+	}
+	_, _, err = core.OverrideGenesisBlock(tx, g, sm.History)
+	if err != nil {
 		return err
 	}
 	return nil

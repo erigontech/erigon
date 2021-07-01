@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -64,7 +65,7 @@ type Genesis struct {
 	Mixhash    common.Hash         `json:"mixHash"`
 	Coinbase   common.Address      `json:"coinbase"`
 	Alloc      GenesisAlloc        `json:"alloc"      gencodec:"required"`
-	Seal       [][]byte            `json:"seal"`
+	SealRlp    []byte              `json:"sealRlp"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
@@ -76,6 +77,13 @@ type Genesis struct {
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
 type GenesisAlloc map[common.Address]GenesisAccount
+
+type AuthorityRoundSeal struct {
+	/// Seal step.
+	Step uint64 `json:"step"`
+	/// Seal signature.
+	Signature common.Hash `json:"signature"`
+}
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common.UnprefixedAddress]GenesisAccount)
@@ -184,6 +192,22 @@ func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*par
 		panic(err)
 	}
 	return c, b
+}
+
+func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+	stored, err := rawdb.ReadCanonicalHash(db, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = rawdb.DeleteCanonicalHash(db, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = rawdb.DeleteChainConfig(db, stored)
+	if err != nil {
+		return nil, nil, err
+	}
+	return WriteGenesisBlock(db, genesis, history)
 }
 
 func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
@@ -309,7 +333,10 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		r, w := state.NewDbStateReader(kv.WrapIntoTxDB(tx)), state.NewDbStateWriter(kv.WrapIntoTxDB(tx), 0)
 		statedb = state.New(r)
 		for addr, account := range g.Alloc {
-			balance, _ := uint256.FromBig(account.Balance)
+			balance, overflow := uint256.FromBig(account.Balance)
+			if overflow {
+				panic("overflow at genesis allocs")
+			}
 			statedb.AddBalance(addr, balance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
@@ -332,6 +359,16 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		}
 	}()
 	wg.Wait()
+	decodeSeal := func(in []byte) (seal []rlp.RawValue) {
+		if len(in) == 0 {
+			return nil
+		}
+		err := rlp.Decode(bytes.NewReader(in), &seal)
+		if err != nil {
+			panic(err)
+		}
+		return seal
+	}
 
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
@@ -346,8 +383,8 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		Coinbase:   g.Coinbase,
 		Root:       root,
 		BaseFee:    g.BaseFee,
-		Seal:       g.Seal,
-		WithSeal:   g.Seal != nil,
+		Seal:       decodeSeal(g.SealRlp),
+		WithSeal:   g.SealRlp != nil,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
@@ -392,7 +429,6 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, 
 	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}
-
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
 	}
@@ -451,20 +487,20 @@ func (g *Genesis) Write(tx ethdb.RwTx, history bool) (*types.Block, *state.Intra
 	return block, statedb, nil
 }
 
-func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, error) {
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer tx.Rollback()
-	block, statedb, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
+	block, _, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
 	if err != nil {
-		return block, statedb, err
+		return block, err
 	}
 	if err := tx.Commit(); err != nil {
-		return block, statedb, err
+		return block, err
 	}
-	return block, statedb, nil
+	return block, nil
 }
 
 // MustCommit writes the genesis block and state to db, panicking on error.
@@ -581,14 +617,17 @@ func DefaultSokolGenesisBlock() *Genesis {
 	/*
 		header rlp: f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	*/
-
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
 	return &Genesis{
-		Config:    params.SokolChainConfig,
-		Timestamp: 0x0,
-		Seal: [][]byte{
-			common.FromHex(""),
-			common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		},
+		Config:     params.SokolChainConfig,
+		Timestamp:  0x0,
+		SealRlp:    sealRlp,
 		GasLimit:   0x663BE0,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/sokol.json"),

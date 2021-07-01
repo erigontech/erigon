@@ -2,7 +2,6 @@ package trie
 
 import (
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var emptyHash [32]byte
@@ -50,23 +49,3 @@ const (
 	AccountFieldSSizeOnly     uint32 = 0x10
 	AccountFieldSetNotAccount uint32 = 0x00
 )
-
-// LoadFromDb loads subtries from a state database.
-func (stl *SubTrieLoader) LoadSubTries(db ethdb.Database, blockNr uint64, rl RetainDecider, hc HashCollector, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
-	return stl.LoadFromFlatDB(db, rl, hc, dbPrefixes, fixedbits, trace)
-}
-
-func (stl *SubTrieLoader) LoadFromFlatDB(db ethdb.Database, rl RetainDecider, hc HashCollector, dbPrefixes [][]byte, fixedbits []int, trace bool) (SubTries, error) {
-	loader := NewFlatDbSubTrieLoader()
-	if err1 := loader.Reset(db, rl, rl, hc, dbPrefixes, fixedbits, trace); err1 != nil {
-		return SubTries{}, err1
-	}
-	subTries, err := loader.LoadSubTries()
-	if err != nil {
-		return subTries, err
-	}
-	if err = loader.AttachRequestedCode(db, stl.codeRequests); err != nil {
-		return subTries, err
-	}
-	return subTries, nil
-}

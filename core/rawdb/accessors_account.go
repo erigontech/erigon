@@ -36,11 +36,14 @@ func ReadAccountDeprecated(db ethdb.DatabaseReader, addrHash common.Hash, acc *a
 	return true, nil
 }
 
-func ReadAccount(db ethdb.Tx, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+func ReadAccount(db ethdb.Tx, addrHash common.Address, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
-	enc, err := db.GetOne(dbutils.HashedAccountsBucket, addrHashBytes)
+	enc, err := db.GetOne(dbutils.PlainStateBucket, addrHashBytes)
 	if err != nil {
 		return false, err
+	}
+	if len(enc) == 0 {
+		return false, nil
 	}
 	if err = acc.DecodeForStorage(enc); err != nil {
 		return false, err

@@ -27,6 +27,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon/consensus/aura"
+	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
@@ -127,6 +130,8 @@ type Config struct {
 	SnapshotSeeding bool
 	SnapshotLayout  bool
 
+	BlockDownloaderWindow int
+
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader
 	ExternalSnapshotDownloaderAddr string
@@ -208,7 +213,11 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
-			eng = clique.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory))
+			var err error
+			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory), chainConfig.Aura.Etherbase, consensusconfig.Sokol)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 

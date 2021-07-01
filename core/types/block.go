@@ -86,9 +86,9 @@ type Header struct {
 	Extra       []byte         `json:"extraData"        gencodec:"required"`
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
-	BaseFee     *big.Int       `json:"baseFee"`
+	BaseFee     *big.Int       `json:"baseFeePerGas"`
 	Eip1559     bool           // to avoid relying on BaseFee != nil for that
-	Seal        [][]byte       // AuRa POA network field
+	Seal        []rlp.RawValue // AuRa POA network field
 	WithSeal    bool           // to avoid relying on Seal != nil for that
 }
 
@@ -99,19 +99,7 @@ func (h Header) EncodingSize() int {
 	var sealListLen int
 	if h.WithSeal {
 		for i := range h.Seal {
-			sealListLen++
-			switch len(h.Seal[i]) {
-			case 0:
-			case 1:
-				if h.Seal[i][0] >= 128 {
-					sealListLen++
-				}
-			default:
-				if len(h.Seal[i]) >= 56 {
-					sealListLen += (bits.Len(uint(len(h.Seal[i]))) + 7) / 8
-				}
-				sealListLen += len(h.Seal[i])
-			}
+			sealListLen += len(h.Seal[i])
 		}
 		encodingSize += sealListLen
 	} else {
@@ -182,19 +170,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	var sealListLen int
 	if h.WithSeal {
 		for i := range h.Seal {
-			sealListLen++
-			switch len(h.Seal[i]) {
-			case 0:
-			case 1:
-				if h.Seal[i][0] >= 128 {
-					sealListLen++
-				}
-			default:
-				if len(h.Seal[i]) >= 56 {
-					sealListLen += (bits.Len(uint(len(h.Seal[i]))) + 7) / 8
-				}
-				sealListLen += len(h.Seal[i])
-			}
+			sealListLen += len(h.Seal[i])
 		}
 		encodingSize += sealListLen
 	} else {
@@ -207,24 +183,28 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		diffLen = (h.Difficulty.BitLen() + 7) / 8
 	}
 	encodingSize += diffLen
+
 	encodingSize++
 	var numberLen int
 	if h.Number != nil && h.Number.BitLen() >= 8 {
 		numberLen = (h.Number.BitLen() + 7) / 8
 	}
 	encodingSize += numberLen
+
 	encodingSize++
 	var gasLimitLen int
 	if h.GasLimit >= 128 {
 		gasLimitLen = (bits.Len64(h.GasLimit) + 7) / 8
 	}
 	encodingSize += gasLimitLen
+
 	encodingSize++
 	var gasUsedLen int
 	if h.GasUsed >= 128 {
 		gasUsedLen = (bits.Len64(h.GasUsed) + 7) / 8
 	}
 	encodingSize += gasUsedLen
+
 	encodingSize++
 	var timeLen int
 	if h.Time >= 128 {
@@ -377,7 +357,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 
 	if h.WithSeal {
 		for i := range h.Seal {
-			if err := EncodeString(h.Seal[i], w, b[:]); err != nil {
+			if _, err := w.Write(h.Seal[i]); err != nil {
 				return err
 			}
 		}
@@ -422,7 +402,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
-		//return fmt.Errorf("open header struct: %w", err)
+		// return fmt.Errorf("open header struct: %w", err)
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
@@ -503,9 +483,8 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 	if h.WithSeal {
 		h.WithSeal = true
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			h.Seal = append(h.Seal, make(rlp.RawValue, len(b)))
-			copy(h.Seal[len(h.Seal)-1][:], b)
+		for b, err = s.Raw(); err == nil; b, err = s.Raw() {
+			h.Seal = append(h.Seal, b)
 		}
 		if !errors.Is(err, rlp.EOL) {
 			return fmt.Errorf("open accessTuple: %d %w", len(h.Seal), err)
@@ -984,7 +963,7 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.Extra, h.Extra)
 	}
 	if len(h.Seal) > 0 {
-		cpy.Seal = make([][]byte, len(h.Seal))
+		cpy.Seal = make([]rlp.RawValue, len(h.Seal))
 		for i := range h.Seal {
 			cpy.Seal[i] = common.CopyBytes(h.Seal[i])
 		}

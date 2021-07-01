@@ -86,8 +86,8 @@ func TestSokolHeaderRLP(t *testing.T) {
 		require.NoError(err)
 		require.Equal(2, len(h.Seal))
 
-		expectSeal2 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
-		require.Equal(common.FromHex(""), h.Seal[0])
+		expectSeal2 := rlp.RawValue(common.FromHex("0xb8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"))
+		require.Equal(rlp.RawValue(common.FromHex("0x80")), h.Seal[0])
 		require.Equal(expectSeal2, h.Seal[1])
 		enc, err := rlp.EncodeToBytes(h)
 		require.NoError(err)
@@ -100,9 +100,9 @@ func TestSokolHeaderRLP(t *testing.T) {
 		err := rlp.DecodeBytes(enc, h)
 		require.NoError(err)
 		require.Equal(2, len(h.Seal))
-		require.Equal(common.FromHex("2"), h.Seal[0])
+		require.Equal(rlp.RawValue(common.FromHex("0x2")), h.Seal[0])
 
-		expectSeal2 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001")
+		expectSeal2 := rlp.RawValue(common.FromHex("0xb8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001"))
 		require.Equal(expectSeal2, h.Seal[1])
 
 		res, err := rlp.EncodeToBytes(h) // after encode getting source bytes

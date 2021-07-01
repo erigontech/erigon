@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -230,6 +231,15 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	cpy.S.Set(s)
 	cpy.V.Set(v)
 	cpy.ChainID = signer.ChainID()
+	return cpy, nil
+}
+
+func (tx *DynamicFeeTransaction) FakeSign(address common.Address) (Transaction, error) {
+	cpy := tx.copy()
+	cpy.R.Set(u256.Num1)
+	cpy.S.Set(u256.Num1)
+	cpy.V.Set(u256.Num4)
+	cpy.from.Store(address)
 	return cpy, nil
 }
 
