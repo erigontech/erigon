@@ -151,6 +151,13 @@ type EpochManager struct {
 	force                 bool
 }
 
+func NewEpochManager() *EpochManager {
+	return &EpochManager{
+		finalityChecker: NewRollingFinality([]common.Address{}),
+		force:           true,
+	}
+}
+
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
 //nolint
@@ -299,7 +306,7 @@ type AuRa struct {
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
 	EmptyStepsSet     *EmptyStepSet
-	EpochManager      EpochManager // Mutex<EpochManager>,
+	EpochManager      *EpochManager // Mutex<EpochManager>,
 
 	//Validators                     ValidatorSet
 	//ValidateScoreTransition        uint64
@@ -439,6 +446,7 @@ func NewAuRa(config *params.AuRaConfig, db ethdb.RwKV, ourSigningAddress common.
 		OurSigningAddress:  ourSigningAddress,
 		cfg:                auraParams,
 		receivedStepHashes: ReceivedStepHashes{},
+		EpochManager:       NewEpochManager(),
 	}
 	_ = config
 

@@ -283,7 +283,7 @@ func (s *SimpleList) epochSet(first bool, num uint64, proof []byte) (SimpleList,
 }
 func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
 func (s *SimpleList) defaultCaller(blockHash common.Hash) (Call, error) {
-	return nil, fmt.Errorf("simple list doesn't require calls")
+	return nil, nil //simple list doesn't require calls
 }
 func (s *SimpleList) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
 	if len(s.validators) == 0 {
