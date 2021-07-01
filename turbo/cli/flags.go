@@ -40,7 +40,7 @@ var (
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
 		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
-		Value: "",
+		Value: "127.0.0.1:9090",
 	}
 
 	PrivateApiRateLimit = cli.IntFlag{

@@ -922,7 +922,7 @@ func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Info(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
+	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
 	clean := ss.addStream(req.Ids, server)
 	defer clean()
 	select {
