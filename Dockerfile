@@ -6,7 +6,7 @@ WORKDIR /app
 ADD . .
 
 RUN git config advice.detachedHead false
-RUN git fetch --all --tags
+RUN git fetch --tags
 
 RUN make all
 
