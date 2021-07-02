@@ -8,8 +8,6 @@ ADD . .
 RUN git config advice.detachedHead false
 RUN git fetch --all --tags
 
-RUN go mod download
-
 RUN make all
 
 FROM alpine:3.13
