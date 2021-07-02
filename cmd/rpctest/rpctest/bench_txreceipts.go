@@ -106,7 +106,7 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 				}
 				if resg.Err == nil && resg.Result.Get("error") == nil {
 					if err := compareResults(res.Result, resg.Result); err != nil {
-						fmt.Printf("Different getTransactionReceipt block %d, tx %x: %v\n", bn, tx.Hash, err)
+						fmt.Printf("Different getTransactionReceipt block %d, tx %s: %v\n", bn, tx.Hash, err)
 						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
 						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
 						return
