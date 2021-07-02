@@ -705,7 +705,6 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
 	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
-		fmt.Printf("del: %x\n", addr)
 		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 			return err
 		}
@@ -715,13 +714,11 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 		stateObject.deleted = false
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			fmt.Printf("code: addr=%x,codeHash=%x,code=%x\n", addr, stateObject.CodeHash(), stateObject.code)
 			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 				return err
 			}
 		}
 		if stateObject.created {
-			fmt.Printf("CreateContract: addr=%x,codeHash=%x,code=%x\n", addr, stateObject.CodeHash(), stateObject.code)
 			if err := stateWriter.CreateContract(addr); err != nil {
 				return err
 			}
@@ -729,7 +726,6 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 		if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 			return err
 		}
-		fmt.Printf("update acc: addr=%x,balance=%d\n", addr, stateObject.data.Balance.Uint64())
 		if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
