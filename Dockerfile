@@ -43,7 +43,7 @@ RUN adduser \
 
 RUN mkdir -p /home/erigon && chown ${USER}:${USER} /home/erigon
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
 USER ${USER}
