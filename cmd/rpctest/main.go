@@ -22,7 +22,6 @@ func main() {
 		erigonURL   string
 		blockFrom   uint64
 		blockTo     uint64
-		chaindata   string
 		recordFile  string
 	)
 	withErigonUrl := func(cmd *cobra.Command) {
@@ -198,27 +197,15 @@ func main() {
 	}
 	with(benchTraceFilterCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
-	var proofsCmd = &cobra.Command{
-		Use:   "proofs",
+	var benchTxReceiptCmd = &cobra.Command{
+		Use:   "benchTxReceipt",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Proofs(chaindata, gethURL, blockFrom)
+			rpctest.BenchTxReceipt(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	proofsCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
-	with(proofsCmd, withGethUrl, withBlockNum)
-
-	var fixStateCmd = &cobra.Command{
-		Use:   "fixstate",
-		Short: "",
-		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.FixState(chaindata, gethURL)
-		},
-	}
-	fixStateCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
-	with(fixStateCmd, withGethUrl)
+	with(benchTxReceiptCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var replayCmd = &cobra.Command{
 		Use:   "replay",
@@ -267,8 +254,7 @@ func main() {
 		bench13Cmd,
 		benchTraceBlockCmd,
 		benchTraceFilterCmd,
-		proofsCmd,
-		fixStateCmd,
+		benchTxReceiptCmd,
 		compareAccountRange,
 		replayCmd,
 	)
