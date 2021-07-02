@@ -357,4 +357,7 @@ func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 }
-func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header { panic("") }
+func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
+	return h
+}

@@ -122,21 +122,29 @@ type Code struct {
 }
 
 type BlockRewardContract struct {
-	BlockNum uint64
-	Address  common.Address // On-chain address.
+	blockNum uint64
+	address  common.Address // On-chain address.
 }
 
-func NewBlockRewardContract(address common.Address) *BlockRewardContract {
-	return &BlockRewardContract{Address: address}
-}
+type BlockRewardContractList []BlockRewardContract
 
-type BlockRewardContractList []*BlockRewardContract
-
-func (r BlockRewardContractList) Less(i, j int) bool { return r[i].BlockNum < r[j].BlockNum }
+func (r BlockRewardContractList) Less(i, j int) bool { return r[i].blockNum < r[j].blockNum }
 func (r BlockRewardContractList) Len() int           { return len(r) }
 func (r BlockRewardContractList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
-func (r BlockRewardContractList) GreaterOrEqual(block uint64) *BlockRewardContract {
-	return r[sort.Search(len(r), func(i int) bool { return block >= r[i].BlockNum })-1]
+
+type BlockReward struct {
+	blockNum uint64
+	amount   *uint256.Int
+}
+
+type BlockRewardList []BlockReward
+
+func (r BlockRewardList) Less(i, j int) bool { return r[i].blockNum < r[j].blockNum }
+func (r BlockRewardList) Len() int           { return len(r) }
+func (r BlockRewardList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+
+func NewBlockRewardContract(address common.Address) *BlockRewardContract {
+	return &BlockRewardContract{address: address}
 }
 
 type AuthorityRoundParams struct {
@@ -158,7 +166,7 @@ type AuthorityRoundParams struct {
 	// Immediate transitions.
 	ImmediateTransitions bool
 	// Block reward in base units.
-	BlockReward map[uint64]*uint256.Int
+	BlockReward BlockRewardList
 	// Block reward contract addresses with their associated starting block numbers.
 	BlockRewardContractTransitions BlockRewardContractList
 	// Number of accepted uncles transition block.
@@ -228,8 +236,9 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		   );
 		*/
 	} else if jsonParams.BlockRewardContractAddress != nil {
-		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, &BlockRewardContract{BlockNum: transitionBlockNum, Address: *jsonParams.BlockRewardContractAddress})
+		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress})
 	}
+	sort.Sort(params.BlockRewardContractTransitions)
 
 	if jsonParams.ValidateScoreTransition != nil {
 		params.ValidateScoreTransition = *jsonParams.ValidateScoreTransition
@@ -247,14 +256,14 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		params.MaximumUncleCountTransition = *jsonParams.MaximumUncleCountTransition
 	}
 
-	params.BlockReward = map[uint64]*uint256.Int{}
 	if jsonParams.BlockReward == nil {
-		params.BlockReward[0] = u256.Num0
+		params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: u256.Num0})
 	} else {
 		if jsonParams.BlockReward != nil {
-			params.BlockReward[0] = uint256.NewInt(uint64(*jsonParams.BlockReward))
+			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(uint64(*jsonParams.BlockReward))})
 		}
 	}
+	sort.Sort(params.BlockReward)
 
 	return params, nil
 }

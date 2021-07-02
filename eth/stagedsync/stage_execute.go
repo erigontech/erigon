@@ -272,6 +272,11 @@ Loop:
 			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 			break
 		}
+
+		if err = cfg.engine.VerifyFamily(&chainReader{config: cfg.chainConfig, tx: tx}, block.Header()); err != nil {
+			return err
+		}
+
 		lastLogTx += uint64(block.Transactions().Len())
 
 		writeChangesets := true

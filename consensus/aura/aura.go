@@ -58,6 +58,27 @@ type StepDurationInfo struct {
 	StepDuration        uint64
 }
 
+// Holds 2 proofs inside: ValidatorSetProof and FinalityProof
+type EpochTransitionProof struct {
+	SignalNumber  uint64
+	SetProof      []byte
+	FinalityProof []byte
+}
+
+// SetProof - validator set proof
+type ValidatorSetProof struct {
+	Header   *types.Header
+	Receipts types.Receipts
+}
+type EpochTransition struct {
+	/// Block hash at which the transition occurred.
+	BlockHash common.Hash
+	/// Block number at which the transition occurred.
+	BlockNumber uint64
+	/// "transition/epoch" proof from the engine combined with a finality proof.
+	ProofRlp []byte
+}
+
 type Step struct {
 	calibrate bool // whether calibration is enabled.
 	inner     *atomic.Uint64
@@ -104,6 +125,37 @@ type PermissionedStep struct {
 	canPropose *atomic.Bool
 }
 
+type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
+
+//nolint
+func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
+	res, ok := r[step]
+	if !ok {
+		return common.Hash{}, false
+	}
+	result, ok := res[author]
+	return result, ok
+}
+
+//nolint
+func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash common.Hash) {
+	res, ok := r[step]
+	if !ok {
+		res = map[common.Address]common.Hash{}
+		r[step] = res
+	}
+	res[author] = blockHash
+}
+
+//nolint
+func (r ReceivedStepHashes) dropAncient(step uint64) {
+	for i := range r {
+		if i < step {
+			delete(r, i)
+		}
+	}
+}
+
 //nolint
 type EpochManager struct {
 	epochTransitionHash   common.Hash // H256,
@@ -112,13 +164,20 @@ type EpochManager struct {
 	force                 bool
 }
 
+func NewEpochManager() *EpochManager {
+	return &EpochManager{
+		finalityChecker: NewRollingFinality([]common.Address{}),
+		force:           true,
+	}
+}
+
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
 //nolint
-func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators ValidatorSet, h *types.Header) (RollingFinality, uint64, bool) {
+func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators ValidatorSet, hash common.Hash) (RollingFinality, uint64, bool) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
-		lastWasParent = *e.finalityChecker.lastPushed == h.Hash()
+		lastWasParent = *e.finalityChecker.lastPushed == hash
 	}
 
 	// early exit for current target == chain head, but only if the epochs are
@@ -132,49 +191,39 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 	// forks it will only need to be called for the block directly after
 	// epoch transition, in which case it will be O(1) and require a single
 	// DB lookup.
-	last_transition, ok := epochTransitionFor(chain, h.ParentHash)
+	lastTransition, ok := epochTransitionFor(chain, hash)
 	if !ok {
 		return e.finalityChecker, e.epochTransitionNumber, false
 	}
-	_ = last_transition
-	/*
-	       // extract other epoch set if it's not the same as the last.
-	       if last_transition.block_hash != self.epoch_transition_hash {
-	           let (signal_number, set_proof, _) = destructure_proofs(&last_transition.proof)
-	               .expect("proof produced by this engine; therefore it is valid; qed");
-
-	           trace!(
-	               target: "engine",
-	               "extracting epoch validator set for epoch ({}, {}) signalled at #{}",
-	               last_transition.block_number, last_transition.block_hash, signal_number
-	           );
-
-	           let first = signal_number == 0;
-	           let (list, _) = validators
-	               .epoch_set(
-	                   first,
-	                   machine,
-	                   signal_number, // use signal number so multi-set first calculation is correct.
-	                   set_proof,
-	               )
-	               .expect("proof produced by this engine; therefore it is valid; qed");
-	           trace!(
-	               target: "engine",
-	               "Updating finality checker with new validator set extracted from epoch ({}, {}): {:?}",
-	               last_transition.block_number, last_transition.block_hash, &list
-	           );
-	           let epoch_set = list.into_inner();
-	           self.finality_checker =
-	               RollingFinality::blank(epoch_set);
-	       }
-
-	       self.epoch_transition_hash = last_transition.block_hash;
-	       self.epoch_transition_number = last_transition.block_number;
-
-	       true
-	   }
-	*/
+	// extract other epoch set if it's not the same as the last.
+	fmt.Printf("aa3: %x,%x\n", lastTransition.BlockHash, e.epochTransitionHash)
+	if lastTransition.BlockHash != e.epochTransitionHash {
+		fmt.Printf("aa2: %T\n", validators)
+		proof, err := destructure_proofs(lastTransition.ProofRlp)
+		if err != nil {
+			panic(err)
+		}
+		first := proof.SignalNumber == 0
+		// use signal number so multi-set first calculation is correct.
+		fmt.Printf("aa1: %T\n", validators)
+		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof)
+		if err != nil {
+			panic(fmt.Errorf("proof produced by this engine; therefore it is valid; qed. %w", err))
+		}
+		epochSet := list.validators
+		e.finalityChecker = NewRollingFinality(epochSet)
+	}
+	e.epochTransitionHash = lastTransition.BlockHash
+	e.epochTransitionNumber = lastTransition.BlockNumber
 	return e.finalityChecker, e.epochTransitionNumber, true
+}
+func destructure_proofs(b []byte) (EpochTransitionProof, error) {
+	res := &EpochTransitionProof{}
+	err := rlp.DecodeBytes(b, res)
+	if err != nil {
+		return EpochTransitionProof{}, err
+	}
+	return *res, nil
 }
 
 /// Get the transition to the epoch the given parent hash is part of
@@ -183,18 +232,18 @@ func (e *EpochManager) zoom(chain consensus.ChainHeaderReader, validators Valida
 ///
 /// The block corresponding the the parent hash must be stored already.
 //nolint
-func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (common.Hash, bool) {
+func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
 	// slow path: loop back block by block
 	for {
 		h := chain.GetHeaderByHash(parentHash)
 		if h == nil {
-			return parentHash, false
+			return transition, false
 		}
 
 		// look for transition in database.
-		transitionHash, ok := epochTransition(h.Number.Uint64(), h.Hash())
+		transition, ok = epochTransition(h.Number.Uint64(), h.Hash())
 		if ok {
-			return transitionHash, true
+			return transition, true
 		}
 
 		// canonical hash -> fast breakout:
@@ -204,11 +253,17 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 		// the parent.
 		canonical := chain.GetHeaderByNumber(h.Number.Uint64())
 		if canonical == nil {
-			return parentHash, false
+			return transition, false
 		}
 		//nolint
 		if canonical.Hash() == parentHash {
-			/* TODO: whaaaat????
+
+			return EpochTransition{
+				BlockNumber: 0,
+				BlockHash:   common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f"),
+				ProofRlp:    params.SokolGenesisEpochProof,
+			}, true
+			/* TODO:
 			   return self
 			       .epoch_transitions()
 			       .map(|(_, t)| t)
@@ -223,8 +278,11 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, parentHash common.Has
 
 // epochTransition get a specific epoch transition by block number and provided block hash.
 //nolint
-func epochTransition(blockNum uint64, blockHash common.Hash) (common.Hash, bool) {
-	return blockHash, true
+func epochTransition(blockNum uint64, blockHash common.Hash) (transition EpochTransition, ok bool) {
+	if blockNum == 0 {
+		return EpochTransition{BlockNumber: 0, BlockHash: params.SokolGenesisHash, ProofRlp: params.SokolGenesisEpochProof}, true
+	}
+	return EpochTransition{}, false
 	/*
 		pub fn epoch_transition(&self, block_num: u64, block_hash: H256) -> Option<EpochTransition> {
 		   trace!(target: "blockchain", "Loading epoch transition at block {}, {}",
@@ -255,9 +313,19 @@ type unAssembledHeader struct {
 //nolint
 type RollingFinality struct {
 	headers    []unAssembledHeader //nolint
-	signers    SimpleList
+	signers    *SimpleList
 	signCount  map[common.Address]uint
 	lastPushed *common.Hash // Option<H256>,
+}
+
+/// Create a blank finality checker under the given validator set.
+func NewRollingFinality(signers []common.Address) RollingFinality {
+	return RollingFinality{
+		signers: NewSimpleList(signers),
+		//headers: VecDeque::new(),
+		//sign_count: HashMap::new(),
+		//last_pushed: None
+	}
 }
 
 // AuRa
@@ -267,11 +335,14 @@ type AuRa struct {
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
 
-	step              PermissionedStep
+	step PermissionedStep
+	// History of step hashes recently received from peers.
+	receivedStepHashes ReceivedStepHashes
+
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
 	EmptyStepsSet     *EmptyStepSet
-	EpochManager      EpochManager // Mutex<EpochManager>,
+	EpochManager      *EpochManager // Mutex<EpochManager>,
 
 	//Validators                     ValidatorSet
 	//ValidateScoreTransition        uint64
@@ -283,8 +354,6 @@ type AuRa struct {
 	//maximumUncleCount              uint
 	//maximumEmptySteps              uint
 	////machine: EthereumMachine,
-	//// History of step hashes recently received from peers.
-	//receivedStepHashes map[uint64]map[common.Address]common.Hash // RwLock<BTreeMap<(u64, Address), H256>>
 	//// If set, enables random number contract integration. It maps the transition block to the contract address.
 	//randomnessContractAddress map[uint64]common.Address
 	//// The addresses of contracts that determine the block gas limit.
@@ -407,11 +476,13 @@ func NewAuRa(config *params.AuRaConfig, db ethdb.RwKV, ourSigningAddress common.
 	exitCh := make(chan struct{})
 
 	c := &AuRa{
-		db:                db,
-		exitCh:            exitCh,
-		step:              PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
-		OurSigningAddress: ourSigningAddress,
-		cfg:               auraParams,
+		db:                 db,
+		exitCh:             exitCh,
+		step:               PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
+		OurSigningAddress:  ourSigningAddress,
+		cfg:                auraParams,
+		receivedStepHashes: ReceivedStepHashes{},
+		EpochManager:       NewEpochManager(),
 	}
 	_ = config
 
@@ -448,7 +519,176 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	return nil
-	//return c.verifyHeader(chain, header, nil)
+}
+
+func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) bool {
+	/*
+		self
+			       .received_step_hashes
+			       .read()
+			       .get(&received_step_key)
+			       .map_or(false, |h| *h != new_hash)
+	*/
+	return false
+}
+func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
+	/*
+	   	    self.received_step_hashes
+	                      .write()
+	                      .insert(received_step_key, new_hash);
+	*/
+}
+
+/// Phase 3 verification. Check block information against parent. Returns either a null `Ok` or a general error detailing the problem with import.
+func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
+	step, err := headerStep(header)
+	if err != nil {
+		return err
+	}
+	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	parentStep, err := headerStep(parent)
+	if err != nil {
+		return err
+	}
+	validators, setNumber, err := c.epochSet(chain, header)
+	if err != nil {
+		return err
+	}
+
+	// Ensure header is from the step after parent.
+	if step == parentStep ||
+		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
+		log.Debug("[engine] Multiple blocks proposed for step", "num", parentStep)
+		_ = setNumber
+		/*
+			self.validators.report_malicious(
+				header.author(),
+				set_number,
+				header.number(),
+				Default::default(),
+			);
+			Err(EngineError::DoubleVote(*header.author()))?;
+		*/
+		return fmt.Errorf("double vote: %x", header.Coinbase)
+	}
+
+	// Report malice if the validator produced other sibling blocks in the same step.
+	if !c.hasReceivedStepHashes(step, header.Coinbase, header.Hash()) {
+		/*
+		   trace!(target: "engine", "Validator {} produced sibling blocks in the same step", header.author());
+		   self.validators.report_malicious(
+		       header.author(),
+		       set_number,
+		       header.number(),
+		       Default::default(),
+		   );
+		*/
+	} else {
+		c.insertReceivedStepHashes(step, header.Coinbase, header.Hash())
+	}
+
+	// Remove hash records older than two full rounds of steps (picked as a reasonable trade-off between
+	// memory consumption and fault-tolerance).
+	cnt, err := count(validators, parent.Hash())
+	if err != nil {
+		return err
+	}
+	siblingMaliceDetectionPeriod := 2 * cnt
+	oldestStep := uint64(0) //  let oldest_step = parent_step.saturating_sub(sibling_malice_detection_period);
+	if parentStep > siblingMaliceDetectionPeriod {
+		oldestStep = parentStep - siblingMaliceDetectionPeriod
+	}
+	//nolint
+	if oldestStep > 0 {
+		/*
+		   let mut rsh = self.received_step_hashes.write();
+		   let new_rsh = rsh.split_off(&(oldest_step, Address::zero()));
+		   *rsh = new_rsh;
+		*/
+	}
+
+	emptyStepLen := uint64(0)
+	//self.report_skipped(header, step, parent_step, &*validators, set_number);
+
+	/*
+	   // If empty step messages are enabled we will validate the messages in the seal, missing messages are not
+	   // reported as there's no way to tell whether the empty step message was never sent or simply not included.
+	   let empty_steps_len = if header.number() >= self.empty_steps_transition {
+	       let validate_empty_steps = || -> Result<usize, Error> {
+	           let strict_empty_steps = header.number() >= self.strict_empty_steps_transition;
+	           let empty_steps = header_empty_steps(header)?;
+	           let empty_steps_len = empty_steps.len();
+	           let mut prev_empty_step = 0;
+
+	           for empty_step in empty_steps {
+	               if empty_step.step <= parent_step || empty_step.step >= step {
+	                   Err(EngineError::InsufficientProof(format!(
+	                       "empty step proof for invalid step: {:?}",
+	                       empty_step.step
+	                   )))?;
+	               }
+
+	               if empty_step.parent_hash != *header.parent_hash() {
+	                   Err(EngineError::InsufficientProof(format!(
+	                       "empty step proof for invalid parent hash: {:?}",
+	                       empty_step.parent_hash
+	                   )))?;
+	               }
+
+	               if !empty_step.verify(&*validators).unwrap_or(false) {
+	                   Err(EngineError::InsufficientProof(format!(
+	                       "invalid empty step proof: {:?}",
+	                       empty_step
+	                   )))?;
+	               }
+
+	               if strict_empty_steps {
+	                   if empty_step.step <= prev_empty_step {
+	                       Err(EngineError::InsufficientProof(format!(
+	                           "{} empty step: {:?}",
+	                           if empty_step.step == prev_empty_step {
+	                               "duplicate"
+	                           } else {
+	                               "unordered"
+	                           },
+	                           empty_step
+	                       )))?;
+	                   }
+
+	                   prev_empty_step = empty_step.step;
+	               }
+	           }
+
+	           Ok(empty_steps_len)
+	       };
+
+	       match validate_empty_steps() {
+	           Ok(len) => len,
+	           Err(err) => {
+	               trace!(
+	                   target: "engine",
+	                   "Reporting benign misbehaviour (cause: invalid empty steps) \
+	                   at block #{}, epoch set number {}. Own address: {}",
+	                   header.number(), set_number, self.address().unwrap_or_default()
+	               );
+	               self.validators
+	                   .report_benign(header.author(), set_number, header.number());
+	               return Err(err);
+	           }
+	       }
+	   } else {
+	       self.report_skipped(header, step, parent_step, &*validators, set_number);
+
+	       0
+	   };
+	*/
+	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
+		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
+		if header.Difficulty.Cmp(expectedDifficulty.ToBig()) != 0 {
+			return fmt.Errorf("invlid difficulty: expect=%s, found=%s\n", expectedDifficulty, header.Difficulty)
+		}
+	}
+	return nil
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
@@ -456,15 +696,6 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 // retrieve the async verifications (the order is that of the input slice).
 func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
 	return nil
-	//if len(headers) == 0 {
-	//	return nil
-	//}
-	//for i, header := range headers {
-	//	if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
-	//		return err
-	//	}
-	//}
-	//return nil
 }
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
@@ -589,8 +820,25 @@ func (c *AuRa) Authorize(signer common.Address, signFn clique.SignerFn) {
 	//c.signFn = signFn
 }
 
-// Seal implements consensus.Engine, attempting to create a sealed block using
-// the local signing credentials.
+func (c *AuRa) GenesisEpochData(header *types.Header, caller Call) ([]byte, error) {
+	proof, err := c.cfg.Validators.genesisEpochData(header, caller)
+	if err != nil {
+		return nil, err
+	}
+	return combineProofs(0, proof, []byte{}), nil
+}
+func combineProofs(signalNumber uint64, setProof []byte, finalityProof []byte) []byte {
+	return common.FromHex("0xf91a8c80b91a87f91a84f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f91871b853f851808080a07bb75cabebdcbd1dbb4331054636d0c6d7a2b08483b9e04df057395a7434c9e080808080808080a0e61e567237b49c44d8f906ceea49027260b4010c10a547b38d8b131b9d3b6f848080808080b86bf869a02080c7b7ae81a58eb98d9c78de4a1fd7fd9535fc953ed2be602daaa41767312ab846f8448080a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470b86bf869a033aa5d69545785694b808840be50c182dad2ec3636dfccbe6572fb69828742c0b846f8440101a0663ce0d171e545a26aa67e4ca66f72ba96bb48287dbcc03beea282867f80d44ba01f0e7726926cb43c03a0abf48197dba78522ec8ba1b158e2aa30da7d2a2c6f9ea3e2a02052222313e28459528d920b65115c16c04f3efc82aaedc97be59f3f377c0d3f01b914c26060604052600436106100fc576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806303aca79214610101578063108552691461016457806340a141ff1461019d57806340c9cdeb146101d65780634110a489146101ff57806345199e0a1461025757806349285b58146102c15780634d238c8e14610316578063752862111461034f578063900eb5a8146103645780639a573786146103c7578063a26a47d21461041c578063ae4b1b5b14610449578063b3f05b971461049e578063b7ab4db5146104cb578063d3e848f114610535578063fa81b2001461058a578063facd743b146105df575b600080fd5b341561010c57600080fd5b6101226004808035906020019091905050610630565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561016f57600080fd5b61019b600480803573ffffffffffffffffffffffffffffffffffffffff1690602001909190505061066f565b005b34156101a857600080fd5b6101d4600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610807565b005b34156101e157600080fd5b6101e9610bb7565b6040518082815260200191505060405180910390f35b341561020a57600080fd5b610236600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610bbd565b60405180831515151581526020018281526020019250505060405180910390f35b341561026257600080fd5b61026a610bee565b6040518080602001828103825283818151815260200191508051906020019060200280838360005b838110156102ad578082015181840152602081019050610292565b505050509050019250505060405180910390f35b34156102cc57600080fd5b6102d4610c82565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561032157600080fd5b61034d600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610d32565b005b341561035a57600080fd5b610362610fcc565b005b341561036f57600080fd5b61038560048080359060200190919050506110fc565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b34156103d257600080fd5b6103da61113b565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561042757600080fd5b61042f6111eb565b604051808215151515815260200191505060405180910390f35b341561045457600080fd5b61045c6111fe565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b34156104a957600080fd5b6104b1611224565b604051808215151515815260200191505060405180910390f35b34156104d657600080fd5b6104de611237565b6040518080602001828103825283818151815260200191508051906020019060200280838360005b83811015610521578082015181840152602081019050610506565b505050509050019250505060405180910390f35b341561054057600080fd5b6105486112cb565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561059557600080fd5b61059d6112f1565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b34156105ea57600080fd5b610616600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050611317565b604051808215151515815260200191505060405180910390f35b60078181548110151561063f57fe5b90600052602060002090016000915054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600460029054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161415156106cb57600080fd5b600460019054906101000a900460ff161515156106e757600080fd5b600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff161415151561072357600080fd5b80600a60006101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055506001600460016101000a81548160ff0219169083151502179055507f600bcf04a13e752d1e3670a5a9f1c21177ca2a93c6f5391d4f1298d098097c22600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff16604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390a150565b600080600061081461113b565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614151561084d57600080fd5b83600960008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff1615156108a957600080fd5b600960008673ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600101549350600160078054905003925060078381548110151561090857fe5b906000526020600020900160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1691508160078581548110151561094657fe5b906000526020600020900160006101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff16021790555083600960008473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600101819055506007838154811015156109e557fe5b906000526020600020900160006101000a81549073ffffffffffffffffffffffffffffffffffffffff02191690556000600780549050111515610a2757600080fd5b6007805480919060019003610a3c9190611370565b506000600960008773ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600101819055506000600960008773ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160006101000a81548160ff0219169083151502179055506000600460006101000a81548160ff0219169083151502179055506001430340600019167f55252fa6eee4741b4e24a74a70e9c11fd2c2281df8d6ea13126ff845f7825c89600760405180806020018281038252838181548152602001915080548015610ba257602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311610b58575b50509250505060405180910390a25050505050565b60085481565b60096020528060005260406000206000915090508060000160009054906101000a900460ff16908060010154905082565b610bf661139c565b6007805480602002602001604051908101604052809291908181526020018280548015610c7857602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311610c2e575b5050505050905090565b6000600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff166349285b586000604051602001526040518163ffffffff167c0100000000000000000000000000000000000000000000000000000000028152600401602060405180830381600087803b1515610d1257600080fd5b6102c65a03f11515610d2357600080fd5b50505060405180519050905090565b610d3a61113b565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff16141515610d7357600080fd5b80600960008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff16151515610dd057600080fd5b600073ffffffffffffffffffffffffffffffffffffffff168273ffffffffffffffffffffffffffffffffffffffff1614151515610e0c57600080fd5b6040805190810160405280600115158152602001600780549050815250600960008473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060008201518160000160006101000a81548160ff0219169083151502179055506020820151816001015590505060078054806001018281610ea991906113b0565b9160005260206000209001600084909190916101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff160217905550506000600460006101000a81548160ff0219169083151502179055506001430340600019167f55252fa6eee4741b4e24a74a70e9c11fd2c2281df8d6ea13126ff845f7825c89600760405180806020018281038252838181548152602001915080548015610fba57602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311610f70575b50509250505060405180910390a25050565b600560009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161480156110365750600460009054906101000a900460ff16155b151561104157600080fd5b6001600460006101000a81548160ff0219169083151502179055506007600690805461106e9291906113dc565b506006805490506008819055507f8564cd629b15f47dc310d45bcbfc9bcf5420b0d51bf0659a16c67f91d27632536110a4611237565b6040518080602001828103825283818151815260200191508051906020019060200280838360005b838110156110e75780820151818401526020810190506110cc565b505050509050019250505060405180910390a1565b60068181548110151561110b57fe5b90600052602060002090016000915054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16639a5737866000604051602001526040518163ffffffff167c0100000000000000000000000000000000000000000000000000000000028152600401602060405180830381600087803b15156111cb57600080fd5b6102c65a03f115156111dc57600080fd5b50505060405180519050905090565b600460019054906101000a900460ff1681565b600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600460009054906101000a900460ff1681565b61123f61139c565b60068054806020026020016040519081016040528092919081815260200182805480156112c157602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311611277575b5050505050905090565b600560009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600460029054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000600960008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff169050919050565b81548183558181151161139757818360005260206000209182019101611396919061142e565b5b505050565b602060405190810160405280600081525090565b8154818355818115116113d7578183600052602060002091820191016113d6919061142e565b5b505050565b82805482825590600052602060002090810192821561141d5760005260206000209182015b8281111561141c578254825591600101919060010190611401565b5b50905061142a9190611453565b5090565b61145091905b8082111561144c576000816000905550600101611434565b5090565b90565b61149391905b8082111561148f57600081816101000a81549073ffffffffffffffffffffffffffffffffffffffff021916905550600101611459565b5090565b905600a165627a7a7230582036ea35935c8246b68074adece2eab70c40e69a0193c08a6277ce06e5b25188510029b8f3f8f1a08023c0d95fc2364e0bf7593f5ff32e1db8ef9f4b41c0bd474eae62d1af896e99808080a0b47b4f0b3e73b5edc8f9a9da1cbcfed562eb06bf54619b6aefeadebf5b3604c280a0da6ec08940a924cb08c947dd56cdb40076b29a6f0ea4dba4e2d02d9a9a72431b80a030cc4138c9e74b6cf79d624b4b5612c0fd888e91f55316cfee7d1694e1a90c0b80a0c5d54b915b56a888eee4e6eeb3141e778f9b674d1d322962eed900f02c29990aa017256b36ef47f907c6b1378a2636942ce894c17075e56fc054d4283f6846659e808080a03340bbaeafcda3a8672eb83099231dbbfab8dae02a1e8ec2f7180538fac207e080b853f851808080a0a87d9bb950836582673aa0eecc0ff64aac607870637a2dd2012b8b1b31981f698080a08da6d5c36a404670c553a2c9052df7cd604f04e3863c4c7b9e0027bfd54206d680808080808080808080b838f7a03868bdfa8727775661e4ccf117824a175a33f8703d728c04488fbfffcafda9f99594e8ddc5c7a2d2f0d7a9798459c0104fdf5e987acab8d3f8d1a0dc277c93a9f9dcee99aac9b8ba3cfa4c51821998522469c37715644e8fbac0bfa0ab8cdb808c8303bb61fb48e276217be9770fa83ecf3f90f2234d558885f5abf1808080a0fe137c3a474fbde41d89a59dd76da4c55bf696b86d3af64a55632f76cf30786780808080a06301b39b2ea8a44df8b0356120db64b788e71f52e1d7a6309d0d2e5b86fee7cb80a0da5d8b08dea0c5a4799c0f44d8a24d7cdf209f9b7a5588c1ecafb5361f6b9f07a01b7779e149cadf24d4ffb77ca7e11314b8db7097e4d70b2a173493153ca2e5a080808080")
+	/*
+	   let mut stream = RlpStream::new_list(3);
+	   stream
+	       .append(&signal_number)
+	       .append(&set_proof)
+	       .append(&finality_proof);
+	   stream.out()
+	*/
+}
+
 func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	return nil
 	//header := block.Header()
@@ -769,52 +1017,11 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, h *types.Header) (Val
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
 
-	//TODO: hardcode for now
-	if h.Number.Uint64() <= 671 {
-		return &SimpleList{validators: []common.Address{
-			common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
-		}}, 0, nil
+	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoomToAfter(chain, c.cfg.Validators, h.ParentHash)
+	if !ok {
+		return nil, 0, fmt.Errorf("unable to zoomToAfter to epoch")
 	}
-	return &SimpleList{validators: []common.Address{
-		common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"),
-		common.HexToAddress("0x82e4e61e7f5139ff0a4157a5bc687ef42294c248"),
-	}}, 672, nil
-	/*
-		finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoom(chain, c.cfg.Validators, h)
-		if !ok {
-			return nil, 0, fmt.Errorf("Unable to zoom to epoch.")
-		}
-		return finalityChecker.validators(), epochTransitionNumber
-	*/
-
-	/*
-			fn epoch_set<'a>(
-		        &'a self,
-		        header: &Header,
-		    ) -> Result<(CowLike<dyn ValidatorSet, SimpleList>, BlockNumber), Error> {
-		        Ok(if self.immediate_transitions {
-		            (CowLike::Borrowed(&*self.validators), header.number())
-		        } else {
-		            let mut epoch_manager = self.epoch_manager.lock();
-		            let client = self.upgrade_client_or("Unable to verify sig")?;
-
-		            if !epoch_manager.zoom_to_after(
-		                &*client,
-		                &self.machine,
-		                &*self.validators,
-		                *header.parent_hash(),
-		            ) {
-		                debug!(target: "engine", "Unable to zoom to epoch.");
-		                return Err(EngineError::RequiresClient.into());
-		            }
-
-		            (
-		                CowLike::Owned(epoch_manager.validators().clone()),
-		                epoch_manager.epoch_transition_number,
-		            )
-		        })
-		    }
-	*/
+	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
 //nolint
@@ -914,34 +1121,42 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 	beneficiaries = append(beneficiaries, header.Coinbase)
 	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 
-	rewardContractAddress := aura.cfg.BlockRewardContractTransitions.GreaterOrEqual(header.Number.Uint64())
-	if rewardContractAddress != nil {
-		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.Address, syscall, beneficiaries, rewardKind)
+	var rewardContractAddress BlockRewardContract
+	var foundContract bool
+	for _, c := range aura.cfg.BlockRewardContractTransitions {
+		if c.blockNum > header.Number.Uint64() {
+			break
+		}
+		foundContract = true
+		rewardContractAddress = c
+	}
+	if foundContract {
+		beneficiaries, rewards = callBlockRewardAbi(rewardContractAddress.address, syscall, beneficiaries, rewardKind)
 		rewardKind = rewardKind[:len(beneficiaries)]
 		for i := 0; i < len(rewardKind); i++ {
 			rewardKind[i] = aurainterfaces.RewardExternal
 		}
 	} else {
-		// find: n <= header.number
-		var foundNum uint64
+		// block_reward.iter.rev().find(|&(block, _)| *block <= number)
+		var reward BlockReward
 		var found bool
-		for n := range aura.cfg.BlockReward {
-			if n > header.Number.Uint64() {
-				continue
+		for i := range aura.cfg.BlockReward {
+			if aura.cfg.BlockReward[i].blockNum > header.Number.Uint64() {
+				break
 			}
-			if n > foundNum {
-				found = true
-				foundNum = n
-			}
+			found = true
+			reward = aura.cfg.BlockReward[i]
 		}
 		if !found {
 			panic("Current block's reward is not found; this indicates a chain config error")
 		}
-		reward := aura.cfg.BlockReward[foundNum]
-		rewards = append(rewards, reward)
+
+		for range beneficiaries {
+			rewards = append(rewards, reward.amount)
+		}
 	}
 
-	//err = aura.Validators.onCloseBlock(header, aura.OurSigningAddress)
+	//err = aura.cfg.Validators.onCloseBlock(header, aura.OurSigningAddress)
 	//if err != nil {
 	//	return
 	//}
