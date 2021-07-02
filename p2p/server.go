@@ -719,7 +719,9 @@ func (srv *Server) run() {
 			srv.log.Error("Write enode to file failed", "self", srv.localnode.Node().URLv4())
 		}
 	}
-	srv.log.Info("Started P2P networking", "self", srv.localnode.Node().URLv4())
+	if len(srv.Config.Protocols) > 0 {
+		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnode.Node().URLv4())
+	}
 	defer srv.loopWG.Done()
 	defer srv.nodedb.Close()
 	defer srv.discmix.Close()

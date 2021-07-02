@@ -21,13 +21,13 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
-	proto_types "github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -922,7 +922,7 @@ func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Info(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
+	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
 	clean := ss.addStream(req.Ids, server)
 	defer clean()
 	select {
