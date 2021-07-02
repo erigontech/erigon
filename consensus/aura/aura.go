@@ -127,6 +127,7 @@ type PermissionedStep struct {
 
 type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
 
+//nolint
 func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
 	res, ok := r[step]
 	if !ok {
@@ -135,6 +136,8 @@ func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash
 	result, ok := res[author]
 	return result, ok
 }
+
+//nolint
 func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash common.Hash) {
 	res, ok := r[step]
 	if !ok {
@@ -143,6 +146,8 @@ func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash
 	}
 	res[author] = blockHash
 }
+
+//nolint
 func (r ReceivedStepHashes) dropAncient(step uint64) {
 	for i := range r {
 		if i < step {
@@ -593,6 +598,7 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 	if parentStep > siblingMaliceDetectionPeriod {
 		oldestStep = parentStep - siblingMaliceDetectionPeriod
 	}
+	//nolint
 	if oldestStep > 0 {
 		/*
 		   let mut rsh = self.received_step_hashes.write();

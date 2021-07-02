@@ -464,6 +464,7 @@ func (s *ValidatorSafeContract) epochSet(first bool, num uint64, proofRlp []byte
 }
 
 // first proof is just a state proof call of `getValidators` at header's state.
+//nolint
 func encodeFirstValidatorSetProof(h *types.Header, dbItems [][]byte) (proofRlp []byte, err error) {
 	type S struct {
 		h       *types.Header
@@ -552,6 +553,7 @@ func checkFirstValidatorSetProof(contract_address common.Address, oldHeader *typ
 // inter-contract proofs are a header and receipts.
 // checking will involve ensuring that the receipts match the header and
 // extracting the validator set from the receipts.
+//nolint
 func encodeValidatorSetProof(p ValidatorSetProof) (proofRlp []byte, err error) {
 	return rlp.EncodeToBytes(p)
 }
