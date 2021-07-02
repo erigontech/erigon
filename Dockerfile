@@ -1,6 +1,6 @@
 FROM golang:1.16-alpine3.13 as builder
 
-RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
+RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++ openssh
 
 WORKDIR /app
 ADD . .
