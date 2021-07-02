@@ -5,9 +5,6 @@ RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgc
 WORKDIR /app
 ADD . .
 
-RUN git config advice.detachedHead false
-RUN git fetch --tags
-
 RUN make all
 
 FROM alpine:3.13
