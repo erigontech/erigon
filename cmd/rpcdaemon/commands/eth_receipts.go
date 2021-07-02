@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/holiman/uint256"
 	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
@@ -53,6 +54,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		if err != nil {
 			return nil, err
 		}
+		receipt.BlockHash = block.Hash()
 		receipts = append(receipts, receipt)
 	}
 

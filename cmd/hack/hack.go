@@ -21,9 +21,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -2070,7 +2068,7 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
-func scanReceipts(chaindata string) error {
+func scanReceipts(chaindata string, block uint64) error {
 	dbdb := kv2.MustOpen(chaindata).RwKV()
 	defer dbdb.Close()
 	txtx, err := dbdb.BeginRw(context.Background())
@@ -2085,70 +2083,13 @@ func scanReceipts(chaindata string) error {
 	} else {
 		return fmt.Errorf("no transaction")
 	}
-	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
-	if err != nil {
-		return err
-	}
-	chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-	if cerr != nil {
-		return cerr
-	}
-	logInterval := 30 * time.Second
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	var buf bytes.Buffer
 	var key [8]byte
 	var v []byte
-	var to uint64
-	if to, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+	binary.BigEndian.PutUint64(key[:], block)
+	if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
 		return err
 	}
-	for blockNum := uint64(1); blockNum <= to; blockNum++ {
-		binary.BigEndian.PutUint64(key[:], blockNum)
-		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
-			return err
-		}
-		if v == nil {
-			continue
-		}
-		//fmt.Printf("blockNum = %d\n", blockNum)
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Scanned receipts up to", "block", blockNum)
-		}
-		var receipts types.Receipts
-		var oldReceipts migrations.OldReceipts
-		if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
-			continue
-		}
-
-		var blockHash common.Hash
-		if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
-			return err
-		}
-		var body *types.Body
-		if chainConfig.IsBerlin(blockNum) {
-			body = rawdb.ReadBody(tx, blockHash, blockNum)
-		}
-		receipts = make(types.Receipts, len(oldReceipts))
-		for i, oldReceipt := range oldReceipts {
-			receipts[i] = new(types.Receipt)
-			receipts[i].PostState = oldReceipt.PostState
-			receipts[i].Status = oldReceipt.Status
-			receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
-			if body != nil {
-				receipts[i].Type = body.Transactions[i].Type()
-			}
-		}
-		buf.Reset()
-		if err = cbor.Marshal(&buf, receipts); err != nil {
-			return err
-		}
-		//if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
-		//	return err
-		//}
-	}
+	fmt.Printf("blockNum = %d, receipt %x\n", block, v)
 	return nil
 }
 
@@ -2356,7 +2297,7 @@ func main() {
 		err = scanTxs(*chaindata)
 
 	case "scanReceipts":
-		err = scanReceipts(*chaindata)
+		err = scanReceipts(*chaindata, uint64(*block))
 
 	case "testTxPool":
 		err = testTxPool()
