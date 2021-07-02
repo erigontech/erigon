@@ -9,7 +9,6 @@ RUN git config advice.detachedHead false
 RUN git fetch --all --tags
 
 RUN go mod download
-RUN go build ./cmd/erigon
 
 RUN make all
 
