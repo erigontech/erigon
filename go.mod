@@ -6,8 +6,8 @@ require (
 	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/RoaringBitmap/roaring v0.6.0
 	github.com/VictoriaMetrics/fastcache v1.5.8
-	github.com/anacrolix/log v0.8.0
-	github.com/anacrolix/torrent v1.25.1
+	github.com/anacrolix/log v0.9.0
+	github.com/anacrolix/torrent v1.28.0
 	github.com/aws/aws-sdk-go v1.34.21
 	github.com/blend/go-sdk v1.20210428.4 // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
@@ -28,7 +28,7 @@ require (
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/golang/snappy v0.0.3
-	github.com/google/btree v1.0.0
+	github.com/google/btree v1.0.1
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/gorilla/websocket v1.4.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
@@ -63,9 +63,9 @@ require (
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	go.uber.org/atomic v1.8.0
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
-	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
-	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
+	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
 	golang.org/x/tools v0.0.0-20210106214847-113979e3529a
 	google.golang.org/grpc v1.39.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
