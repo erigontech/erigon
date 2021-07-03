@@ -34,7 +34,7 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
 
   rpcdaemon:
-    image: turbo-geth:latest
+    image: thorax/erigon:latest
     command: rpcdaemon --private.api.addr="erigon:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug,net"
     ports:
       - 8545:8545
