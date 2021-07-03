@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ugorji/go/codec"
 )
@@ -145,13 +146,13 @@ func (m *Migrator) PendingMigrations(tx ethdb.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
+func (m *Migrator) Apply(kv ethdb.RwKV, datadir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
 
 	var applied map[string][]byte
-	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	if err := kv.View(context.Background(), func(tx ethdb.Tx) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
 		return err
@@ -159,6 +160,7 @@ func (m *Migrator) Apply(db ethdb.Database, datadir string) error {
 		return err
 	}
 
+	db := kv2.NewObjectDatabase(kv)
 	tx, err1 := db.Begin(context.Background(), ethdb.RW)
 	if err1 != nil {
 		return err1
