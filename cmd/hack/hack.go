@@ -2078,18 +2078,11 @@ func scanTxs(chaindata string) error {
 func scanReceipts(chaindata string, block uint64) error {
 	dbdb := kv2.MustOpen(chaindata).RwKV()
 	defer dbdb.Close()
-	txtx, err := dbdb.BeginRw(context.Background())
+	tx, err := dbdb.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
-	defer txtx.Rollback()
-	var db ethdb.Database = kv2.WrapIntoTxDB(txtx)
-	var tx ethdb.Tx
-	if hasTx, ok := db.(ethdb.HasTx); ok {
-		tx = hasTx.Tx()
-	} else {
-		return fmt.Errorf("no transaction")
-	}
+	defer tx.Rollback()
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return err
@@ -2100,11 +2093,19 @@ func scanReceipts(chaindata string, block uint64) error {
 	}
 	vmConfig := vm.Config{}
 	noOpWriter := state.NewNoopWriter()
-	//var key [8]byte
-	//var v []byte
-	for blockNum := block; blockNum < block+1; blockNum++ {
-		if blockNum%10000 == 0 {
-			log.Info("Processing", "block", blockNum)
+	var buf bytes.Buffer
+	fixedCount := 0
+	logInterval := 30 * time.Second
+	logEvery := time.NewTicker(logInterval)
+	for blockNum := block; blockNum < block+100000; blockNum++ {
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Commit", "block", blockNum, "fixed", fixedCount)
+			tx.Commit()
+			if tx, err = dbdb.BeginRw(context.Background()); err != nil {
+				return err
+			}
 		}
 		var hash common.Hash
 		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
@@ -2124,13 +2125,7 @@ func scanReceipts(chaindata string, block uint64) error {
 		}
 		if chainConfig.IsByzantium(block.Number().Uint64()) {
 			receiptSha := types.DeriveSha(receipts)
-			if receiptSha != block.Header().ReceiptHash {
-				fmt.Printf("mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
-			} else {
-				// Match, we do not need to fix
-				for j, receipt := range receipts {
-					fmt.Printf("%d, cumulative gas used: %d\n", j, receipt.CumulativeGasUsed)
-				}
+			if receiptSha == block.Header().ReceiptHash {
 				continue
 			}
 		}
@@ -2139,8 +2134,7 @@ func scanReceipts(chaindata string, block uint64) error {
 		intraBlockState := state.New(dbstate)
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-		checkTEVM := ethdb.GetCheckTEVM(tx)
-		receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, checkTEVM, block, vmConfig)
+		receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, nil /* checkTEVM */, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -2148,31 +2142,21 @@ func scanReceipts(chaindata string, block uint64) error {
 			receiptSha := types.DeriveSha(receipts1)
 			if receiptSha != block.Header().ReceiptHash {
 				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
+			} else {
+				// All good, we can fix receipt record
+				buf.Reset()
+				err := cbor.Marshal(&buf, receipts1)
+				if err != nil {
+					return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
+				}
+				if err = tx.Put(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNum), buf.Bytes()); err != nil {
+					return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
+				}
+				fixedCount++
 			}
 		}
-		for i, receipt := range receipts {
-			receipt1 := receipts1[i]
-			if receipt.Type != receipt1.Type {
-				fmt.Printf("Type mismatch\n")
-			}
-			if !bytes.Equal(receipt.PostState, receipt1.PostState) {
-				fmt.Printf("PostState mismatch\n")
-			}
-			if receipt.CumulativeGasUsed != receipt1.CumulativeGasUsed {
-				fmt.Printf("CumulativeGasUsed mismatch\n")
-			}
-			if receipt.Bloom != receipt1.Bloom {
-				fmt.Printf("Bloom mismatch %x, %x\n", receipt.Bloom, receipt1.Bloom)
-			}
-		}
-		//binary.BigEndian.PutUint64(key[:], blockNum)
-		//if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
-		//	return err
-		//}
 	}
-
-	//fmt.Printf("blockNum = %d, receipt %x\n", block, v)
-	return nil
+	return tx.Commit()
 }
 
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
@@ -2193,7 +2177,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
-		fmt.Printf("%d, cumulative gas: %d\n", i, receipt.CumulativeGasUsed)
+		//fmt.Printf("%d, cumulative gas: %d\n", i, receipt.CumulativeGasUsed)
 	}
 
 	if !vmConfig.ReadOnly {
