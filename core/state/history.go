@@ -16,9 +16,12 @@ import (
 )
 
 func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+	var dat []byte
 	v, err := FindByHistory(tx, storage, key, timestamp)
 	if err == nil {
-		return v, nil
+		dat = make([]byte, len(v))
+		copy(dat, v)
+		return dat, nil
 	}
 	if !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
@@ -27,7 +30,12 @@ func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	return v, nil
+	if v == nil {
+		return nil, nil
+	}
+	dat = make([]byte, len(v))
+	copy(dat, v)
+	return dat, nil
 }
 
 func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
