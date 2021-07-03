@@ -393,10 +393,10 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
-	chainDb := kv.MustOpen(chaindata)
+	chainDb := kv.MustOpen(chaindata).RwKV()
 	defer chainDb.Close()
 	historyDb := chainDb
-	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
+	historyTx, err1 := historyDb.BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
@@ -526,7 +526,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	blockNumLastReport := blockNum
 	for !interrupt {
 		var block *types.Block
-		if err := chainDb.RwKV().View(context.Background(), func(tx ethdb.Tx) (err error) {
+		if err := chainDb.View(context.Background(), func(tx ethdb.Tx) (err error) {
 			block, err = rawdb.ReadBlockByNumber(tx, blockNum)
 			return err
 		}); err != nil {
@@ -544,12 +544,12 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
+		dbstate := state.NewPlainKvState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(chainDb, hash, number) }
-		checkTEVM := ethdb.GetCheckTEVM(chainDb)
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		checkTEVM := ethdb.GetCheckTEVM(historyTx)
 		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, checkTEVM, block, vmConfig)
 		if err1 != nil {
 			return err1
@@ -682,6 +682,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
+		fmt.Printf("%d, gas used: %d, cumulative gas: %d\n", i, receipt.GasUsed, receipt.CumulativeGasUsed)
 	}
 
 	if !vmConfig.ReadOnly {
