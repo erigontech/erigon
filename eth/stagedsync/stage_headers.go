@@ -338,8 +338,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 		"number", now,
 		"blk/second", speed,
 		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys),
-		"numGC", int(m.NumGC))
+		"sys", common.StorageSize(m.Sys))
 
 	return now
 }
