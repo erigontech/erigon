@@ -25,8 +25,6 @@ func BenchmarkMetrics(b *testing.B) {
 	h := NewRegisteredHistogram("histogram", r, NewUniformSample(100))
 	m := NewRegisteredMeter("meter", r)
 	t := NewRegisteredTimer("timer", r)
-	RegisterDebugGCStats(r)
-	RegisterRuntimeMemStats(r)
 	b.ResetTimer()
 	ch := make(chan bool)
 
@@ -60,7 +58,6 @@ func BenchmarkMetrics(b *testing.B) {
 				//log.Println("done CaptureRuntimeMemStats")
 				return
 			default:
-				CaptureRuntimeMemStatsOnce(r)
 			}
 		}
 	}()
