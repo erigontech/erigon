@@ -549,8 +549,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		intraBlockState.SetTracer(ot)
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		checkTEVM := ethdb.GetCheckTEVM(historyTx)
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, checkTEVM, block, vmConfig)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, nil /* checkTEVM */, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -682,7 +681,6 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
-		fmt.Printf("%d, gas used: %d, cumulative gas: %d\n", i, receipt.GasUsed, receipt.CumulativeGasUsed)
 	}
 
 	if !vmConfig.ReadOnly {
