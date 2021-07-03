@@ -2097,7 +2097,9 @@ func scanReceipts(chaindata string, block uint64) error {
 	fixedCount := 0
 	logInterval := 30 * time.Second
 	logEvery := time.NewTicker(logInterval)
-	for blockNum := block; blockNum < block+100000; blockNum++ {
+	var key [8]byte
+	var v []byte
+	for blockNum := block; true; blockNum++ {
 		select {
 		default:
 		case <-logEvery.C:
@@ -2114,21 +2116,40 @@ func scanReceipts(chaindata string, block uint64) error {
 		if hash == (common.Hash{}) {
 			break
 		}
-		var block *types.Block
-		var senders []common.Address
-		if block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockNum); err != nil {
+		binary.BigEndian.PutUint64(key[:], blockNum)
+		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
 			return err
 		}
-		receipts := rawdb.ReadReceipts(tx, block, senders)
-		for _, receipt := range receipts {
-			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-		}
-		if chainConfig.IsByzantium(block.Number().Uint64()) {
-			receiptSha := types.DeriveSha(receipts)
-			if receiptSha == block.Header().ReceiptHash {
+		var receipts types.Receipts
+		if err = cbor.Unmarshal(&receipts, bytes.NewReader(v)); err == nil {
+			broken := false
+			for _, receipt := range receipts {
+				if receipt.CumulativeGasUsed < 21000 {
+					broken = true
+					break
+				}
+			}
+			if !broken {
 				continue
 			}
 		}
+		var block *types.Block
+		//var senders []common.Address
+		if block, _, err = rawdb.ReadBlockWithSenders(tx, hash, blockNum); err != nil {
+			return err
+		}
+		/*
+			receipts = rawdb.ReadReceipts(tx, block, senders)
+			for _, receipt := range receipts {
+				receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+			}
+			if chainConfig.IsByzantium(block.Number().Uint64()) {
+				receiptSha := types.DeriveSha(receipts)
+				if receiptSha == block.Header().ReceiptHash {
+					continue
+				}
+			}
+		*/
 
 		dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
@@ -2149,7 +2170,7 @@ func scanReceipts(chaindata string, block uint64) error {
 				if err != nil {
 					return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
 				}
-				if err = tx.Put(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNum), buf.Bytes()); err != nil {
+				if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
 					return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
 				}
 				fixedCount++
