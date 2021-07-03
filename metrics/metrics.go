@@ -8,6 +8,7 @@ package metrics
 import (
 	"os"
 	"runtime"
+	"runtime/metrics"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -30,6 +31,7 @@ var Enabled = false
 var callbacks atomic.Value
 
 func init() {
+	metrics.All()
 	callbacks.Store([]func(){})
 }
 func AddCallback(collect func()) {
@@ -116,6 +118,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 		// copy from prometheus client
 		goGoroutines = GetOrRegisterGauge("go/goroutines", DefaultRegistry)
 		goThreads    = GetOrRegisterGauge("go/threads", DefaultRegistry)
+		cgoCalls     = GetOrRegisterGauge("go/cgo", DefaultRegistry)
 
 		ruMinflt   = GetOrRegisterGauge("ru/minflt", DefaultRegistry)
 		ruMajflt   = GetOrRegisterGauge("ru/majflt", DefaultRegistry)
@@ -166,6 +169,7 @@ func CollectProcessMetrics(refresh time.Duration) {
 
 		cpuThreads.Update(int64(threadCreateProfile.Count()))
 		cpuGoroutines.Update(int64(runtime.NumGoroutine()))
+		cgoCalls.Update(numCgoCall())
 
 		if m, _ := mem.VirtualMemory(); m != nil {
 			vmemTotal.Update(int64(m.Total))

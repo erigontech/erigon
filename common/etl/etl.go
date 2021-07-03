@@ -140,7 +140,7 @@ func extractBucketIntoFiles(
 			}
 
 			runtime.ReadMemStats(&m)
-			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			logArs = append(logArs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
 		if endkey != nil && bytes.Compare(k, endkey) > 0 {
