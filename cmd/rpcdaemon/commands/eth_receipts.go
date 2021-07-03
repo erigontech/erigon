@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -34,12 +33,11 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		return cached, nil
 	}
 
-	bc := adapter.NewBlockGetter(tx)
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
 	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
 	if err != nil {
 		return nil, err
 	}
