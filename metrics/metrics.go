@@ -100,10 +100,8 @@ func CollectProcessMetrics(refresh time.Duration) {
 	}
 	// Define the various metrics to collect
 	var (
-		cpuSysLoad    = GetOrRegisterGauge("system/cpu/sysload", DefaultRegistry)
-		cpuSysWait    = GetOrRegisterGauge("system/cpu/syswait", DefaultRegistry)
-		cpuThreads    = GetOrRegisterGauge("system/cpu/threads", DefaultRegistry)
-		cpuGoroutines = GetOrRegisterGauge("system/cpu/goroutines", DefaultRegistry)
+		cpuSysLoad = GetOrRegisterGauge("system/cpu/sysload", DefaultRegistry)
+		cpuSysWait = GetOrRegisterGauge("system/cpu/syswait", DefaultRegistry)
 
 		// disabled because of performance impact and because this info exists in logs
 		memPauses = GetOrRegisterMeter("system/memory/pauses", DefaultRegistry)
@@ -167,8 +165,6 @@ func CollectProcessMetrics(refresh time.Duration) {
 		ruNvcsw.Update(nvcsw)
 		ruNivcsw.Update(nivcsw)
 
-		cpuThreads.Update(int64(threadCreateProfile.Count()))
-		cpuGoroutines.Update(int64(runtime.NumGoroutine()))
 		cgoCalls.Update(numCgoCall())
 
 		if m, _ := mem.VirtualMemory(); m != nil {
