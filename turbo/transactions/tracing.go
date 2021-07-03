@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -157,8 +158,13 @@ func TraceTx(
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())
 		stream.WriteMore()
+		// If the result contains a revert reason, return it.
+		returnVal := fmt.Sprintf("%x", result.Return())
+		if len(result.Revert()) > 0 {
+			returnVal = fmt.Sprintf("%x", result.Revert())
+		}
 		stream.WriteObjectField("returnValue")
-		stream.WriteString(fmt.Sprintf("%x", result.Return()))
+		stream.WriteString(returnVal)
 		stream.WriteObjectEnd()
 	} else {
 		if r, err1 := tracer.(*tracers.Tracer).GetResult(); err1 == nil {
@@ -181,10 +187,11 @@ type JsonStreamLogger struct {
 	stream       *jsoniter.Stream
 	firstCapture bool
 
-	storage map[common.Address]vm.Storage
-	logs    []vm.StructLog
-	output  []byte //nolint
-	err     error  //nolint
+	locations common.Hashes // For sorting
+	storage   map[common.Address]vm.Storage
+	logs      []vm.StructLog
+	output    []byte //nolint
+	err       error  //nolint
 }
 
 // NewStructLogger returns a new logger
@@ -299,14 +306,24 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()
 		first := true
-		for i, storageValue := range l.storage[contract.Address()] {
+		// Sort storage by locations for easier comparison with geth
+		if l.locations != nil {
+			l.locations = l.locations[:0]
+		}
+		s := l.storage[contract.Address()]
+		for loc := range s {
+			l.locations = append(l.locations, loc)
+		}
+		sort.Sort(l.locations)
+		for _, loc := range l.locations {
+			value := s[loc]
 			if first {
 				first = false
 			} else {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(fmt.Sprintf("%x", i))
-			l.stream.WriteString(fmt.Sprintf("%x", storageValue))
+			l.stream.WriteObjectField(fmt.Sprintf("%x", loc))
+			l.stream.WriteString(fmt.Sprintf("%x", value))
 		}
 		l.stream.WriteObjectEnd()
 	}
