@@ -1034,7 +1034,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 
 	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
@@ -1067,7 +1067,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account map", "size", len(accountMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	storageMap := make(map[string][]byte)
 	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.StorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
@@ -1087,7 +1087,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed storage map", "size", len(storageMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
 	i := 0
@@ -1132,7 +1132,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	sort.Strings(unfurlList)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 
 	loader := trie.NewFlatDBTrieLoader("checkRoots")
 	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
@@ -1151,13 +1151,13 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	hash, err := rawdb.ReadCanonicalHash(tx, block)
 	tool.Check(err)
 	header := rawdb.ReadHeader(tx, hash, block)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed trie",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)
 	return nil
 }

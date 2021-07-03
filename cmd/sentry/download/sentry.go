@@ -743,7 +743,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 		amount++
 		return true
 	})
-	if req.MaxPeers > amount {
+	if req.MaxPeers < amount {
 		amount = req.MaxPeers
 	}
 
@@ -762,11 +762,11 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
-			return false
+			return true
 		}
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		i++
-		return sendToAmount <= i
+		return i < sendToAmount
 	})
 	if innerErr != nil {
 		return reply, fmt.Errorf("sendMessageToRandomPeers to peer %w", innerErr)
@@ -792,7 +792,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
-			return false
+			return true
 		}
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		return true

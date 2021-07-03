@@ -37,21 +37,9 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainKVState, error) {
+func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainKVState, error) {
 	// Create the parent state database
-	block, err := blockGetter.GetBlockByHash(blockHash)
-	if err != nil {
-		return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, err
-	}
-	if block == nil {
-		return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("block %x not found", blockHash)
-	}
-	parent := blockGetter.GetBlock(block.ParentHash(), block.NumberU64()-1)
-	if parent == nil {
-		return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
-	}
-
-	reader := state.NewPlainKvState(dbtx, parent.NumberU64())
+	reader := state.NewPlainKvState(dbtx, block.NumberU64()-1)
 	statedb := state.New(reader)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
@@ -60,6 +48,9 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64())
 
+	BlockContext := core.NewEVMBlockContext(block.Header(), getHeader, engine, nil, checkTEVM)
+	vmenv := vm.NewEVM(BlockContext, vm.TxContext{}, statedb, cfg, vm.Config{})
+	ctx = vmenv.ChainConfig().WithEIPsFlags(ctx, block.NumberU64())
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
@@ -70,19 +61,18 @@ func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.Chai
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(*signer, block.Header().BaseFee)
-		BlockContext := core.NewEVMBlockContext(block.Header(), getHeader, engine, nil, checkTEVM)
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == int(txIndex) {
 			return msg, BlockContext, TxContext, statedb, reader, nil
 		}
+		vmenv.Reset(TxContext, statedb)
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(BlockContext, TxContext, statedb, cfg, vm.Config{})
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
 			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.NumberU64()), state.NewNoopWriter())
+		_ = statedb.FinalizeTx(ctx, state.NewNoopWriter())
 	}
 	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }

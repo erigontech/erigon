@@ -534,7 +534,7 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*kv2.ObjectDatab
 	var openFunc func(exclusive bool) (*kv2.ObjectDatabase, error)
 	log.Info("Opening Database", "label", name)
 	openFunc = func(exclusive bool) (*kv2.ObjectDatabase, error) {
-		opts := kv2.NewMDBX().Path(dbPath).DBVerbosity(n.config.DatabaseVerbosity)
+		opts := kv2.NewMDBX().Path(dbPath).Label(label).DBVerbosity(n.config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
 		}

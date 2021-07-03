@@ -7,15 +7,6 @@ import (
 	"time"
 )
 
-func BenchmarkDebugGCStats(b *testing.B) {
-	r := NewRegistry()
-	RegisterDebugGCStats(r)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		CaptureDebugGCStatsOnce(r)
-	}
-}
-
 func TestDebugGCStatsBlocking(t *testing.T) {
 	if g := runtime.GOMAXPROCS(0); g < 2 {
 		t.Skipf("skipping TestDebugGCMemStatsBlocking with GOMAXPROCS=%d\n", g)
