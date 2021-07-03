@@ -3,7 +3,7 @@ version: '2.2'
 services:
 
   erigon:
-    image: erigon:latest
+    image: thorax/erigon:latest
     build: .
     command: erigon --metrics --metrics.addr="0.0.0.0" --metrics.port="6060" --private.api.addr="0.0.0.0:9090" --pprof --pprof.addr="0.0.0.0" --pprof.port="6061"
     volumes:
