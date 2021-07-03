@@ -20,11 +20,13 @@ RUN adduser \
     --uid "${UID}" \
     "${USER}"
 
-RUN mkdir -p /home/erigon && chown ${USER}:${USER} /home/erigon
+RUN mkdir -p /var/lib/erigon && chown ${USER}:${USER} /var/lib/erigon
+VOLUME /var/lib/erigon
 
 RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
+WORKDIR /var/lib/erigon
 USER ${USER}
 
 EXPOSE 8545 8546 30303 30303/udp 30304 30304/udp 8080 9090 6060
