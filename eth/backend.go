@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -371,6 +372,25 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		server65 := download.NewSentryServer(backend.downloadV2Ctx, d65, readNodeInfo, &cfg65, eth.ETH65)
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
+		go func() {
+			logEvery := time.NewTicker(60 * time.Second)
+			defer logEvery.Stop()
+
+			var logItems []interface{}
+
+			for {
+				select {
+				case <-backend.downloadV2Ctx.Done():
+					return
+				case <-logEvery.C:
+					logItems = logItems[:0]
+					for _, srv := range backend.sentryServers {
+						logItems = append(logItems, eth.ProtocolToString[srv.Protocol.Version], strconv.Itoa(srv.SimplePeerCount()))
+					}
+					log.Info("[p2p] Peers", logItems...)
+				}
+			}
+		}()
 	}
 	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, config.BlockDownloaderWindow)
 	if err != nil {

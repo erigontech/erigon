@@ -741,8 +741,6 @@ func (srv *Server) run() {
 	for _, n := range srv.TrustedNodes {
 		trusted[n.ID()] = true
 	}
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
 
 running:
 	for {
@@ -750,9 +748,6 @@ running:
 		case <-srv.quit:
 			// The server was stopped. Run the cleanup logic.
 			break running
-		case <-logEvery.C:
-			fmt.Printf("inbound: %d/%d\n", inboundCount, srv.maxInboundConns())
-			srv.dialsched.logStats(len(peers), srv.MaxPeers)
 		case n := <-srv.addtrusted:
 			// This channel is used by AddTrustedPeer to add a node
 			// to the trusted node set.
