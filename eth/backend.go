@@ -127,9 +127,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	// Assemble the Ethereum object
-	var chainDb ethdb.Database
-	var err error
-	chainDb, err = stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
+	chainKv, err := node.OpenDatabase(stack.Config(), ethdb.Chain)
 	if err != nil {
 		return nil, err
 	}
@@ -137,33 +135,41 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	var torrentClient *snapshotsync.Client
 	snapshotsDir := stack.Config().ResolvePath("snapshots")
 	if config.SnapshotLayout {
-		v, err := chainDb.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		var peerID string
+		if err = chainKv.View(context.Background(), func(tx ethdb.Tx) error {
+			v, err := tx.GetOne(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+			if err != nil {
+				return err
+			}
+			peerID = string(v)
+			return nil
+		}); err != nil {
 			log.Error("Get bittorrent peer", "err", err)
 		}
-		torrentClient, err = snapshotsync.New(snapshotsDir, config.SnapshotSeeding, string(v))
+		torrentClient, err = snapshotsync.New(snapshotsDir, config.SnapshotSeeding, peerID)
 		if err != nil {
 			return nil, err
 		}
-		if len(v) == 0 {
+		if len(peerID) == 0 {
 			log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
-			err = torrentClient.SavePeerID(chainDb)
-			if err != nil {
+			if err = chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
+				return torrentClient.SavePeerID(tx)
+			}); err != nil {
 				log.Error("Bittorrent peerID haven't saved", "err", err)
 			}
 		}
 
-		err = snapshotsync.WrapSnapshots(chainDb, snapshotsDir)
+		chainKv, err = snapshotsync.WrapSnapshots(chainKv, snapshotsDir)
 		if err != nil {
 			return nil, err
 		}
-		err = snapshotsync.SnapshotSeeding(chainDb, torrentClient, "headers", snapshotsDir)
+		err = snapshotsync.SnapshotSeeding(chainKv, torrentClient, "headers", snapshotsDir)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainDb.RwKV(), config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis, config.StorageMode.History)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -171,7 +177,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	backend := &Ethereum{
 		config:               config,
-		chainKV:              chainDb.(ethdb.HasRwKV).RwKV(),
+		chainKV:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
 		torrentClient:        torrentClient,
@@ -198,7 +204,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
-	if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	if err := chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		if err := ethdb.SetStorageModeIfNotExist(tx, config.StorageMode); err != nil {
 			return err
 		}
@@ -230,13 +236,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainDb.RwKV())
+	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainKv)
 
 	// setting notifier to support streaming events to rpc daemon
 	backend.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
 	if config.SnapshotLayout {
-		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainDb.RwKV())
+		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainKv)
 		if err != nil {
 			return nil, err
 		}
@@ -372,7 +378,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 	}
-	backend.downloadServer, err = download.NewControlServer(chainDb.RwKV(), stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, config.BlockDownloaderWindow)
+	backend.downloadServer, err = download.NewControlServer(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, config.BlockDownloaderWindow)
 	if err != nil {
 		return nil, err
 	}

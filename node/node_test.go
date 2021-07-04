@@ -17,6 +17,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -174,12 +175,16 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
-	if err = db.Put(dbutils.HashedAccountsBucket, []byte("testK"), []byte{}); err != nil {
+	if err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.Put(dbutils.HashedAccountsBucket, []byte("testK"), []byte{})
+	}); err != nil {
 		t.Fatal("can't Put on open DB:", err)
 	}
 
 	stack.Close()
-	if err = db.Put(dbutils.HashedAccountsBucket, []byte("testK"), []byte{}); err == nil {
+	if err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.Put(dbutils.HashedAccountsBucket, []byte("testK"), []byte{})
+	}); err == nil {
 		t.Fatal("Put succeeded after node is closed")
 	}
 }
@@ -193,7 +198,7 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	stack, _ := New(testNodeConfig())
 	defer stack.Close()
 
-	var db ethdb.Database
+	var db ethdb.RwKV
 	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
