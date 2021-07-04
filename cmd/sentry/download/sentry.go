@@ -851,7 +851,6 @@ func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
 		x, _ := ss.Peers.Load(peerID)
 		peerInfo, _ := x.(*PeerInfo)
 		if peerInfo == nil {
-			panic(1)
 			return true
 		}
 		pc++
