@@ -247,7 +247,7 @@ loop:
 			nodesCh = nil
 		}
 		d.rearmHistoryTimer(historyExp)
-		d.logStats()
+		//d.logStats()
 
 		select {
 		case <-d.ctx.Done():
@@ -338,9 +338,8 @@ func (d *dialScheduler) readNodes(it enode.Iterator) {
 	}
 }
 
-// logStats prints dialer statistics to the log. The message is suppressed when enough
-// peers are connected because users should only see it while their client is starting up
 // or comes back online.
+//nolint
 func (d *dialScheduler) logStats() {
 	now := d.clock.Now()
 	if d.lastStatsLog.Add(dialStatsLogInterval) > now {
