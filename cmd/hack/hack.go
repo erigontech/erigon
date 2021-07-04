@@ -2124,7 +2124,7 @@ func scanReceipts(chaindata string, block uint64) error {
 		if err = cbor.Unmarshal(&receipts, bytes.NewReader(v)); err == nil {
 			broken := false
 			for _, receipt := range receipts {
-				if receipt.CumulativeGasUsed < 21000 {
+				if receipt.CumulativeGasUsed < 10000 {
 					broken = true
 					break
 				}
@@ -2132,9 +2132,6 @@ func scanReceipts(chaindata string, block uint64) error {
 			if !broken {
 				continue
 			}
-			fmt.Printf("Broken receipts for block %d due to cumulative gas used < 21000\n", blockNum)
-		} else {
-			fmt.Printf("Error unmarshalling for block %d: %v\n", blockNum, err)
 		}
 		var block *types.Block
 		//var senders []common.Address
@@ -2180,7 +2177,6 @@ func scanReceipts(chaindata string, block uint64) error {
 			if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
 			}
-			fmt.Printf("Replacing\n%x\n%x\n", v, buf.Bytes())
 			fixedCount++
 		}
 	}
