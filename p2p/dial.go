@@ -42,7 +42,7 @@ const (
 	dialHistoryExpiration = inboundThrottleTime + 5*time.Second
 
 	// Config for the "Looking for peers" message.
-	dialStatsLogInterval = 10 * time.Second // printed at most this often
+	dialStatsLogInterval = 60 * time.Second // printed at most this often
 	dialStatsPeerLimit   = 20               // but not if more than this many dialed peers
 
 	// Endpoint resolution is throttled with bounded backoff.
@@ -247,7 +247,7 @@ loop:
 			nodesCh = nil
 		}
 		d.rearmHistoryTimer(historyExp)
-		//d.logStats()
+		d.logStats()
 
 		select {
 		case <-d.ctx.Done():
@@ -341,16 +341,13 @@ func (d *dialScheduler) readNodes(it enode.Iterator) {
 // logStats prints dialer statistics to the log. The message is suppressed when enough
 // peers are connected because users should only see it while their client is starting up
 // or comes back online.
-func (d *dialScheduler) logStats(activePeerCount, maxActivePeers int) {
+func (d *dialScheduler) logStats() {
 	now := d.clock.Now()
 	if d.lastStatsLog.Add(dialStatsLogInterval) > now {
 		return
 	}
 	if d.dialPeers < dialStatsPeerLimit && d.dialPeers < d.maxDialPeers {
-		active := fmt.Sprintf("%d/%d", activePeerCount, maxActivePeers)
-		connected := fmt.Sprintf("%d/%d", len(d.peers), d.maxDialPeers)
-		fmt.Printf("aa: %d,%d\n", d.maxActiveDials, d.dialPeers)
-		d.log.Info("[p2p] Peers", "protocol", d.subProtocolVersion, "activePeers", active, "connected", connected, "static", len(d.static), "tried", d.doneSinceLastLog)
+		d.log.Info("[p2p] Looking for peers", "protocol", d.subProtocolVersion, "peers", fmt.Sprintf("%d/%d", len(d.peers), d.maxDialPeers), "tried", d.doneSinceLastLog, "static", len(d.static))
 	}
 	d.doneSinceLastLog = 0
 	d.lastStatsLog = now
