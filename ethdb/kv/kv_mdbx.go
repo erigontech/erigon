@@ -472,7 +472,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		return
 	}
 
-	info, err := tx.db.env.Info()
+	info, err := tx.db.env.Info(tx.tx)
 	if err != nil {
 		return
 	}
