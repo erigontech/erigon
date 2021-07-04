@@ -58,77 +58,19 @@ func DecodeStorage(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	return blockN, k, v
 }
 
-type StorageChangeSet struct{ c ethdb.CursorDupSort }
-
-func (b StorageChangeSet) Find(blockNumber uint64, k []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, k[:common.AddressLength], k[common.AddressLength:])
-}
-
-func (b StorageChangeSet) FindWithIncarnation(blockNumber uint64, k []byte) ([]byte, error) {
-	return doSearch2(
-		b.c, blockNumber,
-		k[:common.AddressLength],
-		k[common.AddressLength+common.IncarnationLength:common.AddressLength+common.HashLength+common.IncarnationLength],
-		binary.BigEndian.Uint64(k[common.AddressLength:]), /* incarnation */
-	)
-}
-
-func (b StorageChangeSet) FindWithoutIncarnation(blockNumber uint64, addressToFind []byte, keyToFind []byte) ([]byte, error) {
-	return findWithoutIncarnationInStorageChangeSet2(b.c, blockNumber, common.AddressLength, addressToFind, keyToFind)
-}
-
-func findWithoutIncarnationInStorageChangeSet2(c ethdb.CursorDupSort, blockNumber uint64, keyPrefixLen int, addrBytesToFind []byte, keyBytesToFind []byte) ([]byte, error) {
-	return doSearch2(
-		c, blockNumber,
-		addrBytesToFind,
-		keyBytesToFind,
-		0, /* incarnation */
-	)
-}
-
-func doSearch2(
-	c ethdb.CursorDupSort,
-	blockNumber uint64,
-	addrBytesToFind []byte,
-	keyBytesToFind []byte,
-	incarnation uint64,
-) ([]byte, error) {
-	keyPrefixLen := common.AddressLength
-	if incarnation == 0 {
-		seek := make([]byte, 8+keyPrefixLen)
-		binary.BigEndian.PutUint64(seek, blockNumber)
-		copy(seek[8:], addrBytesToFind)
-		for k, v, err := c.Seek(seek); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return nil, err
-			}
-			_, k, v = DecodeStorage(k, v)
-			if !bytes.HasPrefix(k, addrBytesToFind) {
-				return nil, ErrNotFound
-			}
-
-			stHash := k[keyPrefixLen+common.IncarnationLength:]
-			if bytes.Equal(stHash, keyBytesToFind) {
-				return v, nil
-			}
-		}
-		return nil, ErrNotFound
-	}
-
-	seek := make([]byte, common.BlockNumberLength+keyPrefixLen+common.IncarnationLength)
+func FindStorage(c ethdb.CursorDupSort, blockNumber uint64, k []byte) ([]byte, error) {
+	addWithInc, loc := k[:common.AddressLength+common.IncarnationLength], k[common.AddressLength+common.IncarnationLength:]
+	seek := make([]byte, common.BlockNumberLength+common.AddressLength+common.IncarnationLength)
 	binary.BigEndian.PutUint64(seek, blockNumber)
-	copy(seek[8:], addrBytesToFind)
-	binary.BigEndian.PutUint64(seek[common.BlockNumberLength+keyPrefixLen:], incarnation)
-	k := seek
-	v, err := c.SeekBothRange(seek, keyBytesToFind)
+	copy(seek[8:], addWithInc)
+	v, err := c.SeekBothRange(seek, loc)
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.HasPrefix(v, keyBytesToFind) {
+	if !bytes.HasPrefix(v, loc) {
 		return nil, ErrNotFound
 	}
-	_, _, v = DecodeStorage(k, v)
-	return v, nil
+	return v[common.HashLength:], nil
 }
 
 // RewindDataPlain generates rewind data for all plain buckets between the timestamp

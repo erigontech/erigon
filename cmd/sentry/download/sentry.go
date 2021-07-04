@@ -260,8 +260,7 @@ func runPeer(
 				peerPrinted = true
 			}
 		}
-		var err error
-		if err = common.Stopped(ctx.Done()); err != nil {
+		if err := common.Stopped(ctx.Done()); err != nil {
 			return err
 		}
 		if peerInfo.Removed() {
@@ -816,8 +815,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 		reply.Protocol = proto_sentry.Protocol_ETH65
 	}
 
-	init := ss.statusData == nil
-	if init {
+	if ss.P2pServer == nil {
 		var err error
 		if !ss.p2p.NoDiscovery {
 			if len(ss.discoveryDNS) == 0 {
@@ -840,14 +838,12 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}
 	}
-	genesisHash = gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerCountRequest) (*proto_sentry.PeerCountReply, error) {
-	var pc uint64 = 0
+func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
 	ss.Peers.Range(func(key, value interface{}) bool {
 		peerID := key.(string)
 		x, _ := ss.Peers.Load(peerID)
@@ -858,7 +854,11 @@ func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerC
 		pc++
 		return true
 	})
-	return &proto_sentry.PeerCountReply{Count: pc}, nil
+	return pc
+}
+
+func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerCountRequest) (*proto_sentry.PeerCountReply, error) {
+	return &proto_sentry.PeerCountReply{Count: uint64(ss.SimplePeerCount())}, nil
 }
 
 // setupDiscovery creates the node discovery source for the `eth` and `snap`

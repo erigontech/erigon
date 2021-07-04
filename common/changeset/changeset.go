@@ -11,10 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-type Walker interface {
-	Find(blockNumber uint64, k []byte) ([]byte, error)
-}
-
 func NewChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
@@ -174,7 +170,7 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 var Mapper = map[string]struct {
 	IndexBucket   string
 	IndexChunkKey func([]byte, uint64) []byte
-	WalkerAdapter func(cursor ethdb.CursorDupSort) Walker
+	Find          func(cursor ethdb.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error)
 	New           func() *ChangeSet
 	Encode        Encoder
 	Decode        Decoder
@@ -182,21 +178,17 @@ var Mapper = map[string]struct {
 	dbutils.AccountChangeSetBucket: {
 		IndexBucket:   dbutils.AccountsHistoryBucket,
 		IndexChunkKey: dbutils.AccountIndexChunkKey,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return AccountChangeSet{c: c}
-		},
-		New:    NewAccountChangeSet,
-		Encode: EncodeAccounts,
-		Decode: DecodeAccounts,
+		New:           NewAccountChangeSet,
+		Find:          FindAccount,
+		Encode:        EncodeAccounts,
+		Decode:        DecodeAccounts,
 	},
 	dbutils.StorageChangeSetBucket: {
 		IndexBucket:   dbutils.StorageHistoryBucket,
 		IndexChunkKey: dbutils.StorageIndexChunkKey,
-		WalkerAdapter: func(c ethdb.CursorDupSort) Walker {
-			return StorageChangeSet{c: c}
-		},
-		New:    NewStorageChangeSet,
-		Encode: EncodeStorage,
-		Decode: DecodeStorage,
+		Find:          FindStorage,
+		New:           NewStorageChangeSet,
+		Encode:        EncodeStorage,
+		Decode:        DecodeStorage,
 	},
 }

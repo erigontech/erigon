@@ -65,23 +65,32 @@ func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*Sn
 	return snKV.Open(), nil
 }
 
-func WrapSnapshots(chainDb ethdb.Database, snapshotsDir string) error {
-	snapshotBlock, err := chainDb.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return err
+func WrapSnapshots(chainDb ethdb.RwKV, snapshotsDir string) (ethdb.RwKV, error) {
+	var snapshotBlock uint64
+	var hasSnapshotBlock bool
+	if err := chainDb.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		if err != nil {
+			return err
+		}
+		hasSnapshotBlock = len(v) == 8
+		if hasSnapshotBlock {
+			snapshotBlock = binary.BigEndian.Uint64(v)
+		}
+		return nil
+	}); err != nil {
+		return chainDb, err
 	}
-	snKVOpts := kv2.NewSnapshotKV().DB(chainDb.(ethdb.HasRwKV).RwKV())
-	if len(snapshotBlock) == 8 {
-		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", binary.BigEndian.Uint64(snapshotBlock)))
+
+	snKVOpts := kv2.NewSnapshotKV().DB(chainDb)
+	if hasSnapshotBlock {
+		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", snapshotBlock))
 		if innerErr != nil {
-			return innerErr
+			return chainDb, innerErr
 		}
 		snKVOpts = snKVOpts.SnapshotDB([]string{dbutils.HeadersBucket}, snKV)
 	}
-	//manually wrap current db for snapshot generation
-	chainDb.(ethdb.HasRwKV).SetRwKV(snKVOpts.Open())
-
-	return nil
+	return snKVOpts.Open(), nil
 }
 
 func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr string, networkID uint64, snapshotMode SnapshotMode, chainDb ethdb.Database) error {

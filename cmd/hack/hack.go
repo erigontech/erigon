@@ -2132,6 +2132,9 @@ func scanReceipts(chaindata string, block uint64) error {
 			if !broken {
 				continue
 			}
+			fmt.Printf("Broken receipts for block %d due to cumulative gas used < 21000\n", blockNum)
+		} else {
+			fmt.Printf("Error unmarshalling for block %d: %v\n", blockNum, err)
 		}
 		var block *types.Block
 		//var senders []common.Address
@@ -2159,22 +2162,26 @@ func scanReceipts(chaindata string, block uint64) error {
 		if err1 != nil {
 			return err1
 		}
+		fix := true
 		if chainConfig.IsByzantium(block.Number().Uint64()) {
 			receiptSha := types.DeriveSha(receipts1)
 			if receiptSha != block.Header().ReceiptHash {
 				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
-			} else {
-				// All good, we can fix receipt record
-				buf.Reset()
-				err := cbor.Marshal(&buf, receipts1)
-				if err != nil {
-					return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
-				}
-				if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
-					return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
-				}
-				fixedCount++
+				fix = false
 			}
+		}
+		if fix {
+			// All good, we can fix receipt record
+			buf.Reset()
+			err := cbor.Marshal(&buf, receipts1)
+			if err != nil {
+				return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
+			}
+			if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
+				return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
+			}
+			fmt.Printf("Replacing\n%x\n%x\n", v, buf.Bytes())
+			fixedCount++
 		}
 	}
 	return tx.Commit()

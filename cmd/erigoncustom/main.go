@@ -4,10 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/turbo/node"
-
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/urfave/cli"
@@ -21,7 +17,7 @@ var flag = cli.StringFlag{
 
 // defining a custom bucket name
 const (
-	customBucketName = "ch.torquem.demo.tgcustom.CUSTOM_BUCKET"
+	customBucketName = "ch.torquem.demo.tgcustom.CUSTOM_BUCKET" //nolint
 )
 
 // the regular main function
@@ -39,15 +35,15 @@ func main() {
 // Erigon main function
 func runErigon(ctx *cli.Context) {
 	// running a node and initializing a custom bucket with all default settings
-	eri := node.New(ctx, node.Params{
-		CustomBuckets: map[string]dbutils.BucketConfigItem{
-			customBucketName: {},
-		},
-	})
+	//eri := node.New(ctx, node.Params{
+	//	CustomBuckets: map[string]dbutils.BucketConfigItem{
+	//		customBucketName: {},
+	//	},
+	//})
 
-	err := eri.Serve()
+	//err := eri.Serve()
 
-	if err != nil {
-		log.Error("error while serving a Erigon node", "err", err)
-	}
+	//if err != nil {
+	//	log.Error("error while serving a Erigon node", "err", err)
+	//}
 }
