@@ -22,6 +22,7 @@ import (
 )
 
 func TestFetch(t *testing.T) {
-	fetch := NewFetch(nil)
+	mock := NewMockSentry()
+	fetch := NewFetch(mock)
 	fmt.Printf("fetch: %+v\n", fetch)
 }
