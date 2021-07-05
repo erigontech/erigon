@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 
@@ -60,8 +59,8 @@ func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
 	return originalData
 }
 
-func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	if err := dsw.csw.UpdateAccountData(ctx, address, original, account); err != nil {
+func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	if err := dsw.csw.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
 	addrHash, err := common.HashData(address[:])
@@ -76,8 +75,8 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	return nil
 }
 
-func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	if err := dsw.csw.DeleteAccount(ctx, address, original); err != nil {
+func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+	if err := dsw.csw.DeleteAccount(address, original); err != nil {
 		return err
 	}
 	addrHash, err := common.HashData(address[:])
@@ -116,9 +115,9 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	// We delegate here first to let the changeSetWrite make its own decision on whether to proceed in case *original == *value
-	if err := dsw.csw.WriteAccountStorage(ctx, address, incarnation, key, original, value); err != nil {
+	if err := dsw.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
 	}
 	if *original == *value {

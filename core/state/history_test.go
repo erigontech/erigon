@@ -1,7 +1,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -31,11 +30,10 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
 	blockWriter := NewPlainStateWriter(tx, tx, 1)
-	ctx := context.Background()
 	emptyAccount := accounts.NewAccount()
 	for i := range acc {
 		acc[i], addr[i] = randomAccount(t)
-		if err := blockWriter.UpdateAccountData(ctx, addr[i], &emptyAccount /* original */, acc[i]); err != nil {
+		if err := blockWriter.UpdateAccountData(addr[i], &emptyAccount, acc[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -221,7 +219,6 @@ func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainState
 	accStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
 	accHistoryStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
 	addrs := make([]common.Address, numOfAccounts)
-	ctx := context.Background()
 	for i := range accHistory {
 		accHistory[i], addrs[i] = randomAccount(t)
 		accHistory[i].Balance = *uint256.NewInt(100)
@@ -245,11 +242,11 @@ func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainState
 
 			value := uint256.NewInt(uint64(10 + j))
 			accHistoryStateStorage[i][key] = *value
-			if err := blockWriter.WriteAccountStorage(ctx, addrs[i], accHistory[i].Incarnation, &key, value, newValue); err != nil {
+			if err := blockWriter.WriteAccountStorage(addrs[i], accHistory[i].Incarnation, &key, value, newValue); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if err := blockWriter.UpdateAccountData(ctx, addrs[i], accHistory[i] /* original */, accState[i]); err != nil {
+		if err := blockWriter.UpdateAccountData(addrs[i], accHistory[i], accState[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1097,11 +1094,11 @@ type accData struct {
 func writeBlockData(t *testing.T, blockWriter *PlainStateWriter, data []accData) {
 	for i := range data {
 		if data[i].newVal != nil {
-			if err := blockWriter.UpdateAccountData(context.Background(), data[i].addr, data[i].oldVal, data[i].newVal); err != nil {
+			if err := blockWriter.UpdateAccountData(data[i].addr, data[i].oldVal, data[i].newVal); err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			if err := blockWriter.DeleteAccount(context.Background(), data[i].addr, data[i].oldVal); err != nil {
+			if err := blockWriter.DeleteAccount(data[i].addr, data[i].oldVal); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1126,12 +1123,7 @@ type storageData struct {
 func writeStorageBlockData(t *testing.T, blockWriter *PlainStateWriter, data []storageData) {
 
 	for i := range data {
-		if err := blockWriter.WriteAccountStorage(context.Background(),
-			data[i].addr,
-			data[i].inc,
-			&data[i].key,
-			data[i].oldVal,
-			data[i].newVal); err != nil {
+		if err := blockWriter.WriteAccountStorage(data[i].addr, data[i].inc, &data[i].key, data[i].oldVal, data[i].newVal); err != nil {
 			t.Fatal(err)
 		}
 	}
