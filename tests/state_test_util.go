@@ -17,7 +17,6 @@
 package tests
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -160,8 +159,8 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(ctx context.Context, tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, root, err := t.RunNoVerify(ctx, tx, subtest, vmconfig)
+func (t *StateTest) Run(tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
 	}
@@ -178,7 +177,7 @@ func (t *StateTest) Run(ctx context.Context, tx ethdb.RwTx, subtest StateSubtest
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	tx := kv.WrapIntoTxDB(kvtx)
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {

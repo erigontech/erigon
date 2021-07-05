@@ -96,7 +96,6 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
 	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
-
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
