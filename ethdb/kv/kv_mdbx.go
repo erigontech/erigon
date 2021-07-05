@@ -169,7 +169,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
+		return nil, fmt.Errorf("%w, path: %s, trace: %s", err, opts.path, debug.Callers(10))
 	}
 
 	defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
@@ -327,7 +327,7 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	} else {
-		db.log.Info("database closed (MDBX)")
+		db.log.Info("database closed (MDBX)", "label", db.opts.label.String(), "exclusive", db.opts.flags&mdbx.Exclusive != 0)
 	}
 }
 
