@@ -1,19 +1,8 @@
 package migrations
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 var receiptRepair = Migration{
@@ -124,6 +113,7 @@ var receiptRepair = Migration{
 	},
 }
 
+/*
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
 	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
 	header := block.Header()
@@ -158,3 +148,4 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	return receipts, nil
 }
+*/
