@@ -54,9 +54,9 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := s.w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
-	err = s.w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
 	err = s.state.FinalizeTx(ctx, s.w)
@@ -301,11 +301,11 @@ func TestDump(t *testing.T) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
