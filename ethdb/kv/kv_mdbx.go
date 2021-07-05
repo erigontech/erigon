@@ -169,7 +169,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		return nil, fmt.Errorf("%w, path: %s, trace: %s", err, opts.path, debug.Callers(10))
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), debug.Callers(10))
 	}
 
 	defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
@@ -343,7 +343,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn ethdb.Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label.String(), debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -367,7 +367,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn ethdb.RwTx, err error) {
 	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
+		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
