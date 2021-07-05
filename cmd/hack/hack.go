@@ -2211,6 +2211,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	rules := chainConfig.Rules(block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, checkTEVM)
@@ -2227,8 +2228,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number.Uint64())
-		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
+		if err := ibs.CommitBlock(rules, blockWriter); err != nil {
 			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 		}
 	}

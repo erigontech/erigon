@@ -18,7 +18,6 @@ package tests
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -83,8 +82,7 @@ type vmExecMarshaling struct {
 }
 
 func (t *VMTest) Run(tx ethdb.RwTx, vmconfig vm.Config, blockNr uint64) error {
-	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), blockNr)
-	state, err := MakePreState(ctx, kv.WrapIntoTxDB(tx), t.json.Pre, blockNr)
+	state, err := MakePreState(params.MainnetChainConfig.Rules(blockNr), kv.WrapIntoTxDB(tx), t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
 	}

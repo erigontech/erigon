@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"context"
 	"errors"
 	"math"
 	"strconv"
@@ -95,7 +94,7 @@ func TestEIP2200(t *testing.T) {
 			s.SetCode(address, hexutil.MustDecode(tt.input))
 			s.SetState(address, &common.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(context.Background(), state.NewPlainStateWriter(tx, tx, 0))
+			_ = s.CommitBlock(params.AllEthashProtocolChanges.Rules(0), state.NewPlainStateWriter(tx, tx, 0))
 			vmctx := BlockContext{
 				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
 				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},

@@ -824,28 +824,27 @@ func TestReproduceCrash(t *testing.T) {
 	db := kv.NewTestDB(t)
 	tsw := state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(state.NewPlainStateReader(db))
-	ctx := context.Background()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 2nd transaction
 	intraBlockState.SetState(contract, &storageKey1, *value1)
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey2, *value2)
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
 	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 }
@@ -1202,7 +1201,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	db := kv.NewTestDB(t)
 	r, tsw := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
-	ctx := context.Background()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1210,10 +1208,10 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	intraBlockState.SetCode(contract, oldCode)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %w", err)
 	}
-	err := db.RwKV().View(ctx, func(tx ethdb.Tx) error {
+	err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
 		_, err := trie.CalcRoot("test", tx)
 		return err
 	})
@@ -1226,7 +1224,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
 	intraBlockState.SetCode(contract, newCode)
 
-	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
@@ -1244,7 +1242,6 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	db := kv.NewTestDB(t)
 	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
 	intraBlockState := state.New(r)
-	ctx := context.Background()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1252,10 +1249,10 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
-	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	if err := intraBlockState.CommitBlock(ctx, w); err != nil {
+	if err := intraBlockState.CommitBlock(params.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
 
@@ -1286,10 +1283,10 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
-	if err := intraBlockState.FinalizeTx(ctx, w); err != nil {
+	if err := intraBlockState.FinalizeTx(params.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	if err := intraBlockState.CommitBlock(ctx, w); err != nil {
+	if err := intraBlockState.CommitBlock(params.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
 

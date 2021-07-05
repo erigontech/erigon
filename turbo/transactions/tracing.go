@@ -50,7 +50,6 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 
 	BlockContext := core.NewEVMBlockContext(block.Header(), getHeader, engine, nil, checkTEVM)
 	vmenv := vm.NewEVM(BlockContext, vm.TxContext{}, statedb, cfg, vm.Config{})
-	ctx = vmenv.ChainConfig().WithEIPsFlags(ctx, block.NumberU64())
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
@@ -72,7 +71,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(ctx, state.NewNoopWriter())
+		_ = statedb.FinalizeTx(vmenv.ChainRules, state.NewNoopWriter())
 	}
 	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }

@@ -23,6 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/params"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -53,16 +54,15 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj3.SetBalance(uint256.NewInt(44))
 
 	// write some of them to the trie
-	ctx := context.TODO()
 	err := s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	err = s.state.FinalizeTx(ctx, s.w)
+	err = s.state.FinalizeTx(params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(ctx, s.w)
+	err = s.state.CommitBlock(params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
@@ -118,11 +118,10 @@ func (s *StateSuite) TestNull(c *checker.C) {
 
 	s.state.SetState(address, &common.Hash{}, value)
 
-	ctx := context.TODO()
-	err := s.state.FinalizeTx(ctx, s.w)
+	err := s.state.FinalizeTx(params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(ctx, s.w)
+	err = s.state.CommitBlock(params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
 	s.state.GetCommittedState(address, &common.Hash{}, &value)
@@ -171,7 +170,6 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 func TestSnapshot2(t *testing.T) {
 
 	db := kv.NewMemDatabase()
-	ctx := context.TODO()
 	w := NewDbStateWriter(db, 0)
 	state := New(NewDbStateReader(db))
 
@@ -194,13 +192,13 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	err := state.FinalizeTx(ctx, w)
+	err := state.FinalizeTx(params.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
 	w = NewDbStateWriter(db, 1)
 
-	err = state.CommitBlock(ctx, w)
+	err = state.CommitBlock(params.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -300,7 +298,6 @@ func TestDump(t *testing.T) {
 	obj3.SetBalance(uint256.NewInt(44))
 
 	// write some of them to the trie
-	ctx := context.TODO()
 	err := w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
@@ -310,13 +307,13 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = state.FinalizeTx(ctx, w)
+	err = state.FinalizeTx(params.Rules{}, w)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	blockWriter := NewPlainStateWriter(tx, tx, 1)
-	err = state.CommitBlock(ctx, blockWriter)
+	err = state.CommitBlock(params.Rules{}, blockWriter)
 	if err != nil {
 		t.Fatal(err)
 	}

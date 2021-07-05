@@ -104,7 +104,7 @@ func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, me
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active
-	if evm.chainRules.IsPetersburg || !evm.chainRules.IsConstantinople {
+	if evm.ChainRules.IsPetersburg || !evm.ChainRules.IsConstantinople {
 		// This checks for 3 scenario's and calculates gas accordingly:
 		//
 		// 1. From a zero-value address to a non-zero value         (NEW VALUE)
@@ -336,7 +336,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		transfersValue = !stack.Back(2).IsZero()
 		address        = common.Address(stack.Back(1).Bytes20())
 	)
-	if evm.chainRules.IsEIP158 {
+	if evm.ChainRules.IsEIP158 {
 		if transfersValue && evm.IntraBlockState.Empty(address) {
 			gas += params.CallNewAccountGas
 		}
@@ -355,7 +355,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		return 0, ErrGasUintOverflow
 	}
 
-	evm.callGasTemp, err = callGas(evm.chainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -380,7 +380,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	evm.callGasTemp, err = callGas(evm.chainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -395,7 +395,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	if err != nil {
 		return 0, err
 	}
-	evm.callGasTemp, err = callGas(evm.chainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -411,7 +411,7 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 	if err != nil {
 		return 0, err
 	}
-	evm.callGasTemp, err = callGas(evm.chainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -425,11 +425,11 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	var gas uint64
 	// EIP150 homestead gas reprice fork:
-	if evm.chainRules.IsEIP150 {
+	if evm.ChainRules.IsEIP150 {
 		gas = params.SelfdestructGasEIP150
 		var address = common.Address(stack.Back(0).Bytes20())
 
-		if evm.chainRules.IsEIP158 {
+		if evm.ChainRules.IsEIP158 {
 			// if empty and transfers value
 			if evm.IntraBlockState.Empty(address) && evm.IntraBlockState.GetBalance(contract.Address()).Sign() != 0 {
 				gas += params.CreateBySelfdestructGas
