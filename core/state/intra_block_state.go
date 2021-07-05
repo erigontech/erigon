@@ -18,7 +18,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
@@ -734,8 +733,7 @@ func updateAccount(EIP158Enabled bool, stateWriter StateWriter, addr common.Addr
 }
 
 // FinalizeTx should be called after every transaction.
-func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWriter) error {
-	EIP158Enabled := params.GetForkFlag(ctx, params.IsEIP158Enabled)
+func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		stateObject, exist := sdb.stateObjects[addr]
 		if !exist {
@@ -748,7 +746,7 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			continue
 		}
 
-		if err := updateAccount(EIP158Enabled, stateWriter, addr, stateObject, true); err != nil {
+		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, true); err != nil {
 			return err
 		}
 
@@ -761,14 +759,13 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWriter) error {
-	EIP158Enabled := params.GetForkFlag(ctx, params.IsEIP158Enabled)
+func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(EIP158Enabled, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err
 		}
 	}

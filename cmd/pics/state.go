@@ -307,7 +307,7 @@ func initialState1() error {
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number().Uint64())
+		ctx := context.Background()
 		switch i {
 		case 0:
 			tx, err = types.SignTx(types.NewTransaction(0, theAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)

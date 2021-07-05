@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/urfave/cli"
@@ -114,7 +115,7 @@ func stateTestCmd(ctx *cli.Context) error {
 			var root common.Hash
 			var calcRootErr error
 
-			statedb, err := test.Run(context.Background(), tx, st, cfg)
+			statedb, err := test.Run(params.Rules{}, tx, st, cfg)
 			// print state root for evmlab tracing
 			root, calcRootErr = trie.CalcRoot("", tx)
 			if err == nil && calcRootErr != nil {

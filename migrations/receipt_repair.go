@@ -2,7 +2,6 @@ package migrations
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"time"
@@ -155,8 +154,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number.Uint64())
-		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
+		if err := ibs.CommitBlock(chainConfig.Rules(header.Number.Uint64()), blockWriter); err != nil {
 			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 		}
 	}

@@ -82,14 +82,13 @@ func TestState(t *testing.T) {
 						if !ok {
 							return UnsupportedForkError{subtest.Fork}
 						}
-						ctx := config.WithEIPsFlags(context.Background(), 1)
-
+						rules := config.Rules(1)
 						tx, err := db.BeginRw(context.Background())
 						if err != nil {
 							t.Fatal(err)
 						}
 						defer tx.Rollback()
-						_, err = test.Run(ctx, tx, subtest, vmconfig)
+						_, err = test.Run(rules, tx, subtest, vmconfig)
 						tx.Rollback()
 						return st.checkFailure(t, err)
 					})

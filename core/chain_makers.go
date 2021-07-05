@@ -279,9 +279,8 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
-			ctx := config.WithEIPsFlags(context.Background(), b.header.Number.Uint64())
 			// Write state changes to db
-			if err := ibs.CommitBlock(ctx, plainStateWriter); err != nil {
+			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64()), plainStateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
 
