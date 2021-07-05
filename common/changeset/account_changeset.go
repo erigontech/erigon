@@ -42,11 +42,9 @@ func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	return blockN, k, v
 }
 
-type AccountChangeSet struct{ c ethdb.CursorDupSort }
-
-func (b AccountChangeSet) Find(blockNumber uint64, key []byte) ([]byte, error) {
+func FindAccount(c ethdb.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error) {
 	k := dbutils.EncodeBlockNumber(blockNumber)
-	v, err := b.c.SeekBothRange(k, key)
+	v, err := c.SeekBothRange(k, key)
 	if err != nil {
 		return nil, err
 	}

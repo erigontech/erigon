@@ -37,6 +37,11 @@ const (
 	ETH66 = 66
 )
 
+var ProtocolToString = map[uint]string{
+	ETH65: "eth65",
+	ETH66: "eth66",
+}
+
 // ProtocolName is the official short name of the `eth` protocol used during
 // devp2p capability negotiation.
 const ProtocolName = "eth"
