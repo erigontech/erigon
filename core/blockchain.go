@@ -198,28 +198,25 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
 	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
 	if err != nil {
-		panic(err)
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}
-	w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
-	if err1 != nil {
-		panic(err1)
-	}
-	encoder := json.NewEncoder(w)
-	logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-	if err2 := encoder.Encode(logs); err2 != nil {
-		panic(err2)
-	}
-	panic(1)
+	//w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
+	//if err1 != nil {
+	//	panic(err1)
+	//}
+	//encoder := json.NewEncoder(w)
+	//logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+	//if err2 := encoder.Encode(logs); err2 != nil {
+	//	panic(err2)
+	//}
 	return result, nil
 }
 
 // from the null sender, with 50M gas.
 func SysCallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
-	var from common.Address
-	nonce := ibs.GetNonce(from)
-	tx = types.NewTransaction(nonce, contract, nil, 50_000_000, u256.Num1, data)
-	return tx.FakeSign(from)
+	nonce := ibs.GetNonce(SystemAddress)
+	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
+	return tx.FakeSign(SystemAddress)
 }
 
 func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {

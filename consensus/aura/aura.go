@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -800,27 +799,6 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, header *types.Header, state *s
 	if err != nil {
 		log.Warn("aura initialize block: on epoch begin", "err", err)
 	}
-
-	os.Exit(1)
-	/*
-		// genesis is never a new block, but might as well check.
-		let header = block.header.clone();
-		let first = header.number() == 0;
-
-		let mut call = |to, data| {
-		  let result = self.machine.execute_as_system(
-		      block,
-		      to,
-		      U256::max_value(), // unbounded gas? maybe make configurable.
-		      Some(data),
-		  );
-
-		  result.map_err(|e| format!("{}", e))
-		};
-
-		self.validators.on_epoch_begin(first, &header, &mut call)
-
-	*/
 }
 
 func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
