@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"testing"
@@ -90,7 +89,6 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 		&acc1,
 		&acc2,
 	}
-	ctx := context.Background()
 
 	for blockNumber := uint64(1); blockNumber < from+numberOfBlocks; blockNumber++ {
 		updateIncarnation := difficulty != staticCodeStaticIncarnations && blockNumber%10 == 0
@@ -131,13 +129,13 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 				var location common.Hash
 				location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
 				if blockNumber >= from {
-					if err := blockWriter.WriteAccountStorage(ctx, addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
+					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
 			if blockNumber >= from {
-				if err := blockWriter.UpdateAccountData(ctx, addr, oldAcc /* original */, newAcc /* new account */); err != nil {
+				if err := blockWriter.UpdateAccountData(addr, oldAcc, newAcc); err != nil {
 					t.Fatal(err)
 				}
 			}
