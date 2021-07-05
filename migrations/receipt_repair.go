@@ -39,6 +39,10 @@ var receiptRepair = Migration{
 				log.Warn("Could not perform this migration because history is not in storage mode")
 				return CommitProgress(db, nil, true)
 			}
+			if !sm.Receipts {
+				log.Info("Migration is only relevant for storage mode with receipts, skipping")
+				return CommitProgress(db, nil, true)
+			}
 		}
 
 		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
