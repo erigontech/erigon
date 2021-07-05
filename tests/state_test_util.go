@@ -192,7 +192,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, kvtx ethdb.RwTx, subtest Sta
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(rules, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(config.Rules(writeBlockNr), tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -240,10 +240,10 @@ func (t *StateTest) RunNoVerify(rules params.Rules, kvtx ethdb.RwTx, subtest Sta
 	// - there are only 'bad' transactions, which aren't executed. In those cases,
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
-	if err = statedb.FinalizeTx(evm.ChainRules, w); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainConfig().Rules(writeBlockNr), w); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules, w); err != nil {
+	if err = statedb.CommitBlock(evm.ChainConfig().Rules(writeBlockNr), w); err != nil {
 		return nil, common.Hash{}, err
 	}
 	// Generate hashed state
