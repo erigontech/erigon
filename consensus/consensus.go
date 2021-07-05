@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -113,7 +114,12 @@ type Engine interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int
+
+	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header) []rlp.RawValue
+
+	// VerifyFamily only used by Aura now - later may be merged into VerifyHeaders
+	VerifyFamily(chain ChainHeaderReader, header *types.Header) error
 
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API

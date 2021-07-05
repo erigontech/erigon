@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -23,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -32,12 +33,11 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		return cached, nil
 	}
 
-	bc := adapter.NewBlockGetter(tx)
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
 	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -52,6 +52,7 @@ func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConf
 		if err != nil {
 			return nil, err
 		}
+		receipt.BlockHash = block.Hash()
 		receipts = append(receipts, receipt)
 	}
 
@@ -259,7 +260,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
 	}
-	return marshalReceipt(receipts[txIndex], block.Transactions()[txIndex]), nil
+	return marshalReceipt(receipts[txIndex], block.Transactions()[txIndex], cc, block), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -292,13 +293,13 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block))
 	}
 
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -328,8 +329,15 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction) map[string]in
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
+	if !chainConfig.IsLondon(block.NumberU64()) {
+		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
+	} else {
+		baseFee, _ := uint256.FromBig(block.BaseFee())
+		gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
+		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
+	}
 	// Assign receipt status.
-	fields["status"] = receipt.Status
+	fields["status"] = hexutil.Uint64(receipt.Status)
 	if receipt.Logs == nil {
 		fields["logs"] = [][]*types.Log{}
 	}

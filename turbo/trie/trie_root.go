@@ -123,6 +123,22 @@ type RootHashAggregator struct {
 	accData        GenStructStepAccountData
 }
 
+type StreamReceiver interface {
+	Receive(
+		itemType StreamItem,
+		accountKey []byte,
+		storageKey []byte,
+		accountValue *accounts.Account,
+		storageValue []byte,
+		hash []byte,
+		hasTree bool,
+		cutoff int,
+	) error
+
+	Result() SubTries
+	Root() common.Hash
+}
+
 func NewRootHashAggregator() *RootHashAggregator {
 	return &RootHashAggregator{
 		hb: NewHashBuilder(false),
@@ -1385,18 +1401,6 @@ func (c *StateCursor) Next() ([]byte, []byte, []byte, error) {
 	return k, c.kHex, v, nil
 }
 
-func nextAccount(in, out []byte) bool {
-	copy(out, in)
-	for i := len(out) - 1; i >= 0; i-- {
-		if out[i] != 255 {
-			out[i]++
-			return true
-		}
-		out[i] = 0
-	}
-	return false
-}
-
 // keyIsBefore - ksind of bytes.Compare, but nil is the last key. And return
 func keyIsBefore(k1, k2 []byte) bool {
 	if k1 == nil {
@@ -1489,4 +1493,32 @@ func CalcRoot(logPrefix string, tx ethdb.Tx) (common.Hash, error) {
 	}
 
 	return h, nil
+}
+
+func makeCurrentKeyStr(k []byte) string {
+	var currentKeyStr string
+	if k == nil {
+		currentKeyStr = "final"
+	} else if len(k) < 4 {
+		currentKeyStr = fmt.Sprintf("%x", k)
+	} else {
+		currentKeyStr = fmt.Sprintf("%x...", k[:4])
+	}
+	return currentKeyStr
+}
+
+func isSequenceOld(prev []byte, next []byte) bool {
+	isSequence := false
+	if bytes.HasPrefix(next, prev) {
+		tail := next[len(prev):] // if tail has only zeroes, then no state records can be between fstl.nextHex and fstl.ihK
+		isSequence = true
+		for _, n := range tail {
+			if n != 0 {
+				isSequence = false
+				break
+			}
+		}
+	}
+
+	return isSequence
 }

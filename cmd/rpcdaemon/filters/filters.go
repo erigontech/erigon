@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"google.golang.org/grpc"

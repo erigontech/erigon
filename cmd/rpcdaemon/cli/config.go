@@ -8,6 +8,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -15,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/gointerfaces"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -186,6 +186,8 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 			}
 			kv = snapKv
 		}
+	} else {
+		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 	if cfg.PrivateApiAddr != "" {
 		remoteKv, err := kv2.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
@@ -242,6 +244,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.WebsocketEnabled && r.Method == "GET" {
 			wsHandler.ServeHTTP(w, r)
+			return
 		}
 		httpHandler.ServeHTTP(w, r)
 	})

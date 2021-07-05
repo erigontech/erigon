@@ -12,14 +12,14 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	debug2 "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -68,7 +68,11 @@ func RecvUploadMessageLoop(ctx context.Context,
 		default:
 		}
 
-		SentryHandshake(ctx, sentry, cs)
+		if err := SentryHandshake(ctx, sentry, cs); err != nil {
+			log.Error("[RecvUploadMessage] sentry not ready yet", "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
 		if err := RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
 			log.Error("[RecvUploadMessage]", "err", err)
 		}
@@ -143,7 +147,11 @@ func RecvMessageLoop(ctx context.Context,
 		default:
 		}
 
-		SentryHandshake(ctx, sentry, cs)
+		if err := SentryHandshake(ctx, sentry, cs); err != nil {
+			log.Error("[RecvMessage] sentry not ready yet", "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
 		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
 			log.Error("[RecvMessage]", "err", err)
 
@@ -216,14 +224,14 @@ func RecvMessage(
 	}
 }
 
-func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlServer *ControlServerImpl) {
+func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlServer *ControlServerImpl) error {
 	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-			return
+			return nil
 		}
-		log.Error("sentry not ready yet", "err", err)
 	}
+	return nil
 }
 
 type ControlServerImpl struct {

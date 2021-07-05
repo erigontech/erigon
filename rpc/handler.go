@@ -133,6 +133,13 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 				break
 			}
 		}
+		if !allMethodsAreThreadSafe && stream == nil {
+			_ = h.conn.writeJSON(context.Background(), jsonrpcMessage{Version: vsn, ID: null, Error: &jsonError{
+				Code:    -32601,
+				Message: "streamable methods are not supported on websockets. help us to implement",
+			}})
+			return
+		}
 
 		answers := make([]*jsonrpcMessage, 0, len(msgs))
 		if allMethodsAreThreadSafe {

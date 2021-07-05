@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -32,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"

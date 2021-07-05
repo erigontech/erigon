@@ -23,7 +23,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 )
 
@@ -105,14 +104,8 @@ type JsonSpec struct {
 	MaximumUncleCountTransition *uint64 `json:"maximumUncleCountTransition"`
 	// Maximum number of accepted uncles.
 	MaximumUncleCount *uint `json:"maximumUncleCount"`
-	// Block at which empty step messages should start.
-	EmptyStepsTransition *uint64 `json:"emptyStepsTransition"`
-	// Maximum number of accepted empty steps.
-	MaximumEmptySteps *uint `json:"maximumEmptySteps"`
 	// Strict validation of empty steps transition block.
 	StrictEmptyStepsTransition *uint `json:"strictEmptyStepsTransition"`
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition *uint64 `json:"twoThirdsMajorityTransition"`
 	// The random number contract's address, or a map of contract transitions.
 	RandomnessContractAddress map[uint64]common.Address `json:"randomnessContractAddress"`
 	// The addresses of contracts that determine the block gas limit starting from the block number
@@ -129,21 +122,29 @@ type Code struct {
 }
 
 type BlockRewardContract struct {
-	BlockNum uint64
-	Address  common.Address // On-chain address.
+	blockNum uint64
+	address  common.Address // On-chain address.
 }
 
-func NewBlockRewardContract(address common.Address) *BlockRewardContract {
-	return &BlockRewardContract{Address: address}
-}
+type BlockRewardContractList []BlockRewardContract
 
-type BlockRewardContractList []*BlockRewardContract
-
-func (r BlockRewardContractList) Less(i, j int) bool { return r[i].BlockNum < r[j].BlockNum }
+func (r BlockRewardContractList) Less(i, j int) bool { return r[i].blockNum < r[j].blockNum }
 func (r BlockRewardContractList) Len() int           { return len(r) }
 func (r BlockRewardContractList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
-func (r BlockRewardContractList) GreaterOrEqual(block uint64) *BlockRewardContract {
-	return r[sort.Search(len(r), func(i int) bool { return block >= r[i].BlockNum })-1]
+
+type BlockReward struct {
+	blockNum uint64
+	amount   *uint256.Int
+}
+
+type BlockRewardList []BlockReward
+
+func (r BlockRewardList) Less(i, j int) bool { return r[i].blockNum < r[j].blockNum }
+func (r BlockRewardList) Len() int           { return len(r) }
+func (r BlockRewardList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+
+func NewBlockRewardContract(address common.Address) *BlockRewardContract {
+	return &BlockRewardContract{address: address}
 }
 
 type AuthorityRoundParams struct {
@@ -165,19 +166,13 @@ type AuthorityRoundParams struct {
 	// Immediate transitions.
 	ImmediateTransitions bool
 	// Block reward in base units.
-	BlockReward map[uint64]*uint256.Int
+	BlockReward BlockRewardList
 	// Block reward contract addresses with their associated starting block numbers.
 	BlockRewardContractTransitions BlockRewardContractList
 	// Number of accepted uncles transition block.
 	MaximumUncleCountTransition uint64
 	// Number of accepted uncles.
 	MaximumUncleCount uint
-	// Empty step messages transition block.
-	EmptyStepsTransition uint64
-	// First block for which a 2/3 quorum (instead of 1/2) is required.
-	TwoThirdsMajorityTransition uint64
-	// Number of accepted empty steps.
-	MaximumEmptySteps uint
 	// Transition block to strict empty steps validation.
 	StrictEmptyStepsTransition uint64
 	// If set, enables random number contract integration. It maps the transition block to the contract address.
@@ -241,8 +236,9 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		   );
 		*/
 	} else if jsonParams.BlockRewardContractAddress != nil {
-		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, &BlockRewardContract{BlockNum: transitionBlockNum, Address: *jsonParams.BlockRewardContractAddress})
+		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress})
 	}
+	sort.Sort(params.BlockRewardContractTransitions)
 
 	if jsonParams.ValidateScoreTransition != nil {
 		params.ValidateScoreTransition = *jsonParams.ValidateScoreTransition
@@ -259,34 +255,15 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 	if jsonParams.MaximumUncleCountTransition != nil {
 		params.MaximumUncleCountTransition = *jsonParams.MaximumUncleCountTransition
 	}
-	if jsonParams.MaximumEmptySteps != nil {
-		params.MaximumEmptySteps = *jsonParams.MaximumEmptySteps
-	}
-	if jsonParams.EmptyStepsTransition != nil {
-		params.EmptyStepsTransition = *jsonParams.EmptyStepsTransition
-	}
 
-	params.BlockReward = map[uint64]*uint256.Int{}
 	if jsonParams.BlockReward == nil {
-		params.BlockReward[0] = u256.Num0
+		params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: u256.Num0})
 	} else {
 		if jsonParams.BlockReward != nil {
-			params.BlockReward[0] = uint256.NewInt(uint64(*jsonParams.BlockReward))
+			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(uint64(*jsonParams.BlockReward))})
 		}
 	}
+	sort.Sort(params.BlockReward)
 
-	params.EmptyStepsTransition = math.MaxUint64
-	if jsonParams.EmptyStepsTransition != nil {
-		if *jsonParams.EmptyStepsTransition < 1 {
-			params.EmptyStepsTransition = 1
-		} else {
-			params.EmptyStepsTransition = *jsonParams.EmptyStepsTransition
-		}
-	}
-
-	params.TwoThirdsMajorityTransition = math.MaxUint64
-	if jsonParams.TwoThirdsMajorityTransition != nil {
-		params.TwoThirdsMajorityTransition = *jsonParams.TwoThirdsMajorityTransition
-	}
 	return params, nil
 }

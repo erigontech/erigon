@@ -7,17 +7,17 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"runtime/debug"
-	"strings"
 	"sync"
+	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/remote"
@@ -258,8 +258,14 @@ func RecvTxMessageLoop(ctx context.Context,
 		default:
 		}
 
-		download.SentryHandshake(ctx, sentry, cs)
-		RecvTxMessage(ctx, sentry, handleInboundMessage, wg)
+		if err := download.SentryHandshake(ctx, sentry, cs); err != nil {
+			log.Error("[RecvTxMessage] sentry not ready yet", "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if err := RecvTxMessage(ctx, sentry, handleInboundMessage, wg); err != nil {
+			log.Error("[RecvTxMessage]", "err", err)
+		}
 	}
 }
 
@@ -269,20 +275,8 @@ func RecvTxMessage(ctx context.Context,
 	sentry remote.SentryClient,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
-) {
-	// avoid crash because Erigon's core does many things
-	defer func() {
-		if r := recover(); r != nil { // just log is enough
-			panicReplacer := strings.NewReplacer("\n", " ", "\t", "", "\r", "")
-			stack := panicReplacer.Replace(string(debug.Stack()))
-			switch typed := r.(type) {
-			case error:
-				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			default:
-				log.Error("[RecvTxMessage] fail", "err", fmt.Errorf("%w, trace: %s", typed, stack))
-			}
-		}
-	}()
+) (err error) {
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -309,11 +303,11 @@ func RecvTxMessage(ctx context.Context,
 		if errors.Is(err, io.EOF) {
 			return
 		}
-		log.Error("ReceiveTx messages failed", "error", err)
-		return
+		return err
 	}
 
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var req *proto_sentry.InboundMessage
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -326,8 +320,7 @@ func RecvTxMessage(ctx context.Context,
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			log.Error("[RecvTxMessage] Sentry disconnected", "error", err)
-			return
+			return err
 		}
 		if req == nil {
 			return

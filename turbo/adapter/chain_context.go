@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -31,6 +32,9 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *type
 	panic("must not be called")
 }
 func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
+	panic("must not be called")
+}
+func (c *powEngine) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
 	panic("must not be called")
 }
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Header, uncles []*types.Header) error {
@@ -56,7 +60,12 @@ func (c *powEngine) Seal(chain consensus.ChainHeaderReader, block *types.Block, 
 func (c *powEngine) SealHash(header *types.Header) common.Hash {
 	panic("must not be called")
 }
-func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash) *big.Int {
+
+func (c *powEngine) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header) []rlp.RawValue {
+	return nil
+}
+
+func (c *powEngine) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, _ []rlp.RawValue) *big.Int {
 	panic("must not be called")
 }
 func (c *powEngine) APIs(chain consensus.ChainHeaderReader) []rpc.API {

@@ -114,7 +114,6 @@ func HeadersForward(
 	var peer []byte
 	stopped := false
 	prevProgress := headerProgress
-
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
@@ -339,8 +338,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 		"number", now,
 		"blk/second", speed,
 		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys),
-		"numGC", int(m.NumGC))
+		"sys", common.StorageSize(m.Sys))
 
 	return now
 }
@@ -358,4 +356,7 @@ func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 }
-func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header { panic("") }
+func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
+	return h
+}

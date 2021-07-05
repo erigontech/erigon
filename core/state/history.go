@@ -16,26 +16,14 @@ import (
 )
 
 func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	var dat []byte
 	v, err := FindByHistory(tx, storage, key, timestamp)
 	if err == nil {
-		dat = make([]byte, len(v))
-		copy(dat, v)
-		return dat, nil
+		return v, nil
 	}
 	if !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
-	v, err = tx.GetOne(dbutils.PlainStateBucket, key)
-	if err != nil {
-		return nil, err
-	}
-	if v == nil {
-		return nil, nil
-	}
-	dat = make([]byte, len(v))
-	copy(dat, v)
-	return dat, nil
+	return tx.GetOne(dbutils.PlainStateBucket, key)
 }
 
 func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
@@ -84,9 +72,9 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		}
 		defer c.Close()
 		if storage {
-			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).(changeset.StorageChangeSet).FindWithIncarnation(changeSetBlock, key)
+			data, err = changeset.Mapper[csBucket].Find(c, changeSetBlock, key)
 		} else {
-			data, err = changeset.Mapper[csBucket].WalkerAdapter(c).Find(changeSetBlock, key)
+			data, err = changeset.Mapper[csBucket].Find(c, changeSetBlock, key)
 		}
 		if err != nil {
 			if !errors.Is(err, changeset.ErrNotFound) {

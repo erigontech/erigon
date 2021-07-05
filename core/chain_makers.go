@@ -191,7 +191,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 	}
 	chainreader := &FakeChainReader{Cfg: b.config}
 	parent := b.parent.Header()
-	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash)
+	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.Seal)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -403,11 +403,13 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			parent.Number().Uint64(),
 			parent.Hash(),
 			parent.UncleHash(),
+			parent.Header().Seal,
 		),
 		GasLimit: CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
 		Time:     time,
 	}
+	header.Seal = engine.GenerateSeal(chain, header, parent.Header())
 
 	if chain.Config().IsLondon(header.Number.Uint64()) {
 		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())

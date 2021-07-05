@@ -31,11 +31,16 @@ var (
 		Usage: "Buffer size for ETL operations.",
 		Value: etl.BufferOptimalSize.String(),
 	}
+	BlockDownloaderWindowFlag = cli.IntFlag{
+		Name:  "blockDownloaderWindow",
+		Usage: "Outstanding limit of block bodies being downloaded",
+		Value: 65536,
+	}
 
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
 		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
-		Value: "",
+		Value: "127.0.0.1:9090",
 	}
 
 	PrivateApiRateLimit = cli.IntFlag{
@@ -144,6 +149,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
 	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
+	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
 }
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {

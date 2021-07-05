@@ -21,13 +21,13 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon/gointerfaces/sentry"
-	proto_types "github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -260,8 +260,7 @@ func runPeer(
 				peerPrinted = true
 			}
 		}
-		var err error
-		if err = common.Stopped(ctx.Done()); err != nil {
+		if err := common.Stopped(ctx.Done()); err != nil {
 			return err
 		}
 		if peerInfo.Removed() {
@@ -732,7 +731,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 
 func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Data.Id]
-	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
+	if msgcode != eth.NewBlockMsg &&
+		msgcode != eth.NewBlockHashesMsg &&
+		msgcode != eth.NewPooledTransactionHashesMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
@@ -741,7 +742,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 		amount++
 		return true
 	})
-	if req.MaxPeers > amount {
+	if req.MaxPeers < amount {
 		amount = req.MaxPeers
 	}
 
@@ -760,11 +761,11 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
-			return false
+			return true
 		}
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		i++
-		return sendToAmount <= i
+		return i < sendToAmount
 	})
 	if innerErr != nil {
 		return reply, fmt.Errorf("sendMessageToRandomPeers to peer %w", innerErr)
@@ -775,7 +776,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Id]
 	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Id)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
 	var innerErr error
@@ -790,7 +791,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 			peerInfo.Remove()
 			ss.Peers.Delete(peerID)
 			innerErr = err
-			return false
+			return true
 		}
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		return true
@@ -814,8 +815,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 		reply.Protocol = proto_sentry.Protocol_ETH65
 	}
 
-	init := ss.statusData == nil
-	if init {
+	if ss.P2pServer == nil {
 		var err error
 		if !ss.p2p.NoDiscovery {
 			if len(ss.discoveryDNS) == 0 {
@@ -838,14 +838,12 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}
 	}
-	genesisHash = gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	ss.statusData = statusData
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerCountRequest) (*proto_sentry.PeerCountReply, error) {
-	var pc uint64 = 0
+func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
 	ss.Peers.Range(func(key, value interface{}) bool {
 		peerID := key.(string)
 		x, _ := ss.Peers.Load(peerID)
@@ -856,7 +854,11 @@ func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerC
 		pc++
 		return true
 	})
-	return &proto_sentry.PeerCountReply{Count: pc}, nil
+	return pc
+}
+
+func (ss *SentryServerImpl) PeerCount(_ context.Context, req *proto_sentry.PeerCountRequest) (*proto_sentry.PeerCountReply, error) {
+	return &proto_sentry.PeerCountReply{Count: uint64(ss.SimplePeerCount())}, nil
 }
 
 // setupDiscovery creates the node discovery source for the `eth` and `snap`
@@ -920,7 +922,7 @@ func (ss *SentryServerImpl) addStream(ids []proto_sentry.MessageId, server proto
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Info(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
+	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
 	clean := ss.addStream(req.Ids, server)
 	defer clean()
 	select {

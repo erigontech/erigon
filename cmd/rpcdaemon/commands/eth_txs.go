@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	types2 "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/gointerfaces"
-	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -25,8 +26,23 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
 	txn, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(tx, hash)
+
+	// Add GasPrice for the DynamicFeeTransaction
+	var baseFee *big.Int
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.IsLondon(blockNumber) && blockHash != (common.Hash{}) {
+		block, err := rawdb.ReadBlockByHash(tx, blockHash)
+		if err != nil {
+			return nil, err
+		}
+		baseFee = block.BaseFee()
+	}
+
 	if txn != nil {
-		return newRPCTransaction(txn, blockHash, blockNumber, txIndex), nil
+		return newRPCTransaction(txn, blockHash, blockNumber, txIndex, baseFee), nil
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
@@ -95,7 +111,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
 	}
 
-	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
+	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
@@ -145,7 +161,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
 	}
 
-	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex)), nil
+	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.

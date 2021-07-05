@@ -148,8 +148,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
 				"blk/second", speed,
 				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys),
-				"numGC", int(m.NumGC))
+				"sys", common.StorageSize(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush64(froms, bufLimit) {
 				if err := flushBitmaps64(collectorFrom, froms); err != nil {
@@ -192,8 +191,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Pruning call trace intermediate table", logPrefix), "number", blockNum,
 				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys),
-				"numGC", int(m.NumGC))
+				"sys", common.StorageSize(m.Sys))
 		}
 		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
@@ -334,8 +332,7 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
 				"blk/second", speed,
 				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys),
-				"numGC", int(m.NumGC))
+				"sys", common.StorageSize(m.Sys))
 		}
 	}
 	if err != nil {

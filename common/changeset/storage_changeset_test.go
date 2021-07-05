@@ -200,10 +200,6 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 	m := Mapper[storageTable]
 	_, tx := kv.NewTestTx(t)
 
-	c, err := tx.CursorDupSort(storageTable)
-	require.NoError(t, err)
-	cs := m.WalkerAdapter(c).(StorageChangeSet)
-
 	clear := func() {
 		c, err := tx.RwCursor(storageTable)
 		require.NoError(t, err)
@@ -219,17 +215,13 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 		}
 	}
 
-	doTestFind(t, tx, cs.FindWithIncarnation, clear)
+	doTestFind(t, tx, m.Find, clear)
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnation(t *testing.T) {
 	bkt := storageTable
 	m := Mapper[bkt]
 	_, tx := kv.NewTestTx(t)
-
-	c, err := tx.CursorDupSort(bkt)
-	require.NoError(t, err)
-	cs := m.WalkerAdapter(c).(StorageChangeSet)
 
 	clear := func() {
 		c, err := tx.RwCursor(bkt)
@@ -246,21 +238,13 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnation(t 
 		}
 	}
 
-	findFunc := func(blockN uint64, k []byte) ([]byte, error) {
-		addr, _, key := dbutils.PlainParseCompositeStorageKey(k)
-		addrBytes := addr[:]
-		keyBytes := key[:]
-
-		return cs.FindWithoutIncarnation(blockN, addrBytes, keyBytes)
-	}
-
-	doTestFind(t, tx, findFunc, clear)
+	doTestFind(t, tx, m.Find, clear)
 }
 
 func doTestFind(
 	t *testing.T,
 	tx ethdb.RwTx,
-	findFunc func(uint64, []byte) ([]byte, error),
+	findFunc func(ethdb.CursorDupSort, uint64, []byte) ([]byte, error),
 	clear func(),
 ) {
 	m := Mapper[storageTable]
@@ -279,7 +263,7 @@ func doTestFind(
 			}
 		}
 
-		c, err := tx.RwCursor(storageTable)
+		c, err := tx.RwCursorDupSort(storageTable)
 		require.NoError(t, err)
 
 		err = m.Encode(1, ch, func(k, v []byte) error {
@@ -293,7 +277,7 @@ func doTestFind(
 		}
 
 		for i, v := range ch.Changes {
-			val, err := findFunc(1, v.Key)
+			val, err := findFunc(c, 1, v.Key)
 			if err != nil {
 				t.Error(err, i)
 			}
@@ -383,7 +367,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 
 	c1, err := tx.CursorDupSort(bkt)
 	require.NoError(t, err)
-	cs := m.WalkerAdapter(c1).(StorageChangeSet)
+	defer c1.Close()
 
 	contractA := common.HexToAddress("0x6f0e0cdac6c716a00bd8db4d0eee4f2bfccf8e6a")
 	contractB := common.HexToAddress("0xc5acb79c258108f288288bc26f7820d06f45f08c")
@@ -422,24 +406,24 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 		return c.Put(k, v)
 	}))
 
-	data1, err1 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()))
+	data1, err1 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()))
 	assert.NoError(t, err1)
 	assert.Equal(t, data1, val1)
 
-	data3, err3 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes()))
+	data3, err3 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key3.Bytes()))
 	assert.NoError(t, err3)
 	assert.Equal(t, data3, val3)
 
-	data5, err5 := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()))
+	data5, err5 := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()))
 	assert.NoError(t, err5)
 	assert.Equal(t, data5, val5)
 
-	_, errA := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key1.Bytes()))
+	_, errA := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key1.Bytes()))
 	assert.Error(t, errA)
 
-	_, errB := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractD.Bytes(), 2, key1.Bytes()))
+	_, errB := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractD.Bytes(), 2, key1.Bytes()))
 	assert.Error(t, errB)
 
-	_, errC := cs.FindWithIncarnation(1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key7.Bytes()))
+	_, errC := m.Find(c, 1, dbutils.PlainGenerateCompositeStorageKey(contractB.Bytes(), 1, key7.Bytes()))
 	assert.Error(t, errC)
 }

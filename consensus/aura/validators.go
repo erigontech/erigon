@@ -3,6 +3,7 @@ package aura
 import (
 	"container/list"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/rlp"
 	"go.uber.org/atomic"
 )
 
@@ -61,6 +63,23 @@ type ValidatorSet interface {
 
 	// Draws an validator nonce modulo number of validators.
 	getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error)
+	// Returns the current number of validators.
+	countWithCaller(parentHash common.Hash, caller Call) (uint64, error)
+
+	// Recover the validator set from the given proof, the block number, and
+	// whether this header is first in its set.
+	//
+	// May fail if the given header doesn't kick off an epoch or
+	// the proof is invalid.
+	//
+	// Returns the set, along with a flag indicating whether finality of a specific
+	// hash should be proven.
+
+	epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error)
+
+	// Extract genesis epoch data from the genesis state and header.
+	genesisEpochData(header *types.Header, call Call) ([]byte, error)
+
 	/*
 	 // Returns the current number of validators.
 	    fn count(&self, parent: &H256) -> usize {
@@ -137,8 +156,6 @@ type ValidatorSet interface {
 	    // Draws an validator nonce modulo number of validators.
 	    fn get_with_caller(&self, parent_block_hash: &H256, nonce: usize, caller: &Call) -> Address;
 
-	    // Returns the current number of validators.
-	    fn count_with_caller(&self, parent_block_hash: &H256, caller: &Call) -> usize;
 
 	    // Notifies about malicious behaviour.
 	    fn report_malicious(
@@ -160,6 +177,13 @@ func get(s ValidatorSet, h common.Hash, nonce uint) (common.Address, error) {
 		return common.Address{}, err
 	}
 	return s.getWithCaller(h, nonce, d)
+}
+func count(s ValidatorSet, h common.Hash) (uint64, error) {
+	d, err := s.defaultCaller(h)
+	if err != nil {
+		return 0, err
+	}
+	return s.countWithCaller(h, d)
 }
 
 //nolint
@@ -204,6 +228,13 @@ func (s *Multi) defaultCaller(blockHash common.Hash) (Call, error) {
 func (s *Multi) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
 	panic("not implemented")
 }
+func (s *Multi) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	set, ok := s.correctSet(parentHash)
+	if !ok {
+		return math.MaxUint64, nil
+	}
+	return set.countWithCaller(parentHash, caller)
+}
 
 func (s *Multi) correctSet(blockHash common.Hash) (ValidatorSet, bool) {
 	parent := s.parent(blockHash)
@@ -217,7 +248,7 @@ func (s *Multi) correctSet(blockHash common.Hash) (ValidatorSet, bool) {
 func (s *Multi) correctSetByNumber(parentNumber uint64) (uint64, ValidatorSet) {
 	// get correct set by block number, along with block number at which
 	// this set was activated.
-	for i := len(s.sorted); i >= 0; i-- {
+	for i := len(s.sorted) - 1; i >= 0; i-- {
 		if s.sorted[i].num <= parentNumber+1 {
 			return s.sorted[i].num, s.sorted[i].set
 		}
@@ -236,6 +267,18 @@ func (s *Multi) onCloseBlock(header *types.Header, address common.Address) error
 	return set.onCloseBlock(header, address)
 }
 
+// TODO: do we need add `proof` argument?
+//nolint
+func (s *Multi) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
+	setBlock, set := s.correctSetByNumber(num)
+	first = setBlock == num
+	return set.epochSet(first, num, proof)
+}
+func (s *Multi) genesisEpochData(header *types.Header, call Call) ([]byte, error) {
+	_, set := s.correctSetByNumber(0)
+	return set.genesisEpochData(header, call)
+}
+
 //func (s *Multi) onEpochBegin(first bool, header *types.Header, call SysCall) error {
 //	first, set := s.get(header.Number.Uint64())
 //	return set.onEpochBegin(first,header, address)
@@ -245,15 +288,24 @@ type SimpleList struct {
 	validators []common.Address
 }
 
+func (s *SimpleList) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
+	return *s, common.Hash{}, nil
+}
 func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
 func (s *SimpleList) defaultCaller(blockHash common.Hash) (Call, error) {
-	return nil, fmt.Errorf("simple list doesn't require calls")
+	return nil, nil //simple list doesn't require calls
 }
 func (s *SimpleList) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
 	if len(s.validators) == 0 {
 		return common.Address{}, fmt.Errorf("cannot operate with an empty validator set")
 	}
 	return s.validators[nonce%uint(len(s.validators))], nil
+}
+func (s *SimpleList) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	return uint64(len(s.validators)), nil
+}
+func (s *SimpleList) genesisEpochData(header *types.Header, caller Call) ([]byte, error) {
+	return []byte{}, nil
 }
 
 // Draws an validator nonce modulo number of validators.
@@ -362,6 +414,157 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 // Returns a list of contract calls to be pushed onto the new block.
 //func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 
+func (s *ValidatorSafeContract) epochSet(first bool, num uint64, proofRlp []byte) (SimpleList, common.Hash, error) {
+	var proof EpochTransitionProof
+	if err := rlp.DecodeBytes(proofRlp, &proof); err != nil {
+		return SimpleList{}, common.Hash{}, fmt.Errorf("[ValidatorSafeContract.epochSet] %w", err)
+	}
+
+	if first {
+		oldHeader, state_items, err := decodeFirstValidatorSetProof(proof.SetProof)
+		if err != nil {
+			return SimpleList{}, common.Hash{}, err
+		}
+
+		addresses, err := checkFirstValidatorSetProof(s.contractAddress, oldHeader, state_items)
+		if err != nil {
+			return SimpleList{}, common.Hash{}, fmt.Errorf("insufitient proof: block=%d,%x: %w", oldHeader.Number.Uint64(), oldHeader.Hash(), err)
+		}
+		return *NewSimpleList(addresses), oldHeader.Hash(), nil
+	}
+	setProof, err := decodeValidatorSetProof(proof.SetProof)
+	if err != nil {
+		return SimpleList{}, common.Hash{}, err
+	}
+	_ = setProof
+	// ensure receipts match header.
+	// TODO: optimize? these were just decoded.
+	/*
+	   let found_root = ::triehash::ordered_trie_root(receipts.iter().map(|r| r.encode()));
+	   if found_root != *old_header.receipts_root() {
+	       return Err(::error::BlockError::InvalidReceiptsRoot(Mismatch {
+	           expected: *old_header.receipts_root(),
+	           found: found_root,
+	       })
+	       .into());
+	   }
+
+	   let bloom = self.expected_bloom(&old_header);
+
+	   match self.extract_from_event(bloom, &old_header, &receipts) {
+	       Some(list) => Ok((list, Some(old_header.hash()))),
+	       None => Err(::engines::EngineError::InsufficientProof(
+	           "No log event in proof.".into(),
+	       )
+	       .into()),
+	   }
+	*/
+
+	return SimpleList{}, common.Hash{}, fmt.Errorf("ValidatorSafeContract.epochSet not implemented")
+}
+
+// first proof is just a state proof call of `getValidators` at header's state.
+//nolint
+func encodeFirstValidatorSetProof(h *types.Header, dbItems [][]byte) (proofRlp []byte, err error) {
+	type S struct {
+		h       *types.Header
+		dbItems [][]byte
+	}
+	res := S{h: h, dbItems: dbItems}
+	return rlp.EncodeToBytes(res)
+}
+
+func decodeFirstValidatorSetProof(proofRlp []byte) (h *types.Header, dbItems [][]byte, err error) {
+	type S struct {
+		h       *types.Header
+		dbItems [][]byte
+	}
+	var res S
+	if err := rlp.DecodeBytes(proofRlp, &res); err != nil {
+		return nil, nil, err
+	}
+	return res.h, res.dbItems, nil
+}
+
+// check a first proof: fetch the validator set at the given block.
+func checkFirstValidatorSetProof(contract_address common.Address, oldHeader *types.Header, dbItems [][]byte) ([]common.Address, error) {
+	/*
+		fn check_first_proof(
+		    machine: &EthereumMachine,
+		    contract_address: Address,
+		    old_header: Header,
+		    state_items: &[DBValue],
+		) -> Result<Vec<Address>, String> {
+		    use types::transaction::{Action, Transaction, TypedTransaction};
+
+		    // TODO: match client contract_call_tx more cleanly without duplication.
+		    const PROVIDED_GAS: u64 = 50_000_000;
+
+		    let env_info = ::vm::EnvInfo {
+		        number: old_header.number(),
+		        author: *old_header.author(),
+		        difficulty: *old_header.difficulty(),
+		        gas_limit: PROVIDED_GAS.into(),
+		        timestamp: old_header.timestamp(),
+		        last_hashes: {
+		            // this will break if we don't inclue all 256 last hashes.
+		            let mut last_hashes: Vec<_> = (0..256).map(|_| H256::default()).collect();
+		            last_hashes[255] = *old_header.parent_hash();
+		            Arc::new(last_hashes)
+		        },
+		        gas_used: 0.into(),
+		    };
+
+		    // check state proof using given machine.
+		    let number = old_header.number();
+		    let (data, decoder) = validator_set::functions::get_validators::call();
+
+		    let from = Address::default();
+		    let tx = TypedTransaction::Legacy(Transaction {
+		        nonce: machine.account_start_nonce(number),
+		        action: Action::Call(contract_address),
+		        gas: PROVIDED_GAS.into(),
+		        gas_price: U256::default(),
+		        value: U256::default(),
+		        data,
+		    })
+		    .fake_sign(from);
+
+		    let res = ::state::check_proof(
+		        state_items,
+		        *old_header.state_root(),
+		        &tx,
+		        machine,
+		        &env_info,
+		    );
+
+		    match res {
+		        ::state::ProvedExecution::BadProof => Err("Bad proof".into()),
+		        ::state::ProvedExecution::Failed(e) => Err(format!("Failed call: {}", e)),
+		        ::state::ProvedExecution::Complete(e) => {
+		            decoder.decode(&e.output).map_err(|e| e.to_string())
+		        }
+		    }
+		}
+	*/
+	return nil, nil
+}
+
+// inter-contract proofs are a header and receipts.
+// checking will involve ensuring that the receipts match the header and
+// extracting the validator set from the receipts.
+//nolint
+func encodeValidatorSetProof(p ValidatorSetProof) (proofRlp []byte, err error) {
+	return rlp.EncodeToBytes(p)
+}
+func decodeValidatorSetProof(proofRlp []byte) (ValidatorSetProof, error) {
+	var res ValidatorSetProof
+	if err := rlp.DecodeBytes(proofRlp, &res); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
 func (s *ValidatorSafeContract) defaultCaller(blockHash common.Hash) (Call, error) {
 	return func(addr common.Address, data []byte) (CallResults, error) {
 		return s.client.CallAtBlockHash(blockHash, addr, data)
@@ -377,7 +580,20 @@ func (s *ValidatorSafeContract) getWithCaller(blockHash common.Hash, nonce uint,
 	if !ok {
 		return common.Address{}, nil
 	}
+	s.validators.Add(blockHash, list)
 	return get(list, blockHash, nonce)
+}
+func (s *ValidatorSafeContract) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	set, ok := s.validators.Get(parentHash)
+	if ok {
+		return count(set.(ValidatorSet), parentHash)
+	}
+	list, ok := s.getList(caller)
+	if !ok {
+		return math.MaxUint64, nil
+	}
+	s.validators.Add(parentHash, list)
+	return count(list, parentHash)
 }
 
 func (s *ValidatorSafeContract) getList(caller Call) (*SimpleList, bool) {
@@ -398,6 +614,10 @@ func (s *ValidatorSafeContract) getList(caller Call) (*SimpleList, bool) {
 		return nil, false
 	}
 	return NewSimpleList(res), true
+}
+
+func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call Call) ([]byte, error) {
+	return proveInitial(s.contractAddress, header, call)
 }
 
 func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress common.Address) error {
@@ -446,11 +666,15 @@ func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress co
 	return nil
 }
 
-// A validator contract with reporting.
+// ValidatorContract a validator contract with reporting.
 type ValidatorContract struct {
 	contractAddress  common.Address
 	validators       ValidatorSafeContract
 	posdaoTransition *uint64
+}
+
+func (s *ValidatorContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
+	return s.validators.epochSet(first, num, proof)
 }
 
 func (s *ValidatorContract) defaultCaller(blockHash common.Hash) (Call, error) {
@@ -460,6 +684,49 @@ func (s *ValidatorContract) defaultCaller(blockHash common.Hash) (Call, error) {
 func (s *ValidatorContract) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
 	return s.validators.getWithCaller(parentHash, nonce, caller)
 }
+
+func (s *ValidatorContract) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
+	return s.validators.countWithCaller(parentHash, caller)
+}
 func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Address) error {
 	return s.validators.onCloseBlock(header, address)
+}
+func (s *ValidatorContract) genesisEpochData(header *types.Header, call Call) ([]byte, error) {
+	return s.validators.genesisEpochData(header, call)
+}
+
+func proveInitial(contractAddr common.Address, header *types.Header, caller Call) ([]byte, error) {
+	return common.FromHex("0xf91a84f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f91871b8d3f8d1a0dc277c93a9f9dcee99aac9b8ba3cfa4c51821998522469c37715644e8fbac0bfa0ab8cdb808c8303bb61fb48e276217be9770fa83ecf3f90f2234d558885f5abf1808080a0fe137c3a474fbde41d89a59dd76da4c55bf696b86d3af64a55632f76cf30786780808080a06301b39b2ea8a44df8b0356120db64b788e71f52e1d7a6309d0d2e5b86fee7cb80a0da5d8b08dea0c5a4799c0f44d8a24d7cdf209f9b7a5588c1ecafb5361f6b9f07a01b7779e149cadf24d4ffb77ca7e11314b8db7097e4d70b2a173493153ca2e5a0808080b8f3f8f1a08023c0d95fc2364e0bf7593f5ff32e1db8ef9f4b41c0bd474eae62d1af896e99808080a0b47b4f0b3e73b5edc8f9a9da1cbcfed562eb06bf54619b6aefeadebf5b3604c280a0da6ec08940a924cb08c947dd56cdb40076b29a6f0ea4dba4e2d02d9a9a72431b80a030cc4138c9e74b6cf79d624b4b5612c0fd888e91f55316cfee7d1694e1a90c0b80a0c5d54b915b56a888eee4e6eeb3141e778f9b674d1d322962eed900f02c29990aa017256b36ef47f907c6b1378a2636942ce894c17075e56fc054d4283f6846659e808080a03340bbaeafcda3a8672eb83099231dbbfab8dae02a1e8ec2f7180538fac207e080b838f7a03868bdfa8727775661e4ccf117824a175a33f8703d728c04488fbfffcafda9f99594e8ddc5c7a2d2f0d7a9798459c0104fdf5e987acaa3e2a02052222313e28459528d920b65115c16c04f3efc82aaedc97be59f3f377c0d3f01b853f851808080a0a87d9bb950836582673aa0eecc0ff64aac607870637a2dd2012b8b1b31981f698080a08da6d5c36a404670c553a2c9052df7cd604f04e3863c4c7b9e0027bfd54206d680808080808080808080b86bf869a033aa5d69545785694b808840be50c182dad2ec3636dfccbe6572fb69828742c0b846f8440101a0663ce0d171e545a26aa67e4ca66f72ba96bb48287dbcc03beea282867f80d44ba01f0e7726926cb43c03a0abf48197dba78522ec8ba1b158e2aa30da7d2a2c6f9eb86bf869a02080c7b7ae81a58eb98d9c78de4a1fd7fd9535fc953ed2be602daaa41767312ab846f8448080a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470b853f851808080a07bb75cabebdcbd1dbb4331054636d0c6d7a2b08483b9e04df057395a7434c9e080808080808080a0e61e567237b49c44d8f906ceea49027260b4010c10a547b38d8b131b9d3b6f848080808080b914c26060604052600436106100fc576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806303aca79214610101578063108552691461016457806340a141ff1461019d57806340c9cdeb146101d65780634110a489146101ff57806345199e0a1461025757806349285b58146102c15780634d238c8e14610316578063752862111461034f578063900eb5a8146103645780639a573786146103c7578063a26a47d21461041c578063ae4b1b5b14610449578063b3f05b971461049e578063b7ab4db5146104cb578063d3e848f114610535578063fa81b2001461058a578063facd743b146105df575b600080fd5b341561010c57600080fd5b6101226004808035906020019091905050610630565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561016f57600080fd5b61019b600480803573ffffffffffffffffffffffffffffffffffffffff1690602001909190505061066f565b005b34156101a857600080fd5b6101d4600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610807565b005b34156101e157600080fd5b6101e9610bb7565b6040518082815260200191505060405180910390f35b341561020a57600080fd5b610236600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610bbd565b60405180831515151581526020018281526020019250505060405180910390f35b341561026257600080fd5b61026a610bee565b6040518080602001828103825283818151815260200191508051906020019060200280838360005b838110156102ad578082015181840152602081019050610292565b505050509050019250505060405180910390f35b34156102cc57600080fd5b6102d4610c82565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561032157600080fd5b61034d600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050610d32565b005b341561035a57600080fd5b610362610fcc565b005b341561036f57600080fd5b61038560048080359060200190919050506110fc565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b34156103d257600080fd5b6103da61113b565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561042757600080fd5b61042f6111eb565b604051808215151515815260200191505060405180910390f35b341561045457600080fd5b61045c6111fe565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b34156104a957600080fd5b6104b1611224565b604051808215151515815260200191505060405180910390f35b34156104d657600080fd5b6104de611237565b6040518080602001828103825283818151815260200191508051906020019060200280838360005b83811015610521578082015181840152602081019050610506565b505050509050019250505060405180910390f35b341561054057600080fd5b6105486112cb565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b341561059557600080fd5b61059d6112f1565b604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390f35b34156105ea57600080fd5b610616600480803573ffffffffffffffffffffffffffffffffffffffff16906020019091905050611317565b604051808215151515815260200191505060405180910390f35b60078181548110151561063f57fe5b90600052602060002090016000915054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600460029054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161415156106cb57600080fd5b600460019054906101000a900460ff161515156106e757600080fd5b600073ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff161415151561072357600080fd5b80600a60006101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055506001600460016101000a81548160ff0219169083151502179055507f600bcf04a13e752d1e3670a5a9f1c21177ca2a93c6f5391d4f1298d098097c22600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff16604051808273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200191505060405180910390a150565b600080600061081461113b565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614151561084d57600080fd5b83600960008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff1615156108a957600080fd5b600960008673ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600101549350600160078054905003925060078381548110151561090857fe5b906000526020600020900160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1691508160078581548110151561094657fe5b906000526020600020900160006101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff16021790555083600960008473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600101819055506007838154811015156109e557fe5b906000526020600020900160006101000a81549073ffffffffffffffffffffffffffffffffffffffff02191690556000600780549050111515610a2757600080fd5b6007805480919060019003610a3c9190611370565b506000600960008773ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff168152602001908152602001600020600101819055506000600960008773ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160006101000a81548160ff0219169083151502179055506000600460006101000a81548160ff0219169083151502179055506001430340600019167f55252fa6eee4741b4e24a74a70e9c11fd2c2281df8d6ea13126ff845f7825c89600760405180806020018281038252838181548152602001915080548015610ba257602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311610b58575b50509250505060405180910390a25050505050565b60085481565b60096020528060005260406000206000915090508060000160009054906101000a900460ff16908060010154905082565b610bf661139c565b6007805480602002602001604051908101604052809291908181526020018280548015610c7857602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311610c2e575b5050505050905090565b6000600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff166349285b586000604051602001526040518163ffffffff167c0100000000000000000000000000000000000000000000000000000000028152600401602060405180830381600087803b1515610d1257600080fd5b6102c65a03f11515610d2357600080fd5b50505060405180519050905090565b610d3a61113b565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff16141515610d7357600080fd5b80600960008273ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff16151515610dd057600080fd5b600073ffffffffffffffffffffffffffffffffffffffff168273ffffffffffffffffffffffffffffffffffffffff1614151515610e0c57600080fd5b6040805190810160405280600115158152602001600780549050815250600960008473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060008201518160000160006101000a81548160ff0219169083151502179055506020820151816001015590505060078054806001018281610ea991906113b0565b9160005260206000209001600084909190916101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff160217905550506000600460006101000a81548160ff0219169083151502179055506001430340600019167f55252fa6eee4741b4e24a74a70e9c11fd2c2281df8d6ea13126ff845f7825c89600760405180806020018281038252838181548152602001915080548015610fba57602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311610f70575b50509250505060405180910390a25050565b600560009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161480156110365750600460009054906101000a900460ff16155b151561104157600080fd5b6001600460006101000a81548160ff0219169083151502179055506007600690805461106e9291906113dc565b506006805490506008819055507f8564cd629b15f47dc310d45bcbfc9bcf5420b0d51bf0659a16c67f91d27632536110a4611237565b6040518080602001828103825283818151815260200191508051906020019060200280838360005b838110156110e75780820151818401526020810190506110cc565b505050509050019250505060405180910390a1565b60068181548110151561110b57fe5b90600052602060002090016000915054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16639a5737866000604051602001526040518163ffffffff167c0100000000000000000000000000000000000000000000000000000000028152600401602060405180830381600087803b15156111cb57600080fd5b6102c65a03f115156111dc57600080fd5b50505060405180519050905090565b600460019054906101000a900460ff1681565b600a60009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600460009054906101000a900460ff1681565b61123f61139c565b60068054806020026020016040519081016040528092919081815260200182805480156112c157602002820191906000526020600020905b8160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019060010190808311611277575b5050505050905090565b600560009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b600460029054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b6000600960008373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060000160009054906101000a900460ff169050919050565b81548183558181151161139757818360005260206000209182019101611396919061142e565b5b505050565b602060405190810160405280600081525090565b8154818355818115116113d7578183600052602060002091820191016113d6919061142e565b5b505050565b82805482825590600052602060002090810192821561141d5760005260206000209182015b8281111561141c578254825591600101919060010190611401565b5b50905061142a9190611453565b5090565b61145091905b8082111561144c576000816000905550600101611434565b5090565b90565b61149391905b8082111561148f57600081816101000a81549073ffffffffffffffffffffffffffffffffffffffff021916905550600101611459565b5090565b905600a165627a7a7230582036ea35935c8246b68074adece2eab70c40e69a0193c08a6277ce06e5b25188510029"), nil
+	/*
+
+	   // given a provider and caller, generate proof. this will just be a state proof
+	   // of `getValidators`.
+	   fn prove_initial(
+	       contract_address: Address,
+	       header: &Header,
+	       caller: &Call,
+	   ) -> Result<Vec<u8>, String> {
+	       use std::cell::RefCell;
+
+	       let epoch_proof = RefCell::new(None);
+	       let validators = {
+	           let (data, decoder) = validator_set::functions::get_validators::call();
+	           let (value, proof) = caller(contract_address, data)?;
+	           *epoch_proof.borrow_mut() = Some(encode_first_proof(header, &proof));
+	           decoder.decode(&value).map_err(|e| e.to_string())?
+	       };
+
+	       let proof = epoch_proof
+	           .into_inner()
+	           .expect("epoch_proof always set after call; qed");
+
+	       trace!(target: "engine", "obtained proof for initial set: {} validators, {} bytes",
+	   		validators.len(), proof.len());
+
+	       info!(target: "engine", "Signal for switch to contract-based validator set.");
+	       info!(target: "engine", "Initial contract validators: {:?}", validators);
+
+	       Ok(proof)
+	   }
+	*/
 }

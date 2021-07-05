@@ -6,6 +6,9 @@ import (
 	"math/big"
 	"sync"
 
+	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
@@ -15,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -109,7 +111,7 @@ func (api *BaseAPI) chainConfig(tx ethdb.Tx) (*params.ChainConfig, error) {
 	return cfg, err
 }
 
-//nolint:unused
+// nolint:unused
 func (api *BaseAPI) genesis(tx ethdb.Tx) (*types.Block, error) {
 	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
@@ -206,7 +208,7 @@ type RPCTransaction struct {
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64) *RPCTransaction {
+func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
@@ -245,6 +247,14 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
+		baseFee, overflow := uint256.FromBig(baseFee)
+		if baseFee != nil && !overflow && blockHash != (common.Hash{}) {
+			// price = min(tip + baseFee, gasFeeCap)
+			price := math.Min256(new(uint256.Int).Add(tx.GetTip(), baseFee), tx.GetFeeCap())
+			result.GasPrice = (*hexutil.Big)(price.ToBig())
+		} else {
+			result.GasPrice = nil
+		}
 	}
 	signer := types.LatestSignerForChainID(chainId)
 	result.From, _ = tx.Sender(*signer)
@@ -258,7 +268,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
-	return newRPCTransaction(tx, common.Hash{}, 0, 0)
+	return newRPCTransaction(tx, common.Hash{}, 0, 0, nil)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.

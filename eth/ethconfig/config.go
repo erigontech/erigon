@@ -18,7 +18,6 @@
 package ethconfig
 
 import (
-	"encoding/json"
 	"math/big"
 	"os"
 	"os/user"
@@ -131,6 +130,8 @@ type Config struct {
 	SnapshotSeeding bool
 	SnapshotLayout  bool
 
+	BlockDownloaderWindow int
+
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader
 	ExternalSnapshotDownloaderAddr string
@@ -212,16 +213,8 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
-			spec := aura.JsonSpec{}
-			err := json.Unmarshal(consensusconfig.Sokol, &spec)
-			if err != nil {
-				panic(err)
-			}
-			cfg, err := aura.FromJson(spec)
-			if err != nil {
-				panic(err)
-			}
-			eng, err = aura.NewAuRa(chainConfig, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory), chainConfig.Aura.Etherbase, cfg)
+			var err error
+			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory), chainConfig.Aura.Etherbase, consensusconfig.Sokol)
 			if err != nil {
 				panic(err)
 			}

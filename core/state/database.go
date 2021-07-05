@@ -18,8 +18,6 @@
 package state
 
 import (
-	"context"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -41,10 +39,10 @@ type StateReader interface {
 }
 
 type StateWriter interface {
-	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
+	UpdateAccountData(address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
-	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
-	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error
+	DeleteAccount(address common.Address, original *accounts.Account) error
+	WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error
 	CreateContract(address common.Address) error
 }
 
@@ -63,11 +61,11 @@ func NewNoopWriter() *NoopWriter {
 	return noopWriter
 }
 
-func (nw *NoopWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
+func (nw *NoopWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (nw *NoopWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
+func (nw *NoopWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	return nil
 }
 
@@ -75,7 +73,7 @@ func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	return nil
 }
 

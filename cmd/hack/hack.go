@@ -21,9 +21,12 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -39,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -921,7 +925,7 @@ func getModifiedAccounts(chaindata string) {
 }
 
 type Receiver struct {
-	defaultReceiver *trie.DefaultReceiver
+	defaultReceiver *trie.RootHashAggregator
 	accountMap      map[string]*accounts.Account
 	storageMap      map[string][]byte
 	unfurlList      []string
@@ -1029,7 +1033,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 
 	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
@@ -1062,7 +1066,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account map", "size", len(accountMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	storageMap := make(map[string][]byte)
 	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.StorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
@@ -1082,7 +1086,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed storage map", "size", len(storageMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
 	i := 0
@@ -1127,7 +1131,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	sort.Strings(unfurlList)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 
 	loader := trie.NewFlatDBTrieLoader("checkRoots")
 	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
@@ -1137,8 +1141,8 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	if err != nil {
 		return err
 	}
-	r := &Receiver{defaultReceiver: trie.NewDefaultReceiver(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
-	r.defaultReceiver.Reset(rl, nil /* HashCollector */, false)
+	r := &Receiver{defaultReceiver: trie.NewRootHashAggregator(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
+	r.defaultReceiver.Reset(nil, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
 	root, err := loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx(), nil, nil)
 	if err != nil {
@@ -1146,13 +1150,13 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	hash, err := rawdb.ReadCanonicalHash(tx, block)
 	tool.Check(err)
 	header := rawdb.ReadHeader(tx, hash, block)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed trie",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)
 	return nil
 }
@@ -2070,20 +2074,28 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
-func scanReceipts(chaindata string) error {
-	dbdb := kv2.MustOpen(chaindata).RwKV()
-	defer dbdb.Close()
-	txtx, err := dbdb.BeginRw(context.Background())
+func scanReceipts(chaindata string, block uint64) error {
+	f, err := os.Create("fixed.txt")
 	if err != nil {
 		return err
 	}
-	defer txtx.Rollback()
-	var db ethdb.Database = kv2.WrapIntoTxDB(txtx)
-	var tx ethdb.Tx
-	if hasTx, ok := db.(ethdb.HasTx); ok {
-		tx = hasTx.Tx()
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	dbdb := kv2.MustOpen(chaindata).RwKV()
+	defer dbdb.Close()
+	tx, err := dbdb.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
+		return smErr
 	} else {
-		return fmt.Errorf("no transaction")
+		if !sm.History {
+			log.Warn("Could not perform this migration because history is not in storage mode")
+			return nil
+		}
 	}
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
@@ -2093,63 +2105,135 @@ func scanReceipts(chaindata string) error {
 	if cerr != nil {
 		return cerr
 	}
+	vmConfig := vm.Config{}
+	noOpWriter := state.NewNoopWriter()
+	var buf bytes.Buffer
+	fixedCount := 0
 	logInterval := 30 * time.Second
 	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	var buf bytes.Buffer
 	var key [8]byte
 	var v []byte
-	var to uint64
-	if to, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
-		return err
-	}
-	for blockNum := uint64(1); blockNum <= to; blockNum++ {
+	for blockNum := block; true; blockNum++ {
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Commit", "block", blockNum, "fixed", fixedCount)
+			tx.Commit()
+			if tx, err = dbdb.BeginRw(context.Background()); err != nil {
+				return err
+			}
+		}
+		var hash common.Hash
+		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+			return err
+		}
+		if hash == (common.Hash{}) {
+			break
+		}
 		binary.BigEndian.PutUint64(key[:], blockNum)
 		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
 			return err
 		}
-		if v == nil {
-			continue
-		}
-		//fmt.Printf("blockNum = %d\n", blockNum)
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Scanned receipts up to", "block", blockNum)
-		}
 		var receipts types.Receipts
-		var oldReceipts migrations.OldReceipts
-		if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
-			continue
-		}
-
-		var blockHash common.Hash
-		if blockHash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
-			return err
-		}
-		var body *types.Body
-		if chainConfig.IsBerlin(blockNum) {
-			body = rawdb.ReadBody(tx, blockHash, blockNum)
-		}
-		receipts = make(types.Receipts, len(oldReceipts))
-		for i, oldReceipt := range oldReceipts {
-			receipts[i] = new(types.Receipt)
-			receipts[i].PostState = oldReceipt.PostState
-			receipts[i].Status = oldReceipt.Status
-			receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
-			if body != nil {
-				receipts[i].Type = body.Transactions[i].Type()
+		if err = cbor.Unmarshal(&receipts, bytes.NewReader(v)); err == nil {
+			broken := false
+			for _, receipt := range receipts {
+				if receipt.CumulativeGasUsed < 10000 {
+					broken = true
+					break
+				}
+			}
+			if !broken {
+				continue
 			}
 		}
-		buf.Reset()
-		if err = cbor.Marshal(&buf, receipts); err != nil {
+		var block *types.Block
+		//var senders []common.Address
+		if block, _, err = rawdb.ReadBlockWithSenders(tx, hash, blockNum); err != nil {
 			return err
 		}
-		//if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
-		//	return err
-		//}
+		/*
+			receipts = rawdb.ReadReceipts(tx, block, senders)
+			for _, receipt := range receipts {
+				receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+			}
+			if chainConfig.IsByzantium(block.Number().Uint64()) {
+				receiptSha := types.DeriveSha(receipts)
+				if receiptSha == block.Header().ReceiptHash {
+					continue
+				}
+			}
+		*/
+
+		dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
+		intraBlockState := state.New(dbstate)
+
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+		receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, nil /* checkTEVM */, block, vmConfig)
+		if err1 != nil {
+			return err1
+		}
+		fix := true
+		if chainConfig.IsByzantium(block.Number().Uint64()) {
+			receiptSha := types.DeriveSha(receipts1)
+			if receiptSha != block.Header().ReceiptHash {
+				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
+				fix = false
+			}
+		}
+		if fix {
+			// All good, we can fix receipt record
+			buf.Reset()
+			err := cbor.Marshal(&buf, receipts1)
+			if err != nil {
+				return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
+			}
+			if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
+				return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
+			}
+			if _, err = w.Write([]byte(fmt.Sprintf("%d\n", blockNum))); err != nil {
+				return err
+			}
+			fixedCount++
+		}
 	}
-	return nil
+	return tx.Commit()
+}
+
+func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
+	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
+	header := block.Header()
+	vmConfig.TraceJumpDest = true
+	engine := ethash.NewFullFaker()
+	gp := new(core.GasPool).AddGas(block.GasLimit())
+	usedGas := new(uint64)
+	var receipts types.Receipts
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, checkTEVM)
+		if err != nil {
+			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
+		}
+		receipts = append(receipts, receipt)
+		//fmt.Printf("%d, cumulative gas: %d\n", i, receipt.CumulativeGasUsed)
+	}
+
+	if !vmConfig.ReadOnly {
+		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil); err != nil {
+			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+		}
+
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number.Uint64())
+		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
+			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+		}
+	}
+
+	return receipts, nil
 }
 
 var txParseTests = []struct {
@@ -2356,10 +2440,11 @@ func main() {
 		err = scanTxs(*chaindata)
 
 	case "scanReceipts":
-		err = scanReceipts(*chaindata)
+		err = scanReceipts(*chaindata, uint64(*block))
 
 	case "testTxPool":
 		err = testTxPool()
+
 	}
 
 	if err != nil {
