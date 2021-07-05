@@ -401,15 +401,9 @@ func (s *snTX) getSnapshotTX(bucket string) (ethdb.Tx, error) {
 	switch bucket {
 	case dbutils.HeadersBucket:
 		tx = s.headersTX
-	case dbutils.BlockBodyPrefix:
-		fallthrough
-	case dbutils.EthTx:
+	case dbutils.BlockBodyPrefix, dbutils.EthTx:
 		tx = s.bodiesTX
-	case dbutils.PlainStateBucket:
-		fallthrough
-	case dbutils.PlainContractCodeBucket:
-		fallthrough
-	case dbutils.CodeBucket:
+	case dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket:
 		tx = s.stateTX
 	}
 	if tx == nil {
