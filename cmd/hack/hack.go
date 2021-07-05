@@ -45,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -2072,6 +2073,24 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
+func scanReceipts3(chaindata string, block uint64) error {
+	dbdb := kv2.MustOpen(chaindata).RwKV()
+	defer dbdb.Close()
+	tx, err := dbdb.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var key [8]byte
+	var v []byte
+	binary.BigEndian.PutUint64(key[:], block)
+	if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+		return err
+	}
+	fmt.Printf("%x\n", v)
+	return nil
+}
+
 func scanReceipts2(chaindata string) error {
 	f, err := os.Create("receipts.txt")
 	if err != nil {
@@ -2104,11 +2123,7 @@ func scanReceipts2(chaindata string) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Commit", "block", blockNum, "fixed", fixedCount)
-			tx.Commit()
-			if tx, err = dbdb.BeginRw(context.Background()); err != nil {
-				return err
-			}
+			log.Info("Scanned", "block", blockNum, "fixed", fixedCount)
 		}
 		var hash common.Hash
 		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
@@ -2217,24 +2232,40 @@ func scanReceipts(chaindata string, block uint64) error {
 			if !broken {
 				continue
 			}
+		} else {
+			// Receipt is using old CBOR encoding
+			var oldReceipts migrations.OldReceipts
+			if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
+				return err
+			}
+			var body *types.Body
+			if chainConfig.IsBerlin(blockNum) {
+				body = rawdb.ReadBody(tx, hash, blockNum)
+			}
+			receipts = make(types.Receipts, len(oldReceipts))
+			for i, oldReceipt := range oldReceipts {
+				receipts[i] = new(types.Receipt)
+				receipts[i].PostState = oldReceipt.PostState
+				receipts[i].Status = oldReceipt.Status
+				receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
+				if body != nil {
+					receipts[i].Type = body.Transactions[i].Type()
+				}
+			}
+			buf.Reset()
+			if err = cbor.Marshal(&buf, receipts); err != nil {
+				return err
+			}
+			if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+			fixedCount++
+			continue
 		}
 		var block *types.Block
-		//var senders []common.Address
 		if block, _, err = rawdb.ReadBlockWithSenders(tx, hash, blockNum); err != nil {
 			return err
 		}
-		/*
-			receipts = rawdb.ReadReceipts(tx, block, senders)
-			for _, receipt := range receipts {
-				receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			}
-			if chainConfig.IsByzantium(block.Number().Uint64()) {
-				receiptSha := types.DeriveSha(receipts)
-				if receiptSha == block.Header().ReceiptHash {
-					continue
-				}
-			}
-		*/
 
 		dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
@@ -2245,7 +2276,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			return err1
 		}
 		fix := true
-		if chainConfig.IsByzantium(block.Number().Uint64()) {
+		if chainConfig.IsByzantium(blockNum) {
 			receiptSha := types.DeriveSha(receipts1)
 			if receiptSha != block.Header().ReceiptHash {
 				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
@@ -2469,6 +2500,9 @@ func main() {
 
 	case "scanReceipts2":
 		err = scanReceipts2(*chaindata)
+
+	case "scanReceipts3":
+		err = scanReceipts3(*chaindata, uint64(*block))
 	}
 
 	if err != nil {
