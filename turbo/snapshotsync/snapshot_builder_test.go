@@ -191,7 +191,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 	rotx.Rollback()
 
-	snokv := db.HeadersSnapshot().(ethdb.RoKV)
+	snokv := db.HeadersSnapshot()
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
@@ -314,7 +314,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 
 	headerNumber = 0
-	snRoTx, err = db.HeadersSnapshot().(ethdb.RoKV).BeginRo(context.Background())
+	snRoTx, err = db.HeadersSnapshot().BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
@@ -525,7 +525,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	rotx.Rollback()
 
-	snokv := db.HeadersSnapshot().(ethdb.RoKV)
+	snokv := db.HeadersSnapshot()
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
@@ -687,7 +687,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	rotx.Rollback()
 	headerNumber = 0
-	snRoTx, err = db.HeadersSnapshot().(ethdb.RoKV).BeginRo(context.Background())
+	snRoTx, err = db.HeadersSnapshot().BeginRo(context.Background())
 	require.NoError(t, err)
 	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
 	require.NoError(t, err)
