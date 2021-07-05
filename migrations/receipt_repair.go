@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-var receiptRepair = Migration{
+var ReceiptRepair = Migration{
 	Name: "receipt_repair",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		var tx ethdb.RwTx
