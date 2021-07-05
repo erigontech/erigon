@@ -85,24 +85,20 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+func applyTransaction(ctx context.Context, config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = tx.Hash()
 	}
-	// Add addresses to access list if applicable
-	// about the transaction and calling mechanisms.
-	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, statedb)
-	// If the transaction created a contract, store the creation address in the receipt.
+
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err
@@ -148,6 +144,10 @@ func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Has
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, getHeader, engine, author, checkTEVM)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
+	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
+	// Add addresses to access list if applicable
+	// about the transaction and calling mechanisms.
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
-	return applyTransaction(config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(ctx, config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }

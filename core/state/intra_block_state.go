@@ -408,6 +408,8 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int) {
+	fmt.Printf("AddBalance: %x\n ", addr)
+
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
@@ -427,6 +429,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int) {
+	fmt.Printf("SubBalance: %x, %d\n ", addr, amount)
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
 	}
@@ -492,6 +495,7 @@ func (sdb *IntraBlockState) SetCode(addr common.Address, code []byte) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, value uint256.Int) {
+	fmt.Printf("SetState: %x\n ", addr)
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
@@ -501,6 +505,7 @@ func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, valu
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (sdb *IntraBlockState) SetStorage(addr common.Address, storage Storage) {
+	fmt.Printf("SetStorage: %x\n ", addr)
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetStorage(storage)
@@ -635,6 +640,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
+	fmt.Println("CreateAccount")
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace && err != nil {

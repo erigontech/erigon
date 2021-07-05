@@ -9,6 +9,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/log"
@@ -57,6 +58,15 @@ type ValidatorSet interface {
 	//
 	// Returns a list of contract calls to be pushed onto the new block.
 	//func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
+
+	// Signalling that a new epoch has begun.
+	//
+	// All calls here will be from the `SYSTEM_ADDRESS`: 2^160 - 2
+	// and will have an effect on the block's state.
+	// The caller provided here may not generate proofs.
+	//
+	// `first` is true if this is the first block in the set.
+	onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error
 
 	// Called on the close of every block.
 	onCloseBlock(_header *types.Header, _address common.Address) error
@@ -279,10 +289,14 @@ func (s *Multi) genesisEpochData(header *types.Header, call Call) ([]byte, error
 	return set.genesisEpochData(header, call)
 }
 
-//func (s *Multi) onEpochBegin(first bool, header *types.Header, call SysCall) error {
-//	first, set := s.get(header.Number.Uint64())
-//	return set.onEpochBegin(first,header, address)
-//}
+func (s *Multi) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
+	for i := 0; i < len(s.sorted); i++ {
+		if err := s.sorted[i].set.onEpochBegin(first, header, caller); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 type SimpleList struct {
 	validators []common.Address
@@ -290,6 +304,9 @@ type SimpleList struct {
 
 func (s *SimpleList) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
 	return *s, common.Hash{}, nil
+}
+func (s *SimpleList) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
+	return nil
 }
 func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
 func (s *SimpleList) defaultCaller(blockHash common.Hash) (Call, error) {
@@ -620,6 +637,22 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call Call
 	return proveInitial(s.contractAddress, header, call)
 }
 
+func (s *ValidatorSafeContract) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
+	data := common.FromHex("75286211")
+	_, err := caller(s.contractAddress, data)
+	if err != nil {
+		return err
+	}
+	/*
+	 let data = validator_set::functions::finalize_change::encode_input();
+	        caller(self.contract_address, data)
+	            .map(|_| ())
+	            .map_err(::engines::EngineError::FailedSystemCall)
+	            .map_err(Into::into)
+	*/
+	return nil
+}
+
 func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress common.Address) error {
 	// Skip the rest of the function unless there has been a transition to POSDAO AuRa.
 	if s.posdaoTransition != nil && header.Number.Uint64() < *s.posdaoTransition {
@@ -676,17 +709,17 @@ type ValidatorContract struct {
 func (s *ValidatorContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
 	return s.validators.epochSet(first, num, proof)
 }
-
 func (s *ValidatorContract) defaultCaller(blockHash common.Hash) (Call, error) {
 	return s.validators.defaultCaller(blockHash)
 }
-
 func (s *ValidatorContract) getWithCaller(parentHash common.Hash, nonce uint, caller Call) (common.Address, error) {
 	return s.validators.getWithCaller(parentHash, nonce, caller)
 }
-
 func (s *ValidatorContract) countWithCaller(parentHash common.Hash, caller Call) (uint64, error) {
 	return s.validators.countWithCaller(parentHash, caller)
+}
+func (s *ValidatorContract) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
+	return s.validators.onEpochBegin(first, header, caller)
 }
 func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Address) error {
 	return s.validators.onCloseBlock(header, address)

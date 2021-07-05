@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -541,6 +542,8 @@ func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newH
 
 /// Phase 3 verification. Check block information against parent. Returns either a null `Ok` or a general error detailing the problem with import.
 func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
+	return nil
+
 	step, err := headerStep(header)
 	if err != nil {
 		return err
@@ -788,8 +791,38 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 	//return nil
 }
 
-// Finalize implements consensus.Engine, ensuring no uncles are set, nor block
-// rewards given.
+func (c *AuRa) Initialize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	isEpochBegin := header.Number.Uint64() == 1
+	if !isEpochBegin {
+		return
+	}
+	err := c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
+	if err != nil {
+		log.Warn("aura initialize block: on epoch begin", "err", err)
+	}
+
+	os.Exit(1)
+	/*
+		// genesis is never a new block, but might as well check.
+		let header = block.header.clone();
+		let first = header.number() == 0;
+
+		let mut call = |to, data| {
+		  let result = self.machine.execute_as_system(
+		      block,
+		      to,
+		      U256::max_value(), // unbounded gas? maybe make configurable.
+		      Some(data),
+		  );
+
+		  result.map_err(|e| format!("{}", e))
+		};
+
+		self.validators.on_epoch_begin(first, &header, &mut call)
+
+	*/
+}
+
 func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 	// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 	beneficiaries, _, rewards, err := AccumulateRewards(cc, c, header, uncles, syscall)
@@ -798,7 +831,9 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		return
 	}
 	for i := range beneficiaries {
+		fmt.Printf("rew: add balance %x, %d\n", beneficiaries[i], rewards[i])
 		state.AddBalance(beneficiaries[i], rewards[i])
+		fmt.Printf("rew: balance after add %x, %d\n", beneficiaries[i], state.GetBalance(beneficiaries[i]))
 	}
 }
 
@@ -1152,6 +1187,7 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 		}
 
 		for range beneficiaries {
+			fmt.Printf("rew: %x,%d,%d,\n", header.Coinbase, reward.blockNum, reward.amount)
 			rewards = append(rewards, reward.amount)
 		}
 	}
