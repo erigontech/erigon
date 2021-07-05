@@ -2134,6 +2134,7 @@ func scanReceipts2(chaindata string) error {
 				continue
 			}
 		}
+		fmt.Fprintf(w, "%d %x\n", blockNum, v)
 		fixedCount++
 		if fixedCount > 100 {
 			break
