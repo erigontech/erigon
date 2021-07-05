@@ -159,8 +159,8 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
+func (t *StateTest) Run(rules params.Rules, tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+	state, root, err := t.RunNoVerify(rules, tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
 	}
@@ -177,7 +177,7 @@ func (t *StateTest) Run(tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config)
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(rules params.Rules, kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	tx := kv.WrapIntoTxDB(kvtx)
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
@@ -192,7 +192,7 @@ func (t *StateTest) RunNoVerify(kvtx ethdb.RwTx, subtest StateSubtest, vmconfig 
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(config.Rules(writeBlockNr), tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(rules, tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}

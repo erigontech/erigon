@@ -78,12 +78,17 @@ func TestState(t *testing.T) {
 				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 				t.Run(key, func(t *testing.T) {
 					withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
+						config, ok := Forks[subtest.Fork]
+						if !ok {
+							return UnsupportedForkError{subtest.Fork}
+						}
+						rules := config.Rules(1)
 						tx, err := db.BeginRw(context.Background())
 						if err != nil {
 							t.Fatal(err)
 						}
 						defer tx.Rollback()
-						_, err = test.Run(tx, subtest, vmconfig)
+						_, err = test.Run(rules, tx, subtest, vmconfig)
 						tx.Rollback()
 						return st.checkFailure(t, err)
 					})
