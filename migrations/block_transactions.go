@@ -2,16 +2,12 @@ package migrations
 
 import (
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"path/filepath"
 )
@@ -151,47 +147,4 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 
 		return nil
 	},
-}
-
-
-func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err error) {
-	log.Info("Remove blocks data", "to", newSnapshot)
-	if _, ok := db.(kv.SnapshotUpdater); !ok {
-		return errors.New("db don't implement snapshotUpdater interface")
-	}
-	bodiesSnapshot := db.(kv.SnapshotUpdater).BodiesSnapshot()
-	if bodiesSnapshot == nil {
-		log.Info("bodiesSnapshot is empty")
-		return nil
-	}
-	blockBodySnapshotReadTX, err := bodiesSnapshot.BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer blockBodySnapshotReadTX.Rollback()
-	ethtxSnapshotReadTX, err := blockBodySnapshotReadTX.Cursor(dbutils.EthTx)
-	if err != nil {
-		return err
-	}
-	lastEthTXSnapshotKey, _, err := ethtxSnapshotReadTX.Last()
-	if err != nil {
-		return err
-	}
-	rewriteId := binary.BigEndian.Uint64(lastEthTXSnapshotKey) + 1
-
-	writeTX := tx.(kv.DBTX).DBTX()
-	blockBodyWriteCursor, err := writeTX.RwCursor(dbutils.BlockBodyPrefix)
-	if err != nil {
-		return fmt.Errorf("get bodies cursor %w", err)
-	}
-	ethTXWriteCursor, err := writeTX.RwCursor(dbutils.EthTx)
-	if err != nil {
-		return fmt.Errorf("get ethtx cursor %w", err)
-	}
-
-
-	if err != nil {
-		return err
-	}
-	return nil
 }
