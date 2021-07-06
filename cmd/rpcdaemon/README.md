@@ -387,11 +387,10 @@ Reduce `--private.api.ratelimit`
 ### Batch requests 
 
 Currently batch requests are spawn multiple goroutines and process all sub-requests in parallel. 
-But to limit impact of 1 huge batch to other users - max amount of goroutines hardcoded to 50.
-If submit 1 batch with 200 requests - RPCDaemon will spawn 50 goroutines and will use them to process 200 requests.
-We can make it configurable if your use-case need it. 
+To limit impact of 1 huge batch to other users - added flag `--rpc.batch.concurrency` (default: 50).
+Increase it to process large batches faster.
 
-But if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will processed sequentially (on 1 goroutine).
+Known Issue: if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will processed sequentially (on 1 goroutine).
 
 ## For Developers
 
