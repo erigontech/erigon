@@ -17,7 +17,6 @@
 package core
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -85,7 +84,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(ctx context.Context, config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
 	if err != nil {
 		return nil, nil, err
@@ -104,7 +103,7 @@ func applyTransaction(ctx context.Context, config *params.ChainConfig, gp *GasPo
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = statedb.FinalizeTx(ctx, stateWriter); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainRules, stateWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -144,10 +143,9 @@ func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Has
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, getHeader, engine, author, checkTEVM)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
-	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
-	return applyTransaction(ctx, config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }

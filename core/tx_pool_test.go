@@ -17,7 +17,6 @@
 package core
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"io/ioutil"
@@ -190,8 +189,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	// setup pool with 2 transaction in it
 	// Using AddBalance instead of SetBalance to make it dirty
 	ibs.AddBalance(address, new(uint256.Int).SetUint64(params.Ether))
-	ctx := context.Background()
-	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
 		t.Fatal(err)
 	}
 	tx0 := transaction(0, 100000, key)
@@ -355,8 +353,7 @@ func TestTransactionChainFork(t *testing.T) {
 		stateWriter := state.NewPlainStateWriter(pool.chaindb, nil, 1)
 		ibs := state.New(state.NewPlainStateReader(pool.chaindb))
 		ibs.AddBalance(addr, uint256.NewInt(100000000000000))
-		ctx := context.Background()
-		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+		if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
 			t.Fatal(err)
 		}
 		pool.ResetHead(1000000000, 1)
@@ -384,8 +381,7 @@ func TestTransactionDoubleNonce(t *testing.T) {
 		stateWriter := state.NewPlainStateWriter(pool.chaindb, nil, 1)
 		ibs := state.New(state.NewPlainStateReader(pool.chaindb))
 		ibs.AddBalance(addr, uint256.NewInt(100000000000000))
-		ctx := context.Background()
-		if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+		if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
 			t.Fatal(err)
 		}
 		pool.ResetHead(1000000000, 1)
@@ -1739,7 +1735,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	ibs := state.New(state.NewPlainStateReader(db))
 	ibs.AddBalance(crypto.PubkeyToAddress(local.PublicKey), uint256.NewInt(1000000000))
 	ibs.AddBalance(crypto.PubkeyToAddress(remote.PublicKey), uint256.NewInt(1000000000))
-	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
+	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1773,7 +1769,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	stateWriter = state.NewPlainStateWriter(db, nil, 1)
 	ibs = state.New(state.NewPlainStateReader(db))
 	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
-	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
+	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1802,7 +1798,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	stateWriter = state.NewPlainStateWriter(db, nil, 1)
 	ibs = state.New(state.NewPlainStateReader(db))
 	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 2)
-	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
+	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
 		t.Fatal(err)
 	}
 	pool.ResetHead(1000000000, 1)
@@ -1814,7 +1810,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	stateWriter = state.NewPlainStateWriter(db, nil, 1)
 	ibs = state.New(state.NewPlainStateReader(db))
 	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
-	if err := ibs.CommitBlock(context.Background(), stateWriter); err != nil {
+	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
 		t.Fatal(err)
 	}
 

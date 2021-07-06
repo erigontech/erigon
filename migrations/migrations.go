@@ -62,8 +62,6 @@ var migrations = map[ethdb.Label][]Migration{
 		dbSchemaVersion,
 		rebuilCallTraceIndex,
 		fixSequences,
-		receiptCbor,
-		receiptRepair,
 	},
 	ethdb.TxPool: {},
 	ethdb.Sentry: {},

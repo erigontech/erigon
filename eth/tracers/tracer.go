@@ -558,8 +558,8 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 		if !jst.inited {
 			jst.ctx["block"] = env.Context.BlockNumber
 			// Compute intrinsic gas
-			isHomestead := env.ChainConfig().IsHomestead(env.Context.BlockNumber)
-			isIstanbul := env.ChainConfig().IsIstanbul(env.Context.BlockNumber)
+			isHomestead := env.ChainRules.IsHomestead
+			isIstanbul := env.ChainRules.IsIstanbul
 			var input []byte
 			if data, ok := jst.ctx["input"].([]byte); ok {
 				input = data
