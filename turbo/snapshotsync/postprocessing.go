@@ -227,15 +227,12 @@ func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash commo
 
 func generateHeaderHashToNumberIndex(ctx context.Context, tx ethdb.DbWithPendingMutations) error {
 	log.Info("Generate headers hash to number index")
-	headHashBytes, innerErr := tx.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash))
+	lastHeader, _, innerErr := tx.Last(dbutils.HeadersBucket)
 	if innerErr != nil {
 		return innerErr
 	}
-
-	headNumberBytes, innerErr := tx.Get(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber))
-	if innerErr != nil {
-		return innerErr
-	}
+	headNumberBytes := lastHeader[:8]
+	headHashBytes := lastHeader[8:]
 
 	headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
 	headHash := common.BytesToHash(headHashBytes)

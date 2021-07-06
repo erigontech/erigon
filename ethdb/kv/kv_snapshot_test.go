@@ -99,8 +99,8 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.HeadersBucket}, sn1).
-		SnapshotDB([]string{dbutils.BlockBodyPrefix}, sn2).Open()
+	kv := NewSnapshotKV().DB(mainDB).HeadersSnapshot(sn1).
+		BodiesSnapshot(sn2).Open()
 
 	tx, err := kv.BeginRo(context.Background())
 	if err != nil {
@@ -245,8 +245,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 
 	mainDB := NewTestKV(t)
 
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.HeadersBucket}, sn1).
-		SnapshotDB([]string{dbutils.BlockBodyPrefix}, sn2).Open()
+	kv := NewSnapshotKV().DB(mainDB).HeadersSnapshot(sn1).BodiesSnapshot(sn2).Open()
 	{
 		tx, err := kv.BeginRw(context.Background())
 		require.NoError(t, err)
@@ -353,7 +352,7 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	}
 	mainDB := NewTestKV(t)
 
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 	defer kv.Close()
 
@@ -424,7 +423,7 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 	}
 
 	mainDB := NewTestKV(t)
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
@@ -500,7 +499,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 
 	mainDB := NewTestKV(t)
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
@@ -607,7 +606,7 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
@@ -692,7 +691,7 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
@@ -789,7 +788,7 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 	}
 
 	mainDB := NewTestKV(t)
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
@@ -827,7 +826,7 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 	}
 
 	mainDB := NewTestKV(t)
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
@@ -890,7 +889,7 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 	}
 
 	mainDB := NewTestKV(t)
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRw(context.Background())
@@ -990,7 +989,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	}
 
 	mainDB := NewTestKV(t)
-	kv := NewSnapshotKV().DB(mainDB).SnapshotDB([]string{dbutils.PlainStateBucket}, snapshotDB).
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
 	tx, err := kv.BeginRo(context.Background())
@@ -1010,7 +1009,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	checkKVErr(t, k, v, err, []byte{1}, []byte{1})
 
 	done := make(chan struct{})
-	kv.UpdateSnapshots([]string{dbutils.PlainStateBucket}, snapshotDB2, done)
+	kv.UpdateSnapshots("state", snapshotDB2, done)
 
 	tx2, err := kv.BeginRo(context.Background())
 	if err != nil {
