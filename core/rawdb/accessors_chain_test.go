@@ -18,8 +18,11 @@ package rawdb
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"math/big"
 	"testing"
 
@@ -212,6 +215,100 @@ func TestPartialBlockStorage(t *testing.T) {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
+	}
+}
+
+func TestTransactionStorage(t *testing.T) {
+	db:=kv.NewMemKV()
+	getBlock:= func(num uint64, nonce uint64) *types.Block {
+		return types.NewBlock(&types.Header{
+			Number: big.NewInt(1).SetUint64(num),
+			Extra:       []byte("test block"),
+			UncleHash:   types.EmptyUncleHash,
+			TxHash:      types.EmptyRootHash,
+			ReceiptHash: types.EmptyRootHash,
+		},[]types.Transaction{
+			types.NewTransaction(nonce, common.Address{}, uint256.NewInt(1), 1, uint256.NewInt(1), nil),
+		},nil, []*types.Receipt{{
+			PostState: []byte{},
+		}})
+	}
+
+	block1:=getBlock(1,1)
+	block2:=getBlock(2,2)
+	block2Replaced :=getBlock(2,3)
+
+
+	err:=db.Update(context.Background(), func(tx ethdb.RwTx) error {
+
+		err:=WriteBlock(tx, block1)
+		if err!=nil {
+		    return err
+		}
+		err = WriteBlock(tx, block2)
+		if err!=nil {
+		    return err
+		}
+		err = WriteCanonicalHash(tx, block1.Hash(), 1)
+		if err!=nil {
+		    return err
+		}
+		err = WriteCanonicalHash(tx, block2.Hash(), 2)
+		if err!=nil {
+		    return err
+		}
+		return nil
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		block1Got:=ReadBlock(tx, block1.Hash(), 1)
+		require.Equal(t, block1.Transactions()[0].GetNonce(), block1Got.Transactions()[0].GetNonce(),)
+		block2Got:=ReadBlock(tx, block2.Hash(), 2)
+		require.Equal(t, block2.Transactions()[0].GetNonce(), block2Got.Transactions()[0].GetNonce(),)
+		return nil
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		err =  MoveTransactionToNoneCanonical(tx, 2)
+		if err!=nil {
+		    return err
+		}
+		err = WriteCanonicalHash(tx, block2Replaced.Hash(), 2)
+		if err!=nil {
+		    return err
+		}
+		return WriteBlock(tx, block2Replaced)
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		block1Got:=ReadBlock(tx, block1.Hash(), 1)
+		require.Equal(t, block1.Transactions()[0].GetNonce(), block1Got.Transactions()[0].GetNonce())
+		if block1Got.Transactions()[0].GetNonce()!=block1.Transactions()[0].GetNonce() {
+			t.Error(block1Got.Transactions()[0].GetNonce(), block1.Transactions()[0].GetNonce())
+		}
+
+		block2Got:=ReadBlock(tx, block2.Hash(), 2)
+		require.Equal(t, block2.Transactions()[0].GetNonce(), block2Got.Transactions()[0].GetNonce())
+		if block2Got.Transactions()[0].GetNonce()!=block2.Transactions()[0].GetNonce() {
+			t.Error(block2Got.Transactions()[0].GetNonce(), block2.Transactions()[0].GetNonce())
+		}
+
+		block2ReplacedGot:=ReadBlock(tx, block2Replaced.Hash(), 2)
+		require.Equal(t, block2Replaced.Transactions()[0].GetNonce(), block2ReplacedGot.Transactions()[0].GetNonce())
+		if block2ReplacedGot.Transactions()[0].GetNonce()!=block2Replaced.Transactions()[0].GetNonce() {
+			t.Error(block2ReplacedGot.Transactions()[0].GetNonce(), block2Replaced.Transactions()[0].GetNonce())
+		}
+		return nil
+	})
+	if err!=nil {
+	    t.Fatal(err)
 	}
 }
 

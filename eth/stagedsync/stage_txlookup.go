@@ -155,7 +155,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 			return false, fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
-		txs, _ := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, _ := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount, true)
 		for _, txn := range txs {
 			if err := collector.Collect(txn.Hash().Bytes(), nil); err != nil {
 				return false, err

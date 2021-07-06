@@ -204,6 +204,7 @@ const (
 
 	BlockBodyPrefix     = "BlockBody"        // block_num_u64 + hash -> block body
 	EthTx               = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
+	NonCanonicalTXBucket = "NonCanonicalTransaction"
 	BlockReceiptsPrefix = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
 	Log                 = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
 
@@ -341,6 +342,7 @@ var Buckets = []string{
 	HeaderCanonicalBucket,
 	HeadersBucket,
 	HeaderTDBucket,
+	NonCanonicalTXBucket,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

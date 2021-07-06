@@ -238,7 +238,19 @@ func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesC
 		}
 		defer tx.Rollback()
 	}
-	err := u.Done(tx)
+	bodiesProgress, err:= stages.GetStageProgress(tx, stages.Bodies)
+	if err!=nil {
+	    return err
+	}
+
+	for blockHeight := bodiesProgress; blockHeight > u.UnwindPoint; blockHeight-- {
+		err = rawdb.MoveTransactionToNoneCanonical(tx, blockHeight)
+		if err!=nil {
+		    return err
+		}
+	}
+
+	err = u.Done(tx)
 	logPrefix := s.state.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)

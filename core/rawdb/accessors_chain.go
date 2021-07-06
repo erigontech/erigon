@@ -258,7 +258,7 @@ func ReadStorageBodyRLP(db ethdb.KVGetter, hash common.Hash, number uint64) rlp.
 	return bodyRlp
 }
 
-func ReadTransactions(db ethdb.KVGetter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+func ReadTransactions(db ethdb.KVGetter, baseTxId uint64, amount uint32, canonical bool) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
@@ -269,7 +269,11 @@ func ReadTransactions(db ethdb.KVGetter, baseTxId uint64, amount uint32) ([]type
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 
-	if err := db.ForAmount(dbutils.EthTx, txIdKey, amount, func(k, v []byte) error {
+	bucket:=dbutils.EthTx
+	if !canonical {
+		bucket = dbutils.NonCanonicalTXBucket
+	}
+	if err := db.ForAmount(bucket, txIdKey, amount, func(k, v []byte) error {
 		var decodeErr error
 		reader.Reset(v)
 		stream.Reset(reader, 0)
@@ -306,10 +310,10 @@ func WriteTransactionsDeprecated(db ethdb.Database, txs []types.Transaction, bas
 	return nil
 }
 
-func WriteTransactions(db ethdb.RwTx, txs []types.Transaction, baseTxId uint64) error {
+func WriteTransactions(db ethdb.RwTx, bucket string, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
-	c, err := db.RwCursor(dbutils.EthTx)
+	c, err := db.RwCursor(bucket)
 	if err != nil {
 		return err
 	}
@@ -353,6 +357,18 @@ func WriteRawTransactions(db ethdb.RwTx, txs [][]byte, baseTxId uint64) error {
 	return nil
 }
 
+func DeleteTransactions(db ethdb.RwTx, bucket string, baseTxId uint64, amount uint32) error {
+	k:=make([]byte, 8)
+	for i:=baseTxId; i< baseTxId+uint64(amount); i++ {
+		binary.BigEndian.PutUint64(k, i)
+		err := db.Delete(bucket, k, nil)
+		if err!=nil {
+		    return err
+		}
+	}
+	return nil
+}
+
 // WriteBodyRLP stores an RLP encoded block body into the database.
 func WriteBodyRLP(db ethdb.Putter, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	if err := db.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
@@ -381,18 +397,86 @@ func ReadBodyByNumber(db ethdb.Tx, number uint64) (*types.Body, uint64, uint32, 
 }
 
 func ReadBody(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Body {
-	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+  	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
 	if body == nil {
 		return nil
 	}
 	var err error
-	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount)
+
+	canonicalHash,err:=ReadCanonicalHash(db, number)
+	if err!=nil {
+		log.Error("failed ReadCanonicalHash", "hash", hash, "block", number, "err", err)
+		return nil
+
+	}
+	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount, canonicalHash == hash)
 	if err != nil {
 		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
 		return nil
 	}
 	return body
 }
+
+func ReadCanonicalBody(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Body {
+	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	var err error
+
+	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount, true)
+	if err != nil {
+		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
+		return nil
+	}
+	return body
+}
+
+// Important: it's possible to do only from the end of bucket. If you try to do not for the last block you can currupt the bucket
+func MoveTransactionToNoneCanonical(db ethdb.RwTx, number uint64) error {
+	hash, err := ReadCanonicalHash(db, number)
+	if err!=nil {
+	    return err
+	}
+
+	body, baseTxIdOrig, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	if body == nil {
+		return nil
+	}
+
+	body.Transactions, err = ReadTransactions(db, baseTxIdOrig, txAmount, true)
+	if err != nil {
+		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
+		return nil
+	}
+
+	baseTxId, err := db.IncrementSequence(dbutils.NonCanonicalTXBucket, uint64(len(body.Transactions)))
+	if err != nil {
+		return err
+	}
+	data, err := rlp.EncodeToBytes(types.BodyForStorage{
+		BaseTxId: baseTxId,
+		TxAmount: uint32(len(body.Transactions)),
+		Uncles:   body.Uncles,
+		Canonical: false,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to RLP encode body: %w", err)
+	}
+	WriteBodyRLP(db, hash, number, data)
+	err = WriteTransactions(db, dbutils.NonCanonicalTXBucket,  body.Transactions, baseTxId)
+	if err != nil {
+		return fmt.Errorf("failed to Write non canonical transactions: %w", err)
+	}
+	err = DeleteTransactions(db, dbutils.EthTx, baseTxIdOrig, txAmount)
+	if err!=nil {
+	    return err
+	}
+	val:=make([]byte, 8)
+	binary.BigEndian.PutUint64(val, baseTxIdOrig)
+	return db.Put(dbutils.Sequence, []byte(dbutils.EthTx), val)
+}
+
 
 func ReadBodyWithoutTransactions(db ethdb.KVGetter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
@@ -422,30 +506,6 @@ func ReadSenders(db ethdb.KVGetter, hash common.Hash, number uint64) ([]common.A
 	return senders, nil
 }
 
-// WriteBodyDeprecated - writes body in Network format, later staged sync will convert it into Storage format
-func WriteBodyDeprecated(db ethdb.Database, hash common.Hash, number uint64, body *types.Body) error {
-	// Pre-processing
-	body.SendersFromTxs()
-	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
-	if err != nil {
-		return err
-	}
-	data, err := rlp.EncodeToBytes(types.BodyForStorage{
-		BaseTxId: baseTxId,
-		TxAmount: uint32(len(body.Transactions)),
-		Uncles:   body.Uncles,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to RLP encode body: %w", err)
-	}
-	WriteBodyRLP(db, hash, number, data)
-	err = WriteTransactionsDeprecated(db, body.Transactions, baseTxId)
-	if err != nil {
-		return fmt.Errorf("failed to WriteTransactions: %w", err)
-	}
-	return nil
-}
-
 func WriteRawBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
@@ -455,6 +515,7 @@ func WriteRawBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.Ra
 		BaseTxId: baseTxId,
 		TxAmount: uint32(len(body.Transactions)),
 		Uncles:   body.Uncles,
+		Canonical: true,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode body: %w", err)
@@ -478,12 +539,13 @@ func WriteBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.Body)
 		BaseTxId: baseTxId,
 		TxAmount: uint32(len(body.Transactions)),
 		Uncles:   body.Uncles,
+		Canonical: true,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode body: %w", err)
 	}
 	WriteBodyRLP(db, hash, number, data)
-	err = WriteTransactions(db, body.Transactions, baseTxId)
+	err = WriteTransactions(db, dbutils.EthTx, body.Transactions, baseTxId)
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
@@ -552,14 +614,6 @@ func DeleteTd(db ethdb.Deleter, hash common.Hash, number uint64) error {
 	return nil
 }
 
-// HasReceipts verifies the existence of all the transaction receipts belonging
-// to a block.
-func HasReceipts(db ethdb.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number)); !has || err != nil {
-		return false
-	}
-	return true
-}
 
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.
 // The receipt metadata fields are not guaranteed to be populated, so they
