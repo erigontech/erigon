@@ -282,7 +282,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer()
+	srv := rpc.NewServer(50)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
 		return err
@@ -315,7 +315,7 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	}
 
 	// Create RPC server and handler.
-	srv := rpc.NewServer()
+	srv := rpc.NewServer(50)
 	srv.SetAllowList(allowList)
 	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false); err != nil {
 		return err
