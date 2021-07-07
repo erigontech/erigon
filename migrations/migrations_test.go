@@ -169,12 +169,13 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestMarshalStages(t *testing.T) {
-	require, db := require.New(t), kv.NewTestDB(t)
+	require := require.New(t)
+	_, tx := kv.NewTestTx(t)
 
-	err := stages.SaveStageProgress(db, stages.Execution, 42)
+	err := stages.SaveStageProgress(tx, stages.Execution, 42)
 	require.NoError(err)
 
-	data, err := MarshalMigrationPayload(db)
+	data, err := MarshalMigrationPayload(tx)
 	require.NoError(err)
 
 	res, err := UnmarshalMigrationPayload(data)

@@ -895,9 +895,9 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
-	db := kv.NewTestDB(t)
-	tsw := state.NewPlainStateWriter(db, nil, 0)
-	intraBlockState := state.New(state.NewPlainStateReader(db))
+	_, tx := kv.NewTestTx(t)
+	tsw := state.NewPlainStateWriter(tx, nil, 0)
+	intraBlockState := state.New(state.NewPlainKvState(tx, 0))
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
@@ -1327,8 +1327,8 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := kv.NewTestDB(t)
-	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
+	_, tx := kv.NewTestTx(t)
+	r, w := state.NewPlainKvState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1360,10 +1360,9 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	db := kv.NewTestDB(t)
-	r, w := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
+	_, tx := kv.NewTestTx(t)
+	r, w := state.NewPlainKvState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
-	ctx := context.Background()
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
@@ -1378,32 +1377,24 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error committing block: %v", err)
 	}
 
-	err := db.RwKV().View(ctx, func(tx ethdb.Tx) error {
-		r2, err := trie.CalcRoot("test", tx)
-		require.NoError(t, err)
-		require.Equal(t, root, r2)
-		return nil
-	})
+	r2, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
+	require.Equal(t, root, r2)
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
 	codeSize, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
-	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
+	assert.NoError(t, tx.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
 
 	codeSize2, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
 	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 
-	err = db.RwKV().View(ctx, func(tx ethdb.Tx) error {
-		r2, err := trie.CalcRoot("test", tx)
-		require.NoError(t, err)
-		require.Equal(t, root, r2)
-		return nil
-	})
+	r2, err = trie.CalcRoot("test", tx)
 	require.NoError(t, err)
+	require.Equal(t, root, r2)
 }
 
 func TestRecreateAndRewind(t *testing.T) {

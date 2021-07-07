@@ -361,8 +361,8 @@ func TestAccessList(t *testing.T) {
 		return common.HexToHash(a)
 	}
 
-	db := kv.NewTestDB(t)
-	state := New(NewPlainStateReader(db))
+	_, tx := kv.NewTestTx(t)
+	state := New(NewPlainKvState(tx, 0))
 	state.accessList = newAccessList()
 
 	verifyAddrs := func(astrings ...string) {
