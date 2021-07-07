@@ -30,8 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-const MaxGoroutinesPerBatchRequest = 50
-
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
 // handler is not safe for concurrent use. Message handling never blocks indefinitely
 // because RPCs are processed on background goroutines launched by handler.
@@ -68,8 +66,9 @@ type handler struct {
 
 	allowList AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 
-	subLock    sync.Mutex
-	serverSubs map[ID]*Subscription
+	subLock             sync.Mutex
+	serverSubs          map[ID]*Subscription
+	maxBatchConcurrency uint
 }
 
 type callProc struct {
@@ -77,7 +76,7 @@ type callProc struct {
 	notifiers []*Notifier
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList) *handler {
+func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	h := &handler{
 		reg:            reg,
@@ -91,6 +90,8 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		serverSubs:     make(map[ID]*Subscription),
 		log:            log.Root(),
 		allowList:      allowList,
+
+		maxBatchConcurrency: maxBatchConcurrency,
 	}
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
@@ -146,7 +147,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 			// All goroutines will place results right to this array. Because requests order must match reply orders.
 			answersWithNils := make([]*jsonrpcMessage, len(msgs))
 			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
-			boundedConcurrency := make(chan struct{}, MaxGoroutinesPerBatchRequest)
+			boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
 			defer close(boundedConcurrency)
 			wg := sync.WaitGroup{}
 			wg.Add(len(msgs))
