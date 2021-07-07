@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"encoding/binary"
+	"fmt"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
@@ -18,20 +19,75 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 		bodiesPath := filepath.Join(tmpdir, "bodies")
 		ethtxPath := filepath.Join(tmpdir, "ethtx")
 		nonCanonicalPath := filepath.Join(tmpdir, "noncanonicaltx")
-		bodiesCollector := etl.NewCollector(bodiesPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		ethTXCollector := etl.NewCollector(ethtxPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		nonCanonicalCollector := etl.NewCollector(nonCanonicalPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
+
+		var ethTXIndex, nonCanonicalIndex uint64
+		logPrefix := "split_canonical_and_noncanonical_txs"
+		const loadStep = "load"
+
+		bodiesCollector, err := etl.NewCollectorFromFiles(bodiesPath)
+		if err != nil {
+			return err
+		}
+		ethTXCollector, err := etl.NewCollectorFromFiles(ethtxPath)
+		if err != nil {
+			return err
+		}
+		nonCanonicalCollector, err := etl.NewCollectorFromFiles(nonCanonicalPath)
+		if err != nil {
+			return err
+		}
 
 		ethTXWriteCursor, err := db.(ethdb.HasTx).Tx().(ethdb.RwTx).Cursor(dbutils.EthTx)
 		if err != nil {
 			return err
 		}
-		bfs := &types.BodyForStorage{}
-		var ethTXIndex, nonCanonicalIndex uint64
+		defer ethTXWriteCursor.Close()
+
+		switch string(progress) {
+		case "":
+			// can't use files if progress field not set, clear them
+			if bodiesCollector != nil {
+				bodiesCollector.Close(logPrefix)
+				bodiesCollector = nil
+			}
+
+			if ethTXCollector != nil {
+				ethTXCollector.Close(logPrefix)
+				ethTXCollector = nil
+			}
+
+			if nonCanonicalCollector != nil {
+				nonCanonicalCollector.Close(logPrefix)
+				nonCanonicalCollector = nil
+			}
+		case loadStep:
+			if nonCanonicalCollector == nil || ethTXCollector == nil || bodiesCollector == nil {
+				return ErrMigrationETLFilesDeleted
+			}
+			defer func() {
+				// don't clean if error or panic happened
+				if err != nil {
+					return
+				}
+				if rec := recover(); rec != nil {
+					panic(rec)
+				}
+				bodiesCollector.Close(logPrefix)
+				ethTXCollector.Close(logPrefix)
+				nonCanonicalCollector.Close(logPrefix)
+			}()
+
+			goto LoadStep
+		}
+
+		bodiesCollector = etl.NewCriticalCollector(bodiesPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		ethTXCollector = etl.NewCriticalCollector(ethtxPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		nonCanonicalCollector = etl.NewCriticalCollector(nonCanonicalPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
 		err = db.ForEach(dbutils.BlockBodyPrefix, []byte{}, func(k, v []byte) error {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
+			bfs := &types.BodyForStorage{}
 			err = rlp.DecodeBytes(v, bfs)
 			if err != nil {
 				return err
@@ -111,6 +167,13 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 
+		ethTXWriteCursor.Close()
+		// Commit clearing of the bucket - freelist should now be written to the database
+		if err = CommitProgress(db, []byte(loadStep), false); err != nil {
+			return fmt.Errorf("committing the removal of table: %w", err)
+		}
+
+	LoadStep:
 		err = bodiesCollector.Load("bodies", db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{})
 		if err != nil {
 			return err
@@ -144,6 +207,6 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 
-		return nil
+		return CommitProgress(db, nil, true)
 	},
 }
