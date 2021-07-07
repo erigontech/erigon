@@ -356,11 +356,6 @@ func (m *mutation) panicOnEmptyDB() {
 	}
 }
 
-func (m *mutation) MemCopy() ethdb.Database {
-	m.panicOnEmptyDB()
-	return m.db
-}
-
 func (m *mutation) SetRwKV(kv ethdb.RwKV) {
 	m.db.(ethdb.HasRwKV).SetRwKV(kv)
 }
