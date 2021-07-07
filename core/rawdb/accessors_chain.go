@@ -359,7 +359,7 @@ func WriteRawTransactions(db ethdb.RwTx, txs [][]byte, baseTxId uint64) error {
 
 func DeleteTransactions(db ethdb.RwTx, bucket string, baseTxId uint64, amount uint32) error {
 	k:=make([]byte, 8)
-	for i:=baseTxId; i< baseTxId+uint64(amount); i++ {
+	for i:=baseTxId; i < baseTxId+uint64(amount); i++ {
 		binary.BigEndian.PutUint64(k, i)
 		err := db.Delete(bucket, k, nil)
 		if err!=nil {
@@ -392,39 +392,18 @@ func ReadBodyByNumber(db ethdb.Tx, number uint64) (*types.Body, uint64, uint32, 
 	if hash == (common.Hash{}) {
 		return nil, 0, 0, nil
 	}
-	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	body, baseTxId, txAmount, _ := ReadBodyWithoutTransactions(db, hash, number)
 	return body, baseTxId, txAmount, nil
 }
 
 func ReadBody(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Body {
-  	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+  	body, baseTxId, txAmount, canonical := ReadBodyWithoutTransactions(db, hash, number)
 	if body == nil {
 		return nil
 	}
 	var err error
 
-	canonicalHash,err:=ReadCanonicalHash(db, number)
-	if err!=nil {
-		log.Error("failed ReadCanonicalHash", "hash", hash, "block", number, "err", err)
-		return nil
-
-	}
-	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount, canonicalHash == hash)
-	if err != nil {
-		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
-		return nil
-	}
-	return body
-}
-
-func ReadCanonicalBody(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Body {
-	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
-	if body == nil {
-		return nil
-	}
-	var err error
-
-	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount, true)
+	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount, canonical)
 	if err != nil {
 		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
 		return nil
@@ -439,7 +418,7 @@ func MoveTransactionToNoneCanonical(db ethdb.RwTx, number uint64) error {
 	    return err
 	}
 
-	body, baseTxIdOrig, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	body, baseTxIdOrig, txAmount, _ := ReadBodyWithoutTransactions(db, hash, number)
 	if body == nil {
 		return nil
 	}
@@ -478,20 +457,20 @@ func MoveTransactionToNoneCanonical(db ethdb.RwTx, number uint64) error {
 }
 
 
-func ReadBodyWithoutTransactions(db ethdb.KVGetter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+func ReadBodyWithoutTransactions(db ethdb.KVGetter, hash common.Hash, number uint64) (*types.Body, uint64, uint32, bool) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
-		return nil, 0, 0
+		return nil, 0, 0, false
 	}
 	bodyForStorage := new(types.BodyForStorage)
 	err := rlp.DecodeBytes(data, bodyForStorage)
 	if err != nil {
 		log.Error("Invalid block body RLP", "hash", hash, "err", err)
-		return nil, 0, 0
+		return nil, 0, 0, false
 	}
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
-	return body, bodyForStorage.BaseTxId, bodyForStorage.TxAmount
+	return body, bodyForStorage.BaseTxId, bodyForStorage.TxAmount, bodyForStorage.Canonical
 }
 
 func ReadSenders(db ethdb.KVGetter, hash common.Hash, number uint64) ([]common.Address, error) {

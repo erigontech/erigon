@@ -103,6 +103,7 @@ func TestBodyStorage(t *testing.T) {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	require.NoError(WriteBody(tx, hash, 0, body))
+	require.NoError(WriteCanonicalHash(tx, hash, 0))
 	if entry := ReadBody(tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
