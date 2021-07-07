@@ -15,32 +15,32 @@ import (
 var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 	Name: "split_canonical_and_noncanonical_txs",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		bodiesPath:=filepath.Join(tmpdir, "bodies")
-		ethtxPath:=filepath.Join(tmpdir, "ethtx")
-		nonCanonicalPath:=filepath.Join(tmpdir, "noncanonicaltx")
+		bodiesPath := filepath.Join(tmpdir, "bodies")
+		ethtxPath := filepath.Join(tmpdir, "ethtx")
+		nonCanonicalPath := filepath.Join(tmpdir, "noncanonicaltx")
 		bodiesCollector := etl.NewCollector(bodiesPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		ethTXCollector := etl.NewCollector(ethtxPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		nonCanonicalCollector := etl.NewCollector(nonCanonicalPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
 
-		ethTXWriteCursor,err:=db.(ethdb.HasTx).Tx().(ethdb.RwTx).Cursor(dbutils.EthTx)
-		if err!=nil {
-		    return err
+		ethTXWriteCursor, err := db.(ethdb.HasTx).Tx().(ethdb.RwTx).Cursor(dbutils.EthTx)
+		if err != nil {
+			return err
 		}
-		bfs:=&types.BodyForStorage{}
+		bfs := &types.BodyForStorage{}
 		var ethTXIndex, nonCanonicalIndex uint64
 
 		err = db.ForEach(dbutils.BlockBodyPrefix, []byte{}, func(k, v []byte) error {
-			blockNum:=binary.BigEndian.Uint64(k[:8])
-			blockHash:=common.BytesToHash(k[8:])
+			blockNum := binary.BigEndian.Uint64(k[:8])
+			blockHash := common.BytesToHash(k[8:])
 			err = rlp.DecodeBytes(v, bfs)
-			if err!=nil {
-			    return err
+			if err != nil {
+				return err
 			}
-			canonicalHash,err:=rawdb.ReadCanonicalHash(db,blockNum)
-			if err!=nil {
-			    return err
+			canonicalHash, err := rawdb.ReadCanonicalHash(db, blockNum)
+			if err != nil {
+				return err
 			}
-			if blockHash==canonicalHash {
+			if blockHash == canonicalHash {
 				bfs.Canonical = true
 				if bfs.TxAmount > 0 {
 					txIdKey := make([]byte, 8)
@@ -64,7 +64,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 					}
 				}
 				bfs.BaseTxId = ethTXIndex
-				ethTXIndex+=uint64(bfs.TxAmount)
+				ethTXIndex += uint64(bfs.TxAmount)
 			} else {
 				bfs.Canonical = false
 				if bfs.TxAmount > 0 {
@@ -89,7 +89,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 					}
 				}
 				bfs.BaseTxId = nonCanonicalIndex
-				nonCanonicalIndex+=uint64(bfs.TxAmount)
+				nonCanonicalIndex += uint64(bfs.TxAmount)
 			}
 			bodyBytes, err := rlp.EncodeToBytes(bfs)
 			if err != nil {
@@ -97,18 +97,18 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			}
 
 			err = bodiesCollector.Collect(common.CopyBytes(k), bodyBytes)
-			if err!=nil {
-			    return err
+			if err != nil {
+				return err
 			}
-			return  nil
+			return nil
 		})
-		if err!=nil {
-		    return err
+		if err != nil {
+			return err
 		}
 
 		err = db.(ethdb.BucketMigrator).ClearBucket(dbutils.EthTx)
-		if err!=nil {
-		    return err
+		if err != nil {
+			return err
 		}
 
 		err = bodiesCollector.Load("bodies", db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{})
@@ -126,22 +126,21 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 
-
-		ethTXLast, _, err:=db.Last(dbutils.EthTx)
-		if err!=nil {
-		    return err
+		ethTXLast, _, err := db.Last(dbutils.EthTx)
+		if err != nil {
+			return err
 		}
 		err = db.Put(dbutils.Sequence, []byte(dbutils.EthTx), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(ethTXLast)+1))
-		if err!=nil {
-		    return err
+		if err != nil {
+			return err
 		}
 
-		nonCanonicalTXLast, _, err:=db.Last(dbutils.NonCanonicalTXBucket)
-		if err!=nil {
-		    return err
+		nonCanonicalTXLast, _, err := db.Last(dbutils.NonCanonicalTXBucket)
+		if err != nil {
+			return err
 		}
 		err = db.Put(dbutils.Sequence, []byte(dbutils.NonCanonicalTXBucket), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(nonCanonicalTXLast)+1))
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 
