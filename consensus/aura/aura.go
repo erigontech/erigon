@@ -512,8 +512,13 @@ func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, b
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *AuRa) Author(header *types.Header) (common.Address, error) {
-	return common.Address{}, nil
-	//return ecrecover(header, c.signatures)
+	panic("?????????")
+	/*
+	 let message = keccak(empty_step_rlp(self.step, &self.parent_hash));
+	        let public = publickey::recover(&self.signature.into(), &message)?;
+	        Ok(publickey::public_to_address(&public))
+	*/
+	return header.Coinbase, nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -521,6 +526,7 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
+//nolint
 func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) bool {
 	/*
 		self
@@ -531,6 +537,8 @@ func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash
 	*/
 	return false
 }
+
+//nolint
 func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
 	/*
 	   	    self.received_step_hashes

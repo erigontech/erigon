@@ -17,14 +17,6 @@ import (
 	"go.uber.org/atomic"
 )
 
-/// Kind of SystemOrCodeCall, this is either an on-chain address, or code.
-type SystemOrCodeCallKind uint8
-
-const (
-	SystemCallOnChain SystemOrCodeCallKind = 0
-	CallHardCodedCode SystemOrCodeCallKind = 1
-)
-
 //nolint
 type CallResults struct {
 	data      []byte

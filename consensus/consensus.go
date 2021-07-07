@@ -59,7 +59,8 @@ type ChainReader interface {
 	HasBlock(hash common.Hash, number uint64) bool
 }
 
-type SystemCall func(address common.Address, in []byte) ([]byte, error)
+type SystemCall func(contract common.Address, data []byte) ([]byte, error)
+type Call func(contract common.Address, data []byte) ([]byte, error)
 
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {

@@ -23,7 +23,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -184,14 +183,55 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+
 	noop := state.NewNoopWriter()
 	tx, err := SysCallContractTx(contract, data, ibs)
 	if err != nil {
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	// Set infinite balance to the fake caller account.
-	from := ibs.GetOrNewStateObject(common.Address{})
-	from.SetBalance(uint256.NewInt(0).SetAllOne())
+	fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
+
+	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
+	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
+	if err != nil {
+		return result, fmt.Errorf("SysCallContract: %w ", err)
+	}
+	ibs.SetNonce(SystemAddress, 0)
+
+	//w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
+	//if err1 != nil {
+	//	panic(err1)
+	//}
+	//encoder := json.NewEncoder(w)
+	//logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+	//if err2 := encoder.Encode(logs); err2 != nil {
+	//	panic(err2)
+	//}
+	return result, nil
+}
+
+// from the null sender, with 50M gas.
+func SysCallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
+	//nonce := ibs.GetNonce(SystemAddress)
+	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data)
+	return tx.FakeSign(SystemAddress)
+}
+
+func CallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
+	gp := new(GasPool)
+	gp.AddGas(50_000_000)
+	var gasUsed uint64
+
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	noop := state.NewNoopWriter()
+	tx, err := CallContractTx(contract, data, ibs)
+	if err != nil {
+		return nil, fmt.Errorf("SysCallContract: %w ", err)
+	}
+	// Set infinite balance to the fake caller account.
 	fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
 
 	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
@@ -212,16 +252,17 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 }
 
 // from the null sender, with 50M gas.
-func SysCallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
-	nonce := ibs.GetNonce(SystemAddress)
+func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
+	from := common.Address{}
+	nonce := ibs.GetNonce(from)
 	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
-	return tx.FakeSign(SystemAddress)
+	return tx.FakeSign(from)
 }
 
 func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	engine.Finalize(cc, header, ibs, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, *cc, ibs, header, engine)
+		return CallContract(contract, data, *cc, ibs, header, engine)
 	})
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {

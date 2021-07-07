@@ -175,7 +175,7 @@ func (sdb *IntraBlockState) Error() error {
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
-func (sdb *IntraBlockState) Reset() error {
+func (sdb *IntraBlockState) Reset() {
 	sdb.stateObjects = make(map[common.Address]*stateObject)
 	sdb.stateObjectsDirty = make(map[common.Address]struct{})
 	sdb.thash = common.Hash{}
@@ -186,7 +186,6 @@ func (sdb *IntraBlockState) Reset() error {
 	sdb.preimages = make(map[common.Hash][]byte)
 	sdb.clearJournalAndRefund()
 	sdb.accessList = newAccessList()
-	return nil
 }
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
@@ -426,7 +425,6 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int) {
-	fmt.Printf("SubBalance: %x, %d\n ", addr, amount)
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
 	}
@@ -492,7 +490,6 @@ func (sdb *IntraBlockState) SetCode(addr common.Address, code []byte) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, value uint256.Int) {
-	fmt.Printf("SetState: %x, %x,%s\n ", addr, key, value.String())
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
