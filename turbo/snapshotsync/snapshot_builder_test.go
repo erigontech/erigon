@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/log"
 	"math"
 	"math/big"
 	"os"
@@ -41,7 +42,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	var err error
 	dir := t.TempDir()
 
@@ -160,7 +161,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	//wait until migration start
 	wg.Wait()
 	tm := time.After(time.Second * 1000)
-	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
+	for !(atomic.LoadUint64(&sb.started) == 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) == 10) {
 		select {
 		case <-tm:
 			t.Fatal("timeout")
@@ -284,7 +285,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	c := time.After(time.Second * 3)
 	tm = time.After(time.Second * 20)
 
-	for atomic.LoadUint64(&sb.started) > 0 || atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 20 {
+	for !(atomic.LoadUint64(&sb.started) == 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) == 20) {
 		select {
 		case <-c:
 			roTX.Rollback()
@@ -296,7 +297,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 		}
 	}
 	if !rollbacked {
-		t.Log("it's not possible to close db without rollback. something went wrong")
+		t.Log("it's not possible to close db without rollback. something went wrong", atomic.LoadUint64(&sb.started), atomic.LoadUint64(&sb.HeadersCurrentSnapshot))
 	}
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
