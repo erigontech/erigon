@@ -281,13 +281,9 @@ func (s *Multi) genesisEpochData(header *types.Header, call Call) ([]byte, error
 	return set.genesisEpochData(header, call)
 }
 
-func (s *Multi) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
-	for i := 0; i < len(s.sorted); i++ {
-		if err := s.sorted[i].set.onEpochBegin(first, header, caller); err != nil {
-			return err
-		}
-	}
-	return nil
+func (s *Multi) onEpochBegin(_ bool, header *types.Header, caller consensus.SystemCall) error {
+	setTransition, set := s.correctSetByNumber(header.Number.Uint64())
+	return set.onEpochBegin(setTransition == header.Number.Uint64(), header, caller)
 }
 
 type SimpleList struct {

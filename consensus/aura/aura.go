@@ -196,16 +196,13 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators
 		return e.finalityChecker, e.epochTransitionNumber, false
 	}
 	// extract other epoch set if it's not the same as the last.
-	fmt.Printf("aa3: %x,%x\n", lastTransition.BlockHash, e.epochTransitionHash)
 	if lastTransition.BlockHash != e.epochTransitionHash {
-		fmt.Printf("aa2: %T\n", validators)
 		proof, err := destructure_proofs(lastTransition.ProofRlp)
 		if err != nil {
 			panic(err)
 		}
 		first := proof.SignalNumber == 0
 		// use signal number so multi-set first calculation is correct.
-		fmt.Printf("aa1: %T\n", validators)
 		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof)
 		if err != nil {
 			panic(fmt.Errorf("proof produced by this engine; therefore it is valid; qed. %w", err))
@@ -817,9 +814,7 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		return
 	}
 	for i := range beneficiaries {
-		fmt.Printf("rew: add balance %x, %d\n", beneficiaries[i], rewards[i])
 		state.AddBalance(beneficiaries[i], rewards[i])
-		fmt.Printf("rew: balance after add %x, %d\n", beneficiaries[i], state.GetBalance(beneficiaries[i]))
 	}
 }
 
@@ -1173,7 +1168,6 @@ func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, 
 		}
 
 		for range beneficiaries {
-			fmt.Printf("rew: %x,%d,%d,\n", header.Coinbase, reward.blockNum, reward.amount)
 			rewards = append(rewards, reward.amount)
 		}
 	}
@@ -1207,7 +1201,6 @@ func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCal
 	}
 	_ = res[0]
 	_ = res[1]
-	fmt.Printf("aaaaa: %#v, %#v\n", res[0], res[1])
 	return nil, nil
 }
 
