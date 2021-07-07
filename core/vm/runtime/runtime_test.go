@@ -159,10 +159,9 @@ func BenchmarkCall(b *testing.B) {
 	}
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
-	db := kv.NewMemDatabase()
-	defer db.Close()
+	_, tx := kv.NewTestTx(bench)
 	var (
-		statedb  = state.New(state.NewPlainStateReader(db))
+		statedb  = state.New(state.NewPlainKvState(tx, 0))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -330,9 +329,8 @@ func TestBlockhash(t *testing.T) {
 func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.B) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	db := kv.NewMemDatabase()
-	defer db.Close()
-	cfg.State = state.New(state.NewDbStateReader(db))
+	_, tx := kv.NewTestTx(b)
+	cfg.State = state.New(state.NewPlainKvState(tx, 0))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))

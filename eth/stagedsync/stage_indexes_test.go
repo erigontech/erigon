@@ -25,10 +25,8 @@ import (
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	db := kv2.NewMemDatabase()
-	defer db.Close()
-	kv := db.RwKV()
-	cfg := StageHistoryCfg(db.RwKV(), t.TempDir())
+	kv := kv2.NewTestKV(t)
+	cfg := StageHistoryCfg(kv, t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := kv.BeginRw(context.Background())

@@ -176,10 +176,9 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-
-	db := kv.NewMemDatabase()
-	w := NewDbStateWriter(db, 0)
-	state := New(NewDbStateReader(db))
+	_, tx := kv.NewTestTx(t)
+	w := NewPlainKvState(tx, 0)
+	state := New(NewPlainKvState(tx, 0))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -204,7 +203,7 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewDbStateWriter(db, 1)
+	w = NewPlainKvState(tx, 1)
 
 	err = state.CommitBlock(params.Rules{}, w)
 	if err != nil {
