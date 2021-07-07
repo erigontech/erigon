@@ -68,13 +68,13 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	if err != nil {
 		return err
 	}
-	chainDb := kv2.NewObjectDatabase(kv)
+	chainDb := kv
 	defer chainDb.Close()
 	historyDb := chainDb
 	if chaindata != historyfile {
 		historyDb = kv2.MustOpen(historyfile)
 	}
-	historyTx, err1 := historyDb.RwKV().BeginRo(context.Background())
+	historyTx, err1 := historyDb.BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
@@ -85,7 +85,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
-	rwtx, err := chainDb.RwKV().BeginRw(context.Background())
+	rwtx, err := chainDb.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -226,12 +226,12 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				if err = rwtx.Commit(); err != nil {
 					return err
 				}
-				rwtx, err = chainDb.RwKV().BeginRw(context.Background())
+				rwtx, err = chainDb.BeginRw(context.Background())
 				if err != nil {
 					return err
 				}
 				historyTx.Rollback()
-				historyTx, err = historyDb.RwKV().BeginRo(context.Background())
+				historyTx, err = historyDb.BeginRo(context.Background())
 				if err != nil {
 					return err
 				}

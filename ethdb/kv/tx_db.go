@@ -334,10 +334,6 @@ func (m *TxDb) Tx() ethdb.Tx {
 	return m.tx
 }
 
-func (m *TxDb) Keys() ([][]byte, error) {
-	panic("don't use me")
-}
-
 func (m *TxDb) BucketExists(name string) (bool, error) {
 	exists := false
 	migrator, ok := m.tx.(ethdb.BucketMigrator)
