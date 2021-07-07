@@ -61,7 +61,7 @@ func (m *getPutkvMachine) Init(t *rapid.T) {
 	require.NoError(t, err)
 	err = txModel.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().SnapshotDB([]string{m.bucket}, m.snKV).DB(NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(NewMemKV()).Open()
 }
 
 func (m *getPutkvMachine) Cleanup() {
@@ -203,7 +203,7 @@ func (m *getKVMachine) Init(t *rapid.T) {
 	//save snapshot and wrap new write db
 	err = txSn.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().SnapshotDB([]string{m.bucket}, m.snKV).DB(NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(NewMemKV()).Open()
 	txSn, err = m.snKV.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer txSn.Rollback()
@@ -318,7 +318,7 @@ func (m *cursorKVMachine) Init(t *rapid.T) {
 	require.NoError(t, err)
 	err = txModel.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().SnapshotDB([]string{m.bucket}, m.snKV).DB(NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(NewMemKV()).Open()
 }
 
 func (m *cursorKVMachine) Check(t *rapid.T) {

@@ -18,7 +18,6 @@
 package core
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -165,8 +164,7 @@ func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs t
 		return CallContract(contract, data, *cc, ibs, header, engine)
 	})
 
-	ctx := cc.WithEIPsFlags(context.Background(), header.Number.Uint64())
-	if err := ibs.CommitBlock(ctx, stateWriter); err != nil {
+	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {
 		return fmt.Errorf("committing block %d failed: %v", header.Number.Uint64(), err)
 	}
 	if err := stateWriter.WriteChangeSets(); err != nil {

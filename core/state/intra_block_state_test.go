@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/params"
 	"gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -321,12 +321,12 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 
-	err := s.state.FinalizeTx(context.Background(), s.w)
+	err := s.state.FinalizeTx(params.Rules{}, s.w)
 	if err != nil {
 		c.Fatal("error while finalize", err)
 	}
 
-	err = s.state.CommitBlock(context.Background(), s.w)
+	err = s.state.CommitBlock(params.Rules{}, s.w)
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}

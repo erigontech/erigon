@@ -18,7 +18,6 @@ package tracers
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
@@ -146,7 +145,6 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	    gas (assuming no mem expansion): 32006
 	    result: 0x60f3f640a8508fC6a86d45DF051962668E1e8AC7
 	*/
-	ctx := context.TODO()
 	origin, _ := signer.Sender(tx)
 	txContext := vm.TxContext{
 		Origin:   origin,
@@ -176,7 +174,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
-	statedb, _ := tests.MakePreState(ctx, kv.NewTestDB(t), alloc, context.BlockNumber)
+	statedb, _ := tests.MakePreState(params.Rules{}, kv.NewTestDB(t), alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := New("prestateTracer", txContext)
@@ -210,8 +208,6 @@ func TestPrestateTracerCreate2(t *testing.T) {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracer(t *testing.T) {
-	ctx := context.TODO()
-
 	files, filesErr := ioutil.ReadDir("testdata")
 	if filesErr != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", filesErr)
@@ -254,7 +250,7 @@ func TestCallTracer(t *testing.T) {
 				GasLimit:    uint64(test.Context.GasLimit),
 				CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 			}
-			statedb, _ := tests.MakePreState(ctx, kv.NewTestDB(t), test.Genesis.Alloc, uint64(test.Context.Number))
+			statedb, _ := tests.MakePreState(params.Rules{}, kv.NewTestDB(t), test.Genesis.Alloc, uint64(test.Context.Number))
 
 			// Create the tracer, the EVM environment and run it
 			tracer, err := New("callTracer", txContext)

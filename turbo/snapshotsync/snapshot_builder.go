@@ -4,25 +4,22 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/params"
-
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator {
@@ -38,88 +35,152 @@ type SnapshotMigrator struct {
 	snapshotsDir               string
 	HeadersCurrentSnapshot     uint64
 	HeadersNewSnapshot         uint64
+	BodiesCurrentSnapshot      uint64
+	BodiesNewSnapshot          uint64
 	HeadersNewSnapshotInfohash []byte
+	BodiesNewSnapshotInfohash  []byte
+	snapshotType               string
 	started                    uint64
 	replaceChan                chan struct{}
 	replaced                   uint64
 }
 
 func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rwTX ethdb.Tx, bittorrent *Client, async bool) error {
-	if sm.HeadersCurrentSnapshot >= migrateToBlock || atomic.LoadUint64(&sm.HeadersNewSnapshot) >= migrateToBlock || atomic.LoadUint64(&sm.started) > 0 {
+	if atomic.LoadUint64(&sm.started) > 0 {
+		return nil
+	}
+
+	var snapshotName string
+	var snapshotHashKey []byte
+	if sm.HeadersCurrentSnapshot < migrateToBlock && atomic.LoadUint64(&sm.HeadersNewSnapshot) < migrateToBlock {
+		snapshotName = "headers"
+		snapshotHashKey = dbutils.CurrentHeadersSnapshotHash
+	} else if sm.BodiesCurrentSnapshot < migrateToBlock && atomic.LoadUint64(&sm.BodiesNewSnapshot) < migrateToBlock {
+		snapshotName = "bodies"
+		snapshotHashKey = dbutils.CurrentBodiesSnapshotHash
+	} else {
 		return nil
 	}
 	atomic.StoreUint64(&sm.started, 1)
-	snapshotPath := SnapshotName(sm.snapshotsDir, "headers", migrateToBlock)
-	sm.HeadersNewSnapshot = migrateToBlock
+	sm.snapshotType = snapshotName
+	snapshotPath := SnapshotName(sm.snapshotsDir, sm.snapshotType, migrateToBlock)
+	switch sm.snapshotType {
+	case "headers":
+		sm.HeadersNewSnapshot = migrateToBlock
+	case "bodies":
+		sm.BodiesNewSnapshot = migrateToBlock
+	}
 	atomic.StoreUint64(&sm.replaced, 0)
 
-	stages := []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
-		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
-			return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath)
-		},
-		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
-			//replace snapshot
-			if _, ok := db.(kv.SnapshotUpdater); !ok {
-				return errors.New("db don't implement snapshotUpdater interface")
-			}
-			snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
-			if err != nil {
-				return err
-			}
-
-			db.(kv.SnapshotUpdater).UpdateSnapshots([]string{dbutils.HeadersBucket}, snapshotKV, sm.replaceChan)
-			return nil
-		},
-		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
-			//todo headers infohash
-			var infohash []byte
-			var err error
-			infohash, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				log.Error("Get infohash", "err", err, "block", toBlock)
-				return err
-			}
-
-			if len(infohash) == 20 {
-				var hash metainfo.Hash
-				copy(hash[:], infohash)
-				log.Info("Stop seeding snapshot", "type", "headers", "infohash", hash.String())
-				err = bittorrent.StopSeeding(hash)
+	var initialStages []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error
+	switch sm.snapshotType {
+	case "headers":
+		initialStages = []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
+			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+				return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath)
+			},
+			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+				//replace snapshot
+				if _, ok := db.(kv.SnapshotUpdater); !ok {
+					return errors.New("db don't implement snapshotUpdater interface")
+				}
+				snapshotKV, err := OpenHeadersSnapshot(snapshotPath)
 				if err != nil {
-					log.Error("Stop seeding", "err", err, "block", toBlock)
 					return err
 				}
-				log.Info("Stopped seeding snapshot", "type", "headers", "infohash", hash.String())
-				//atomic.StoreUint64(&sm.Stage, StageStartSeedingNew)
-			} else {
-				log.Warn("Hasn't stopped snapshot", "infohash", common.Bytes2Hex(infohash))
-			}
-			return nil
-		},
-		func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
-			log.Info("Start seeding snapshot", "type", "headers")
-			seedingInfoHash, err := bittorrent.SeedSnapshot("headers", snapshotPath)
-			if err != nil {
-				log.Error("Seeding", "err", err)
-				return err
-			}
-			sm.HeadersNewSnapshotInfohash = seedingInfoHash[:]
-			log.Info("Started seeding snapshot", "type", "headers", "infohash", seedingInfoHash.String())
-			atomic.StoreUint64(&sm.started, 2)
-			return nil
-		},
+
+				db.(kv.SnapshotUpdater).UpdateSnapshots("headers", snapshotKV, sm.replaceChan)
+				return nil
+			},
+		}
+	case "bodies":
+		initialStages = []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
+			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+				return CreateBodySnapshot(tx, toBlock, snapshotPath)
+			},
+			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+				//replace snapshot
+				if _, ok := db.(kv.SnapshotUpdater); !ok {
+					return errors.New("db don't implement snapshotUpdater interface")
+				}
+				snapshotKV, err := OpenBodiesSnapshot(snapshotPath)
+				if err != nil {
+					return err
+				}
+
+				db.(kv.SnapshotUpdater).UpdateSnapshots("bodies", snapshotKV, sm.replaceChan)
+				return nil
+			},
+		}
 	}
+
+	btStages := func(shapshotHashKey []byte) []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+		return []func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error{
+			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+				//todo headers infohash
+				var infohash []byte
+				var err error
+				infohash, err = tx.GetOne(dbutils.BittorrentInfoBucket, shapshotHashKey)
+				if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+					log.Error("Get infohash", "err", err, "block", toBlock)
+					return err
+				}
+
+				if len(infohash) == 20 {
+					var hash metainfo.Hash
+					copy(hash[:], infohash)
+					log.Info("Stop seeding snapshot", "type", snapshotName, "infohash", hash.String())
+					err = bittorrent.StopSeeding(hash)
+					if err != nil {
+						log.Error("Stop seeding", "err", err, "block", toBlock)
+						return err
+					}
+					log.Info("Stopped seeding snapshot", "type", snapshotName, "infohash", hash.String())
+				} else {
+					log.Warn("Hasn't stopped snapshot", "infohash", common.Bytes2Hex(infohash))
+				}
+				return nil
+			},
+			func(db ethdb.RoKV, tx ethdb.Tx, toBlock uint64) error {
+				log.Info("Start seeding snapshot", "type", snapshotName)
+				seedingInfoHash, err := bittorrent.SeedSnapshot(snapshotName, snapshotPath)
+				if err != nil {
+					log.Error("Seeding", "err", err)
+					return err
+				}
+
+				switch snapshotName {
+				case "bodies":
+					sm.BodiesNewSnapshotInfohash = seedingInfoHash[:]
+				case "headers":
+					sm.HeadersNewSnapshotInfohash = seedingInfoHash[:]
+				}
+
+				log.Info("Started seeding snapshot", "type", snapshotName, "infohash", seedingInfoHash.String())
+				atomic.StoreUint64(&sm.started, 2)
+				return nil
+			},
+		}
+	}
+
+	stages := append(initialStages, btStages(snapshotHashKey)...)
 
 	startStages := func(tx ethdb.Tx) (innerErr error) {
 		defer func() {
 			if innerErr != nil {
-
 				atomic.StoreUint64(&sm.started, 0)
-				atomic.StoreUint64(&sm.HeadersNewSnapshot, 0)
-				log.Error("Error on stage. Rollback", "err", innerErr)
+				switch snapshotName {
+				case "headers":
+					atomic.StoreUint64(&sm.HeadersNewSnapshot, atomic.LoadUint64(&sm.HeadersCurrentSnapshot))
+				case "bodies":
+					atomic.StoreUint64(&sm.BodiesNewSnapshot, atomic.LoadUint64(&sm.BodiesCurrentSnapshot))
+				}
+
+				log.Error("Error on stage. Rollback", "type", snapshotName, "err", innerErr)
 			}
 		}()
 		for i := range stages {
+			log.Info("Stage", "i", i)
 			innerErr = stages[i](dbi, tx, migrateToBlock)
 			if innerErr != nil {
 				return innerErr
@@ -133,14 +194,15 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			defer debug.LogPanic()
 			readTX, err := dbi.BeginRo(context.Background())
 			if err != nil {
-				//return fmt.Errorf("begin err: %w", err)
+				log.Error("begin", "err", err)
 				return
 			}
 			defer readTX.Rollback()
 
 			innerErr := startStages(readTX)
 			if innerErr != nil {
-				log.Error("Error ", "err", innerErr)
+				log.Error("Async stages", "err", innerErr)
+				return
 			}
 		}()
 	} else {
@@ -164,26 +226,52 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi ethdb.RwKV, rw
 	log.Info("SyncStages", "started", atomic.LoadUint64(&sm.started))
 
 	if atomic.LoadUint64(&sm.started) == 2 && sm.Replaced() {
-		syncStages := []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error{
-			func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
-				log.Info("Prune db", "current", sm.HeadersCurrentSnapshot, "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
-				return RemoveHeadersData(db, tx, sm.HeadersCurrentSnapshot, atomic.LoadUint64(&sm.HeadersNewSnapshot))
-			},
-			func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
-				log.Info("Save CurrentHeadersSnapshotHash", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
-				c, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
-				if err != nil {
-					return err
-				}
-				if len(sm.HeadersNewSnapshotInfohash) == 20 {
-					err = c.Put(dbutils.CurrentHeadersSnapshotHash, sm.HeadersNewSnapshotInfohash)
+		var syncStages []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error
+		switch sm.snapshotType {
+		case "bodies":
+			syncStages = []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error{
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Prune db", "new", atomic.LoadUint64(&sm.BodiesNewSnapshot))
+					return RemoveBlocksData(db, tx, atomic.LoadUint64(&sm.BodiesNewSnapshot))
+				},
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Save bodies snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+					c, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
 					if err != nil {
 						return err
 					}
-				}
-				return c.Put(dbutils.CurrentHeadersSnapshotBlock, dbutils.EncodeBlockNumber(atomic.LoadUint64(&sm.HeadersNewSnapshot)))
-			},
+					if len(sm.BodiesNewSnapshotInfohash) == 20 {
+						err = c.Put(dbutils.CurrentBodiesSnapshotHash, sm.BodiesNewSnapshotInfohash)
+						if err != nil {
+							return err
+						}
+					}
+					return c.Put(dbutils.CurrentBodiesSnapshotBlock, dbutils.EncodeBlockNumber(atomic.LoadUint64(&sm.BodiesNewSnapshot)))
+				},
+			}
+		case "headers":
+			syncStages = []func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error{
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Prune headers db", "current", sm.HeadersCurrentSnapshot, "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+					return RemoveHeadersData(db, tx, sm.HeadersCurrentSnapshot, atomic.LoadUint64(&sm.HeadersNewSnapshot))
+				},
+				func(db ethdb.RoKV, tx ethdb.RwTx, toBlock uint64) error {
+					log.Info("Save headers snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+					c, err := tx.RwCursor(dbutils.BittorrentInfoBucket)
+					if err != nil {
+						return err
+					}
+					if len(sm.HeadersNewSnapshotInfohash) == 20 {
+						err = c.Put(dbutils.CurrentHeadersSnapshotHash, sm.HeadersNewSnapshotInfohash)
+						if err != nil {
+							return err
+						}
+					}
+					return c.Put(dbutils.CurrentHeadersSnapshotBlock, dbutils.EncodeBlockNumber(atomic.LoadUint64(&sm.HeadersNewSnapshot)))
+				},
+			}
 		}
+
 		for i := range syncStages {
 			innerErr := syncStages[i](dbi, rwTX, migrateToBlock)
 			if innerErr != nil {
@@ -251,7 +339,7 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 				continue
 			}
 			if snapshotBlock != sm.HeadersCurrentSnapshot {
-				snapshotPath := path.Join(sm.snapshotsDir, snapshotName)
+				snapshotPath := filepath.Join(sm.snapshotsDir, snapshotName)
 				innerErr = os.RemoveAll(snapshotPath)
 				if innerErr != nil {
 					log.Warn("useless snapshot has't removed", "path", snapshotPath, "err", innerErr)
@@ -269,7 +357,7 @@ func CalculateEpoch(block, epochSize uint64) uint64 {
 }
 
 func SnapshotName(baseDir, name string, blockNum uint64) string {
-	return path.Join(baseDir, name) + strconv.FormatUint(blockNum, 10)
+	return filepath.Join(baseDir, name) + strconv.FormatUint(blockNum, 10)
 }
 
 func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
@@ -298,116 +386,4 @@ func GetSnapshotInfo(db ethdb.RwKV) (uint64, []byte, error) {
 		return 0, nil, err
 	}
 	return snapshotBlock, infohash, nil
-}
-
-func OpenHeadersSnapshot(dbPath string) (ethdb.RwKV, error) {
-	return kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-		}
-	}).Readonly().Path(dbPath).Open()
-}
-
-func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64, snapshotPath string) error {
-	// remove created snapshot if it's not saved in main db(to avoid append error)
-	err := os.RemoveAll(snapshotPath)
-	if err != nil {
-		return err
-	}
-	var snKV ethdb.RwKV
-	snKV, err = kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
-		}
-	}).Path(snapshotPath).Open()
-	if err != nil {
-		return err
-	}
-
-	sntx, err := snKV.BeginRw(context.Background())
-	if err != nil {
-		return fmt.Errorf("begin err: %w", err)
-	}
-	defer sntx.Rollback()
-
-	err = GenerateHeadersSnapshot(ctx, readTX, sntx, toBlock)
-	if err != nil {
-		return fmt.Errorf("generate err: %w", err)
-	}
-	err = sntx.Commit()
-	if err != nil {
-		return fmt.Errorf("commit err: %w", err)
-	}
-	snKV.Close()
-
-	return nil
-}
-
-func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, toBlock uint64) error {
-	headerCursor, err := sntx.RwCursor(dbutils.HeadersBucket)
-	if err != nil {
-		return err
-	}
-	var hash common.Hash
-	var header []byte
-	t := time.NewTicker(time.Second * 30)
-	defer t.Stop()
-	tt := time.Now()
-	for i := uint64(0); i <= toBlock; i++ {
-		if common.IsCanceled(ctx) {
-			return common.ErrStopped
-		}
-		select {
-		case <-t.C:
-			log.Info("Headers snapshot generation", "t", time.Since(tt), "block", i)
-		default:
-		}
-		hash, err = rawdb.ReadCanonicalHash(db, i)
-		if err != nil {
-			return err
-		}
-		header = rawdb.ReadHeaderRLP(db, hash, i)
-		if len(header) < 2 {
-			return fmt.Errorf("header %d is empty, %v", i, header)
-		}
-
-		err = headerCursor.Append(dbutils.HeaderKey(i, hash), header)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
-	log.Info("Remove data", "from", currentSnapshot, "to", newSnapshot)
-	if _, ok := db.(kv.SnapshotUpdater); !ok {
-		return errors.New("db don't implement snapshotUpdater interface")
-	}
-	headerSnapshot := db.(kv.SnapshotUpdater).SnapshotKV(dbutils.HeadersBucket)
-	if headerSnapshot == nil {
-		log.Info("headerSnapshot is empty")
-		return nil
-	}
-	writeTX := tx.(kv.DBTX).DBTX()
-	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
-	if err != nil {
-		return fmt.Errorf("get headers cursor %w", err)
-	}
-
-	return headerSnapshot.View(context.Background(), func(tx ethdb.Tx) error {
-		c2, err := tx.Cursor(dbutils.HeadersBucket)
-		if err != nil {
-			return err
-		}
-		defer c2.Close()
-		defer c2.Close()
-		return ethdb.Walk(c2, dbutils.EncodeBlockNumber(currentSnapshot), 0, func(k, v []byte) (bool, error) {
-			innerErr := c.Delete(k, nil)
-			if innerErr != nil {
-				return false, fmt.Errorf("remove %v err:%w", common.Bytes2Hex(k), innerErr)
-			}
-			return true, nil
-		})
-	})
 }

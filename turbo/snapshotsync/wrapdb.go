@@ -53,12 +53,14 @@ func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*Sn
 			log.Error("Can't open snapshot", "err", err)
 			return nil, err
 		} else { //nolint
-			buckets := make([]string, 0, 1)
-			for bucket := range BucketConfigs[k] {
-				buckets = append(buckets, bucket)
+			switch k {
+			case SnapshotType_headers:
+				snKV = snKV.HeadersSnapshot(snapshotKV)
+			case SnapshotType_bodies:
+				snKV = snKV.BodiesSnapshot(snapshotKV)
+			case SnapshotType_state:
+				snKV = snKV.StateSnapshot(snapshotKV)
 			}
-
-			snKV = snKV.SnapshotDB(buckets, snapshotKV)
 		}
 	}
 
@@ -88,7 +90,7 @@ func WrapSnapshots(chainDb ethdb.RwKV, snapshotsDir string) (ethdb.RwKV, error) 
 		if innerErr != nil {
 			return chainDb, innerErr
 		}
-		snKVOpts = snKVOpts.SnapshotDB([]string{dbutils.HeadersBucket}, snKV)
+		snKVOpts = snKVOpts.HeadersSnapshot(snKV)
 	}
 	return snKVOpts.Open(), nil
 }

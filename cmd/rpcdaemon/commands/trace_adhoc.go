@@ -532,7 +532,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(ctx, sd); err != nil {
+		if err = ibs.FinalizeTx(chainConfig.Rules(blockNumber), sd); err != nil {
 			return nil, err
 		}
 	}
@@ -786,7 +786,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(ctx, sd); err != nil {
+		if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
@@ -901,6 +901,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 	results := []*TraceCallResult{}
 
 	for txIndex, args := range callParams {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 		for _, traceType := range args.traceTypes {
@@ -959,18 +962,18 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			sdMap := make(map[common.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd := &StateDiff{sdMap: sdMap}
-			if err = ibs.FinalizeTx(ctx, sd); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
 				return nil, err
 			}
 			sd.CompareStates(initialIbs, ibs)
-			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
 				return nil, err
 			}
 		} else {
-			if err = ibs.FinalizeTx(ctx, noop); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules, noop); err != nil {
 				return nil, err
 			}
-			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
 				return nil, err
 			}
 		}

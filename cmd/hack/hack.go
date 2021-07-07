@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -30,7 +29,6 @@ import (
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
-	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -47,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -2074,6 +2073,93 @@ func scanTxs(chaindata string) error {
 	return nil
 }
 
+func scanReceipts3(chaindata string, block uint64) error {
+	dbdb := kv2.MustOpen(chaindata).RwKV()
+	defer dbdb.Close()
+	tx, err := dbdb.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var key [8]byte
+	var v []byte
+	binary.BigEndian.PutUint64(key[:], block)
+	if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+		return err
+	}
+	fmt.Printf("%x\n", v)
+	return nil
+}
+
+func scanReceipts2(chaindata string) error {
+	f, err := os.Create("receipts.txt")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	dbdb := kv2.MustOpen(chaindata).RwKV()
+	defer dbdb.Close()
+	tx, err := dbdb.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
+		return smErr
+	} else {
+		if !sm.History {
+			log.Warn("Could not perform this migration because history is not in storage mode")
+			return nil
+		}
+	}
+	fixedCount := 0
+	logInterval := 30 * time.Second
+	logEvery := time.NewTicker(logInterval)
+	var key [8]byte
+	var v []byte
+	for blockNum := uint64(1); true; blockNum++ {
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("Scanned", "block", blockNum, "fixed", fixedCount)
+		}
+		var hash common.Hash
+		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
+			return err
+		}
+		if hash == (common.Hash{}) {
+			break
+		}
+		binary.BigEndian.PutUint64(key[:], blockNum)
+		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+			return err
+		}
+		var receipts types.Receipts
+		if err = cbor.Unmarshal(&receipts, bytes.NewReader(v)); err == nil {
+			broken := false
+			for _, receipt := range receipts {
+				if receipt.CumulativeGasUsed < 10000 {
+					broken = true
+					break
+				}
+			}
+			if !broken {
+				continue
+			}
+		}
+		fmt.Fprintf(w, "%d %x\n", blockNum, v)
+		fixedCount++
+		if fixedCount > 100 {
+			break
+		}
+
+	}
+	tx.Rollback()
+	return nil
+}
+
 func scanReceipts(chaindata string, block uint64) error {
 	f, err := os.Create("fixed.txt")
 	if err != nil {
@@ -2146,24 +2232,40 @@ func scanReceipts(chaindata string, block uint64) error {
 			if !broken {
 				continue
 			}
+		} else {
+			// Receipt is using old CBOR encoding
+			var oldReceipts migrations.OldReceipts
+			if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
+				return err
+			}
+			var body *types.Body
+			if chainConfig.IsBerlin(blockNum) {
+				body = rawdb.ReadBody(tx, hash, blockNum)
+			}
+			receipts = make(types.Receipts, len(oldReceipts))
+			for i, oldReceipt := range oldReceipts {
+				receipts[i] = new(types.Receipt)
+				receipts[i].PostState = oldReceipt.PostState
+				receipts[i].Status = oldReceipt.Status
+				receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
+				if body != nil {
+					receipts[i].Type = body.Transactions[i].Type()
+				}
+			}
+			buf.Reset()
+			if err = cbor.Marshal(&buf, receipts); err != nil {
+				return err
+			}
+			if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+			fixedCount++
+			continue
 		}
 		var block *types.Block
-		//var senders []common.Address
 		if block, _, err = rawdb.ReadBlockWithSenders(tx, hash, blockNum); err != nil {
 			return err
 		}
-		/*
-			receipts = rawdb.ReadReceipts(tx, block, senders)
-			for _, receipt := range receipts {
-				receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			}
-			if chainConfig.IsByzantium(block.Number().Uint64()) {
-				receiptSha := types.DeriveSha(receipts)
-				if receiptSha == block.Header().ReceiptHash {
-					continue
-				}
-			}
-		*/
 
 		dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
@@ -2174,7 +2276,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			return err1
 		}
 		fix := true
-		if chainConfig.IsByzantium(block.Number().Uint64()) {
+		if chainConfig.IsByzantium(blockNum) {
 			receiptSha := types.DeriveSha(receipts1)
 			if receiptSha != block.Header().ReceiptHash {
 				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
@@ -2211,6 +2313,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	rules := chainConfig.Rules(block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, checkTEVM)
@@ -2227,59 +2330,12 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number.Uint64())
-		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
+		if err := ibs.CommitBlock(rules, blockWriter); err != nil {
 			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 		}
 	}
 
 	return receipts, nil
-}
-
-var txParseTests = []struct {
-	payloadStr  string
-	senderStr   string
-	idHashStr   string
-	signHashStr string
-}{
-	// Legacy unprotected
-	{payloadStr: "f86a808459682f0082520894fe3b557e8fb62b89f4916b721be55ceb828dbd73872386f26fc10000801ca0d22fc3eed9b9b9dbef9eec230aa3fb849eff60356c6b34e86155dca5c03554c7a05e3903d7375337f103cb9583d97a59dcca7472908c31614ae240c6a8311b02d6",
-		senderStr: "fe3b557e8fb62b89f4916b721be55ceb828dbd73", idHashStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
-		signHashStr: "e2b043ecdbcfed773fe7b5ffc2e23ec238081c77137134a06d71eedf9cdd81d3"},
-	// Legacy protected (EIP-155) from calveras, with chainId 123
-	{payloadStr: "f86d808459682f0082520894e80d2a018c813577f33f9e69387dc621206fb3a48856bc75e2d63100008082011aa04ae3cae463329a32573f4fbf1bd9b011f93aecf80e4185add4682a03ba4a4919a02b8f05f3f4858b0da24c93c2a65e51b2fbbecf5ffdf97c1f8cc1801f307dc107",
-		senderStr: "1041afbcb359d5a8dc58c15b2ff51354ff8a217d", idHashStr: "f4a91979624effdb45d2ba012a7995c2652b62ebbeb08cdcab00f4923807aa8a",
-		signHashStr: "ff44cf01ee9b831f09910309a689e8da83d19aa60bad325ee9154b7c25cf4de8"},
-	{payloadStr: "b86d02f86a7b80843b9aca00843b9aca0082520894e80d2a018c813577f33f9e69387dc621206fb3a48080c001a02c73a04cd144e5a84ceb6da942f83763c2682896b51f7922e2e2f9a524dd90b7a0235adda5f87a1d098e2739e40e83129ff82837c9042e6ad61d0481334dcb6f1a",
-		senderStr: "e80d2a018c813577f33f9e69387dc621206fb3a4", idHashStr: "1247438da30b5919f1401eff4422fd11added646eff41278cd5276a5d3df802e",
-		signHashStr: "34ef1790ebd860a84c73ba27576ae96621ec21e96f70935c94e8e24dc1b62f2b"},
-	{payloadStr: "b86e01f86b7b018203e882520894236ff1e97419ae93ad80cafbaa21220c5d78fb7d880de0b6b3a764000080c080a0987e3d8d0dcd86107b041e1dca2e0583118ff466ad71ad36a8465dd2a166ca2da02361c5018e63beea520321b290097cd749febc2f437c7cb41fdd085816742060",
-		senderStr: "4774e55994fce67b26c94716612c7048dcbf2dcd", idHashStr: "dec28fbfd19eb82ba91437922ea91d550d2861efb8cc7a4040b0f5efd3658284",
-		signHashStr: "1ee032826e5aa14bc7353bf9f3af8683fd9f657a779879ff562ddcab0ecda30a"},
-	{payloadStr: "f86780862d79883d2000825208945df9b87991262f6ba471f09758cde1c0fc1de734827a69801ca088ff6cf0fefd94db46111149ae4bfc179e9b94721fffd821d38d16464b3f71d0a045e0aff800961cfce805daef7016b9b675c137a6a41a548f7b60a3484c06a33a",
-		senderStr: "a1e4380a3b1f749673e270229993ee55f35663b4", idHashStr: "5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
-		signHashStr: "19b1e28c14f33e74b96b88eba97d4a4fc8a97638d72e972310025b7e1189b049"},
-	{payloadStr: "b903a301f9039f018218bf85105e34df0083048a949410a0847c2d170008ddca7c3a688124f49363003280b902e4c11695480000000000000000000000004b274e4a9af31c20ed4151769a88ffe63d9439960000000000000000000000008510211a852f0c5994051dd85eaef73112a82eb5000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000bad4de000000000000000000000000607816a600000000000000000000000000000000000000000000000000000000000002200000000000000000000000000000000000000000000000000000001146aa2600000000000000000000000000000000000000000000000000000000000001bc9b000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee000000000000000000000000482579f93dc13e6b434e38b5a0447ca543d88a4600000000000000000000000000000000000000000000000000000000000000c42df546f40000000000000000000000004b274e4a9af31c20ed4151769a88ffe63d943996000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000000000000007d93f93d41604572119e4be7757a7a4a43705f080000000000000000000000000000000000000000000000003782dace9d90000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000082b5a61569b5898ac347c82a594c86699f1981aa88ca46a6a00b8e4f27b3d17bdf3714e7c0ca6a8023b37cca556602fce7dc7daac3fcee1ab04bbb3b94c10dec301cc57266db6567aa073efaa1fa6669bdc6f0877b0aeab4e33d18cb08b8877f08931abf427f11bade042177db48ca956feb114d6f5d56d1f5889047189562ec545e1c000000000000000000000000000000000000000000000000000000000000f84ff7946856ccf24beb7ed77f1f24eee5742f7ece5557e2e1a00000000000000000000000000000000000000000000000000000000000000001d694b1dd690cc9af7bb1a906a9b5a94f94191cc553cec080a0d52f3dbcad3530e73fcef6f4a75329b569a8903bf6d8109a960901f251a37af3a00ecf570e0c0ffa6efdc6e6e49be764b6a1a77e47de7bb99e167544ffbbcd65bc",
-		senderStr: "1ced2cef30d40bb3617f8d455071b69f3b12d06f", idHashStr: "851bad0415758075a1eb86776749c829b866d43179c57c3e4a4b9359a0358231",
-		signHashStr: "894d999ea27537def37534b3d55df3fed4e1492b31e9f640774432d21cf4512c"},
-	{payloadStr: "b8d202f8cf7b038502540be40085174876e8008301869f94e77162b7d2ceb3625a4993bab557403a7b706f18865af3107a400080f85bf85994de0b295669a9fd93d5f28d9ec85e40f4cb697baef842a00000000000000000000000000000000000000000000000000000000000000003a0000000000000000000000000000000000000000000000000000000000000000780a0f73da48f3f5c9f324dfd28d106dcf911b53f33c92ae068cf6135352300e7291aa06ee83d0f59275d90000ac8cf912c6eb47261d244c9db19ffefc49e52869ff197",
-		senderStr: "0961ca10d49b9b8e371aa0bcf77fe5730b18f2e4", idHashStr: "27db095399b22dc311aaab4d9ed45195873fdff1288fdc7c4e6dc1bfb17c061a",
-		signHashStr: "35fbc0cd33a181e62b7432338f172106886a1396e1e3647ddf1e756740d81ae1"},
-}
-
-func testTxPool() error {
-	ctx := txpool.NewTxParseContext()
-	for _, tt := range txParseTests {
-		var payload []byte
-		var err error
-		if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
-			return err
-		}
-		if _, _, err = ctx.ParseTransaction(payload, 0); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func main() {
@@ -2442,9 +2498,11 @@ func main() {
 	case "scanReceipts":
 		err = scanReceipts(*chaindata, uint64(*block))
 
-	case "testTxPool":
-		err = testTxPool()
+	case "scanReceipts2":
+		err = scanReceipts2(*chaindata)
 
+	case "scanReceipts3":
+		err = scanReceipts3(*chaindata, uint64(*block))
 	}
 
 	if err != nil {

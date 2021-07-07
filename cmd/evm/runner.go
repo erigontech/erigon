@@ -273,11 +273,11 @@ func runCmd(ctx *cli.Context) error {
 	output, leftOverGas, stats, err := timedExec(bench, execFunc)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		ctx := context.Background()
+		var rules params.Rules
 		if chainConfig != nil {
-			ctx = chainConfig.WithEIPsFlags(context.Background(), runtimeConfig.BlockNumber.Uint64())
+			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64())
 		}
-		if err = statedb.CommitBlock(ctx, state.NewNoopWriter()); err != nil {
+		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}

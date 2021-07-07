@@ -51,7 +51,7 @@ func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block
 
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()
-	snkv = kv.NewSnapshotKV().SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}, snkv).DB(tmpDB).Open()
+	snkv = kv.NewSnapshotKV().StateSnapshot(snkv).DB(tmpDB).Open()
 	tx, err := snkv.BeginRw(context.Background())
 	if err != nil {
 		return err

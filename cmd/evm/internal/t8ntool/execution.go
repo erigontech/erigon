@@ -108,7 +108,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	}
 	var (
 		db          = kv.NewMemDatabase()
-		ibs         = MakePreState(context.Background(), db, pre.Pre)
+		ibs         = MakePreState(chainConfig.Rules(0), db, pre.Pre)
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -233,7 +233,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		ibs.AddBalance(pre.Env.Coinbase, minerReward)
 	}
 
-	err := ibs.FinalizeTx(context.Background(), state.NewDbStateWriter(db, 1))
+	err := ibs.FinalizeTx(chainConfig.Rules(1), state.NewDbStateWriter(db, 1))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -258,7 +258,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	return db.RwKV(), execRs, nil
 }
 
-func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc) *state.IntraBlockState {
+func MakePreState(chainRules params.Rules, db ethdb.Database, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
 	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
 	statedb := state.New(r)
@@ -278,10 +278,10 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(chainRules, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(ctx, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(chainRules, state.NewDbStateWriter(db, blockNr+1)); err != nil {
 		panic(err)
 	}
 	return statedb
