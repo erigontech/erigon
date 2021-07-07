@@ -94,7 +94,7 @@ func New(conf *Config) (*Node, error) {
 
 	node := &Node{
 		config:        conf,
-		inprocHandler: rpc.NewServer(),
+		inprocHandler: rpc.NewServer(50),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
 		databases:     make([]ethdb.Closer, 0),
