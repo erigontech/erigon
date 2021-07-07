@@ -11,7 +11,8 @@ import (
 )
 
 func BuildInfoBytesForSnapshot(root string, fileName string) (metainfo.Info, error) {
-	path := root + "/" + fileName
+
+	path := filepath.Join(root, fileName)
 	fi, err := os.Stat(path)
 	if err != nil {
 		return metainfo.Info{}, err
