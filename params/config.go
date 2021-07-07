@@ -293,10 +293,13 @@ var (
 		ChainID:        big.NewInt(77),
 		HomesteadBlock: big.NewInt(0),
 		DAOForkBlock:   nil,
-		DAOForkSupport: true,
-		EIP150Block:    big.NewInt(0),
-		EIP155Block:    big.NewInt(0),
-		EIP158Block:    big.NewInt(0),
+		DAOForkSupport: false,
+		EIP150Block:    nil,
+		EIP155Block:    nil,
+		EIP158Block:    nil,
+		//EIP150Block:    big.NewInt(0),
+		//EIP155Block:    big.NewInt(0),
+		//EIP158Block:    big.NewInt(0),
 		/*
 							"eip140Transition": "0x0",  in Byzantium
 							"eip211Transition": "0x0",  in Byzantium
@@ -334,6 +337,28 @@ var (
 		BerlinBlock:         big.NewInt(21050600),
 		//LondonBlock:         big.NewInt(21050600),
 		Aura: &AuRaConfig{},
+
+		/*
+				Mainnet also has:
+					"registrar": "0xe3389675d0338462dC76C6f9A3e432550c36A142",
+					"eip150Transition": "0x259518",
+					"eip160Transition": "0x28d138",
+					"eip161abcTransition": "0x28d138",
+					"eip161dTransition": "0x28d138",
+					"eip155Transition": "0x28d138",
+					"maxCodeSize": "0x6000",
+					"maxCodeSizeTransition": "0x28d138",
+
+
+			HomesteadBlock:      big.NewInt(1_150_000),
+				DAOForkBlock:        big.NewInt(1920000),
+				DAOForkSupport:      true,
+				EIP150Block:         big.NewInt(2_463_000),
+				EIP150Hash:          common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
+				EIP155Block:         big.NewInt(2_675_000),
+				EIP158Block:         big.NewInt(2_675_000),
+
+		*/
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -651,6 +676,9 @@ func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64) *Confi
 // CheckConfigForkOrder checks that we don't "skip" any forks, geth isn't pluggable enough
 // to guarantee that forks can be implemented in a different order than on official networks
 func (c *ChainConfig) CheckConfigForkOrder() error {
+	if c.ChainID.Uint64() == 77 {
+		return nil
+	}
 	type fork struct {
 		name     string
 		block    *big.Int
