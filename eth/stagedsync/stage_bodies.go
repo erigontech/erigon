@@ -244,7 +244,7 @@ func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesC
 	}
 
 	for blockHeight := bodiesProgress; blockHeight > u.UnwindPoint; blockHeight-- {
-		err = rawdb.MoveTransactionToNoneCanonical(tx, blockHeight)
+		err = rawdb.MoveTransactionToNonCanonical(tx, blockHeight)
 		if err != nil {
 			return err
 		}

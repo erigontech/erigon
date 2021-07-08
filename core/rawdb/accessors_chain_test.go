@@ -274,7 +274,7 @@ func TestTransactionStorage(t *testing.T) {
 	}
 
 	err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		err = MoveTransactionToNoneCanonical(tx, 2)
+		err = MoveTransactionToNonCanonical(tx, 2)
 		if err != nil {
 			return err
 		}

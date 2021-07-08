@@ -391,7 +391,7 @@ func ReadBody(db ethdb.KVGetter, hash common.Hash, number uint64) *types.Body {
 }
 
 // Important: it's possible to do only from the end of bucket. If you try to do not for the last block you can currupt the bucket
-func MoveTransactionToNoneCanonical(db ethdb.RwTx, number uint64) error {
+func MoveTransactionToNonCanonical(db ethdb.RwTx, number uint64) error {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return err
