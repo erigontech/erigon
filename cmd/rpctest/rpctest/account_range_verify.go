@@ -33,8 +33,6 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 	}
 	resultsKV := kv.NewMDBX().Path(tmpDataDir).MustOpen()
 	gethKV := kv.NewMDBX().Path(gethDataDir).MustOpen()
-	resultsDB := kv.NewObjectDatabase(resultsKV)
-	gethResultsDB := kv.NewObjectDatabase(gethKV)
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,
@@ -58,7 +56,7 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 		Result state.IteratorDump `json:"result"`
 	}
 
-	f := func(url string, db ethdb.Database) error {
+	f := func(url string, db ethdb.RwTx) error {
 		i := uint64(0)
 		reqGen := &RequestGenerator{
 			client: client,
@@ -97,13 +95,17 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 			next = ar.Result.Next
 		}
 	}
-	err = f(erigonURL, resultsDB)
+	err = resultsKV.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return f(erigonURL, tx)
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	if !notRegenerateGethData {
-		err = f(gethURL, gethResultsDB)
+		err = gethKV.Update(context.Background(), func(tx ethdb.RwTx) error {
+			return f(erigonURL, tx)
+		})
 		if err != nil {
 			log.Fatal(err)
 		}

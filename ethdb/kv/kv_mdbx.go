@@ -24,8 +24,6 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
-var _ DbCopier = &MdbxKV{}
-
 const expectMdbxVersionMajor = 0
 const expectMdbxVersionMinor = 10
 const pageSize = 4 * 1024
@@ -304,11 +302,6 @@ type MdbxKV struct {
 	buckets dbutils.BucketsCfg
 	opts    MdbxOpts
 	txSize  uint64
-}
-
-func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
-	opts := db.opts
-	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
 }
 
 // Close closes db
