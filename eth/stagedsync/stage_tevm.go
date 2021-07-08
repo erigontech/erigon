@@ -114,7 +114,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		defer tx.Rollback()
 	}
 
-	batch := kv.NewBatch(tx)
+	batch := kv.NewBatch(tx, quitCh)
 	defer batch.Rollback()
 
 	// read contracts pending for translation

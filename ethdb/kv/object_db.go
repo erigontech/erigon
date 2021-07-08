@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -281,14 +280,6 @@ func (db *ObjectDatabase) RwKV() ethdb.RwKV {
 
 func (db *ObjectDatabase) SetRwKV(kv ethdb.RwKV) {
 	db.kv = kv
-}
-
-func (db *ObjectDatabase) NewBatch() ethdb.DbWithPendingMutations {
-	m := &mutation{
-		db:   db,
-		puts: btree.New(32),
-	}
-	return m
 }
 
 func (db *ObjectDatabase) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {
