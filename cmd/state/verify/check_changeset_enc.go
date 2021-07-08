@@ -11,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"golang.org/x/sync/errgroup"
 )
@@ -79,32 +80,32 @@ func CheckEnc(chaindata string) error {
 		defer func() {
 			close(stop)
 		}()
+		return db.View(context.Background(), func(tx ethdb.Tx) error {
+			return tx.ForEach(dbutils.StorageChangeSetBucket, []byte{}, func(k, v []byte) error {
+				if i%100_000 == 0 {
+					blockNum := binary.BigEndian.Uint64(k)
+					fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",
+						i/1000,
+						blockNum,
+						atomic.LoadUint64(&currentSize),
+						atomic.LoadUint64(&newSize),
+						time.Since(startTime))
+				}
 
-		return db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-			if i%100_000 == 0 {
-				blockNum := binary.BigEndian.Uint64(k)
-				fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",
-					i/1000,
-					blockNum,
-					atomic.LoadUint64(&currentSize),
-					atomic.LoadUint64(&newSize),
-					time.Since(startTime))
-			}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
 
-			select {
-			case <-ctx.Done():
-				return false, nil
-			default:
+				}
 
-			}
-
-			i++
-			ch <- struct {
-				k []byte
-				v []byte
-			}{k: k, v: v}
-
-			return true, nil
+				i++
+				ch <- struct {
+					k []byte
+					v []byte
+				}{k: k, v: v}
+				return nil
+			})
 		})
 	})
 	err := g.Wait()

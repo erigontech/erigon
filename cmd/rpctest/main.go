@@ -22,7 +22,6 @@ func main() {
 		erigonURL   string
 		blockFrom   uint64
 		blockTo     uint64
-		chaindata   string
 		recordFile  string
 	)
 	withErigonUrl := func(cmd *cobra.Command) {
@@ -135,18 +134,15 @@ func main() {
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
 
-	var bench10Cmd = &cobra.Command{
-		Use:   "bench10",
+	var benchTraceTransactionCmd = &cobra.Command{
+		Use:   "benchTraceTransaction",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench10(erigonURL, gethURL, blockFrom, blockTo, recordFile)
-			if err != nil {
-				log.Error("bench 10 err", "err", err)
-			}
+			rpctest.BenchTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench10Cmd, withGethUrl, withErigonUrl, withBlockNum, withRecord)
+	with(benchTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench11Cmd = &cobra.Command{
 		Use:   "bench11",
@@ -198,27 +194,15 @@ func main() {
 	}
 	with(benchTraceFilterCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
-	var proofsCmd = &cobra.Command{
-		Use:   "proofs",
+	var benchTxReceiptCmd = &cobra.Command{
+		Use:   "benchTxReceipt",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Proofs(chaindata, gethURL, blockFrom)
+			rpctest.BenchTxReceipt(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	proofsCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
-	with(proofsCmd, withGethUrl, withBlockNum)
-
-	var fixStateCmd = &cobra.Command{
-		Use:   "fixstate",
-		Short: "",
-		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.FixState(chaindata, gethURL)
-		},
-	}
-	fixStateCmd.Flags().StringVar(&chaindata, "chaindata", "", "")
-	with(fixStateCmd, withGethUrl)
+	with(benchTxReceiptCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var replayCmd = &cobra.Command{
 		Use:   "replay",
@@ -261,14 +245,13 @@ func main() {
 		bench7Cmd,
 		bench8Cmd,
 		bench9Cmd,
-		bench10Cmd,
+		benchTraceTransactionCmd,
 		bench11Cmd,
 		bench12Cmd,
 		bench13Cmd,
 		benchTraceBlockCmd,
 		benchTraceFilterCmd,
-		proofsCmd,
-		fixStateCmd,
+		benchTxReceiptCmd,
 		compareAccountRange,
 		replayCmd,
 	)

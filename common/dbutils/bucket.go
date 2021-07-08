@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 )
 
 // DBSchemaVersion
@@ -187,12 +187,9 @@ const TrieOfStorageBucket = "TrieStorage"
 
 const (
 	// DatabaseInfoBucket is used to store information about data layout.
-	DatabaseInfoBucket        = "DbInfo"
-	SnapshotInfoBucket        = "SnapshotInfo"
-	BittorrentInfoBucket      = "BittorrentInfo"
-	HeadersSnapshotInfoBucket = "HeadersSnapshotInfo"
-	BodiesSnapshotInfoBucket  = "BodiesSnapshotInfo"
-	StateSnapshotInfoBucket   = "StateSnapshotInfo"
+	DatabaseInfoBucket   = "DbInfo"
+	SnapshotInfoBucket   = "SnapshotInfo"
+	BittorrentInfoBucket = "BittorrentInfo"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefixOld    = "h"            // block_num_u64 + hash -> header
@@ -261,6 +258,8 @@ const (
 
 	Sequence      = "Sequence" // tbl_name -> seq_u64
 	HeadHeaderKey = "LastHeader"
+
+	Epoch = "Epoch"
 )
 
 // Keys
@@ -278,14 +277,11 @@ var (
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
-	SnapshotHeadersHeadNumber = "SnapshotLastHeaderNumber"
-	SnapshotHeadersHeadHash   = "SnapshotLastHeaderHash"
-	SnapshotBodyHeadNumber    = "SnapshotLastBodyNumber"
-	SnapshotBodyHeadHash      = "SnapshotLastBodyHash"
-
 	BittorrentPeerID            = "peerID"
 	CurrentHeadersSnapshotHash  = []byte("CurrentHeadersSnapshotHash")
 	CurrentHeadersSnapshotBlock = []byte("CurrentHeadersSnapshotBlock")
+	CurrentBodiesSnapshotHash   = []byte("CurrentBodiesSnapshotHash")
+	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 )
 
 // Buckets - list of all buckets. App will panic if some bucket is not in this list.
@@ -322,9 +318,6 @@ var Buckets = []string{
 	LogTopicIndex,
 	LogAddressIndex,
 	SnapshotInfoBucket,
-	HeadersSnapshotInfoBucket,
-	BodiesSnapshotInfoBucket,
-	StateSnapshotInfoBucket,
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,

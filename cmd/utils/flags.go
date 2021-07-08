@@ -31,7 +31,6 @@ import (
 	"text/template"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -40,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
@@ -1185,18 +1183,18 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 }
 
 // SetEthConfig applies eth-related command line flags to the config.
-func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
+func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
 	CheckExclusive(ctx, MinerSigningKeyFlag, MinerEtherbaseFlag)
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
-	setEthash(ctx, stack.Config().DataDir, cfg)
-	setClique(ctx, &cfg.Clique, stack.Config().DataDir)
-	setAuRa(ctx, &cfg.Aura, stack.Config().DataDir)
+	setEthash(ctx, nodeConfig.DataDir, cfg)
+	setClique(ctx, &cfg.Clique, nodeConfig.DataDir)
+	setAuRa(ctx, &cfg.Aura, nodeConfig.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
-	cfg.P2PEnabled = len(stack.Config().P2P.SentryAddr) == 0
+	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
@@ -1292,19 +1290,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 		// Create a new developer genesis block or reuse existing one
 		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), developer)
-		if ctx.GlobalIsSet(DataDirFlag.Name) {
-			// Check if we have an already initialized chain and fall back to
-			// that if so. Otherwise we need to generate a new genesis spec.
-			chaindb := MakeChainDatabase(ctx, stack)
-			h, err := rawdb.ReadCanonicalHash(chaindb, 0)
-			if err != nil {
-				panic(err)
-			}
-			if h != (common.Hash{}) {
-				cfg.Genesis = nil // fallback to db content
-			}
-			chaindb.Close()
-		}
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
@@ -1343,8 +1328,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(ctx *cli.Context, stack *node.Node) *kv.ObjectDatabase {
-	chainDb, err := stack.OpenDatabase(ethdb.Chain, stack.Config().DataDir)
+func MakeChainDatabase(cfg *node.Config) ethdb.RwKV {
+	chainDb, err := node.OpenDatabase(cfg, ethdb.Chain)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}

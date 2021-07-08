@@ -18,7 +18,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
@@ -702,10 +701,10 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
-	emptyRemoval := params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()
+func updateAccount(EIP158Enabled bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
+	emptyRemoval := EIP158Enabled && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
-		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
+		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
 		}
 		stateObject.deleted = true
@@ -723,10 +722,10 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 				return err
 			}
 		}
-		if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
+		if err := stateObject.updateTrie(stateWriter); err != nil {
 			return err
 		}
-		if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
+		if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 			return err
 		}
 	}
@@ -734,7 +733,7 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 }
 
 // FinalizeTx should be called after every transaction.
-func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWriter) error {
+func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		stateObject, exist := sdb.stateObjects[addr]
 		if !exist {
@@ -747,7 +746,7 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			continue
 		}
 
-		if err := updateAccount(ctx, stateWriter, addr, stateObject, true); err != nil {
+		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, true); err != nil {
 			return err
 		}
 
@@ -760,13 +759,13 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWriter) error {
+func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(ctx, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err
 		}
 	}

@@ -36,7 +36,7 @@ type OldReceipt struct {
 
 type OldReceipts []*OldReceipt
 
-var receiptCbor = Migration{
+var ReceiptCbor = Migration{
 	Name: "receipt_cbor",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
 		var tx ethdb.RwTx

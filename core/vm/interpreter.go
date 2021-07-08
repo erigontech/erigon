@@ -85,21 +85,21 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case evm.chainRules.IsLondon:
+	case evm.ChainRules.IsLondon:
 		jt = &londonInstructionSet
-	case evm.chainRules.IsBerlin:
+	case evm.ChainRules.IsBerlin:
 		jt = &berlinInstructionSet
-	case evm.chainRules.IsIstanbul:
+	case evm.ChainRules.IsIstanbul:
 		jt = &istanbulInstructionSet
-	case evm.chainRules.IsConstantinople:
+	case evm.ChainRules.IsConstantinople:
 		jt = &constantinopleInstructionSet
-	case evm.chainRules.IsByzantium:
+	case evm.ChainRules.IsByzantium:
 		jt = &byzantiumInstructionSet
-	case evm.chainRules.IsEIP158:
+	case evm.ChainRules.IsEIP158:
 		jt = &spuriousDragonInstructionSet
-	case evm.chainRules.IsEIP150:
+	case evm.ChainRules.IsEIP150:
 		jt = &tangerineWhistleInstructionSet
-	case evm.chainRules.IsHomestead:
+	case evm.ChainRules.IsHomestead:
 		jt = &homesteadInstructionSet
 	default:
 		jt = &frontierInstructionSet
@@ -217,7 +217,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// If the operation is valid, enforce and write restrictions
-		if in.readOnly && in.evm.chainRules.IsByzantium {
+		if in.readOnly && in.evm.ChainRules.IsByzantium {
 			// If the interpreter is operating in readonly mode, make sure no
 			// state-modifying operation is performed. The 3rd stack item
 			// for a call operation is the value. Transferring value from one

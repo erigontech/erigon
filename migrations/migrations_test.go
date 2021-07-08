@@ -15,7 +15,7 @@ import (
 )
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), kv.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestKV(t)
 	m := []Migration{
 		{
 			"one",
@@ -36,7 +36,7 @@ func TestApplyWithInit(t *testing.T) {
 	err := migrator.Apply(db, "")
 	require.NoError(err)
 	var applied map[string][]byte
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
@@ -51,7 +51,7 @@ func TestApplyWithInit(t *testing.T) {
 	// apply again
 	err = migrator.Apply(db, "")
 	require.NoError(err)
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(applied, applied2)
@@ -61,7 +61,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), kv.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestKV(t)
 	m := []Migration{
 		{
 			"one",
@@ -77,7 +77,9 @@ func TestApplyWithoutInit(t *testing.T) {
 			},
 		},
 	}
-	err := db.Put(dbutils.Migrations, []byte(m[0].Name), []byte{1})
+	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.Put(dbutils.Migrations, []byte(m[0].Name), []byte{1})
+	})
 	require.NoError(err)
 
 	migrator := NewMigrator(ethdb.Chain)
@@ -86,7 +88,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	var applied map[string][]byte
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
@@ -103,7 +105,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	err = migrator.Apply(db, "")
 	require.NoError(err)
 
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(applied, applied2)
@@ -114,7 +116,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), kv.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestKV(t)
 	m := []Migration{
 		{
 			"one",
@@ -130,7 +132,9 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 			},
 		},
 	}
-	err := db.Put(dbutils.Migrations, []byte(m[1].Name), []byte{1}) // apply non-first migration
+	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.Put(dbutils.Migrations, []byte(m[1].Name), []byte{1}) // apply non-first migration
+	})
 	require.NoError(err)
 
 	migrator := NewMigrator(ethdb.Chain)
@@ -139,7 +143,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	var applied map[string][]byte
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 
@@ -155,7 +159,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	// apply again
 	err = migrator.Apply(db, "")
 	require.NoError(err)
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(applied, applied2)
@@ -165,12 +169,13 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestMarshalStages(t *testing.T) {
-	require, db := require.New(t), kv.NewTestDB(t)
+	require := require.New(t)
+	_, tx := kv.NewTestTx(t)
 
-	err := stages.SaveStageProgress(db, stages.Execution, 42)
+	err := stages.SaveStageProgress(tx, stages.Execution, 42)
 	require.NoError(err)
 
-	data, err := MarshalMigrationPayload(db)
+	data, err := MarshalMigrationPayload(tx)
 	require.NoError(err)
 
 	res, err := UnmarshalMigrationPayload(data)
@@ -183,7 +188,7 @@ func TestMarshalStages(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), kv.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestKV(t)
 	m := []Migration{
 		{
 			Name: "repeated_name",
@@ -204,7 +209,7 @@ func TestValidation(t *testing.T) {
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
 
 	var applied map[string][]byte
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(0, len(applied))
@@ -214,7 +219,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), kv.NewTestDB(t)
+	require, db := require.New(t), kv.NewTestKV(t)
 	m := []Migration{
 		{
 			Name: "one",
@@ -229,7 +234,7 @@ func TestCommitCallRequired(t *testing.T) {
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))
 
 	var applied map[string][]byte
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		applied, err = AppliedMigrations(tx, false)
 		require.NoError(err)
 		require.Equal(0, len(applied))

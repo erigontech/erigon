@@ -225,8 +225,7 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 		"delivery /second", common.StorageSize(speed),
 		"wasted /second", common.StorageSize(wastedSpeed),
 		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys),
-		"numGC", int(m.NumGC))
+		"sys", common.StorageSize(m.Sys))
 }
 
 func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesCfg) error {

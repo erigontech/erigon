@@ -55,7 +55,7 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, tmpdir string) (d
 		log.Info(
 			"Flushed buffer file",
 			"name", bufferFile.Name(),
-			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys), "numGC", int(m.NumGC))
+			"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	}()
 
 	encoder.Reset(w)

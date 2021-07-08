@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"time"
 
@@ -90,16 +89,6 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 		}
 	}
 
-	err = snTx.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadNumber), big.NewInt(0).SetUint64(toBlock).Bytes())
-	if err != nil {
-		log.Crit("SnapshotHeadersHeadNumber error", "err", err)
-		return err
-	}
-	err = snTx.Put(dbutils.HeadersSnapshotInfoBucket, []byte(dbutils.SnapshotHeadersHeadHash), hash.Bytes())
-	if err != nil {
-		log.Crit("SnapshotHeadersHeadHash error", "err", err)
-		return err
-	}
 	if err = snTx.Commit(); err != nil {
 		return err
 	}

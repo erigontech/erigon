@@ -262,11 +262,11 @@ func (dbs *PlainDBState) ReadAccountIncarnation(address common.Address) (uint64,
 	return acc.Incarnation - 1, nil
 }
 
-func (dbs *PlainDBState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
+func (dbs *PlainDBState) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (dbs *PlainDBState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
+func (dbs *PlainDBState) DeleteAccount(address common.Address, original *accounts.Account) error {
 	return nil
 }
 
@@ -274,7 +274,7 @@ func (dbs *PlainDBState) UpdateAccountCode(address common.Address, incarnation u
 	return nil
 }
 
-func (dbs *PlainDBState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (dbs *PlainDBState) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()
@@ -470,11 +470,11 @@ func (s *PlainKVState) ReadAccountIncarnation(address common.Address) (uint64, e
 	return acc.Incarnation - 1, nil
 }
 
-func (s *PlainKVState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
+func (s *PlainKVState) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (s *PlainKVState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
+func (s *PlainKVState) DeleteAccount(address common.Address, original *accounts.Account) error {
 	return nil
 }
 
@@ -482,7 +482,7 @@ func (s *PlainKVState) UpdateAccountCode(address common.Address, incarnation uin
 	return nil
 }
 
-func (s *PlainKVState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (s *PlainKVState) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	t, ok := s.storage[address]
 	if !ok {
 		t = llrb.New()

@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
+//nolint
 func prepareBuckets(customBuckets dbutils.BucketsCfg) {
 	if len(customBuckets) == 0 {
 		return

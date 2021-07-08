@@ -132,8 +132,8 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 	refDB := kv.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
-	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		if err := refDB.RwKV().View(context.Background(), func(refTX ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		if err := refDB.View(context.Background(), func(refTX ethdb.Tx) error {
 			for _, bucket := range stateBuckets {
 				fmt.Printf("\nBucket: %s\n", bucket)
 				if err := compareBuckets(ctx, tx, bucket, refTX, bucket); err != nil {
@@ -158,8 +158,8 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 	refDB := kv.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
-	if err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		return refDB.RwKV().View(context.Background(), func(refTX ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		return refDB.View(context.Background(), func(refTX ethdb.Tx) error {
 			return compareBuckets(ctx, tx, bucket, refTX, bucket)
 		})
 	}); err != nil {

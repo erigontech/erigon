@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/log"
 	"sync"
 	"unsafe"
 
@@ -23,8 +24,10 @@ var (
 )
 
 type SnapshotUpdater interface {
-	UpdateSnapshots(buckets []string, snapshotKV ethdb.RoKV, done chan struct{})
-	SnapshotKV(bucket string) ethdb.RoKV
+	UpdateSnapshots(tp string, snapshotKV ethdb.RoKV, done chan struct{})
+	HeadersSnapshot() ethdb.RoKV
+	BodiesSnapshot() ethdb.RoKV
+	StateSnapshot() ethdb.RoKV
 }
 
 type WriteDB interface {
@@ -35,20 +38,23 @@ func NewSnapshotKV() snapshotOpts {
 	return snapshotOpts{}
 }
 
-type snapshotData struct {
-	snapshot ethdb.RoKV
-	buckets  []string
-}
 type snapshotOpts struct {
-	db        ethdb.RwKV
-	snapshots []snapshotData
+	db              ethdb.RwKV
+	headersSnapshot ethdb.RoKV
+	bodiesSnapshot  ethdb.RoKV
+	stateSnapshot   ethdb.RoKV
 }
 
-func (opts snapshotOpts) SnapshotDB(buckets []string, db ethdb.RoKV) snapshotOpts {
-	opts.snapshots = append(opts.snapshots, snapshotData{
-		buckets:  buckets,
-		snapshot: db,
-	})
+func (opts snapshotOpts) HeadersSnapshot(kv ethdb.RoKV) snapshotOpts {
+	opts.headersSnapshot = kv
+	return opts
+}
+func (opts snapshotOpts) BodiesSnapshot(kv ethdb.RoKV) snapshotOpts {
+	opts.bodiesSnapshot = kv
+	return opts
+}
+func (opts snapshotOpts) StateSnapshot(kv ethdb.RoKV) snapshotOpts {
+	opts.stateSnapshot = kv
 	return opts
 }
 
@@ -58,22 +64,20 @@ func (opts snapshotOpts) DB(db ethdb.RwKV) snapshotOpts {
 }
 
 func (opts snapshotOpts) Open() *SnapshotKV {
-	snapshots := make(map[string]snapshotData)
-	for i, v := range opts.snapshots {
-		for _, bucket := range v.buckets {
-			snapshots[bucket] = opts.snapshots[i]
-		}
-	}
 	return &SnapshotKV{
-		snapshots: snapshots,
-		db:        opts.db,
+		headersSnapshot: opts.headersSnapshot,
+		bodiesSnapshot:  opts.bodiesSnapshot,
+		stateSnapshot:   opts.stateSnapshot,
+		db:              opts.db,
 	}
 }
 
 type SnapshotKV struct {
-	db        ethdb.RwKV
-	snapshots map[string]snapshotData
-	mtx       sync.RWMutex
+	db              ethdb.RwKV
+	headersSnapshot ethdb.RoKV
+	bodiesSnapshot  ethdb.RoKV
+	stateSnapshot   ethdb.RoKV
+	mtx             sync.RWMutex
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx ethdb.Tx) error) error {
@@ -100,75 +104,113 @@ func (s *SnapshotKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) er
 }
 
 func (s *SnapshotKV) Close() {
-	s.db.Close()
-	for i := range s.snapshots {
-		s.snapshots[i].snapshot.Close()
+	defer s.db.Close()
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if s.headersSnapshot != nil {
+		defer s.headersSnapshot.Close()
+	}
+	if s.bodiesSnapshot != nil {
+		defer s.bodiesSnapshot.Close()
+	}
+	if s.stateSnapshot != nil {
+		defer s.stateSnapshot.Close()
 	}
 }
 
-func (s *SnapshotKV) UpdateSnapshots(buckets []string, snapshotKV ethdb.RoKV, done chan struct{}) {
-	sd := snapshotData{
-		buckets:  buckets,
-		snapshot: snapshotKV,
-	}
-
-	toClose := []ethdb.RoKV{}
-	var (
-		snData snapshotData
-		ok     bool
-	)
+func (s *SnapshotKV) UpdateSnapshots(tp string, snapshotKV ethdb.RoKV, done chan struct{}) {
+	var toClose ethdb.RoKV
 	s.mtx.Lock()
-	for _, bucket := range buckets {
-		snData, ok = s.snapshots[bucket]
-		if ok {
-			toClose = append(toClose, snData.snapshot)
-		}
-		s.snapshots[bucket] = sd
+	defer s.mtx.Unlock()
+	switch {
+	case tp == "headers":
+		toClose = s.headersSnapshot
+		s.headersSnapshot = snapshotKV
+	case tp == "bodies":
+		toClose = s.bodiesSnapshot
+		s.bodiesSnapshot = snapshotKV
+	case tp == "state":
+		toClose = s.stateSnapshot
+		s.stateSnapshot = snapshotKV
+	default:
+		log.Error("incorrect type", "tp", tp)
 	}
-	s.mtx.Unlock()
 
 	go func() {
-		wg := sync.WaitGroup{}
-		wg.Add(len(toClose))
-
-		for i := range toClose {
-			i := i
-			go func() {
-				defer wg.Done()
-				toClose[i].Close()
-			}()
+		if toClose != nil {
+			toClose.Close()
 		}
-		wg.Wait()
 		done <- struct{}{}
+		log.Info("old snapshot closed", "tp", tp)
 	}()
 }
 
 func (s *SnapshotKV) WriteDB() ethdb.RwKV {
 	return s.db
 }
-func (s *SnapshotKV) SnapshotKV(bucket string) ethdb.RoKV {
-	return s.snapshots[bucket].snapshot
+
+//todo
+func (s *SnapshotKV) HeadersSnapshot() ethdb.RoKV {
+	return s.headersSnapshot
+}
+func (s *SnapshotKV) BodiesSnapshot() ethdb.RoKV {
+	return s.bodiesSnapshot
+}
+func (s *SnapshotKV) StateSnapshot() ethdb.RoKV {
+	return s.stateSnapshot
 }
 
+func (s *SnapshotKV) snapsthotsTx(ctx context.Context) (ethdb.Tx, ethdb.Tx, ethdb.Tx, error) {
+	var headersTX, bodiesTX, stateTX ethdb.Tx
+	var err error
+	defer func() {
+		if err != nil {
+			if headersTX != nil {
+				headersTX.Rollback()
+			}
+			if bodiesTX != nil {
+				bodiesTX.Rollback()
+			}
+			if stateTX != nil {
+				stateTX.Rollback()
+			}
+		}
+	}()
+	if s.headersSnapshot != nil {
+		headersTX, err = s.headersSnapshot.BeginRo(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if s.bodiesSnapshot != nil {
+		bodiesTX, err = s.bodiesSnapshot.BeginRo(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if s.stateSnapshot != nil {
+		stateTX, err = s.stateSnapshot.BeginRo(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return headersTX, bodiesTX, stateTX, nil
+}
 func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	dbTx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
+	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &snTX{
 		dbTX:      dbTx,
-		snapshots: s.copySnapshots(),
-		snTX:      map[string]ethdb.Tx{},
+		headersTX: headersTX,
+		bodiesTX:  bodiesTX,
+		stateTX:   stateTX,
 	}, nil
-}
-func (s *SnapshotKV) copySnapshots() map[string]snapshotData {
-	s.mtx.RLock()
-	defer s.mtx.RUnlock()
-	mp := make(map[string]snapshotData, len(s.snapshots))
-	for i := range s.snapshots {
-		mp[i] = s.snapshots[i]
-	}
-	return mp
 }
 
 func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
@@ -176,10 +218,17 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &snTX{
 		dbTX:      dbTx,
-		snapshots: s.copySnapshots(),
-		snTX:      map[string]ethdb.Tx{},
+		headersTX: headersTX,
+		bodiesTX:  bodiesTX,
+		stateTX:   stateTX,
 	}, nil
 }
 
@@ -191,8 +240,9 @@ var ErrUnavailableSnapshot = errors.New("unavailable snapshot")
 
 type snTX struct {
 	dbTX      ethdb.Tx
-	snapshots map[string]snapshotData
-	snTX      map[string]ethdb.Tx
+	headersTX ethdb.Tx
+	bodiesTX  ethdb.Tx
+	stateTX   ethdb.Tx
 }
 
 type DBTX interface {
@@ -347,20 +397,18 @@ func (s *snTX) CollectMetrics() {
 }
 
 func (s *snTX) getSnapshotTX(bucket string) (ethdb.Tx, error) {
-	tx, ok := s.snTX[bucket]
-	if ok {
-		return tx, nil
+	var tx ethdb.Tx
+	switch bucket {
+	case dbutils.HeadersBucket:
+		tx = s.headersTX
+	case dbutils.BlockBodyPrefix, dbutils.EthTx:
+		tx = s.bodiesTX
+	case dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket:
+		tx = s.stateTX
 	}
-	sn, ok := s.snapshots[bucket]
-	if !ok {
+	if tx == nil {
 		return nil, fmt.Errorf("%s  %w", bucket, ErrUnavailableSnapshot)
 	}
-	var err error
-	tx, err = sn.snapshot.BeginRo(context.TODO())
-	if err != nil {
-		return nil, err
-	}
-	s.snTX[bucket] = tx
 	return tx, nil
 }
 
@@ -444,23 +492,29 @@ func (s *snTX) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker
 		if err := walker(k, v); err != nil {
 			return err
 		}
+		amount--
 	}
 	return nil
 }
 
 func (s *snTX) Commit() error {
-	for i := range s.snTX {
-		defer s.snTX[i].Rollback()
-	}
+	defer s.snapshotsRollback()
 	return s.dbTX.Commit()
 }
-
-func (s *snTX) Rollback() {
-	for i := range s.snTX {
-		defer s.snTX[i].Rollback()
+func (s *snTX) snapshotsRollback() {
+	if s.headersTX != nil {
+		defer s.headersTX.Rollback()
 	}
+	if s.bodiesTX != nil {
+		defer s.bodiesTX.Rollback()
+	}
+	if s.stateTX != nil {
+		defer s.stateTX.Rollback()
+	}
+}
+func (s *snTX) Rollback() {
+	defer s.snapshotsRollback()
 	s.dbTX.Rollback()
-
 }
 
 func (s *snTX) BucketSize(bucket string) (uint64, error) {
@@ -472,7 +526,7 @@ func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 }
 
 func (s *snTX) ReadSequence(bucket string) (uint64, error) {
-	panic("implement me")
+	return s.dbTX.ReadSequence(bucket)
 }
 
 func (s *snTX) CHandle() unsafe.Pointer {

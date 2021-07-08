@@ -188,8 +188,8 @@ func TestPeerDisconnect(t *testing.T) {
 	}
 	select {
 	case reason := <-disc:
-		if reason != DiscQuitting {
-			t.Errorf("run returned wrong reason: got %v, want %v", reason, DiscQuitting)
+		if !strings.Contains(reason.Error(), DiscQuitting.Error()) {
+			t.Errorf("run returned wrong reason: got %v, want %v", reason.Error(), DiscQuitting.Error())
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Error("peer did not return")

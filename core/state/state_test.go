@@ -23,6 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/params"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -34,8 +35,8 @@ import (
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {
-	db    ethdb.Database
-	kv    ethdb.RwKV // Same as db, but with a different interface
+	kv    ethdb.RwKV
+	tx    ethdb.RwTx
 	state *IntraBlockState
 	r     StateReader
 	w     StateWriter
@@ -53,16 +54,15 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj3.SetBalance(uint256.NewInt(44))
 
 	// write some of them to the trie
-	ctx := context.TODO()
-	err := s.w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := s.w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
-	err = s.w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
-	c.Check(err, checker.IsNil)
-
-	err = s.state.FinalizeTx(ctx, s.w)
+	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(ctx, s.w)
+	err = s.state.FinalizeTx(params.Rules{}, s.w)
+	c.Check(err, checker.IsNil)
+
+	err = s.state.CommitBlock(params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
@@ -102,12 +102,20 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	db := kv.NewMemDatabase()
-	s.db = db
-	s.kv = db.RwKV()
-	s.r = NewDbStateReader(s.db)
-	s.w = NewDbStateWriter(s.db, 0)
+	s.kv = kv.NewMemKV()
+	tx, err := s.kv.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	s.tx = tx
+	s.r = NewPlainKvState(tx, 0)
+	s.w = NewPlainKvState(tx, 0)
 	s.state = New(s.r)
+}
+
+func (s *StateSuite) TearDownTest(c *checker.C) {
+	s.tx.Rollback()
+	s.kv.Close()
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
@@ -118,11 +126,10 @@ func (s *StateSuite) TestNull(c *checker.C) {
 
 	s.state.SetState(address, &common.Hash{}, value)
 
-	ctx := context.TODO()
-	err := s.state.FinalizeTx(ctx, s.w)
+	err := s.state.FinalizeTx(params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(ctx, s.w)
+	err = s.state.CommitBlock(params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
 	s.state.GetCommittedState(address, &common.Hash{}, &value)
@@ -169,11 +176,9 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-
-	db := kv.NewMemDatabase()
-	ctx := context.TODO()
-	w := NewDbStateWriter(db, 0)
-	state := New(NewDbStateReader(db))
+	_, tx := kv.NewTestTx(t)
+	w := NewPlainKvState(tx, 0)
+	state := New(NewPlainKvState(tx, 0))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -194,13 +199,13 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	err := state.FinalizeTx(ctx, w)
+	err := state.FinalizeTx(params.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewDbStateWriter(db, 1)
+	w = NewPlainKvState(tx, 1)
 
-	err = state.CommitBlock(ctx, w)
+	err = state.CommitBlock(params.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -300,23 +305,22 @@ func TestDump(t *testing.T) {
 	obj3.SetBalance(uint256.NewInt(44))
 
 	// write some of them to the trie
-	ctx := context.TODO()
-	err := w.UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	err := w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = w.UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = state.FinalizeTx(ctx, w)
+	err = state.FinalizeTx(params.Rules{}, w)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	blockWriter := NewPlainStateWriter(tx, tx, 1)
-	err = state.CommitBlock(ctx, blockWriter)
+	err = state.CommitBlock(params.Rules{}, blockWriter)
 	if err != nil {
 		t.Fatal(err)
 	}

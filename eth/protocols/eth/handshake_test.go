@@ -46,7 +46,7 @@ func testHandshake(t *testing.T, protocol uint) {
 	// Create a test backend only to have some valid genesis chain
 	backend := newTestBackend(t, 3)
 
-	tx, err := backend.db.RwKV().BeginRw(context.Background())
+	tx, err := backend.db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	var (

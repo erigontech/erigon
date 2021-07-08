@@ -649,7 +649,11 @@ func (srv *Server) setupDialScheduler() {
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
 	}
-	srv.dialsched = newDialScheduler(config, srv.discmix, srv.SetupConn)
+	var subProtocolVersion uint
+	if len(srv.Protocols) > 0 {
+		subProtocolVersion = srv.Protocols[0].Version
+	}
+	srv.dialsched = newDialScheduler(config, srv.discmix, srv.SetupConn, subProtocolVersion)
 	for _, n := range srv.StaticNodes {
 		srv.dialsched.addStatic(n)
 	}
@@ -719,7 +723,9 @@ func (srv *Server) run() {
 			srv.log.Error("Write enode to file failed", "self", srv.localnode.Node().URLv4())
 		}
 	}
-	srv.log.Info("Started P2P networking", "self", srv.localnode.Node().URLv4())
+	if len(srv.Config.Protocols) > 0 {
+		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnode.Node().URLv4())
+	}
 	defer srv.loopWG.Done()
 	defer srv.nodedb.Close()
 	defer srv.discmix.Close()
@@ -742,7 +748,6 @@ running:
 		case <-srv.quit:
 			// The server was stopped. Run the cleanup logic.
 			break running
-
 		case n := <-srv.addtrusted:
 			// This channel is used by AddTrustedPeer to add a node
 			// to the trusted node set.
