@@ -289,27 +289,6 @@ func ReadTransactions(db ethdb.KVGetter, baseTxId uint64, amount uint32, canonic
 	return txs, nil
 }
 
-func WriteTransactionsDeprecated(db ethdb.Database, txs []types.Transaction, baseTxId uint64) error {
-	txId := baseTxId
-	buf := bytes.NewBuffer(nil)
-	for _, tx := range txs {
-		txIdKey := make([]byte, 8)
-		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
-
-		buf.Reset()
-		if err := rlp.Encode(buf, tx); err != nil {
-			return fmt.Errorf("broken tx rlp: %w", err)
-		}
-
-		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := db.Append(dbutils.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func WriteTransactions(db ethdb.RwTx, bucket string, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)

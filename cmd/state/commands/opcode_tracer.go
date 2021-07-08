@@ -393,7 +393,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
-	chainDb := kv.MustOpen(chaindata).RwKV()
+	chainDb := kv.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
 	historyTx, err1 := historyDb.BeginRo(context.Background())

@@ -46,12 +46,8 @@ func NewObjectDatabase(kv ethdb.RwKV) *ObjectDatabase {
 	}
 }
 
-func MustOpen(path string) *ObjectDatabase {
-	return NewObjectDatabase(MustOpenKV(path))
-}
-
-func MustOpenKV(path string) ethdb.RwKV {
-	db, err := OpenKV(path, false)
+func MustOpen(path string) ethdb.RwKV {
+	db, err := Open(path, false)
 	if err != nil {
 		panic(err)
 	}
@@ -59,7 +55,7 @@ func MustOpenKV(path string) ethdb.RwKV {
 }
 
 // Open - main method to open database.
-func OpenKV(path string, readOnly bool) (ethdb.RwKV, error) {
+func Open(path string, readOnly bool) (ethdb.RwKV, error) {
 	var db ethdb.RwKV
 	var err error
 	opts := NewMDBX().Path(path)
@@ -72,15 +68,6 @@ func OpenKV(path string, readOnly bool) (ethdb.RwKV, error) {
 		return nil, err
 	}
 	return db, nil
-}
-
-func Open(path string, readOnly bool) (*ObjectDatabase, error) {
-	kv, kvErr := OpenKV(path, readOnly)
-	if kvErr != nil {
-		return nil, kvErr
-	}
-
-	return NewObjectDatabase(kv), nil
 }
 
 // Put inserts or updates a single entry.
@@ -291,34 +278,6 @@ func (db *ObjectDatabase) DropBuckets(buckets ...string) error {
 
 func (db *ObjectDatabase) Close() {
 	db.kv.Close()
-}
-
-func (db *ObjectDatabase) Keys() ([][]byte, error) {
-	var keys [][]byte
-	err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		for _, name := range dbutils.Buckets {
-			var nameCopy = make([]byte, len(name))
-			copy(nameCopy, name)
-			c, err := tx.Cursor(name)
-			if err != nil {
-				return err
-			}
-			err = ethdb.ForEach(c, func(k, _ []byte) (bool, error) {
-				var kCopy = make([]byte, len(k))
-				copy(kCopy, k)
-				keys = append(append(keys, nameCopy), kCopy)
-				return true, nil
-			})
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return keys, err
 }
 
 func (db *ObjectDatabase) RwKV() ethdb.RwKV {

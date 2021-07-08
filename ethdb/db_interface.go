@@ -87,10 +87,6 @@ type Database interface {
 	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
-	Keys() ([][]byte, error)
-
-	Append(bucket string, key, value []byte) error
-	AppendDup(bucket string, key, value []byte) error
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
 	ReadSequence(bucket string) (uint64, error)
 	RwKV() RwKV
