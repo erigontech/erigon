@@ -13,6 +13,12 @@ import (
 	"path/filepath"
 )
 
+type BodyForStorageDeprecated struct {
+	BaseTxId uint64
+	TxAmount uint32
+	Uncles   []*types.Header
+}
+
 var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 	Name: "split_canonical_and_noncanonical_txs",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
@@ -87,20 +93,24 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 		err = db.ForEach(dbutils.BlockBodyPrefix, []byte{}, func(k, v []byte) error {
 			blockNum := binary.BigEndian.Uint64(k[:8])
 			blockHash := common.BytesToHash(k[8:])
-			bfs := &types.BodyForStorage{}
-			err = rlp.DecodeBytes(v, bfs)
+			bfsOld := &BodyForStorageDeprecated{}
+			err = rlp.DecodeBytes(v, bfsOld)
 			if err != nil {
 				return err
+			}
+			bfsNew := &types.BodyForStorage{
+				TxAmount: bfsOld.TxAmount,
+				Uncles:   bfsOld.Uncles,
 			}
 			canonicalHash, err := rawdb.ReadCanonicalHash(db, blockNum)
 			if err != nil {
 				return err
 			}
 			if blockHash == canonicalHash {
-				bfs.Canonical = true
-				if bfs.TxAmount > 0 {
+				bfsNew.Canonical = true
+				if bfsNew.TxAmount > 0 {
 					txIdKey := make([]byte, 8)
-					binary.BigEndian.PutUint64(txIdKey, bfs.BaseTxId)
+					binary.BigEndian.PutUint64(txIdKey, bfsOld.BaseTxId)
 					i := uint32(0)
 
 					for k, v, err := ethTXWriteCursor.SeekExact(txIdKey); k != nil; k, v, err = ethTXWriteCursor.Next() {
@@ -114,18 +124,18 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 						}
 
 						i++
-						if i >= bfs.TxAmount {
+						if i >= bfsOld.TxAmount {
 							break
 						}
 					}
 				}
-				bfs.BaseTxId = ethTXIndex
-				ethTXIndex += uint64(bfs.TxAmount)
+				bfsNew.BaseTxId = ethTXIndex
+				ethTXIndex += uint64(bfsNew.TxAmount)
 			} else {
-				bfs.Canonical = false
-				if bfs.TxAmount > 0 {
+				bfsNew.Canonical = false
+				if bfsNew.TxAmount > 0 {
 					txIdKey := make([]byte, 8)
-					binary.BigEndian.PutUint64(txIdKey, bfs.BaseTxId)
+					binary.BigEndian.PutUint64(txIdKey, bfsOld.BaseTxId)
 					i := uint32(0)
 
 					for k, v, err := ethTXWriteCursor.SeekExact(txIdKey); k != nil; k, v, err = ethTXWriteCursor.Next() {
@@ -139,15 +149,15 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 						}
 
 						i++
-						if i >= bfs.TxAmount {
+						if i >= bfsNew.TxAmount {
 							break
 						}
 					}
 				}
-				bfs.BaseTxId = nonCanonicalIndex
-				nonCanonicalIndex += uint64(bfs.TxAmount)
+				bfsNew.BaseTxId = nonCanonicalIndex
+				nonCanonicalIndex += uint64(bfsNew.TxAmount)
 			}
-			bodyBytes, err := rlp.EncodeToBytes(bfs)
+			bodyBytes, err := rlp.EncodeToBytes(bfsNew)
 			if err != nil {
 				return err
 			}
