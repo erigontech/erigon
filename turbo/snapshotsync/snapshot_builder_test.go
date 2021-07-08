@@ -67,7 +67,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	defer btCli.Close()
 	btCli.trackers = [][]string{}
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -420,7 +420,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	btCli.trackers = [][]string{}
 	defer btCli.Close()
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 
 	sb := &SnapshotMigrator{
@@ -1081,7 +1081,7 @@ func TestPruneBlocks(t *testing.T) {
 	btCli.trackers = [][]string{}
 	defer btCli.Close()
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1338,7 +1338,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		replaceChan:  make(chan struct{}),
 	}
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpenKV(filepath.Join(dir, "chaindata"))).Open()
+	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())

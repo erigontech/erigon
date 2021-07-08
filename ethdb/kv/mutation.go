@@ -12,7 +12,6 @@ import (
 	"unsafe"
 
 	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -331,22 +330,6 @@ func (m *mutation) Rollback() {
 	m.size = 0
 }
 
-func (m *mutation) Keys() ([][]byte, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	tuples := common.NewTuples(m.puts.Len(), 2, 1)
-	var innerErr error
-	m.puts.Ascend(func(i btree.Item) bool {
-		mi := i.(*MutationItem)
-		if err := tuples.Append([]byte(mi.table), mi.key); err != nil {
-			innerErr = err
-			return false
-		}
-		return true
-	})
-	return tuples.Values, innerErr
-}
-
 func (m *mutation) Close() {
 	m.Rollback()
 }
@@ -371,11 +354,6 @@ func (m *mutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")
 	}
-}
-
-func (m *mutation) MemCopy() ethdb.Database {
-	m.panicOnEmptyDB()
-	return m.db
 }
 
 func (m *mutation) SetRwKV(kv ethdb.RwKV) {

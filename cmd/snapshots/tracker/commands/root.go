@@ -76,7 +76,7 @@ var rootCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		db := kv.MustOpen(args[0])
 		m := http.NewServeMux()
-		m.Handle("/announce", &Tracker{db: db})
+		m.Handle("/announce", &Tracker{db: kv.NewObjectDatabase(db)})
 		m.HandleFunc("/scrape", func(writer http.ResponseWriter, request *http.Request) {
 			log.Warn("scrape", "url", request.RequestURI)
 			ih := request.URL.Query().Get("info_hash")
@@ -89,25 +89,32 @@ var rootCmd = &cobra.Command{
 				ih: {},
 			}}
 
-			err := db.Walk(dbutils.SnapshotInfoBucket, append([]byte(ih), make([]byte, 20)...), 20*8, func(k, v []byte) (bool, error) {
-				a := AnnounceReqWithTime{}
-				err := json.Unmarshal(v, &a)
+			err := db.View(context.Background(), func(tx ethdb.Tx) error {
+				c, err := tx.Cursor(dbutils.SnapshotInfoBucket)
 				if err != nil {
-					log.Error("Fail to unmarshall", "k", common.Bytes2Hex(k), "err", err)
-					//skip failed
+					return err
+				}
+				defer c.Close()
+				return ethdb.Walk(c, append([]byte(ih), make([]byte, 20)...), 20*8, func(k, v []byte) (bool, error) {
+					a := AnnounceReqWithTime{}
+					err := json.Unmarshal(v, &a)
+					if err != nil {
+						log.Error("Fail to unmarshall", "k", common.Bytes2Hex(k), "err", err)
+						//skip failed
+						return true, nil
+					}
+					if time.Since(a.UpdatedAt) > 24*time.Hour {
+						log.Debug("Skipped", "k", common.Bytes2Hex(k), "last updated", a.UpdatedAt)
+						return true, nil
+					}
+					if a.Left == 0 {
+						resp.Files[ih].Downloaded++
+						resp.Files[ih].Complete++
+					} else {
+						resp.Files[ih].Incomplete++
+					}
 					return true, nil
-				}
-				if time.Since(a.UpdatedAt) > 24*time.Hour {
-					log.Debug("Skipped", "k", common.Bytes2Hex(k), "last updated", a.UpdatedAt)
-					return true, nil
-				}
-				if a.Left == 0 {
-					resp.Files[ih].Downloaded++
-					resp.Files[ih].Complete++
-				} else {
-					resp.Files[ih].Incomplete++
-				}
-				return true, nil
+				})
 			})
 			if err != nil {
 				log.Error("Walk", "err", err)

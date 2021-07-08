@@ -15,7 +15,7 @@ import (
 func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, indexBucket string) error {
 	db := kv.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.RwKV().BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}

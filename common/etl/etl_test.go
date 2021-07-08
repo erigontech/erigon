@@ -2,7 +2,6 @@ package etl
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -132,19 +131,14 @@ func TestRAMDataProviders(t *testing.T) {
 
 func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := kv.NewTestDB(t)
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := kv.NewTestTx(t)
 
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, tx, sourceBucket, 20)
-	err = Transform(
+	err := Transform(
 		"logPrefix",
-		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+		tx,
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -157,17 +151,12 @@ func TestTransformRAMOnly(t *testing.T) {
 }
 
 func TestEmptySourceBucket(t *testing.T) {
-	db := kv.NewTestDB(t)
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := kv.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
-	err = Transform(
+	err := Transform(
 		"logPrefix",
-		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+		tx,
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -181,18 +170,13 @@ func TestEmptySourceBucket(t *testing.T) {
 
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	db := kv.NewTestDB(t)
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := kv.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, tx, sourceBucket, 10)
-	err = Transform(
+	err := Transform(
 		"logPrefix",
-		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+		tx,
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -206,18 +190,13 @@ func TestTransformExtractStartKey(t *testing.T) {
 
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	db := kv.NewTestDB(t)
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := kv.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, tx, sourceBucket, 10)
-	err = Transform(
+	err := Transform(
 		"logPrefix",
-		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+		tx,
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -233,18 +212,13 @@ func TestTransformThroughFiles(t *testing.T) {
 
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
-	db := kv.NewTestDB(t)
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := kv.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, tx, sourceBucket, 10)
-	err = Transform(
+	err := Transform(
 		"logPrefix",
-		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+		tx,
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -258,18 +232,13 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
-	db := kv.NewTestDB(t)
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
+	_, tx := kv.NewTestTx(t)
 	sourceBucket := dbutils.Buckets[0]
 	destBucket := dbutils.Buckets[1]
 	generateTestData(t, tx, sourceBucket, 10)
-	err = Transform(
+	err := Transform(
 		"logPrefix",
-		tx.(ethdb.HasTx).Tx().(ethdb.RwTx),
+		tx,
 		sourceBucket,
 		destBucket,
 		"", // temp dir
@@ -355,7 +324,7 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next Lo
 	return next(k, append(k, 0xBB), append(realValue, 0xBB))
 }
 
-func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 string, startKey []byte) {
+func compareBuckets(t *testing.T, db ethdb.Tx, b1, b2 string, startKey []byte) {
 	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.ForEach(b1, startKey, func(k, v []byte) error {
@@ -372,7 +341,7 @@ func compareBuckets(t *testing.T, db ethdb.Database, b1, b2 string, startKey []b
 	assert.Equal(t, b1Map, b2Map)
 }
 
-func compareBucketsDouble(t *testing.T, db ethdb.Database, b1, b2 string) {
+func compareBucketsDouble(t *testing.T, db ethdb.Tx, b1, b2 string) {
 	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.ForEach(b1, nil, func(k, v []byte) error {

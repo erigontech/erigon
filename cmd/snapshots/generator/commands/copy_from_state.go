@@ -38,7 +38,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	}
 	defer db.Close()
 
-	tx, err := db.RwKV().BeginRo(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
