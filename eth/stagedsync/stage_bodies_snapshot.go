@@ -3,25 +3,30 @@ package stagedsync
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type SnapshotBodiesCfg struct {
-	db          ethdb.RwKV
-	snapshotDir string
-	tmpDir      string
+	db               ethdb.RwKV
+	snapshotDir      string
+	tmpDir           string
+	client           *snapshotsync.Client
+	snapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
-func StageSnapshotBodiesCfg(db ethdb.RwKV, snapshotDir string, tmpDir string) SnapshotBodiesCfg {
+func StageSnapshotBodiesCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, tmpDir string) SnapshotBodiesCfg {
 	return SnapshotBodiesCfg{
-		db:          db,
-		snapshotDir: snapshotDir,
-		tmpDir:      tmpDir,
+		db:               db,
+		snapshotDir:      snapshot.Dir,
+		client:           client,
+		snapshotMigrator: snapshotMigrator,
+		tmpDir:           tmpDir,
 	}
 }
 
-func SpawnBodiesSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+func SpawnBodiesSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, quit <-chan struct{}) error {
 	s.Done()
 	return nil
 }

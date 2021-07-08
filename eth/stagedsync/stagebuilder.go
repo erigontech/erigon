@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type ChainEventNotifier interface {
@@ -25,10 +24,8 @@ type StageParameters struct {
 	InitialCycle bool
 	mining       *MiningCfg
 
-	snapshotsDir    string
-	btClient        *snapshotsync.Client
-	SnapshotBuilder *snapshotsync.SnapshotMigrator
-	Accumulator     *shards.Accumulator // State change accumulator
+	snapshotsDir string
+	Accumulator  *shards.Accumulator // State change accumulator
 }
 
 type MiningCfg struct {

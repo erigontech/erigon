@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
@@ -13,18 +14,22 @@ import (
 )
 
 type SnapshotHeadersCfg struct {
-	db          ethdb.RwKV
-	snapshotDir string
+	db               ethdb.RwKV
+	snapshotDir      string
+	client           *snapshotsync.Client
+	snapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
-func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshotDir string) SnapshotHeadersCfg {
+func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotHeadersCfg {
 	return SnapshotHeadersCfg{
-		db:          db,
-		snapshotDir: snapshotDir,
+		db:               db,
+		snapshotDir:      snapshot.Dir,
+		client:           client,
+		snapshotMigrator: snapshotMigrator,
 	}
 }
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, quit <-chan struct{}) error {
 	//generate snapshot only on initial mode
 	if !initial {
 		s.Done()
@@ -62,13 +67,13 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 		return nil
 	}
 
-	err = sm.AsyncStages(snapshotBlock, cfg.db, readTX, torrentClient, false)
+	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.db, readTX, cfg.client, false)
 	if err != nil {
 		return err
 	}
 	readTX.Rollback()
 
-	for !sm.Replaced() {
+	for !cfg.snapshotMigrator.Replaced() {
 		time.Sleep(time.Minute)
 		log.Info("Wait old snapshot to close")
 	}
@@ -79,7 +84,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	}
 	defer writeTX.Rollback()
 
-	err = sm.SyncStages(snapshotBlock, cfg.db, writeTX)
+	err = cfg.snapshotMigrator.SyncStages(snapshotBlock, cfg.db, writeTX)
 	if err != nil {
 		return err
 	}
@@ -99,9 +104,9 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 			return false, err
 		}
 		defer readTX.Rollback()
-		err = sm.Final(readTX)
+		err = cfg.snapshotMigrator.Final(readTX)
 
-		return atomic.LoadUint64(&sm.HeadersCurrentSnapshot) == snapshotBlock, err
+		return atomic.LoadUint64(&cfg.snapshotMigrator.HeadersCurrentSnapshot) == snapshotBlock, err
 	}
 
 	for {

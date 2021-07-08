@@ -17,12 +17,14 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 )
@@ -245,9 +247,11 @@ func NewStagedSync2(
 	bodyDownloadTimeout int,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
-	snapshotsDir string,
+	snapshotCfg ethconfig.Snapshot,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
+
+	client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator,
 ) (*stagedsync.StagedSync, error) {
 	var pruningDistance uint64
 	if !sm.History {
@@ -265,7 +269,7 @@ func NewStagedSync2(
 			batchSize,
 		),
 		stagedsync.StageBlockHashesCfg(db, tmpdir),
-		stagedsync.StageSnapshotHeadersCfg(db, snapshotsDir),
+		stagedsync.StageSnapshotHeadersCfg(db, snapshotCfg, client, snapshotMigrator),
 		stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
@@ -276,7 +280,7 @@ func NewStagedSync2(
 			*controlServer.ChainConfig,
 			batchSize,
 		),
-		stagedsync.StageSnapshotBodiesCfg(db, snapshotsDir, tmpdir),
+		stagedsync.StageSnapshotBodiesCfg(db, snapshotCfg, client, snapshotMigrator, tmpdir),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
@@ -298,7 +302,7 @@ func NewStagedSync2(
 			nil,
 			controlServer.ChainConfig,
 		),
-		stagedsync.StageSnapshotStateCfg(db, snapshotsDir, tmpdir),
+		stagedsync.StageSnapshotStateCfg(db, snapshotCfg, tmpdir, client, snapshotMigrator),
 		stagedsync.StageHashStateCfg(db, tmpdir),
 		stagedsync.StageTrieCfg(db, true, true, tmpdir),
 		stagedsync.StageHistoryCfg(db, tmpdir),
@@ -313,7 +317,7 @@ func NewStagedSync2(
 			}
 			txPoolServer.TxFetcher.Start()
 		}),
-		stagedsync.StageFinishCfg(db, tmpdir),
+		stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator),
 		false, /* test */
 	), nil
 }

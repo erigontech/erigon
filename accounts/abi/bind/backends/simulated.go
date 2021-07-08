@@ -104,13 +104,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return h
 		},
 	}
-
-	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		backend.checkTEVM = ethdb.GetCheckTEVM(tx)
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	backend.checkTEVM = ethdb.GetCheckTEVM(kv.NewObjectDatabase(m.DB))
 	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
 	backend.emptyPendingBlock()
 	return backend

@@ -818,9 +818,10 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 		bodyDownloadTimeoutSeconds,
 		downloadServer,
 		tmpdir,
-		snapshotDir,
+		ethconfig.Snapshot{Enabled: false},
 		txPool,
 		txPoolP2PServer,
+		nil, nil,
 	)
 	if err != nil {
 		panic(err)

@@ -134,8 +134,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	var torrentClient *snapshotsync.Client
-	snapshotsDir := stack.Config().ResolvePath("snapshots")
-	if config.SnapshotLayout {
+	config.Snapshot.Dir = stack.Config().ResolvePath("snapshots")
+	if config.Snapshot.Enabled {
 		var peerID string
 		if err = chainKv.View(context.Background(), func(tx ethdb.Tx) error {
 			v, err := tx.GetOne(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
@@ -147,7 +147,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}); err != nil {
 			log.Error("Get bittorrent peer", "err", err)
 		}
-		torrentClient, err = snapshotsync.New(snapshotsDir, config.SnapshotSeeding, peerID)
+		torrentClient, err = snapshotsync.New(config.Snapshot.Dir, config.Snapshot.Seeding, peerID)
 		if err != nil {
 			return nil, err
 		}
@@ -160,11 +160,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 		}
 
-		chainKv, err = snapshotsync.WrapSnapshots(chainKv, snapshotsDir)
+		chainKv, err = snapshotsync.WrapSnapshots(chainKv, config.Snapshot.Dir)
 		if err != nil {
 			return nil, err
 		}
-		err = snapshotsync.SnapshotSeeding(chainKv, torrentClient, "headers", snapshotsDir)
+		err = snapshotsync.SnapshotSeeding(chainKv, torrentClient, "headers", config.Snapshot.Dir)
 		if err != nil {
 			return nil, err
 		}
@@ -242,12 +242,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// setting notifier to support streaming events to rpc daemon
 	backend.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
-	if config.SnapshotLayout {
+	if config.Snapshot.Enabled {
 		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainKv)
 		if err != nil {
 			return nil, err
 		}
-		mg = snapshotsync.NewMigrator(snapshotsDir, currentSnapshotBlock, currentInfohash)
+		mg = snapshotsync.NewMigrator(config.Snapshot.Dir, currentSnapshotBlock, currentInfohash)
 		err = mg.RemoveNonCurrentSnapshots()
 		if err != nil {
 			log.Error("Remove non current snapshot", "err", err)
@@ -423,17 +423,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		bodyDownloadTimeoutSeconds,
 		backend.downloadServer,
 		tmpdir,
-		snapshotsDir,
+		config.Snapshot,
 		backend.txPool,
 		backend.txPoolP2PServer,
+
+		torrentClient, mg,
 	)
 	if err != nil {
 		return nil, err
-	}
-
-	if config.SnapshotLayout {
-		backend.stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
-		log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 	}
 
 	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadCtx, backend.txPool, backend.downloadServer)

@@ -224,7 +224,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			batchSize,
 		),
 		stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageSnapshotHeadersCfg(mock.DB, mock.tmpdir),
+		stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
 		stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
@@ -237,7 +237,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		),
 		stagedsync.StageSnapshotBodiesCfg(
 			mock.DB,
-			"",
+			ethconfig.Snapshot{Enabled: false},
+			nil, nil,
 			"",
 		),
 		stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
@@ -263,8 +264,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		),
 		stagedsync.StageSnapshotStateCfg(
 			mock.DB,
+			ethconfig.Snapshot{Enabled: false},
 			"",
-			"",
+			nil, nil,
 		),
 		stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
@@ -279,7 +281,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			mock.StreamWg.Wait()
 			mock.TxPoolP2PServer.TxFetcher.Start()
 		}),
-		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
+		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
 		true, /* test */
 	)
 

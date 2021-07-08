@@ -52,13 +52,11 @@ func (stagedSync *StagedSync) Prepare(
 ) (*State, error) {
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
-			QuitCh:          quitCh,
-			InitialCycle:    initialCycle,
-			mining:          miningConfig,
-			snapshotsDir:    stagedSync.params.SnapshotDir,
-			btClient:        stagedSync.params.TorrentClient,
-			SnapshotBuilder: stagedSync.params.SnapshotMigrator,
-			Accumulator:     accumulator,
+			QuitCh:       quitCh,
+			InitialCycle: initialCycle,
+			mining:       miningConfig,
+			snapshotsDir: stagedSync.params.SnapshotDir,
+			Accumulator:  accumulator,
 		},
 	)
 	state := NewState(stages)
@@ -83,11 +81,6 @@ func (stagedSync *StagedSync) Prepare(
 	return state, nil
 }
 
-func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
-	stagedSync.params.TorrentClient = client
-	stagedSync.params.SnapshotDir = snapshotsDir
-	stagedSync.params.SnapshotMigrator = snapshotMigrator
-}
 func (stagedSync *StagedSync) GetSnapshotMigratorFinal() func(tx ethdb.Tx) error {
 	if stagedSync.params.SnapshotMigrator != nil {
 		return stagedSync.params.SnapshotMigrator.Final

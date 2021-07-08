@@ -109,6 +109,13 @@ func init() {
 
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
+type Snapshot struct {
+	Enabled bool
+	Mode    snapshotsync.SnapshotMode
+	Dir     string
+	Seeding bool
+}
+
 // Config contains configuration options for ETH protocol.
 type Config struct {
 	// The genesis block, which is inserted if the database is empty.
@@ -124,11 +131,10 @@ type Config struct {
 
 	P2PEnabled bool
 
-	StorageMode     ethdb.StorageMode
-	BatchSize       datasize.ByteSize // Batch size for execution stage
-	SnapshotMode    snapshotsync.SnapshotMode
-	SnapshotSeeding bool
-	SnapshotLayout  bool
+	StorageMode ethdb.StorageMode
+	BatchSize   datasize.ByteSize // Batch size for execution stage
+
+	Snapshot Snapshot
 
 	BlockDownloaderWindow int
 

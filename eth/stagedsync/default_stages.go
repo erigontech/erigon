@@ -68,7 +68,7 @@ func DefaultStages(ctx context.Context,
 					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, world.InitialCycle, world.SnapshotBuilder, world.btClient, world.QuitCh)
+						return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, world.InitialCycle, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindHeadersSnapshotGenerationStage(u, s, tx, snapshotHeaders, world.QuitCh)
@@ -100,7 +100,7 @@ func DefaultStages(ctx context.Context,
 					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, world.btClient, world.QuitCh)
+						return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindBodiesSnapshotGenerationStage(u, s, tx, snapshotBodies, world.QuitCh)
@@ -164,7 +164,7 @@ func DefaultStages(ctx context.Context,
 					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, world.btClient, world.QuitCh)
+						return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindStateSnapshotGenerationStage(u, s, tx, snapshotState, world.QuitCh)
@@ -310,7 +310,7 @@ func DefaultStages(ctx context.Context,
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-						return FinishForward(s, tx, finish, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, tx, finish)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindFinish(u, s, tx, finish)
