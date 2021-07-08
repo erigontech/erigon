@@ -59,7 +59,7 @@ func TestSendRawTransaction(t *testing.T) {
 		notifier := &remotedbserver.Events{}
 		initialCycle := true
 		highestSeenHeader := chain.TopBlock.NumberU64()
-		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -818,9 +818,10 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 		bodyDownloadTimeoutSeconds,
 		downloadServer,
 		tmpdir,
-		snapshotDir,
+		ethconfig.Snapshot{Enabled: false},
 		txPool,
 		txPoolP2PServer,
+		nil, nil,
 	)
 	if err != nil {
 		panic(err)
@@ -842,7 +843,7 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 
 	var sync *stagedsync.State
 	if err := db.View(context.Background(), func(tx ethdb.Tx) (err error) {
-		sync, err = st.Prepare(vmConfig, nil, tx, sm, ctx.Done(), false, nil, nil)
+		sync, err = st.Prepare(nil, tx, ctx.Done(), false, nil, nil)
 		if err != nil {
 			return nil
 		}

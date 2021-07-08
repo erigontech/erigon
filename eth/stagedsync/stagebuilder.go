@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type ChainEventNotifier interface {
@@ -19,17 +18,14 @@ type ChainEventNotifier interface {
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
 type StageParameters struct {
-	DB ethdb.Database
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
 	QuitCh       <-chan struct{}
 	InitialCycle bool
 	mining       *MiningCfg
 
-	snapshotsDir    string
-	btClient        *snapshotsync.Client
-	SnapshotBuilder *snapshotsync.SnapshotMigrator
-	Accumulator     *shards.Accumulator // State change accumulator
+	snapshotsDir string
+	Accumulator  *shards.Accumulator // State change accumulator
 }
 
 type MiningCfg struct {

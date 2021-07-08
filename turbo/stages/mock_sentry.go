@@ -224,7 +224,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			batchSize,
 		),
 		stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageHeadersSnapshotGenCfg(mock.DB, mock.tmpdir),
+		stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
 		stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
@@ -234,6 +234,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			blockDowloadTimeout,
 			*mock.ChainConfig,
 			batchSize,
+		),
+		stagedsync.StageSnapshotBodiesCfg(
+			mock.DB,
+			ethconfig.Snapshot{Enabled: false},
+			nil, nil,
+			"",
 		),
 		stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
 		stagedsync.StageExecuteBlocksCfg(
@@ -256,6 +262,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			nil,
 			mock.ChainConfig,
 		),
+		stagedsync.StageSnapshotStateCfg(
+			mock.DB,
+			ethconfig.Snapshot{Enabled: false},
+			"",
+			nil, nil,
+		),
 		stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
 		stagedsync.StageHistoryCfg(mock.DB, mock.tmpdir),
@@ -269,7 +281,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			mock.StreamWg.Wait()
 			mock.TxPoolP2PServer.TxFetcher.Start()
 		}),
-		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir),
+		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
 		true, /* test */
 	)
 
@@ -384,7 +396,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	notifier := &remotedbserver.Events{}
 	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.ChainConfig, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
+	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, notifier, initialCycle, nil, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	// Check if the latest header was imported or rolled back
