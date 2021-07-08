@@ -12,19 +12,19 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
-type HeadersSnapshotGenCfg struct {
+type SnapshotHeadersCfg struct {
 	db          ethdb.RwKV
 	snapshotDir string
 }
 
-func StageHeadersSnapshotGenCfg(db ethdb.RwKV, snapshotDir string) HeadersSnapshotGenCfg {
-	return HeadersSnapshotGenCfg{
+func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshotDir string) SnapshotHeadersCfg {
+	return SnapshotHeadersCfg{
 		db:          db,
 		snapshotDir: snapshotDir,
 	}
 }
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, initial bool, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
 	//generate snapshot only on initial mode
 	if !initial {
 		s.Done()
@@ -113,6 +113,28 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 			break
 		}
 		time.Sleep(time.Second)
+	}
+	return nil
+}
+
+func UnwindHeadersSnapshotGenerationStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if err := u.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

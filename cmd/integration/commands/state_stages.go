@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -311,7 +310,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 
 			miningConfig.Etherbase = nextBlock.Header().Coinbase
 			miningConfig.ExtraData = nextBlock.Header().Extra
-			miningStages, err := mining.Prepare(vmConfig, kv.NewObjectDatabase(db), tx, sm, quit, false, miningWorld, nil)
+			miningStages, err := mining.Prepare(db, tx, quit, false, miningWorld, nil)
 			if err != nil {
 				panic(err)
 			}

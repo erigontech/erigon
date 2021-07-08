@@ -19,7 +19,6 @@ type ChainEventNotifier interface {
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
 type StageParameters struct {
-	DB ethdb.Database
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
 	QuitCh       <-chan struct{}

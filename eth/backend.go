@@ -102,14 +102,14 @@ type Ethereum struct {
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
 
-	// downloader v2 fields
-	downloadV2Ctx        context.Context
-	downloadV2Cancel     context.CancelFunc
+	// downloader fields
+	downloadCtx          context.Context
+	downloadCancel       context.CancelFunc
 	downloadServer       *download.ControlServerImpl
 	sentryServers        []*download.SentryServerImpl
 	txPoolP2PServer      *txpool.P2PServer
 	sentries             []remote.SentryClient
-	stagedSync2          *stagedsync.StagedSync
+	stagedSync           *stagedsync.StagedSync
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
 }
@@ -338,10 +338,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	backend.downloadV2Ctx, backend.downloadV2Cancel = context.WithCancel(context.Background())
+	backend.downloadCtx, backend.downloadCancel = context.WithCancel(context.Background())
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
-			sentry, err := download.GrpcSentryClient(backend.downloadV2Ctx, addr)
+			sentry, err := download.GrpcSentryClient(backend.downloadCtx, addr)
 			if err != nil {
 				return nil, err
 			}
@@ -365,7 +365,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 		cfg66 := stack.Config().P2P
 		cfg66.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth66")
-		server66 := download.NewSentryServer(backend.downloadV2Ctx, d66, readNodeInfo, &cfg66, eth.ETH66)
+		server66 := download.NewSentryServer(backend.downloadCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
 		cfg65 := stack.Config().P2P
@@ -375,7 +375,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return nil, err
 		}
 		cfg65.ListenAddr = cfg65.ListenAddr65
-		server65 := download.NewSentryServer(backend.downloadV2Ctx, d65, readNodeInfo, &cfg65, eth.ETH65)
+		server65 := download.NewSentryServer(backend.downloadCtx, d65, readNodeInfo, &cfg65, eth.ETH65)
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 		go func() {
@@ -386,7 +386,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 			for {
 				select {
-				case <-backend.downloadV2Ctx.Done():
+				case <-backend.downloadCtx.Done():
 					return
 				case <-logEvery.C:
 					logItems = logItems[:0]
@@ -402,7 +402,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-	backend.txPoolP2PServer, err = txpool.NewP2PServer(backend.downloadV2Ctx, backend.sentries, backend.txPool)
+	backend.txPoolP2PServer, err = txpool.NewP2PServer(backend.downloadCtx, backend.sentries, backend.txPool)
 	if err != nil {
 		return nil, err
 	}
@@ -415,8 +415,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	backend.txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
 	bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
-	backend.stagedSync2, err = stages2.NewStagedSync2(
-		backend.downloadV2Ctx,
+	backend.stagedSync, err = stages2.NewStagedSync2(
+		backend.downloadCtx,
 		backend.chainKV,
 		config.StorageMode,
 		config.BatchSize,
@@ -432,11 +432,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	if config.SnapshotLayout {
-		backend.stagedSync2.SetTorrentParams(torrentClient, snapshotsDir, mg)
+		backend.stagedSync.SetTorrentParams(torrentClient, snapshotsDir, mg)
 		log.Info("Set torrent params", "snapshotsDir", snapshotsDir)
 	}
 
-	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadV2Ctx, backend.txPool, backend.downloadServer)
+	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadCtx, backend.txPool, backend.downloadServer)
 
 	go func() {
 		defer debug.LogPanic()
@@ -651,14 +651,14 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 func (s *Ethereum) Start() error {
 	for i := range s.sentries {
 		go func(i int) {
-			download.RecvMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+			download.RecvMessageLoop(s.downloadCtx, s.sentries[i], s.downloadServer, nil)
 		}(i)
 		go func(i int) {
-			download.RecvUploadMessageLoop(s.downloadV2Ctx, s.sentries[i], s.downloadServer, nil)
+			download.RecvUploadMessageLoop(s.downloadCtx, s.sentries[i], s.downloadServer, nil)
 		}(i)
 	}
 
-	go Loop(s.downloadV2Ctx, s.chainKV, s.stagedSync2, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
+	go Loop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
 	return nil
 }
 
@@ -666,7 +666,7 @@ func (s *Ethereum) Start() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
-	s.downloadV2Cancel()
+	s.downloadCancel()
 	s.txPoolP2PServer.TxFetcher.Stop()
 	s.txPool.Stop()
 	if s.quitMining != nil {
