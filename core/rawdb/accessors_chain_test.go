@@ -256,7 +256,7 @@ func TestTransactionStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = tx.Commit()
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 
