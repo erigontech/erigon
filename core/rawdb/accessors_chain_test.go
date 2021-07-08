@@ -220,7 +220,7 @@ func TestPartialBlockStorage(t *testing.T) {
 }
 
 func TestTransactionStorage(t *testing.T) {
-	db := kv.NewMemKV()
+	db, tx := kv.NewTestTx(t)
 	getBlock := func(num uint64, nonce uint64) *types.Block {
 		return types.NewBlock(&types.Header{
 			Number:      big.NewInt(1).SetUint64(num),
@@ -239,29 +239,27 @@ func TestTransactionStorage(t *testing.T) {
 	block2 := getBlock(2, 2)
 	block2Replaced := getBlock(2, 3)
 
-	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
-
-		err := WriteBlock(tx, block1)
-		if err != nil {
-			return err
-		}
-		err = WriteBlock(tx, block2)
-		if err != nil {
-			return err
-		}
-		err = WriteCanonicalHash(tx, block1.Hash(), 1)
-		if err != nil {
-			return err
-		}
-		err = WriteCanonicalHash(tx, block2.Hash(), 2)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
+	err := WriteBlock(tx, block1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	err = WriteBlock(tx, block2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = WriteCanonicalHash(tx, block1.Hash(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = WriteCanonicalHash(tx, block2.Hash(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tx.Commit()
+	if err!=nil {
+		t.Fatal(err)
+	}
+
 	err = db.View(context.Background(), func(tx ethdb.Tx) error {
 		block1Got := ReadBlock(tx, block1.Hash(), 1)
 		require.Equal(t, block1.Transactions()[0].GetNonce(), block1Got.Transactions()[0].GetNonce())
