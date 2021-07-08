@@ -294,9 +294,23 @@ var (
 		HomesteadBlock: big.NewInt(0),
 		DAOForkBlock:   nil,
 		DAOForkSupport: false,
-		EIP150Block:    nil,
-		EIP155Block:    nil,
-		EIP158Block:    nil,
+		EIP150Block:    big.NewInt(0),
+		EIP155Block:    big.NewInt(0),
+		EIP158Block:    big.NewInt(0),
+		/*
+		   eip150_transition: 0,
+		   eip155_transition: 0,
+		   eip160_transition: 0,
+		   eip161abc_transition: 0,
+		   eip161d_transition: 0,
+		   //eip658_transition: 0,
+		   validate_receipts_transition: 0,
+		   validate_chain_id_transition: 0,
+		   //eip140_transition: 0,
+		   //eip211_transition: 0,
+		   //eip214_transition: 0,
+		*/
+
 		/*
 							"eip140Transition": "0x0",  in Byzantium
 							"eip211Transition": "0x0",  in Byzantium

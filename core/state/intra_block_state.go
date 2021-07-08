@@ -23,6 +23,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -406,6 +407,9 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int) {
+	if addr == common.HexToAddress("0x0000000000000000000000000000000000000000") {
+		fmt.Printf("callers: %s\n", debug.Callers(7))
+	}
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
@@ -444,6 +448,7 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int)
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int) {
+	fmt.Printf("setBalance: %x,%d\n", addr, amount.Uint64())
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
@@ -663,6 +668,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	}
 
 	newObj := sdb.createObject(addr, previous)
+	fmt.Printf("77create accc ccc: %x, %t, %d,%d,%s\n", addr, contractCreation, newObj.data.Incarnation, newObj.data.Nonce, debug.Callers(7))
 
 	if contractCreation {
 		newObj.created = true
@@ -732,6 +738,29 @@ func updateAccount(EIP158Enabled bool, stateWriter StateWriter, addr common.Addr
 	return nil
 }
 
+func printAccount(EIP158Enabled bool, addr common.Address, stateObject *stateObject, isDirty bool) {
+	emptyRemoval := EIP158Enabled && stateObject.empty()
+	if stateObject.suicided || (isDirty && emptyRemoval) {
+		fmt.Printf("delete: %x\n", addr)
+	}
+	if isDirty && (stateObject.created || !stateObject.suicided) && !emptyRemoval {
+		// Write any contract code associated with the state object
+		if stateObject.code != nil && stateObject.dirtyCode {
+			fmt.Printf("UpdateCode: %x,%x\n", addr, stateObject.CodeHash())
+		}
+		if stateObject.created {
+			fmt.Printf("CreateContract: %x\n", addr)
+		}
+		stateObject.printTrie()
+		if stateObject.data.Balance.IsUint64() {
+			fmt.Printf("UpdateAccountData: %x, balance=%d, nonce=%d\n", addr, stateObject.data.Balance.Uint64(), stateObject.data.Nonce)
+		} else {
+			div := uint256.NewInt(1_000_000_000)
+			fmt.Printf("UpdateAccountData: %x, balance=%d*%d, nonce=%d\n", addr, uint256.NewInt(0).Div(&stateObject.data.Balance, div).Uint64(), div.Uint64(), stateObject.data.Nonce)
+		}
+	}
+}
+
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
@@ -772,6 +801,15 @@ func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter Sta
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
+}
+
+func (sdb *IntraBlockState) Print(chainRules params.Rules) {
+	for addr, stateObject := range sdb.stateObjects {
+		_, isDirty := sdb.stateObjectsDirty[addr]
+		_, isDirty2 := sdb.journal.dirties[addr]
+
+		printAccount(chainRules.IsEIP158, addr, stateObject, isDirty || isDirty2)
+	}
 }
 
 // Prepare sets the current transaction hash and index and block hash which is

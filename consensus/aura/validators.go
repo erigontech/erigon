@@ -631,6 +631,7 @@ func (s *ValidatorSafeContract) onEpochBegin(first bool, header *types.Header, c
 	if err != nil {
 		return err
 	}
+
 	/*
 	 let data = validator_set::functions::finalize_change::encode_input();
 	        caller(self.contract_address, data)
