@@ -97,7 +97,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, statedb)
-	// If the transaction created a contract, store the creation address in the receipt.
+
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err

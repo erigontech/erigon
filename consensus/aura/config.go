@@ -52,10 +52,14 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 		return &SimpleList{validators: j.List}
 	}
 	if j.SafeContract != nil {
-		return &ValidatorSafeContract{contractAddress: *j.SafeContract}
+		return &ValidatorSafeContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition}
 	}
 	if j.Contract != nil {
-		return &ValidatorContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition}
+		return &ValidatorContract{
+			contractAddress:  *j.SafeContract,
+			validators:       ValidatorSafeContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition},
+			posdaoTransition: posdaoTransition,
+		}
 	}
 	if j.Multi != nil {
 		l := map[uint64]ValidatorSet{}
