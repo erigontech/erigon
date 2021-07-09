@@ -91,9 +91,13 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	ibs := state.New(stateReader)
 
-	baseFee, overflow := uint256.FromBig(header.BaseFee)
-	if overflow {
-		return fmt.Errorf("header.BaseFee uint256 overflow")
+	var baseFee *uint256.Int
+	if header.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		if overflow {
+			return fmt.Errorf("header.BaseFee uint256 overflow")
+		}
 	}
 	msg, err := args.ToMessage(api.GasCap, baseFee)
 	if err != nil {

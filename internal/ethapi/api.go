@@ -502,9 +502,13 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	baseFee, overflow := uint256.FromBig(header.BaseFee)
-	if overflow {
-		return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+	var baseFee *uint256.Int
+	if header.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		if overflow {
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+		}
 	}
 	msg, err := args.ToMessage(globalGasCap, baseFee)
 	if err != nil {

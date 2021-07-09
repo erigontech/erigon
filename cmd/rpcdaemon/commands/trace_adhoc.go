@@ -786,9 +786,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// Get a new instance of the EVM.
-	baseFee, overflow := uint256.FromBig(header.BaseFee)
-	if overflow {
-		return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+	var baseFee *uint256.Int
+	if header.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		if overflow {
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+		}
 	}
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
@@ -960,9 +964,13 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		}
 
 		// Get a new instance of the EVM.
-		baseFee, overflow := uint256.FromBig(header.BaseFee)
-		if overflow {
-			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+		var baseFee *uint256.Int
+		if header.BaseFee != nil {
+			var overflow bool
+			baseFee, overflow = uint256.FromBig(header.BaseFee)
+			if overflow {
+				return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+			}
 		}
 		msg, err := args.ToMessage(api.gasCap, baseFee)
 		if err != nil {
