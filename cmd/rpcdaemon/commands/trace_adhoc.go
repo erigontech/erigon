@@ -787,7 +787,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	// Get a new instance of the EVM.
 	var baseFee *uint256.Int
-	if header.BaseFee != nil {
+	if header != nil && header.BaseFee != nil {
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
@@ -965,7 +965,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 
 		// Get a new instance of the EVM.
 		var baseFee *uint256.Int
-		if header.BaseFee != nil {
+		if header != nil && header.BaseFee != nil {
 			var overflow bool
 			baseFee, overflow = uint256.FromBig(header.BaseFee)
 			if overflow {
