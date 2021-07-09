@@ -1,4 +1,4 @@
-FROM golang:1.16-alpine3.13 as builder
+FROM docker.io/library/golang:1.16-alpine3.13 as builder
 
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
@@ -7,7 +7,7 @@ ADD . .
 
 RUN make all
 
-FROM alpine:3.13
+FROM docker.io/library/alpine:3.13
 
 RUN mkdir -p /var/lib/erigon
 VOLUME /var/lib/erigon
