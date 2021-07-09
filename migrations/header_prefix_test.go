@@ -17,9 +17,9 @@ import (
 
 func TestHeaderPrefix(t *testing.T) {
 	require := require.New(t)
-	db := kv.NewTestDB(t)
+	db := kv.NewTestKV(t)
 
-	err := db.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
 		err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
 		if err != nil {
 			return err
@@ -48,31 +48,37 @@ func TestHeaderPrefix(t *testing.T) {
 	require.NoError(err)
 
 	num := 0
-	err = db.Walk(dbutils.HeaderCanonicalBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		require.Len(k, 8)
-		bytes.Equal(v, common.Hash{uint8(binary.BigEndian.Uint64(k))}.Bytes())
-		num++
-		return true, nil
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		return tx.ForEach(dbutils.HeaderCanonicalBucket, []byte{}, func(k, v []byte) error {
+			require.Len(k, 8)
+			bytes.Equal(v, common.Hash{uint8(binary.BigEndian.Uint64(k))}.Bytes())
+			num++
+			return nil
+		})
 	})
 	require.NoError(err)
 	require.Equal(num, 10)
 
 	num = 0
-	err = db.Walk(dbutils.HeaderTDBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		require.Len(k, 40)
-		bytes.Equal(v, []byte{uint8(binary.BigEndian.Uint64(k))})
-		num++
-		return true, nil
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		return tx.ForEach(dbutils.HeaderTDBucket, []byte{}, func(k, v []byte) error {
+			require.Len(k, 40)
+			bytes.Equal(v, []byte{uint8(binary.BigEndian.Uint64(k))})
+			num++
+			return nil
+		})
 	})
 	require.NoError(err)
 	require.Equal(num, 10)
 
 	num = 0
-	err = db.Walk(dbutils.HeadersBucket, []byte{}, 0, func(k, v []byte) (bool, error) {
-		require.Len(k, 40)
-		bytes.Equal(v, []byte("header "+strconv.Itoa(int(binary.BigEndian.Uint64(k)))))
-		num++
-		return true, nil
+	err = db.View(context.Background(), func(tx ethdb.Tx) error {
+		return tx.ForEach(dbutils.HeadersBucket, []byte{}, func(k, v []byte) error {
+			require.Len(k, 40)
+			bytes.Equal(v, []byte("header "+strconv.Itoa(int(binary.BigEndian.Uint64(k)))))
+			num++
+			return nil
+		})
 	})
 	require.NoError(err)
 	require.Equal(num, 10)

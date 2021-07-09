@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
@@ -192,13 +191,6 @@ func (m *TxDb) Delete(bucket string, k, v []byte) error {
 	return c.(ethdb.RwCursor).Delete(k, v)
 }
 
-func (m *TxDb) NewBatch() ethdb.DbWithPendingMutations {
-	return &mutation{
-		db:   m,
-		puts: btree.New(32),
-	}
-}
-
 func (m *TxDb) begin(ctx context.Context, flags ethdb.TxFlags) error {
 	kv := m.db.(ethdb.HasRwKV).RwKV()
 
@@ -332,10 +324,6 @@ func (m *TxDb) Rollback() {
 
 func (m *TxDb) Tx() ethdb.Tx {
 	return m.tx
-}
-
-func (m *TxDb) Keys() ([][]byte, error) {
-	panic("don't use me")
 }
 
 func (m *TxDb) BucketExists(name string) (bool, error) {

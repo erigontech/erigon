@@ -36,10 +36,10 @@ var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cad
 
 // NewAccount creates a new account w/o code nor storage.
 func NewAccount() Account {
-	a := Account{}
-	a.Root = emptyRoot
-	a.CodeHash = emptyCodeHash
-	return a
+	return Account{
+		Root:     emptyRoot,
+		CodeHash: emptyCodeHash,
+	}
 }
 
 func bytesToUint64(buf []byte) (x uint64) {

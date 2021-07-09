@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -57,14 +56,23 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	}
 	defer tx.Rollback()
 
-	bc := adapter.NewBlockGetter(tx)
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+
+	block, _, err := rawdb.ReadBlockByHashWithSenders(tx, blockHash)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	if block == nil {
+		return StorageRangeResult{}, nil
+	}
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
 	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -211,16 +219,23 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
-	bc := adapter.NewBlockGetter(tx)
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
+	}
+
+	block, _, err := rawdb.ReadBlockByHashWithSenders(tx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
 	}
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
 	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, bc, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

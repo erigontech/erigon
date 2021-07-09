@@ -17,7 +17,6 @@
 package tests
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -160,8 +159,8 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(ctx context.Context, tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, root, err := t.RunNoVerify(ctx, tx, subtest, vmconfig)
+func (t *StateTest) Run(rules params.Rules, tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+	state, root, err := t.RunNoVerify(rules, tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
 	}
@@ -178,7 +177,7 @@ func (t *StateTest) Run(ctx context.Context, tx ethdb.RwTx, subtest StateSubtest
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(rules params.Rules, kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	tx := kv.WrapIntoTxDB(kvtx)
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
@@ -192,9 +191,8 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
-	ctx = config.WithEIPsFlags(ctx, writeBlockNr)
 
-	_, err = MakePreState(context.Background(), tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(params.Rules{}, tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -242,10 +240,10 @@ func (t *StateTest) RunNoVerify(ctx context.Context, kvtx ethdb.RwTx, subtest St
 	// - there are only 'bad' transactions, which aren't executed. In those cases,
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
-	if err = statedb.FinalizeTx(ctx, w); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainRules, w); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(ctx, w); err != nil {
+	if err = statedb.CommitBlock(evm.ChainRules, w); err != nil {
 		return nil, common.Hash{}, err
 	}
 	// Generate hashed state
@@ -300,7 +298,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules params.Rules, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := state.NewPlainStateReader(db)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -319,10 +317,10 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(ctx, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(ctx, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
 	return statedb, nil

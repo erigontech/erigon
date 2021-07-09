@@ -17,10 +17,10 @@ import (
 
 func TestHeadersGenerateIndex(t *testing.T) {
 	snPath := t.TempDir()
-	snVK := kv.NewMDBX().Path(snPath).MustOpen()
+	snKV := kv.NewMDBX().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers := generateHeaders(10)
-	err := snVK.Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := snKV.Update(context.Background(), func(tx ethdb.RwTx) error {
 		for _, header := range headers {
 			headerBytes, innerErr := rlp.EncodeToBytes(header)
 			if innerErr != nil {
@@ -31,25 +31,12 @@ func TestHeadersGenerateIndex(t *testing.T) {
 				panic(innerErr)
 			}
 		}
-		c, err := tx.RwCursor(dbutils.HeadersSnapshotInfoBucket)
-		if err != nil {
-			return err
-		}
-		innerErr := c.Put([]byte(dbutils.SnapshotHeadersHeadHash), headers[len(headers)-1].Hash().Bytes())
-		if innerErr != nil {
-			return innerErr
-		}
-		innerErr = c.Put([]byte(dbutils.SnapshotHeadersHeadNumber), headers[len(headers)-1].Number.Bytes())
-		if innerErr != nil {
-			return innerErr
-		}
-
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	snVK.Close()
+	snKV.Close()
 
 	db := kv.NewMDBX().InMem().WithBucketsConfig(kv.DefaultBucketConfigs).MustOpen()
 	defer db.Close()
@@ -58,11 +45,11 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var snKV ethdb.RwKV
+
 	snKV = kv.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(kv.DefaultBucketConfigs).MustOpen()
 	defer snKV.Close()
 
-	snKV = kv.NewSnapshotKV().SnapshotDB([]string{dbutils.HeadersSnapshotInfoBucket, dbutils.HeadersBucket}, snKV).DB(db).Open()
+	snKV = kv.NewSnapshotKV().HeadersSnapshot(snKV).DB(db).Open()
 	snDb := kv.NewObjectDatabase(snKV)
 	err = GenerateHeaderIndexes(context.Background(), snDb)
 	if err != nil {

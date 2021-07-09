@@ -230,7 +230,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 	// Make sure the transaction feeCap is greater than the block's baseFee.
-	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
+	if st.evm.ChainRules.IsLondon {
 		if l := st.feeCap.BitLen(); l > 256 {
 			return fmt.Errorf("%w: address %v, feeCap bit length: %d", ErrFeeCapVeryHigh,
 				st.msg.From().Hex(), l)
@@ -282,9 +282,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
-	homestead := st.evm.ChainConfig().IsHomestead(st.evm.Context.BlockNumber)
-	istanbul := st.evm.ChainConfig().IsIstanbul(st.evm.Context.BlockNumber)
-	london := st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber)
+	homestead := st.evm.ChainRules.IsHomestead
+	istanbul := st.evm.ChainRules.IsIstanbul
+	london := st.evm.ChainRules.IsLondon
 	contractCreation := msg.To() == nil
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
@@ -307,7 +307,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		}
 	}
 	// Set up the initial access list.
-	if st.evm.ChainConfig().IsBerlin(st.evm.Context.BlockNumber) {
+	if st.evm.ChainRules.IsBerlin {
 		st.state.PrepareAccessList(msg.From(), msg.To(), st.evm.ActivePrecompiles(), msg.AccessList())
 	}
 
@@ -336,7 +336,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		}
 	}
 	effectiveTip := st.gasPrice
-	if st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber) {
+	if st.evm.ChainRules.IsLondon {
 		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.feeCap, st.evm.Context.BaseFee))
 	}
 	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))

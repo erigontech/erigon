@@ -48,14 +48,16 @@ type Server struct {
 	idgen           func() ID
 	run             int32
 	codecs          mapset.Set
+
+	batchConcurrency uint
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer() *Server {
-	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1}
+func NewServer(batchConcurrency uint) *Server {
+	server := &Server{idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency}
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
-	rpcService := &RPCService{server}
+	rpcService := &RPCService{server: server}
 	server.RegisterName(MetadataApi, rpcService)
 	return server
 }
@@ -104,7 +106,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 

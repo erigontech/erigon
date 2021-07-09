@@ -134,18 +134,15 @@ func main() {
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
 
-	var bench10Cmd = &cobra.Command{
-		Use:   "bench10",
+	var benchTraceTransactionCmd = &cobra.Command{
+		Use:   "benchTraceTransaction",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench10(erigonURL, gethURL, blockFrom, blockTo, recordFile)
-			if err != nil {
-				log.Error("bench 10 err", "err", err)
-			}
+			rpctest.BenchTraceTransaction(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench10Cmd, withGethUrl, withErigonUrl, withBlockNum, withRecord)
+	with(benchTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench11Cmd = &cobra.Command{
 		Use:   "bench11",
@@ -248,7 +245,7 @@ func main() {
 		bench7Cmd,
 		bench8Cmd,
 		bench9Cmd,
-		bench10Cmd,
+		benchTraceTransactionCmd,
 		bench11Cmd,
 		bench12Cmd,
 		bench13Cmd,

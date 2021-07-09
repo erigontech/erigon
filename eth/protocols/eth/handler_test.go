@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
@@ -53,7 +52,7 @@ var (
 // purpose is to allow testing the request/reply workflows and wire serialization
 // in the `eth` protocol without actually doing any data processing.
 type testBackend struct {
-	db          ethdb.Database
+	db          ethdb.RwKV
 	txpool      *core.TxPool
 	headBlock   *types.Block
 	genesis     *types.Block
@@ -87,7 +86,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	txconfig.Journal = "" // Don't litter the disk with test journals
 
 	b := &testBackend{
-		db:          kv.NewObjectDatabase(m.DB),
+		db:          m.DB,
 		txpool:      core.NewTxPool(txconfig, m.ChainConfig, m.DB),
 		headBlock:   headBlock,
 		genesis:     m.Genesis,
@@ -99,7 +98,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	return b
 }
 
-func (b *testBackend) DB() ethdb.RwKV     { return b.db.(ethdb.HasRwKV).RwKV() }
+func (b *testBackend) DB() ethdb.RwKV     { return b.db }
 func (b *testBackend) TxPool() eth.TxPool { return b.txpool }
 func (b *testBackend) RunPeer(peer *eth.Peer, handler eth.Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
@@ -141,7 +140,7 @@ func TestGetBlockHeaders65(t *testing.T) { testGetBlockHeaders(t, 65) }
 
 func testGetBlockHeaders(t *testing.T, protocol uint) {
 	backend := newTestBackend(t, eth.MaxHeadersServe+15)
-	tx, err := backend.db.RwKV().BeginRw(context.Background())
+	tx, err := backend.db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -315,7 +314,7 @@ func TestGetBlockBodies65(t *testing.T) { testGetBlockBodies(t, 65) }
 
 func testGetBlockBodies(t *testing.T, protocol uint) {
 	backend := newTestBackend(t, eth.MaxBodiesServe+15)
-	tx, err := backend.db.RwKV().BeginRw(context.Background())
+	tx, err := backend.db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 

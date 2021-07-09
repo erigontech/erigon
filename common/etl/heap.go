@@ -2,6 +2,7 @@ package etl
 
 import (
 	"bytes"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
@@ -14,10 +15,6 @@ type HeapElem struct {
 type Heap struct {
 	comparator dbutils.CmpFunc
 	elems      []HeapElem
-}
-
-func (h Heap) SetComparator(cmp dbutils.CmpFunc) {
-	h.comparator = cmp
 }
 
 func (h Heap) Len() int {

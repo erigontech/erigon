@@ -127,6 +127,13 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 }
 
 func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx ethdb.Tx) (vm.BlockContext, vm.TxContext) {
+	var baseFee uint256.Int
+	if header.Eip1559 {
+		overflow := baseFee.SetFromBig(header.BaseFee)
+		if overflow {
+			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
+		}
+	}
 	return vm.BlockContext{
 			CanTransfer: core.CanTransfer,
 			Transfer:    core.Transfer,
@@ -137,6 +144,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			Time:        header.Time,
 			Difficulty:  new(big.Int).Set(header.Difficulty),
 			GasLimit:    header.GasLimit,
+			BaseFee:     &baseFee,
 		},
 		vm.TxContext{
 			Origin:   msg.From(),

@@ -22,17 +22,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )
-
-type DbCopier interface {
-	NewDbWithTheSameParameters() *ObjectDatabase
-}
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
@@ -46,12 +40,8 @@ func NewObjectDatabase(kv ethdb.RwKV) *ObjectDatabase {
 	}
 }
 
-func MustOpen(path string) *ObjectDatabase {
-	return NewObjectDatabase(MustOpenKV(path))
-}
-
-func MustOpenKV(path string) ethdb.RwKV {
-	db, err := OpenKV(path, false)
+func MustOpen(path string) ethdb.RwKV {
+	db, err := Open(path, false)
 	if err != nil {
 		panic(err)
 	}
@@ -59,7 +49,7 @@ func MustOpenKV(path string) ethdb.RwKV {
 }
 
 // Open - main method to open database.
-func OpenKV(path string, readOnly bool) (ethdb.RwKV, error) {
+func Open(path string, readOnly bool) (ethdb.RwKV, error) {
 	var db ethdb.RwKV
 	var err error
 	opts := NewMDBX().Path(path)
@@ -72,15 +62,6 @@ func OpenKV(path string, readOnly bool) (ethdb.RwKV, error) {
 		return nil, err
 	}
 	return db, nil
-}
-
-func Open(path string, readOnly bool) (*ObjectDatabase, error) {
-	kv, kvErr := OpenKV(path, readOnly)
-	if kvErr != nil {
-		return nil, kvErr
-	}
-
-	return NewObjectDatabase(kv), nil
 }
 
 // Put inserts or updates a single entry.
@@ -293,90 +274,12 @@ func (db *ObjectDatabase) Close() {
 	db.kv.Close()
 }
 
-func (db *ObjectDatabase) Keys() ([][]byte, error) {
-	var keys [][]byte
-	err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		for _, name := range dbutils.Buckets {
-			var nameCopy = make([]byte, len(name))
-			copy(nameCopy, name)
-			c, err := tx.Cursor(name)
-			if err != nil {
-				return err
-			}
-			err = ethdb.ForEach(c, func(k, _ []byte) (bool, error) {
-				var kCopy = make([]byte, len(k))
-				copy(kCopy, k)
-				keys = append(append(keys, nameCopy), kCopy)
-				return true, nil
-			})
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return keys, err
-}
-
 func (db *ObjectDatabase) RwKV() ethdb.RwKV {
 	return db.kv
 }
 
 func (db *ObjectDatabase) SetRwKV(kv ethdb.RwKV) {
 	db.kv = kv
-}
-
-func (db *ObjectDatabase) MemCopy() *ObjectDatabase {
-	var mem *ObjectDatabase
-	// Open the db and recover any potential corruptions
-	switch t := db.kv.(type) {
-	case DbCopier:
-		mem = t.NewDbWithTheSameParameters()
-	default:
-		panic(fmt.Sprintf("MemCopy is not implemented for type %T", t))
-	}
-
-	if err := db.kv.View(context.Background(), func(readTx ethdb.Tx) error {
-		for _, name := range dbutils.Buckets {
-			name := name
-			if err := mem.kv.Update(context.Background(), func(writeTx ethdb.RwTx) error {
-				newBucketToWrite, err := writeTx.RwCursor(name)
-				if err != nil {
-					return err
-				}
-				defer newBucketToWrite.Close()
-				readC, err := readTx.Cursor(name)
-				if err != nil {
-					return err
-				}
-				defer readC.Close()
-				return ethdb.ForEach(readC, func(k, v []byte) (bool, error) {
-					if err := newBucketToWrite.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-						return false, err
-					}
-					return true, nil
-				})
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-
-	return mem
-}
-
-func (db *ObjectDatabase) NewBatch() ethdb.DbWithPendingMutations {
-	m := &mutation{
-		db:   db,
-		puts: btree.New(32),
-	}
-	return m
 }
 
 func (db *ObjectDatabase) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {

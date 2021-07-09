@@ -396,7 +396,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	chainDb := kv.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
-	historyTx, err1 := historyDb.Begin(context.Background(), ethdb.RO)
+	historyTx, err1 := historyDb.BeginRo(context.Background())
 	if err1 != nil {
 		return err1
 	}
@@ -526,7 +526,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	blockNumLastReport := blockNum
 	for !interrupt {
 		var block *types.Block
-		if err := chainDb.RwKV().View(context.Background(), func(tx ethdb.Tx) (err error) {
+		if err := chainDb.View(context.Background(), func(tx ethdb.Tx) (err error) {
 			block, err = rawdb.ReadBlockByNumber(tx, blockNum)
 			return err
 		}); err != nil {
@@ -544,13 +544,12 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate := state.NewPlainDBState(historyTx, block.NumberU64()-1)
+		dbstate := state.NewPlainKvState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(chainDb, hash, number) }
-		checkTEVM := ethdb.GetCheckTEVM(chainDb)
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, checkTEVM, block, vmConfig)
+		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, nil /* checkTEVM */, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -675,6 +674,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	rules := chainConfig.Rules(block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, checkTEVM)
@@ -690,8 +690,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number.Uint64())
-		if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
+		if err := ibs.CommitBlock(rules, blockWriter); err != nil {
 			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 		}
 	}

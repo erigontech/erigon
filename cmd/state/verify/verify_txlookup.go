@@ -17,7 +17,7 @@ import (
 )
 
 func ValidateTxLookups(chaindata string) error {
-	db := kv.MustOpenKV(chaindata)
+	db := kv.MustOpen(chaindata)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err

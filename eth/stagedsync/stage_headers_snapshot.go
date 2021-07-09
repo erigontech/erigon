@@ -6,25 +6,30 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
-type HeadersSnapshotGenCfg struct {
-	db          ethdb.RwKV
-	snapshotDir string
+type SnapshotHeadersCfg struct {
+	db               ethdb.RwKV
+	snapshotDir      string
+	client           *snapshotsync.Client
+	snapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
-func StageHeadersSnapshotGenCfg(db ethdb.RwKV, snapshotDir string) HeadersSnapshotGenCfg {
-	return HeadersSnapshotGenCfg{
-		db:          db,
-		snapshotDir: snapshotDir,
+func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotHeadersCfg {
+	return SnapshotHeadersCfg{
+		db:               db,
+		snapshotDir:      snapshot.Dir,
+		client:           client,
+		snapshotMigrator: snapshotMigrator,
 	}
 }
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg HeadersSnapshotGenCfg, initial bool, sm *snapshotsync.SnapshotMigrator, torrentClient *snapshotsync.Client, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, quit <-chan struct{}) error {
 	//generate snapshot only on initial mode
 	if !initial {
 		s.Done()
@@ -62,13 +67,13 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 		return nil
 	}
 
-	err = sm.AsyncStages(snapshotBlock, cfg.db, readTX, torrentClient, false)
+	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.db, readTX, cfg.client, false)
 	if err != nil {
 		return err
 	}
 	readTX.Rollback()
 
-	for !sm.Replaced() {
+	for !cfg.snapshotMigrator.Replaced() {
 		time.Sleep(time.Minute)
 		log.Info("Wait old snapshot to close")
 	}
@@ -79,7 +84,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 	}
 	defer writeTX.Rollback()
 
-	err = sm.SyncStages(snapshotBlock, cfg.db, writeTX)
+	err = cfg.snapshotMigrator.SyncStages(snapshotBlock, cfg.db, writeTX)
 	if err != nil {
 		return err
 	}
@@ -99,9 +104,9 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 			return false, err
 		}
 		defer readTX.Rollback()
-		err = sm.Final(readTX)
+		err = cfg.snapshotMigrator.Final(readTX)
 
-		return atomic.LoadUint64(&sm.HeadersCurrentSnapshot) == snapshotBlock, err
+		return atomic.LoadUint64(&cfg.snapshotMigrator.HeadersCurrentSnapshot) == snapshotBlock, err
 	}
 
 	for {
@@ -113,6 +118,28 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Heade
 			break
 		}
 		time.Sleep(time.Second)
+	}
+	return nil
+}
+
+func UnwindHeadersSnapshotGenerationStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, quit <-chan struct{}) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if err := u.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

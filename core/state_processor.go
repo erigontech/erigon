@@ -17,7 +17,6 @@
 package core
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -91,24 +90,20 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 		return nil, nil, err
 	}
 
-	ctx := config.WithEIPsFlags(context.Background(), header.Number.Uint64())
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = tx.Hash()
 	}
-	// Add addresses to access list if applicable
-	// about the transaction and calling mechanisms.
-	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, statedb)
-	// If the transaction created a contract, store the creation address in the receipt.
+
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = statedb.FinalizeTx(ctx, stateWriter); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainRules, stateWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -148,6 +143,9 @@ func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Has
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, getHeader, engine, author, checkTEVM)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
+	// Add addresses to access list if applicable
+	// about the transaction and calling mechanisms.
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
 	return applyTransaction(config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }

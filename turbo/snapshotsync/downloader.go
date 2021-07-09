@@ -374,20 +374,35 @@ func ParseInfoHashKey(k []byte) (uint64, string) {
 	return binary.BigEndian.Uint64(k), string(bytes.TrimPrefix(k[8:], []byte(SnapshotInfoHashPrefix)))
 }
 
-func SnapshotSeeding(chainDB ethdb.Database, cli *Client, name string, snapshotsDir string) error {
-	snapshotBlock, err := chainDB.Get(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+func GetInfo() {
+
+}
+
+func SnapshotSeeding(chainDB ethdb.RwKV, cli *Client, name string, snapshotsDir string) error {
+	var snapshotBlock uint64
+	var hasSnapshotBlock bool
+	if err := chainDB.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+			return err
+		}
+		hasSnapshotBlock = len(v) == 8
+		if hasSnapshotBlock {
+			snapshotBlock = binary.BigEndian.Uint64(v)
+		} else {
+			log.Warn("Snapshot block unknown", "snapshot", name, "v", common.Bytes2Hex(v))
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	if len(snapshotBlock) == 8 {
-		hash, err := cli.SeedSnapshot(name, SnapshotName(snapshotsDir, name, binary.BigEndian.Uint64(snapshotBlock)))
+	if hasSnapshotBlock {
+		hash, err := cli.SeedSnapshot(name, SnapshotName(snapshotsDir, name, snapshotBlock))
 		if err != nil {
 			return err
 		}
 		log.Info("Start seeding", "snapshot", name, "hash", hash.String())
-	} else {
-		log.Warn("Snapshot block unknown", "snapshot", name, "v", common.Bytes2Hex(snapshotBlock))
 	}
 	return nil
 }

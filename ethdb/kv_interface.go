@@ -72,6 +72,19 @@ const (
 	Sentry Label = 2
 )
 
+func (l Label) String() string {
+	switch l {
+	case Chain:
+		return "chaindata"
+	case TxPool:
+		return "txpool"
+	case Sentry:
+		return "sentry"
+	default:
+		return "unknown"
+	}
+}
+
 type Has interface {
 	// Has indicates whether a key exists in the database.
 	Has(bucket string, key []byte) (bool, error)

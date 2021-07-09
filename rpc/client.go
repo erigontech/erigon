@@ -112,7 +112,7 @@ type clientConn struct {
 
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
-	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList)
+	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList, 50)
 	return &clientConn{conn, handler}
 }
 

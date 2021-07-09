@@ -24,8 +24,6 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
-var _ DbCopier = &MdbxKV{}
-
 const expectMdbxVersionMajor = 0
 const expectMdbxVersionMinor = 10
 const pageSize = 4 * 1024
@@ -169,7 +167,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		return nil, fmt.Errorf("%w, path: %s", err, opts.path)
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), debug.Callers(10))
 	}
 
 	defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
@@ -306,11 +304,6 @@ type MdbxKV struct {
 	txSize  uint64
 }
 
-func (db *MdbxKV) NewDbWithTheSameParameters() *ObjectDatabase {
-	opts := db.opts
-	return NewObjectDatabase(NewMDBX().Set(opts).MustOpen())
-}
-
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
@@ -327,7 +320,7 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	} else {
-		db.log.Info("database closed (MDBX)")
+		db.log.Info("database closed (MDBX)", "label", db.opts.label.String(), "exclusive", db.opts.flags&mdbx.Exclusive != 0)
 	}
 }
 
@@ -343,7 +336,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn ethdb.Tx, err error) {
 
 	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
 	if err != nil {
-		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label.String(), debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -367,7 +360,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn ethdb.RwTx, err error) {
 	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
-		return nil, fmt.Errorf("%w, trace: %s", err, debug.Callers(10))
+		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), debug.Callers(10))
 	}
 	tx.RawRead = true
 	return &MdbxTx{
@@ -472,7 +465,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		return
 	}
 
-	info, err := tx.db.env.Info()
+	info, err := tx.db.env.Info(tx.tx)
 	if err != nil {
 		return
 	}

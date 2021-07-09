@@ -334,7 +334,7 @@ type StateDiff struct {
 	sdMap map[common.Address]*StateDiffAccount
 }
 
-func (sd *StateDiff) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+func (sd *StateDiff) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
@@ -348,14 +348,14 @@ func (sd *StateDiff) UpdateAccountCode(address common.Address, incarnation uint6
 	return nil
 }
 
-func (sd *StateDiff) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+func (sd *StateDiff) DeleteAccount(address common.Address, original *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
 		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -532,7 +532,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(ctx, sd); err != nil {
+		if err = ibs.FinalizeTx(chainConfig.Rules(blockNumber), sd); err != nil {
 			return nil, err
 		}
 	}
@@ -786,7 +786,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(ctx, sd); err != nil {
+		if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
@@ -901,6 +901,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 	results := []*TraceCallResult{}
 
 	for txIndex, args := range callParams {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
 		for _, traceType := range args.traceTypes {
@@ -959,18 +962,18 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			sdMap := make(map[common.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd := &StateDiff{sdMap: sdMap}
-			if err = ibs.FinalizeTx(ctx, sd); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
 				return nil, err
 			}
 			sd.CompareStates(initialIbs, ibs)
-			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
 				return nil, err
 			}
 		} else {
-			if err = ibs.FinalizeTx(ctx, noop); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules, noop); err != nil {
 				return nil, err
 			}
-			if err = ibs.CommitBlock(ctx, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
 				return nil, err
 			}
 		}

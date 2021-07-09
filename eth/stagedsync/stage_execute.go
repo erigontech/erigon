@@ -246,7 +246,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	}
 
 	var batch ethdb.DbWithPendingMutations
-	batch = kv.NewBatch(tx)
+	batch = kv.NewBatch(tx, quit)
 	defer batch.Rollback()
 
 	logEvery := time.NewTicker(logInterval)
@@ -318,7 +318,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = kv.NewBatch(tx)
+			batch = kv.NewBatch(tx, quit)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
@@ -385,8 +385,7 @@ func pruneDupSortedBucket(tx ethdb.RwTx, logPrefix string, name string, tableNam
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Pruning", logPrefix), "table", tableName, "number", blockNum,
 				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys),
-				"numGC", int(m.NumGC))
+				"sys", common.StorageSize(m.Sys))
 		}
 		if err = changeSetCursor.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("%s: failed to remove %s for block %d: %v", logPrefix, name, blockNum, err)

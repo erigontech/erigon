@@ -22,6 +22,8 @@ type mutation struct {
 	puts       *btree.BTree
 	db         ethdb.Database
 	searchItem MutationItem
+	quit       <-chan struct{}
+	clean      func()
 	mu         sync.RWMutex
 	size       int
 }
@@ -32,10 +34,26 @@ type MutationItem struct {
 	value []byte
 }
 
-func NewBatch(tx ethdb.RwTx) *mutation {
+// NewBatch - starts in-mem batch
+//
+// Common pattern:
+//
+// batch := db.NewBatch()
+// defer batch.Rollback()
+// ... some calculations on `batch`
+// batch.Commit()
+func NewBatch(tx ethdb.RwTx, quit <-chan struct{}) *mutation {
+	clean := func() {}
+	if quit == nil {
+		ch := make(chan struct{})
+		clean = func() { close(ch) }
+		quit = ch
+	}
 	return &mutation{
-		db:   &TxDb{tx: tx, cursors: map[string]ethdb.Cursor{}},
-		puts: btree.New(32),
+		db:    &TxDb{tx: tx, cursors: map[string]ethdb.Cursor{}},
+		puts:  btree.New(32),
+		quit:  quit,
+		clean: clean,
 	}
 }
 
@@ -294,6 +312,9 @@ func (m *mutation) doCommit(tx ethdb.RwTx) error {
 			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
 			log.Info("Write to db", "progress", progress, "current table", mi.table)
 			tx.CollectMetrics()
+		case <-m.quit:
+			innerErr = common.ErrStopped
+			return false
 		}
 		return true
 	})
@@ -321,6 +342,7 @@ func (m *mutation) Commit() error {
 
 	m.puts.Clear(false /* addNodesToFreelist */)
 	m.size = 0
+	m.clean()
 	return nil
 }
 
@@ -329,34 +351,11 @@ func (m *mutation) Rollback() {
 	defer m.mu.Unlock()
 	m.puts.Clear(false /* addNodesToFreelist */)
 	m.size = 0
-}
-
-func (m *mutation) Keys() ([][]byte, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	tuples := common.NewTuples(m.puts.Len(), 2, 1)
-	var innerErr error
-	m.puts.Ascend(func(i btree.Item) bool {
-		mi := i.(*MutationItem)
-		if err := tuples.Append([]byte(mi.table), mi.key); err != nil {
-			innerErr = err
-			return false
-		}
-		return true
-	})
-	return tuples.Values, innerErr
+	m.clean()
 }
 
 func (m *mutation) Close() {
 	m.Rollback()
-}
-
-func (m *mutation) NewBatch() ethdb.DbWithPendingMutations {
-	mm := &mutation{
-		db:   m,
-		puts: btree.New(32),
-	}
-	return mm
 }
 
 func (m *mutation) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
@@ -371,11 +370,6 @@ func (m *mutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")
 	}
-}
-
-func (m *mutation) MemCopy() ethdb.Database {
-	m.panicOnEmptyDB()
-	return m.db
 }
 
 func (m *mutation) SetRwKV(kv ethdb.RwKV) {

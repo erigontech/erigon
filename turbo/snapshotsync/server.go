@@ -22,24 +22,30 @@ var (
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 	db := kv.MustOpen(dir + "/db")
-	peerID, err := db.Get(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
-	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-		return nil, fmt.Errorf("get peer id: %w", err)
+	sn := &SNDownloaderServer{
+		db: kv.NewObjectDatabase(db),
 	}
-	downloader, err := New(dir, seeding, string(peerID))
-	if err != nil {
+	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		peerID, err := tx.GetOne(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+		if err != nil {
+			return fmt.Errorf("get peer id: %w", err)
+		}
+		sn.t, err = New(dir, seeding, string(peerID))
+		if err != nil {
+			return err
+		}
+		if len(peerID) == 0 {
+			err = sn.t.SavePeerID(tx)
+			if err != nil {
+				return fmt.Errorf("save peer id: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	if len(peerID) == 0 {
-		err = downloader.SavePeerID(db)
-		if err != nil {
-			return nil, fmt.Errorf("save peer id: %w", err)
-		}
-	}
-	return &SNDownloaderServer{
-		t:  downloader,
-		db: db,
-	}, nil
+
+	return sn, nil
 }
 
 type SNDownloaderServer struct {

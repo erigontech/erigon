@@ -126,9 +126,9 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	cfg.SnapshotMode = snMode
-	cfg.SnapshotSeeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
-	cfg.SnapshotLayout = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
+	cfg.Snapshot.Mode = snMode
+	cfg.Snapshot.Seeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
+	cfg.Snapshot.Enabled = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
 
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
@@ -164,10 +164,10 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
-		cfg.SnapshotMode = snMode
+		cfg.Snapshot.Mode = snMode
 	}
 	if v := f.Bool(SeedSnapshotsFlag.Name, false, SeedSnapshotsFlag.Usage); v != nil {
-		cfg.SnapshotSeeding = *v
+		cfg.Snapshot.Seeding = *v
 	}
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))

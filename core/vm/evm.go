@@ -48,11 +48,11 @@ type (
 // configuration
 func (evm *EVM) ActivePrecompiles() []common.Address {
 	switch {
-	case evm.chainRules.IsBerlin:
+	case evm.ChainRules.IsBerlin:
 		return PrecompiledAddressesBerlin
-	case evm.chainRules.IsIstanbul:
+	case evm.ChainRules.IsIstanbul:
 		return PrecompiledAddressesIstanbul
-	case evm.chainRules.IsByzantium:
+	case evm.ChainRules.IsByzantium:
 		return PrecompiledAddressesByzantium
 	default:
 		return PrecompiledAddressesHomestead
@@ -62,11 +62,11 @@ func (evm *EVM) ActivePrecompiles() []common.Address {
 func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	var precompiles map[common.Address]PrecompiledContract
 	switch {
-	case evm.chainRules.IsBerlin:
+	case evm.ChainRules.IsBerlin:
 		precompiles = PrecompiledContractsBerlin
-	case evm.chainRules.IsIstanbul:
+	case evm.ChainRules.IsIstanbul:
 		precompiles = PrecompiledContractsIstanbul
-	case evm.chainRules.IsByzantium:
+	case evm.ChainRules.IsByzantium:
 		precompiles = PrecompiledContractsByzantium
 	default:
 		precompiles = PrecompiledContractsHomestead
@@ -147,7 +147,7 @@ type EVM struct {
 	// chainConfig contains information about the current chain
 	chainConfig *params.ChainConfig
 	// chain rules contains the chain rules for the current epoch
-	chainRules params.Rules
+	ChainRules params.Rules
 	// virtual machine configuration options used to initialise the
 	// evm.
 	vmConfig Config
@@ -173,7 +173,7 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chain
 		IntraBlockState: state,
 		vmConfig:        vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      chainConfig.Rules(blockCtx.BlockNumber),
+		ChainRules:      chainConfig.Rules(blockCtx.BlockNumber),
 	}
 
 	evm.interpreters = []Interpreter{
@@ -240,7 +240,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		snapshot = evm.IntraBlockState.Snapshot()
 	)
 	if !evm.IntraBlockState.Exist(addr) {
-		if !isPrecompile && evm.chainRules.IsEIP158 && value.Sign() == 0 {
+		if !isPrecompile && evm.ChainRules.IsEIP158 && value.Sign() == 0 {
 			return nil, gas, nil
 		}
 		evm.IntraBlockState.CreateAccount(addr, false)
@@ -497,7 +497,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	evm.IntraBlockState.SetNonce(caller.Address(), nonce+1)
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
-	if evm.chainRules.IsBerlin {
+	if evm.ChainRules.IsBerlin {
 		evm.IntraBlockState.AddAddressToAccessList(address)
 	}
 	// Ensure there's no existing contract already at the designated address
@@ -509,7 +509,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Create a new account on the state
 	snapshot := evm.IntraBlockState.Snapshot()
 	evm.IntraBlockState.CreateAccount(address, true)
-	if evm.chainRules.IsEIP158 {
+	if evm.ChainRules.IsEIP158 {
 		evm.IntraBlockState.SetNonce(address, 1)
 	}
 	evm.Context.Transfer(evm.IntraBlockState, caller.Address(), address, value, false /* bailout */)
@@ -526,11 +526,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	ret, err = run(evm, contract, nil, false)
 
 	// check whether the max code size has been exceeded
-	maxCodeSizeExceeded := evm.chainRules.IsEIP158 && len(ret) > params.MaxCodeSize
+	maxCodeSizeExceeded := evm.ChainRules.IsEIP158 && len(ret) > params.MaxCodeSize
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && !maxCodeSizeExceeded {
-		if evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
+		if evm.ChainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 			err = ErrInvalidCode
 		}
 	}
@@ -550,7 +550,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in homestead this also counts for code storage gas errors.
-	if maxCodeSizeExceeded || (err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas)) {
+	if maxCodeSizeExceeded || (err != nil && (evm.ChainRules.IsHomestead || err != ErrCodeStoreOutOfGas)) {
 		evm.IntraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
 			contract.UseGas(contract.Gas)

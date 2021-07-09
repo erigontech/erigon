@@ -94,7 +94,7 @@ func New(conf *Config) (*Node, error) {
 
 	node := &Node{
 		config:        conf,
-		inprocHandler: rpc.NewServer(),
+		inprocHandler: rpc.NewServer(50),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
 		databases:     make([]ethdb.Closer, 0),
@@ -506,7 +506,7 @@ func (n *Node) WSEndpoint() string {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*kv2.ObjectDatabase, error) {
+func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (ethdb.RwKV, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -523,18 +523,18 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*kv2.ObjectDatab
 	default:
 		name = "test"
 	}
-	var db *kv2.ObjectDatabase
+	var db ethdb.RwKV
 	if n.config.DataDir == "" {
-		db = kv2.NewMemDatabase()
+		db = kv2.NewMemKV()
 		n.databases = append(n.databases, db)
 		return db, nil
 	}
 	dbPath := n.config.ResolvePath(name)
 
-	var openFunc func(exclusive bool) (*kv2.ObjectDatabase, error)
+	var openFunc func(exclusive bool) (ethdb.RwKV, error)
 	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (*kv2.ObjectDatabase, error) {
-		opts := kv2.NewMDBX().Path(dbPath).DBVerbosity(n.config.DatabaseVerbosity)
+	openFunc = func(exclusive bool) (ethdb.RwKV, error) {
+		opts := kv2.NewMDBX().Path(dbPath).Label(label).DBVerbosity(n.config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
@@ -542,7 +542,7 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*kv2.ObjectDatab
 		if err1 != nil {
 			return nil, err1
 		}
-		return kv2.NewObjectDatabase(kv), nil
+		return kv, nil
 	}
 	var err error
 	db, err = openFunc(false)
@@ -550,7 +550,7 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*kv2.ObjectDatab
 		return nil, err
 	}
 	migrator := migrations.NewMigrator(label)
-	has, err := migrator.HasPendingMigrations(db.RwKV())
+	has, err := migrator.HasPendingMigrations(db)
 	if err != nil {
 		return nil, err
 	}
@@ -572,6 +572,66 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (*kv2.ObjectDatab
 	}
 
 	n.databases = append(n.databases, db)
+	return db, nil
+}
+
+func OpenDatabase(config *Config, label ethdb.Label) (ethdb.RwKV, error) {
+	var name string
+	switch label {
+	case ethdb.Chain:
+		name = "chaindata"
+	case ethdb.TxPool:
+		name = "txpool"
+	default:
+		name = "test"
+	}
+	var db ethdb.RwKV
+	if config.DataDir == "" {
+		db = kv2.NewMemKV()
+		return db, nil
+	}
+	dbPath := config.ResolvePath(name)
+
+	var openFunc func(exclusive bool) (ethdb.RwKV, error)
+	log.Info("Opening Database", "label", name)
+	openFunc = func(exclusive bool) (ethdb.RwKV, error) {
+		opts := kv2.NewMDBX().Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
+		if exclusive {
+			opts = opts.Exclusive()
+		}
+		kv, err1 := opts.Open()
+		if err1 != nil {
+			return nil, err1
+		}
+		return kv, nil
+	}
+	var err error
+	db, err = openFunc(false)
+	if err != nil {
+		return nil, err
+	}
+	migrator := migrations.NewMigrator(label)
+	has, err := migrator.HasPendingMigrations(db)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		log.Info("Re-Opening DB in exclusive mode to apply migrations")
+		db.Close()
+		db, err = openFunc(true)
+		if err != nil {
+			return nil, err
+		}
+		if err = migrator.Apply(db, config.DataDir); err != nil {
+			return nil, err
+		}
+		db.Close()
+		db, err = openFunc(false)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return db, nil
 }
 

@@ -285,27 +285,6 @@ func ReadTransactions(db ethdb.KVGetter, baseTxId uint64, amount uint32) ([]type
 	return txs, nil
 }
 
-func WriteTransactionsDeprecated(db ethdb.Database, txs []types.Transaction, baseTxId uint64) error {
-	txId := baseTxId
-	buf := bytes.NewBuffer(nil)
-	for _, tx := range txs {
-		txIdKey := make([]byte, 8)
-		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
-
-		buf.Reset()
-		if err := rlp.Encode(buf, tx); err != nil {
-			return fmt.Errorf("broken tx rlp: %w", err)
-		}
-
-		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := db.Append(dbutils.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func WriteTransactions(db ethdb.RwTx, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
@@ -420,30 +399,6 @@ func ReadSenders(db ethdb.KVGetter, hash common.Hash, number uint64) ([]common.A
 		copy(senders[i][:], data[i*common.AddressLength:])
 	}
 	return senders, nil
-}
-
-// WriteBodyDeprecated - writes body in Network format, later staged sync will convert it into Storage format
-func WriteBodyDeprecated(db ethdb.Database, hash common.Hash, number uint64, body *types.Body) error {
-	// Pre-processing
-	body.SendersFromTxs()
-	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
-	if err != nil {
-		return err
-	}
-	data, err := rlp.EncodeToBytes(types.BodyForStorage{
-		BaseTxId: baseTxId,
-		TxAmount: uint32(len(body.Transactions)),
-		Uncles:   body.Uncles,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to RLP encode body: %w", err)
-	}
-	WriteBodyRLP(db, hash, number, data)
-	err = WriteTransactionsDeprecated(db, body.Transactions, baseTxId)
-	if err != nil {
-		return fmt.Errorf("failed to WriteTransactions: %w", err)
-	}
-	return nil
 }
 
 func WriteRawBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {

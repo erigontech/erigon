@@ -1,7 +1,8 @@
 package stagedsync
 
 import (
-	"github.com/ledgerwatch/erigon/core/vm"
+	"context"
+
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -42,31 +43,20 @@ func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameter
 }
 
 func (stagedSync *StagedSync) Prepare(
-	vmConfig *vm.Config,
-	db ethdb.Database,
+	db ethdb.RwKV,
 	tx ethdb.Tx,
-	storageMode ethdb.StorageMode,
 	quitCh <-chan struct{},
 	initialCycle bool,
 	miningConfig *MiningCfg,
 	accumulator *shards.Accumulator,
 ) (*State, error) {
-
-	if vmConfig == nil {
-		vmConfig = &vm.Config{}
-	}
-	vmConfig.EnableTEMV = storageMode.TEVM
-
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
-			DB:              db,
-			QuitCh:          quitCh,
-			InitialCycle:    initialCycle,
-			mining:          miningConfig,
-			snapshotsDir:    stagedSync.params.SnapshotDir,
-			btClient:        stagedSync.params.TorrentClient,
-			SnapshotBuilder: stagedSync.params.SnapshotMigrator,
-			Accumulator:     accumulator,
+			QuitCh:       quitCh,
+			InitialCycle: initialCycle,
+			mining:       miningConfig,
+			snapshotsDir: stagedSync.params.SnapshotDir,
+			Accumulator:  accumulator,
 		},
 	)
 	state := NewState(stages)
@@ -82,18 +72,15 @@ func (stagedSync *StagedSync) Prepare(
 			return nil, err
 		}
 	} else {
-		if err := state.LoadUnwindInfo(db); err != nil {
+		if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+			return state.LoadUnwindInfo(tx)
+		}); err != nil {
 			return nil, err
 		}
 	}
 	return state, nil
 }
 
-func (stagedSync *StagedSync) SetTorrentParams(client *snapshotsync.Client, snapshotsDir string, snapshotMigrator *snapshotsync.SnapshotMigrator) {
-	stagedSync.params.TorrentClient = client
-	stagedSync.params.SnapshotDir = snapshotsDir
-	stagedSync.params.SnapshotMigrator = snapshotMigrator
-}
 func (stagedSync *StagedSync) GetSnapshotMigratorFinal() func(tx ethdb.Tx) error {
 	if stagedSync.params.SnapshotMigrator != nil {
 		return stagedSync.params.SnapshotMigrator.Final
