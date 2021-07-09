@@ -45,6 +45,7 @@ type Config struct {
 	Value       *uint256.Int
 	Debug       bool
 	EVMConfig   vm.Config
+	BaseFee     *uint256.Int
 
 	State     *state.IntraBlockState
 	r         state.StateReader
@@ -71,6 +72,7 @@ func setDefaults(cfg *Config) {
 			IstanbulBlock:       new(big.Int),
 			MuirGlacierBlock:    new(big.Int),
 			BerlinBlock:         new(big.Int),
+			LondonBlock:         new(big.Int),
 		}
 	}
 
