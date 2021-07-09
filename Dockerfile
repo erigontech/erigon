@@ -1,4 +1,4 @@
-FROM golang:1.16-alpine3.13 as builder
+FROM docker.io/library/golang:1.16-alpine3.13 as builder
 
 ARG git_commit
 ENV GIT_COMMIT=$git_commit
@@ -23,7 +23,7 @@ RUN go mod download
 ADD . .
 RUN make all
 
-FROM alpine:3.13
+FROM docker.io/library/alpine:3.13
 
 RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
