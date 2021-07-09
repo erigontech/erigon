@@ -100,11 +100,17 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg := args.ToMessage(GasCap)
-
+	baseFee, overflow := uint256.FromBig(header.BaseFee)
+	if overflow {
+		return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+	}
+	msg, err := args.ToMessage(GasCap, baseFee)
+	if err != nil {
+		return nil, err
+	}
 	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
 
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{})
+	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
