@@ -117,9 +117,9 @@ var (
 	}
 
 	// Throttling Flags
-	ThrottleLoopMinTimeFlag = cli.StringFlag{
-		Name:  "throttle.loopMinTime",
-		Usage: "Sets the minimum time between stage loop iterations (e.g. 1h30m, default is none)",
+	SyncLoopThrottleFlag = cli.StringFlag{
+		Name:  "sync.loop.throttle",
+		Usage: "Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)",
 		Value: "",
 	}
 )
@@ -159,12 +159,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
 	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
 
-	if ctx.GlobalString(ThrottleLoopMinTimeFlag.Name) != "" {
-		throttleLoopMinTime, err := time.ParseDuration(ctx.GlobalString(ThrottleLoopMinTimeFlag.Name))
+	if ctx.GlobalString(SyncLoopThrottleFlag.Name) != "" {
+		syncLoopThrottle, err := time.ParseDuration(ctx.GlobalString(SyncLoopThrottleFlag.Name))
 		if err != nil {
-			utils.Fatalf("Invalid time duration provided in %s: %v", ThrottleLoopMinTimeFlag.Name, err)
+			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
-		cfg.ThrottleLoopMinTimeFlag = throttleLoopMinTime
+		cfg.SyncLoopThrottle = syncLoopThrottle
 	}
 }
 

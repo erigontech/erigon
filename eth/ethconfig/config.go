@@ -186,8 +186,8 @@ type Config struct {
 
 	StateStream bool
 
-	// ThrottleLoopMinTimeFlag sets a minimum time between staged loop iterations
-	ThrottleLoopMinTimeFlag time.Duration
+	// SyncLoopThrottle sets a minimum time between staged loop iterations
+	SyncLoopThrottle time.Duration
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {
