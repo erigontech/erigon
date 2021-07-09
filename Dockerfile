@@ -3,9 +3,8 @@ FROM golang:1.16-alpine3.13 as builder
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
 WORKDIR /app
-ADD . .
 
-RUN make all
+RUN make erigon rpcdaemon integration sentry
 
 FROM alpine:3.13
 
