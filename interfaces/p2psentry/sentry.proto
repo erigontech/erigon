@@ -125,7 +125,17 @@ message MessagesRequest {
 
 message PeerCountRequest {}
 
-message PeerCountReply { uint64 count = 1; }
+message PeerCountReply {uint64 count = 1;}
+
+message PeersRequest {}
+message PeersReply {
+  enum PeerEvent {
+    Connect = 0;
+    Disconnect = 1;
+  }
+  types.H512 peer_id = 1;
+  PeerEvent event = 2;
+}
 
 service Sentry {
   rpc PenalizePeer(PenalizePeerRequest) returns (google.protobuf.Empty);
@@ -144,4 +154,7 @@ service Sentry {
   // It is possible to subscribe to the same set if ids more than once.
   rpc Messages(MessagesRequest) returns (stream InboundMessage);
   rpc PeerCount(PeerCountRequest) returns (PeerCountReply);
+
+  // Notifications about connected (after sub-protocol handshake) or lost peer
+  rpc Peers(PeersRequest) returns (stream PeersReply);
 }
