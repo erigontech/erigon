@@ -345,14 +345,6 @@ func (arg *CallArgs) from() common.Address {
 	return *arg.From
 }
 
-// data retrieves the transaction calldata. Input field is preferred.
-func (arg *CallArgs) data() []byte {
-	if arg.Data != nil {
-		return *arg.Data
-	}
-	return nil
-}
-
 // ToMessage converts CallArgs to the Message type used by the core evm
 func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (types.Message, error) {
 	// Reject invalid combinations of pre- and post-1559 fee styles
