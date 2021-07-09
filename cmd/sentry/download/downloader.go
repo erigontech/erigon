@@ -154,7 +154,6 @@ func RecvMessageLoop(ctx context.Context,
 		}
 		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
 			log.Error("[RecvMessage]", "err", err)
-
 		}
 	}
 }

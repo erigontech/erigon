@@ -333,3 +333,78 @@ func RecvTxMessage(ctx context.Context,
 		}
 	}
 }
+
+func RecvPeersLoop(ctx context.Context,
+	sentry remote.SentryClient,
+	cs *download.ControlServerImpl,
+	wg *sync.WaitGroup,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if err := download.SentryHandshake(ctx, sentry, cs); err != nil {
+			log.Error("[RecvPeers] sentry not ready yet", "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if err := RecvPeers(ctx, sentry, wg); err != nil {
+			log.Error("[RecvPeers]", "err", err)
+		}
+	}
+}
+
+// RecvPeers
+// wg is used only in tests to avoid time.Sleep. For non-test code wg == nil
+func RecvPeers(ctx context.Context,
+	sentry remote.SentryClient,
+	wg *sync.WaitGroup,
+) (err error) {
+	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := sentry.Peers(streamCtx, &proto_sentry.PeersRequest{})
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		return err
+	}
+
+	var req *proto_sentry.PeersReply
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			return err
+		}
+		if req == nil {
+			return
+		}
+		//todo: send direct peerID
+		if wg != nil {
+			wg.Done()
+		}
+	}
+}

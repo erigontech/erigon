@@ -314,6 +314,9 @@ func NewStagedSync2(
 				go func(i int) {
 					txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
 				}(i)
+				go func(i int) {
+					txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
+				}(i)
 			}
 			txPoolServer.TxFetcher.Start()
 		}),
