@@ -5,7 +5,7 @@ RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgc
 WORKDIR /app
 ADD . .
 
-RUN make all
+RUN make erigon rpcdaemon integration sentry
 
 FROM docker.io/library/alpine:3.13
 
