@@ -4,7 +4,7 @@ RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgc
 
 WORKDIR /app
 
-RUN make erigon rpcdaemon integration sentry
+RUN make all
 
 FROM alpine:3.13
 
