@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package remote;
+
+option go_package = "./remote;remote";
+
+service ETHBACKEND {
+  rpc Etherbase(EtherbaseRequest) returns (EtherbaseReply);
+
+  rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
+  
+  rpc NetPeerCount(NetPeerCountRequest) returns (NetPeerCountReply);
+
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  // ProtocolVersion returns the Ethereum protocol version number (e.g. 66 for ETH66).
+  rpc ProtocolVersion(ProtocolVersionRequest) returns (ProtocolVersionReply);
+
+  // ClientVersion returns the Ethereum client version string using node name convention (e.g. TurboGeth/v2021.03.2-alpha/Linux).
+  rpc ClientVersion(ClientVersionRequest) returns (ClientVersionReply);
+
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeReply);
+}
+
+enum Event {
+  HEADER = 0;
+  PENDING_LOGS = 1;
+  PENDING_BLOCK = 2;
+}
+
+message EtherbaseRequest {}
+
+message EtherbaseReply { types.H160 address = 1; }
+
+message NetVersionRequest {}
+
+message NetVersionReply { uint64 id = 1; }
+
+message NetPeerCountRequest {}
+
+message NetPeerCountReply { uint64 count = 1; }
+
+message ProtocolVersionRequest {}
+
+message ProtocolVersionReply { uint64 id = 1; }
+
+message ClientVersionRequest {}
+
+message ClientVersionReply { string nodeName = 1; }
+
+message SubscribeRequest {
+  Event type = 1;
+}
+
+message SubscribeReply {
+  Event type = 1;
+  bytes data = 2;  //  serialized data
+}
+
