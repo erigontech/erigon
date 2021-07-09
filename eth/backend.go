@@ -655,7 +655,7 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go Loop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop)
+	go Loop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop, s.config.ThrottleLoopMinTimeFlag)
 	return nil
 }
 
@@ -696,7 +696,15 @@ func (s *Ethereum) Stop() error {
 }
 
 //Deprecated - use stages.StageLoop
-func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, controlServer *download.ControlServerImpl, notifier stagedsync.ChainEventNotifier, stateStream bool, waitForDone chan struct{}) {
+func Loop(
+	ctx context.Context,
+	db ethdb.RwKV, sync *stagedsync.StagedSync,
+	controlServer *download.ControlServerImpl,
+	notifier stagedsync.ChainEventNotifier,
+	stateStream bool,
+	waitForDone chan struct{},
+	loopMinTime time.Duration,
+) {
 	defer debug.LogPanic()
 	stages2.StageLoop(
 		ctx,
@@ -708,5 +716,6 @@ func Loop(ctx context.Context, db ethdb.RwKV, sync *stagedsync.StagedSync, contr
 		stateStream,
 		controlServer.UpdateHead,
 		waitForDone,
+		loopMinTime,
 	)
 }

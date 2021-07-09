@@ -69,6 +69,7 @@ func StageLoop(
 	stateStream bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
+	loopMinTime time.Duration,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -79,6 +80,8 @@ func StageLoop(
 			return
 		default:
 		}
+
+		start := time.Now()
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
@@ -100,6 +103,17 @@ func StageLoop(
 
 		initialCycle = false
 		hd.EnableRequestChaining()
+
+		if loopMinTime != 0 {
+			waitTime := loopMinTime - time.Since(start)
+			log.Info("Wait time until next loop", "for", waitTime)
+			c := time.After(waitTime)
+			select {
+			case <-ctx.Done():
+				return
+			case <-c:
+			}
+		}
 	}
 }
 

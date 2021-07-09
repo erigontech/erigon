@@ -185,6 +185,9 @@ type Config struct {
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
 	StateStream bool
+
+	// ThrottleLoopMinTimeFlag sets a minimum time between staged loop iterations
+	ThrottleLoopMinTimeFlag time.Duration
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {

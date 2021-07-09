@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -114,6 +115,13 @@ var (
 		Name:  "state.stream",
 		Usage: "Enable streaming of state changes from core to RPC daemon",
 	}
+
+	// Throttling Flags
+	ThrottleLoopMinTimeFlag = cli.StringFlag{
+		Name:  "throttle.loopMinTime",
+		Usage: "Sets the minimum time between stage loop iterations (e.g. 1h30m, default is none)",
+		Value: "",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -150,7 +158,16 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
 	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
 	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
+
+	if ctx.GlobalString(ThrottleLoopMinTimeFlag.Name) != "" {
+		throttleLoopMinTime, err := time.ParseDuration(ctx.GlobalString(ThrottleLoopMinTimeFlag.Name))
+		if err != nil {
+			utils.Fatalf("Invalid time duration provided in %s: %v", ThrottleLoopMinTimeFlag.Name, err)
+		}
+		cfg.ThrottleLoopMinTimeFlag = throttleLoopMinTime
+	}
 }
+
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
 		mode, err := ethdb.StorageModeFromString(*v)
