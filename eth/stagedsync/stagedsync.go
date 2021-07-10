@@ -46,13 +46,11 @@ func (stagedSync *StagedSync) Prepare(
 	tx ethdb.Tx,
 	quitCh <-chan struct{},
 	initialCycle bool,
-	miningConfig *MiningCfg,
 ) (*State, error) {
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
 			QuitCh:       quitCh,
 			InitialCycle: initialCycle,
-			mining:       miningConfig,
 			snapshotsDir: stagedSync.params.SnapshotDir,
 		},
 	)

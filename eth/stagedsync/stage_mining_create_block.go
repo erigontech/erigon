@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-type miningBlock struct {
+type MiningBlock struct {
 	Header   *types.Header
 	Uncles   []*types.Header
 	Txs      []types.Transaction
@@ -31,9 +31,25 @@ type miningBlock struct {
 	RemoteTxs types.TransactionsStream
 }
 
+type MiningState struct {
+	MiningConfig    *params.MiningConfig
+	PendingResultCh chan *types.Block
+	MiningResultCh  chan *types.Block
+	MiningBlock     *MiningBlock
+}
+
+func NewMiningState(cfg *params.MiningConfig) MiningState {
+	return MiningState{
+		MiningConfig:    cfg,
+		PendingResultCh: make(chan *types.Block, 1),
+		MiningResultCh:  make(chan *types.Block, 1),
+		MiningBlock:     &MiningBlock{},
+	}
+}
+
 type MiningCreateBlockCfg struct {
 	db          ethdb.RwKV
-	mining      params.MiningConfig
+	miner       MiningState
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
 	txPool      *core.TxPool
@@ -42,7 +58,7 @@ type MiningCreateBlockCfg struct {
 
 func StageMiningCreateBlockCfg(
 	db ethdb.RwKV,
-	mining params.MiningConfig,
+	miner MiningState,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
 	txPool *core.TxPool,
@@ -50,7 +66,7 @@ func StageMiningCreateBlockCfg(
 ) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:          db,
-		mining:      mining,
+		miner:       miner,
 		chainConfig: chainConfig,
 		engine:      engine,
 		txPool:      txPool,
@@ -61,19 +77,22 @@ func StageMiningCreateBlockCfg(
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateBlockCfg, current *miningBlock, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) error {
 	txPoolLocals := cfg.txPool.Locals()
 	pendingTxs, err := cfg.txPool.Pending()
 	if err != nil {
 		return err
 	}
 
+	current := cfg.miner.MiningBlock
+	coinbase := cfg.miner.MiningConfig.Etherbase
+
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
 		staleThreshold = 7
 	)
 
-	if cfg.mining.Etherbase == (common.Address{}) {
+	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
 		return fmt.Errorf("refusing to mine without etherbase")
 	}
 
@@ -90,7 +109,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 	blockNum := executionAt + 1
 	signer := types.MakeSigner(&cfg.chainConfig, blockNum)
 
-	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, cfg.mining.Etherbase, txPoolLocals)
+	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
@@ -134,14 +153,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.mining.GasFloor, cfg.mining.GasCeil),
-		Extra:      cfg.mining.ExtraData,
+		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil),
+		Extra:      cfg.miner.MiningConfig.ExtraData,
 		Time:       uint64(timestamp),
 	}
 
 	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
 	//if w.isRunning() {
-	header.Coinbase = cfg.mining.Etherbase
+	header.Coinbase = coinbase
 	//}
 
 	if err = cfg.engine.Prepare(chain, header); err != nil {
@@ -268,6 +287,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 	current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
 	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
 	s.Done()
+	fmt.Printf("aa: %t, %t,%t\n", current == nil, cfg.miner.MiningBlock == nil, current.Header == nil)
 	return nil
 }
 
