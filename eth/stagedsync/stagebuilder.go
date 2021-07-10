@@ -7,12 +7,18 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
 	OnNewPendingLogs(types.Logs)
+}
+
+type Notifications struct {
+	Events      *remotedbserver.Events
+	Accumulator *shards.Accumulator
 }
 
 // StageParameters contains the stage that stages receives at runtime when initializes.
@@ -25,7 +31,6 @@ type StageParameters struct {
 	mining       *MiningCfg
 
 	snapshotsDir string
-	Accumulator  *shards.Accumulator // State change accumulator
 }
 
 type MiningCfg struct {
