@@ -155,6 +155,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
+		Notifications: &stagedsync.Notifications{
+			Events:      remotedbserver.NewEvents(),
+			Accumulator: &shards.Accumulator{},
+		},
 	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -402,10 +406,6 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		}
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-	ms.Notifications = &stagedsync.Notifications{
-		Events:      remotedbserver.NewEvents(),
-		Accumulator: &shards.Accumulator{},
-	}
 	initialCycle := false
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
