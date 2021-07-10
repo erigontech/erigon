@@ -159,6 +159,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			Events:      remotedbserver.NewEvents(),
 			Accumulator: &shards.Accumulator{},
 		},
+		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
+		},
+		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
 	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -180,11 +183,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte {
 		return nil
 	}
-	mock.UpdateHead = func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
-	}
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {
 	}
-	blockDowloadTimeout := 10
 	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
 	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
 	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
@@ -242,7 +242,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			sendBodyRequest,
 			penalize,
 			blockPropagator,
-			blockDowloadTimeout,
+			cfg.BodyDownloadTimeoutSeconds,
 			*mock.ChainConfig,
 			cfg.BatchSize,
 		),
@@ -298,7 +298,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		true, /* test */
 	)
 
-	miningConfig := ethconfig.Defaults.Miner
+	miningConfig := cfg.Miner
 	miningConfig.Enabled = true
 	miningConfig.Noverify = false
 	miningConfig.Etherbase = mock.Address
@@ -319,7 +319,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.OptionalParameters{},
 	)
 
-	mock.PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 	mock.StreamWg.Add(1)
 	go download.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
