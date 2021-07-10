@@ -235,6 +235,13 @@ func (m *txSortedMap) Flatten() types.Transactions {
 	return txs
 }
 
+func (m *txSortedMap) AppendHashes(buf []common.Hash) []common.Hash {
+	for _, tx := range m.items {
+		buf = append(buf, tx.Hash())
+	}
+	return buf
+}
+
 // LastElement returns the last element of a flattened list, thus, the
 // transaction with the highest nonce
 func (m *txSortedMap) LastElement() types.Transaction {
@@ -397,6 +404,10 @@ func (l *txList) Empty() bool {
 // it's requested again before any modifications are made to the contents.
 func (l *txList) Flatten() types.Transactions {
 	return l.txs.Flatten()
+}
+
+func (l *txList) AppendHashes(buf []common.Hash) []common.Hash {
+	return l.txs.AppendHashes(buf)
 }
 
 // LastElement returns the last element of a flattened list, thus, the

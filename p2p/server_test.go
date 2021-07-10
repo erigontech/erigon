@@ -116,7 +116,7 @@ func TestServerListen(t *testing.T) {
 		}
 		peers := srv.Peers()
 		if !reflect.DeepEqual(peers, []*Peer{peer}) {
-			t.Errorf("Peers mismatch: got %v, want %v", peers, []*Peer{peer})
+			t.Errorf("GoodPeers mismatch: got %v, want %v", peers, []*Peer{peer})
 		}
 	case <-time.After(1 * time.Second):
 		t.Error("server did not accept within one second")
@@ -169,7 +169,7 @@ func TestServerDial(t *testing.T) {
 			}
 			peers := srv.Peers()
 			if !reflect.DeepEqual(peers, []*Peer{peer}) {
-				t.Errorf("Peers mismatch: got %v, want %v", peers, []*Peer{peer})
+				t.Errorf("GoodPeers mismatch: got %v, want %v", peers, []*Peer{peer})
 			}
 
 			// Test AddTrustedPeer/RemoveTrustedPeer and changing Trusted flags

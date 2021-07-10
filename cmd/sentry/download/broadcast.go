@@ -3,8 +3,10 @@ package download
 import (
 	"context"
 	"math/big"
+	"strings"
 
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -101,6 +103,9 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 			}
 
 			if _, err = sentry.SendMessageToRandomPeers(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
+				if isPeerNotFoundErr(err) {
+					continue
+				}
 				log.Error("broadcastNewBlock", "error", err)
 			}
 
@@ -115,9 +120,11 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 				}
 			}
 			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+				if isPeerNotFoundErr(err) {
+					continue
+				}
 				log.Error("broadcastNewBlock", "error", err)
 			}
-			continue
 		}
 	}
 }
@@ -137,7 +144,7 @@ func (cs *ControlServerImpl) BroadcastNewTxs(ctx context.Context, txs []types.Tr
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("broadcastNewBlock", "error", err)
+			log.Error("BroadcastNewTxs", "error", err)
 		}
 		var req66, req65 *proto_sentry.SendMessageToRandomPeersRequest
 		for _, sentry := range cs.sentries {
@@ -158,7 +165,10 @@ func (cs *ControlServerImpl) BroadcastNewTxs(ctx context.Context, txs []types.Tr
 				}
 
 				if _, err = sentry.SendMessageToRandomPeers(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-					log.Error("broadcastNewBlock", "error", err)
+					if isPeerNotFoundErr(err) {
+						continue
+					}
+					log.Error("BroadcastNewTxs", "error", err)
 				}
 
 			case eth.ETH66:
@@ -172,10 +182,77 @@ func (cs *ControlServerImpl) BroadcastNewTxs(ctx context.Context, txs []types.Tr
 					}
 				}
 				if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-					log.Error("broadcastNewBlock", "error", err)
+					if isPeerNotFoundErr(err) {
+						continue
+					}
+					log.Error("BroadcastNewTxs", "error", err)
 				}
 				continue
 			}
 		}
 	}
+}
+
+func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H512, txs []common.Hash) {
+	cs.lock.RLock()
+	defer cs.lock.RUnlock()
+
+	for len(txs) > 0 {
+		pendingLen := maxTxPacketSize / common.HashLength
+		pending := make([]common.Hash, 0, pendingLen)
+
+		for i := 0; i < pendingLen && i < len(txs); i++ {
+			pending = append(pending, txs[i])
+		}
+		txs = txs[len(pending):]
+
+		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
+		if err != nil {
+			log.Error("PropagatePooledTxsToPeersList", "error", err)
+		}
+		for _, sentry := range cs.sentries {
+			if !sentry.Ready() {
+				continue
+			}
+
+			for _, peer := range peers {
+				switch sentry.Protocol() {
+				case eth.ETH65:
+					req65 := &proto_sentry.SendMessageByIdRequest{
+						PeerId: peer,
+						Data: &proto_sentry.OutboundMessageData{
+							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
+							Data: data,
+						},
+					}
+
+					if _, err = sentry.SendMessageById(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
+						if isPeerNotFoundErr(err) {
+							continue
+						}
+						log.Error("broadcastNewBlock", "error", err)
+					}
+
+				case eth.ETH66:
+					req66 := &proto_sentry.SendMessageByIdRequest{
+						PeerId: peer,
+						Data: &proto_sentry.OutboundMessageData{
+							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+							Data: data,
+						},
+					}
+					if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+						if isPeerNotFoundErr(err) {
+							continue
+						}
+						log.Error("PropagatePooledTxsToPeersList", "error", err)
+					}
+				}
+			}
+		}
+	}
+}
+
+func isPeerNotFoundErr(err error) bool {
+	return strings.Contains(err.Error(), "peer not found")
 }

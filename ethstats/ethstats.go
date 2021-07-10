@@ -724,7 +724,7 @@ type nodeStats struct {
 	Syncing  bool `json:"syncing"`
 	Mining   bool `json:"mining"`
 	Hashrate int  `json:"hashrate"`
-	Peers    int  `json:"peers"`
+	GoodPeers    int  `json:"peers"`
 	GasPrice int  `json:"gasPrice"`
 	Uptime   int  `json:"uptime"`
 }
@@ -760,7 +760,7 @@ func (s *Service) reportStats(conn *connWrapper) error {
 			Active:   true,
 			Mining:   mining,
 			Hashrate: hashrate,
-			Peers:    s.server.PeerCount(),
+			GoodPeers:    s.server.PeerCount(),
 			GasPrice: gasprice,
 			Syncing:  syncing,
 			Uptime:   100,

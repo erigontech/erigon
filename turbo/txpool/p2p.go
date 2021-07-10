@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/remote"
+	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,17 +29,19 @@ import (
 
 // P2PServer - receiving and sending messages to Sentries
 type P2PServer struct {
-	ctx       context.Context
-	Sentries  []remote.SentryClient
-	TxPool    *core.TxPool
-	TxFetcher *fetcher.TxFetcher
+	ctx         context.Context
+	Sentries    []remote.SentryClient
+	TxPool      *core.TxPool
+	TxFetcher   *fetcher.TxFetcher
+	RecentPeers *txpropagate.RecentlyConnectedPeers
 }
 
 func NewP2PServer(ctx context.Context, sentries []remote.SentryClient, txPool *core.TxPool) (*P2PServer, error) {
 	cs := &P2PServer{
-		ctx:      ctx,
-		Sentries: sentries,
-		TxPool:   txPool,
+		ctx:         ctx,
+		Sentries:    sentries,
+		TxPool:      txPool,
+		RecentPeers: &txpropagate.RecentlyConnectedPeers{},
 	}
 
 	return cs, nil
@@ -337,6 +340,7 @@ func RecvTxMessage(ctx context.Context,
 func RecvPeersLoop(ctx context.Context,
 	sentry remote.SentryClient,
 	cs *download.ControlServerImpl,
+	recentPeers *txpropagate.RecentlyConnectedPeers,
 	wg *sync.WaitGroup,
 ) {
 	for {
@@ -351,7 +355,7 @@ func RecvPeersLoop(ctx context.Context,
 			time.Sleep(time.Second)
 			continue
 		}
-		if err := RecvPeers(ctx, sentry, wg); err != nil {
+		if err := RecvPeers(ctx, sentry, recentPeers, wg); err != nil {
 			log.Error("[RecvPeers]", "err", err)
 		}
 	}
@@ -361,6 +365,7 @@ func RecvPeersLoop(ctx context.Context,
 // wg is used only in tests to avoid time.Sleep. For non-test code wg == nil
 func RecvPeers(ctx context.Context,
 	sentry remote.SentryClient,
+	recentPeers *txpropagate.RecentlyConnectedPeers,
 	wg *sync.WaitGroup,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
@@ -402,7 +407,10 @@ func RecvPeers(ctx context.Context,
 		if req == nil {
 			return
 		}
-		//todo: send direct peerID
+		switch req.Event {
+		case proto_sentry.PeersReply_Connect:
+			recentPeers.AddPeer(req.PeerId)
+		}
 		if wg != nil {
 			wg.Done()
 		}

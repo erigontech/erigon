@@ -526,6 +526,19 @@ func (pool *TxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	return pending, nil
 }
 
+func (pool *TxPool) AppendHashes(buf []common.Hash) []common.Hash {
+	buf = buf[:0]
+	if !pool.IsStarted() {
+		return buf
+	}
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	for _, list := range pool.pending {
+		buf = list.AppendHashes(buf)
+	}
+	return buf
+}
+
 // Locals retrieves the accounts currently considered local by the pool.
 func (pool *TxPool) Locals() []common.Address {
 	pool.mu.Lock()

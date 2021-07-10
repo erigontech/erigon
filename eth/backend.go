@@ -393,7 +393,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 					for _, srv := range backend.sentryServers {
 						logItems = append(logItems, eth.ProtocolToString[srv.Protocol.Version], strconv.Itoa(srv.SimplePeerCount()))
 					}
-					log.Info("[p2p] Peers", logItems...)
+					log.Info("[p2p] GoodPeers", logItems...)
 				}
 			}
 		}()
@@ -433,7 +433,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadCtx, backend.txPool, backend.downloadServer)
+	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 
 	go func() {
 		defer debug.LogPanic()
