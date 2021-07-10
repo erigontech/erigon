@@ -436,17 +436,17 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 
 	log.Info("Stage4", "progress", execStage.BlockNumber)
 	ch := ctx.Done()
-	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, chainConfig, engine, vmConfig, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: execStage.BlockNumber - unwind}
-		err := stagedsync.UnwindExecutionStage(u, execStage, nil, ch, cfg, nil)
+		err := stagedsync.UnwindExecutionStage(u, execStage, nil, ch, cfg, false)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(execStage, sync, nil, block, ch, cfg, nil)
+	err := stagedsync.SpawnExecuteBlocksStage(execStage, sync, nil, block, ch, cfg, false)
 	if err != nil {
 		return err
 	}
@@ -796,7 +796,6 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
 
 	blockDownloaderWindow := 65536
 	downloadServer, err := download.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow)
@@ -814,14 +813,17 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 	}
 
 	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
-	st, err := stages2.NewStagedSync2(context.Background(), db, sm, batchSize,
-		bodyDownloadTimeoutSeconds,
+
+	cfg := ethconfig.Defaults
+	cfg.StorageMode = sm
+	cfg.BatchSize = batchSize
+
+	st, err := stages2.NewStagedSync2(context.Background(), db, cfg,
 		downloadServer,
 		tmpdir,
-		ethconfig.Snapshot{Enabled: false},
 		txPool,
 		txPoolP2PServer,
-		nil, nil,
+		nil, nil, nil,
 	)
 	if err != nil {
 		panic(err)
@@ -843,7 +845,7 @@ func newSync(ctx context.Context, db ethdb.RwKV) (ethdb.StorageMode, consensus.E
 
 	var sync *stagedsync.State
 	if err := db.View(context.Background(), func(tx ethdb.Tx) (err error) {
-		sync, err = st.Prepare(nil, tx, ctx.Done(), false, nil, nil)
+		sync, err = st.Prepare(nil, tx, ctx.Done(), false, nil)
 		if err != nil {
 			return nil
 		}

@@ -14,6 +14,13 @@ type Accumulator struct {
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
+func (a *Accumulator) Reset() {
+	a.changes = nil
+	a.latestChange = nil
+	a.accountChangeIndex = nil
+	a.storageChangeIndex = nil
+}
+
 // StartChanges begins accumulation of changes for a new block
 func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, unwind bool) {
 	a.changes = append(a.changes, remote.StateChange{})
