@@ -3,7 +3,6 @@ module github.com/ledgerwatch/erigon
 go 1.16
 
 require (
-	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/RoaringBitmap/roaring v0.6.0
 	github.com/VictoriaMetrics/fastcache v1.5.8
 	github.com/anacrolix/log v0.8.0
