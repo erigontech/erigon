@@ -336,6 +336,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 			//return stagedsync.SpawnMiningFinishStage(s, tx, miningWorld.Block, cc.Engine(), chainConfig, quit)
 			//})
 
+			_ = miningStages.SetCurrentStage(stages.MiningCreateBlock)
 			if err := miningStages.Run(db, tx); err != nil {
 				return err
 			}
