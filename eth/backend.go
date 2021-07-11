@@ -61,6 +61,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/remote"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
@@ -94,7 +95,6 @@ type Ethereum struct {
 	torrentClient *snapshotsync.Client
 
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
-	events            *remotedbserver.Events
 	chainConfig       *params.ChainConfig
 	genesisHash       common.Hash
 	quitMining        chan struct{}
@@ -103,13 +103,16 @@ type Ethereum struct {
 	minedBlocks       chan *types.Block
 
 	// downloader fields
-	downloadCtx          context.Context
-	downloadCancel       context.CancelFunc
-	downloadServer       *download.ControlServerImpl
-	sentryServers        []*download.SentryServerImpl
-	txPoolP2PServer      *txpool.P2PServer
-	sentries             []remote.SentryClient
-	stagedSync           *stagedsync.StagedSync
+	downloadCtx     context.Context
+	downloadCancel  context.CancelFunc
+	downloadServer  *download.ControlServerImpl
+	sentryServers   []*download.SentryServerImpl
+	txPoolP2PServer *txpool.P2PServer
+	sentries        []remote.SentryClient
+	stagedSync      *stagedsync.StagedSync
+
+	notifications *stagedsync.Notifications
+
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
 }
@@ -187,6 +190,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
 		sentries:             []remote.SentryClient{},
+		notifications: &stagedsync.Notifications{
+			Events:      remotedbserver.NewEvents(),
+			Accumulator: &shards.Accumulator{},
+		},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -240,7 +247,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	backend.txPool = core.NewTxPool(config.TxPool, chainConfig, chainKv)
 
 	// setting notifier to support streaming events to rpc daemon
-	backend.events = remotedbserver.NewEvents()
 	var mg *snapshotsync.SnapshotMigrator
 	if config.Snapshot.Enabled {
 		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainKv)
@@ -262,7 +268,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	mining := stagedsync.New(
 		stagedsync.MiningStages(
 			stagedsync.StageMiningCreateBlockCfg(backend.chainKV, backend.config.Miner, *backend.chainConfig, backend.engine, backend.txPool, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainKV, backend.config.Miner, backend.events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+			stagedsync.StageMiningExecCfg(backend.chainKV, backend.config.Miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainKV, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainKV, false, true, tmpdir),
 			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, backend.pendingBlocks, backend.minedBlocks, backend.miningSealingQuit),
@@ -274,7 +280,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
-	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.events)
+	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.notifications.Events)
 	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
 	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
 
@@ -413,21 +419,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	backend.txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
-	bodyDownloadTimeoutSeconds := 30 // TODO: convert to duration, make configurable
+	config.BodyDownloadTimeoutSeconds = 30
 
 	backend.stagedSync, err = stages2.NewStagedSync2(
 		backend.downloadCtx,
 		backend.chainKV,
-		config.StorageMode,
-		config.BatchSize,
-		bodyDownloadTimeoutSeconds,
+		*config,
 		backend.downloadServer,
 		tmpdir,
-		config.Snapshot,
 		backend.txPool,
 		backend.txPoolP2PServer,
 
-		torrentClient, mg,
+		torrentClient, mg, backend.notifications.Accumulator,
 	)
 	if err != nil {
 		return nil, err
@@ -655,7 +658,7 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go Loop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer, s.events, s.config.StateStream, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
+	go Loop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 	return nil
 }
 
@@ -700,8 +703,7 @@ func Loop(
 	ctx context.Context,
 	db ethdb.RwKV, sync *stagedsync.StagedSync,
 	controlServer *download.ControlServerImpl,
-	notifier stagedsync.ChainEventNotifier,
-	stateStream bool,
+	notifications *stagedsync.Notifications,
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 ) {
@@ -711,9 +713,7 @@ func Loop(
 		db,
 		sync,
 		controlServer.Hd,
-		controlServer.ChainConfig,
-		notifier,
-		stateStream,
+		notifications,
 		controlServer.UpdateHead,
 		waitForDone,
 		loopMinTime,

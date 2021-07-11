@@ -8,7 +8,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
@@ -64,9 +63,7 @@ func StageLoop(
 	db ethdb.RwKV,
 	sync *stagedsync.StagedSync,
 	hd *headerdownload.HeaderDownload,
-	chainConfig *params.ChainConfig,
-	notifier stagedsync.ChainEventNotifier,
-	stateStream bool,
+	notifications *stagedsync.Notifications,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
@@ -85,11 +82,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		var accumulator *shards.Accumulator
-		if !initialCycle && stateStream {
-			accumulator = &shards.Accumulator{}
-		}
-		if err := StageLoopStep(ctx, db, sync, height, notifier, initialCycle, accumulator, updateHead, sync.GetSnapshotMigratorFinal()); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, sync.GetSnapshotMigratorFinal()); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -122,9 +115,8 @@ func StageLoopStep(
 	db ethdb.RwKV,
 	sync *stagedsync.StagedSync,
 	highestSeenHeader uint64,
-	notifier stagedsync.ChainEventNotifier,
+	notifications *stagedsync.Notifications,
 	initialCycle bool,
-	accumulator *shards.Accumulator,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
@@ -157,7 +149,10 @@ func StageLoopStep(
 		return err
 	}
 
-	st, err1 := sync.Prepare(db, nil, ctx.Done(), initialCycle, nil, accumulator)
+	if notifications != nil && notifications.Accumulator != nil {
+		notifications.Accumulator.Reset()
+	}
+	st, err1 := sync.Prepare(db, nil, ctx.Done(), initialCycle, nil)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
@@ -219,7 +214,7 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifier, db)
+	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifications.Events, db)
 	if err != nil {
 		return err
 	}
@@ -241,7 +236,6 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		ctx.Done(),
 		false,
 		stagedsync.StageMiningCfg(true),
-		nil,
 	)
 	if err != nil {
 		return err
@@ -256,23 +250,22 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 func NewStagedSync2(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sm ethdb.StorageMode,
-	batchSize datasize.ByteSize,
-	bodyDownloadTimeout int,
+	cfg ethconfig.Config,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
-	snapshotCfg ethconfig.Snapshot,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
 
-	client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator,
+	client *snapshotsync.Client,
+	snapshotMigrator *snapshotsync.SnapshotMigrator,
+	accumulator *shards.Accumulator,
 ) (*stagedsync.StagedSync, error) {
 	var pruningDistance uint64
-	if !sm.History {
+	if !cfg.StorageMode.History {
 		pruningDistance = params.FullImmutabilityThreshold
 	}
 
-	return NewStagedSync(ctx, sm,
+	return NewStagedSync(ctx, cfg.StorageMode,
 		stagedsync.StageHeadersCfg(
 			db,
 			controlServer.Hd,
@@ -280,48 +273,50 @@ func NewStagedSync2(
 			controlServer.SendHeaderRequest,
 			controlServer.PropagateNewBlockHashes,
 			controlServer.Penalize,
-			batchSize,
+			cfg.BatchSize,
 		),
 		stagedsync.StageBlockHashesCfg(db, tmpdir),
-		stagedsync.StageSnapshotHeadersCfg(db, snapshotCfg, client, snapshotMigrator),
+		stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator),
 		stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
 			controlServer.SendBodyRequest,
 			controlServer.Penalize,
 			controlServer.BroadcastNewBlock,
-			bodyDownloadTimeout,
+			cfg.BodyDownloadTimeoutSeconds,
 			*controlServer.ChainConfig,
-			batchSize,
+			cfg.BatchSize,
 		),
-		stagedsync.StageSnapshotBodiesCfg(db, snapshotCfg, client, snapshotMigrator, tmpdir),
+		stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
-			sm.Receipts,
-			sm.CallTraces,
-			sm.TEVM,
+			cfg.StorageMode.Receipts,
+			cfg.StorageMode.CallTraces,
+			cfg.StorageMode.TEVM,
 			pruningDistance,
-			batchSize,
+			cfg.BatchSize,
 			nil,
 			controlServer.ChainConfig,
 			controlServer.Engine,
-			&vm.Config{NoReceipts: !sm.Receipts, EnableTEMV: sm.TEVM},
+			&vm.Config{NoReceipts: !cfg.StorageMode.Receipts, EnableTEMV: cfg.StorageMode.TEVM},
+			accumulator,
+			cfg.StateStream,
 			tmpdir,
 		),
 		stagedsync.StageTranspileCfg(
 			db,
-			batchSize,
+			cfg.BatchSize,
 			nil,
 			nil,
 			controlServer.ChainConfig,
 		),
-		stagedsync.StageSnapshotStateCfg(db, snapshotCfg, tmpdir, client, snapshotMigrator),
+		stagedsync.StageSnapshotStateCfg(db, cfg.Snapshot, tmpdir, client, snapshotMigrator),
 		stagedsync.StageHashStateCfg(db, tmpdir),
 		stagedsync.StageTrieCfg(db, true, true, tmpdir),
 		stagedsync.StageHistoryCfg(db, tmpdir),
 		stagedsync.StageLogIndexCfg(db, tmpdir),
-		stagedsync.StageCallTracesCfg(db, 0, batchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
+		stagedsync.StageCallTracesCfg(db, 0, cfg.BatchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			for i := range txPoolServer.Sentries {

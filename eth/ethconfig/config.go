@@ -81,6 +81,8 @@ var Defaults = Config{
 	RPCGasCap:   25000000,
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
+
+	BodyDownloadTimeoutSeconds: 30,
 }
 
 func init() {
@@ -184,7 +186,8 @@ type Config struct {
 	// CheckpointOracle is the configuration for checkpoint oracle.
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
-	StateStream bool
+	StateStream                bool
+	BodyDownloadTimeoutSeconds int // TODO change to duration
 
 	// SyncLoopThrottle sets a minimum time between staged loop iterations
 	SyncLoopThrottle time.Duration

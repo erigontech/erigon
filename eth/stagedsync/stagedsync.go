@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 )
@@ -48,7 +47,6 @@ func (stagedSync *StagedSync) Prepare(
 	quitCh <-chan struct{},
 	initialCycle bool,
 	miningConfig *MiningCfg,
-	accumulator *shards.Accumulator,
 ) (*State, error) {
 	stages := stagedSync.stageBuilders.Build(
 		StageParameters{
@@ -56,7 +54,6 @@ func (stagedSync *StagedSync) Prepare(
 			InitialCycle: initialCycle,
 			mining:       miningConfig,
 			snapshotsDir: stagedSync.params.SnapshotDir,
-			Accumulator:  accumulator,
 		},
 	)
 	state := NewState(stages)
