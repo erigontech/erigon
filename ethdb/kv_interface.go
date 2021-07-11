@@ -261,7 +261,7 @@ type BucketMigrator interface {
 type Cursor interface {
 	First() ([]byte, []byte, error)               // First - position at first key/data item
 	Seek(seek []byte) ([]byte, []byte, error)     // Seek - position at first key greater than or equal to specified key
-	SeekExact(key []byte) ([]byte, []byte, error) // SeekExact - position at first key greater than or equal to specified key
+	SeekExact(key []byte) ([]byte, []byte, error) // SeekExact - position at exact matching key if exists
 	Next() ([]byte, []byte, error)                // Next - position at next key/value (can iterate over DupSort key/values automatically)
 	Prev() ([]byte, []byte, error)                // Prev - position at previous key
 	Last() ([]byte, []byte, error)                // Last - position at last key and last possible value
