@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -89,7 +90,19 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	ibs := state.New(stateReader)
-	msg := args.ToMessage(api.GasCap)
+
+	var baseFee *uint256.Int
+	if header != nil && header.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		if overflow {
+			return fmt.Errorf("header.BaseFee uint256 overflow")
+		}
+	}
+	msg, err := args.ToMessage(api.GasCap, baseFee)
+	if err != nil {
+		return err
+	}
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx)
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)

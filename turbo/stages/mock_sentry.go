@@ -304,16 +304,17 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	miningConfig.Etherbase = mock.Address
 	miningConfig.SigKey = mock.Key
 
-	mock.PendingBlocks = make(chan *types.Block, 1)
-	mock.MinedBlocks = make(chan *types.Block, 1)
+	miner := stagedsync.NewMiningState(&miningConfig)
+	mock.PendingBlocks = miner.PendingResultCh
+	mock.MinedBlocks = miner.MiningResultCh
 
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(
-			stagedsync.StageMiningCreateBlockCfg(mock.DB, miningConfig, *mock.ChainConfig, mock.Engine, txPool, mock.tmpdir),
-			stagedsync.StageMiningExecCfg(mock.DB, miningConfig, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, txPool, mock.tmpdir),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
 			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir),
-			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, mock.PendingBlocks, mock.MinedBlocks, mock.Ctx.Done()),
+			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder(),
 		stagedsync.OptionalParameters{},
