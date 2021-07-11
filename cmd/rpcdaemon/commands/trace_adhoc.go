@@ -134,7 +134,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		// A basefee is provided, necessitating 1559-type execution
 		if args.GasPrice != nil {
 			// User specified the legacy gas field, convert to 1559 gas typing
-			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
+			gasPrice, overflow := uint256.FromBig(args.GasPrice.ToInt())
 			if overflow {
 				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
 			}
