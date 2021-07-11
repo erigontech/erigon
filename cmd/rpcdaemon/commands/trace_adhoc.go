@@ -506,7 +506,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	txn, blockHash, blockNumber, _ := rawdb.ReadTransaction(tx, txHash)
+	txn, blockHash, blockNumber, _, err := rawdb.ReadTransaction(tx, txHash)
+	if err != nil {
+		return nil, err
+	}
 	if txn == nil {
 		return nil, nil
 	}
