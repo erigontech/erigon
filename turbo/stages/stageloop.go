@@ -152,7 +152,7 @@ func StageLoopStep(
 	if notifications != nil && notifications.Accumulator != nil {
 		notifications.Accumulator.Reset()
 	}
-	st, err1 := sync.Prepare(db, nil, ctx.Done(), initialCycle, nil)
+	st, err1 := sync.Prepare(db, nil, ctx.Done(), initialCycle)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
@@ -235,7 +235,6 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		tx,
 		ctx.Done(),
 		false,
-		stagedsync.StageMiningCfg(true),
 	)
 	if err != nil {
 		return err
