@@ -235,6 +235,7 @@ func (m *txSortedMap) Flatten() types.Transactions {
 	return txs
 }
 
+// AppendHashes to given buffer and return it
 func (m *txSortedMap) AppendHashes(buf []common.Hash) []common.Hash {
 	for _, tx := range m.items {
 		buf = append(buf, tx.Hash())
@@ -406,6 +407,7 @@ func (l *txList) Flatten() types.Transactions {
 	return l.txs.Flatten()
 }
 
+// AppendHashes to given buffer and return it
 func (l *txList) AppendHashes(buf []common.Hash) []common.Hash {
 	return l.txs.AppendHashes(buf)
 }

@@ -526,8 +526,8 @@ func (pool *TxPool) Pending() (types.TransactionsGroupedBySender, error) {
 	return pending, nil
 }
 
+// AppendHashes to given buffer and return it
 func (pool *TxPool) AppendHashes(buf []common.Hash) []common.Hash {
-	buf = buf[:0]
 	if !pool.IsStarted() {
 		return buf
 	}
@@ -535,6 +535,19 @@ func (pool *TxPool) AppendHashes(buf []common.Hash) []common.Hash {
 	defer pool.mu.Unlock()
 	for _, list := range pool.pending {
 		buf = list.AppendHashes(buf)
+	}
+	return buf
+}
+
+// AppendLocalHashes to given buffer and return it
+func (pool *TxPool) AppendLocalHashes(buf []common.Hash) []common.Hash {
+	if !pool.IsStarted() {
+		return buf
+	}
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	for txHash, _ := range pool.all.locals {
+		buf = append(buf, txHash)
 	}
 	return buf
 }

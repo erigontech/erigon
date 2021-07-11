@@ -436,7 +436,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
+	go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 
 	go func() {
 		defer debug.LogPanic()
