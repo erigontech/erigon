@@ -290,7 +290,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 			mock.StreamWg.Add(1)
 			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
-			go txpropagate.BroadcastNewTxsToNetworks(mock.Ctx, txPool, mock.downloader)
+			go txpropagate.BroadcastPendingTxsToNetwork(mock.Ctx, txPool, mock.TxPoolP2PServer.RecentPeers, mock.downloader)
 			mock.StreamWg.Wait()
 			mock.TxPoolP2PServer.TxFetcher.Start()
 		}),

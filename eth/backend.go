@@ -389,7 +389,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 		go func() {
-			logEvery := time.NewTicker(60 * time.Second)
+			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()
 
 			var logItems []interface{}
@@ -403,7 +403,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 					for _, srv := range backend.sentryServers {
 						logItems = append(logItems, eth.ProtocolToString[srv.Protocol.Version], strconv.Itoa(srv.SimplePeerCount()))
 					}
-					log.Info("[p2p] Peers", logItems...)
+					log.Info("[p2p] GoodPeers", logItems...)
 				}
 			}
 		}()
@@ -440,7 +440,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadCtx, backend.txPool, backend.downloadServer)
+	go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 
 	go func() {
 		defer debug.LogPanic()

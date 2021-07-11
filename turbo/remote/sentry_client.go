@@ -163,6 +163,35 @@ func (c *SentryReceiveClientDirect) Context() context.Context {
 	return c.ctx
 }
 
+// implements proto_sentry.Sentry_ReceivePeersServer
+type SentryReceivePeersServerDirect struct {
+	ch  chan *proto_sentry.PeersReply
+	ctx context.Context
+	grpc.ServerStream
+}
+
+func (s *SentryReceivePeersServerDirect) Send(m *proto_sentry.PeersReply) error {
+	s.ch <- m
+	return nil
+}
+func (s *SentryReceivePeersServerDirect) Context() context.Context {
+	return s.ctx
+}
+
+type SentryReceivePeersClientDirect struct {
+	ch  chan *proto_sentry.PeersReply
+	ctx context.Context
+	grpc.ClientStream
+}
+
+func (c *SentryReceivePeersClientDirect) Recv() (*proto_sentry.PeersReply, error) {
+	m := <-c.ch
+	return m, nil
+}
+func (c *SentryReceivePeersClientDirect) Context() context.Context {
+	return c.ctx
+}
+
 func (c *SentryClientDirect) Messages(ctx context.Context, in *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
 	in.Ids = filterIds(in.Ids, c.Protocol())
 	messageCh := make(chan *proto_sentry.InboundMessage, 16384)
@@ -174,6 +203,18 @@ func (c *SentryClientDirect) Messages(ctx context.Context, in *proto_sentry.Mess
 		close(messageCh)
 	}()
 	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
+}
+
+func (c *SentryClientDirect) Peers(ctx context.Context, in *proto_sentry.PeersRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_PeersClient, error) {
+	messageCh := make(chan *proto_sentry.PeersReply, 16384)
+	streamServer := &SentryReceivePeersServerDirect{ch: messageCh, ctx: ctx}
+	go func() {
+		if err := c.server.Peers(in, streamServer); err != nil {
+			log.Error("ReceiveMessages returned", "error", err)
+		}
+		close(messageCh)
+	}()
+	return &SentryReceivePeersClientDirect{ch: messageCh, ctx: ctx}, nil
 }
 
 func filterIds(in []proto_sentry.MessageId, protocol uint) (filtered []proto_sentry.MessageId) {

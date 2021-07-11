@@ -81,7 +81,6 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, quitCh <-chan stru
 		}
 	}
 	return nil
-
 }
 
 func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx ethdb.RwTx, quitCh <-chan struct{}) error {
