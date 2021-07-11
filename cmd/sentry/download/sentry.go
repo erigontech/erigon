@@ -249,6 +249,11 @@ func runPeer(
 	printTime := time.Now().Add(time.Minute)
 	peerPrinted := false
 	defer func() {
+		select { // don't print logs if we stopping
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if peerPrinted {
 			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()), "proto", protocol)
 		}
