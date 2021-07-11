@@ -28,7 +28,10 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	defer tx.Rollback()
 
 	// Retrieve the transaction and assemble its EVM context
-	txn, blockHash, _, txIndex := rawdb.ReadTransaction(tx, hash)
+	txn, blockHash, _, txIndex, err := rawdb.ReadTransaction(tx, hash)
+	if err != nil {
+		return err
+	}
 	if txn == nil {
 		stream.WriteNil()
 		return fmt.Errorf("transaction %#x not found", hash)
