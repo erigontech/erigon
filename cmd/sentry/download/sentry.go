@@ -712,6 +712,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		msgcode != eth.BlockBodiesMsg &&
 		msgcode != eth.GetReceiptsMsg &&
 		msgcode != eth.ReceiptsMsg &&
+		msgcode != eth.NewPooledTransactionHashesMsg &&
 		msgcode != eth.PooledTransactionsMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
