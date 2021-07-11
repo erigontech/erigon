@@ -31,6 +31,7 @@ type Config struct {
 	Debug                   bool   // Enables debugging
 	Tracer                  Tracer // Opcode logger
 	NoRecursion             bool   // Disables call, callcode, delegate call and create
+	NoBaseFee               bool   // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	EnablePreimageRecording bool   // Enables recording of SHA3/keccak preimages
 	SkipAnalysis            bool   // Whether we can skip jumpdest analysis based on the checked history
 	TraceJumpDest           bool   // Print transaction hashes where jumpdest analysis was useful

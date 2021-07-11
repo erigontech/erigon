@@ -265,13 +265,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	backend.pendingBlocks = make(chan *types.Block, 1)
 	backend.minedBlocks = make(chan *types.Block, 1)
 
+	miner := stagedsync.NewMiningState(&config.Miner)
+	backend.pendingBlocks = miner.PendingResultCh
+	backend.minedBlocks = miner.MiningResultCh
+
 	mining := stagedsync.New(
 		stagedsync.MiningStages(
-			stagedsync.StageMiningCreateBlockCfg(backend.chainKV, backend.config.Miner, *backend.chainConfig, backend.engine, backend.txPool, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainKV, backend.config.Miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainKV, miner, *backend.chainConfig, backend.engine, backend.txPool, tmpdir),
+			stagedsync.StageMiningExecCfg(backend.chainKV, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainKV, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainKV, false, true, tmpdir),
-			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, backend.pendingBlocks, backend.minedBlocks, backend.miningSealingQuit),
+			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
 		), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
 
 	var ethashApi *ethash.API
@@ -385,7 +389,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 		go func() {
-			logEvery := time.NewTicker(60 * time.Second)
+			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()
 
 			var logItems []interface{}
@@ -399,7 +403,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 					for _, srv := range backend.sentryServers {
 						logItems = append(logItems, eth.ProtocolToString[srv.Protocol.Version], strconv.Itoa(srv.SimplePeerCount()))
 					}
-					log.Info("[p2p] Peers", logItems...)
+					log.Info("[p2p] GoodPeers", logItems...)
 				}
 			}
 		}()
@@ -436,7 +440,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	go txpropagate.BroadcastNewTxsToNetworks(backend.downloadCtx, backend.txPool, backend.downloadServer)
+	go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 
 	go func() {
 		defer debug.LogPanic()

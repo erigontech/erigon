@@ -51,7 +51,7 @@ type StateTransition struct {
 	msg        Message
 	gas        uint64
 	gasPrice   *uint256.Int
-	feeCap     *uint256.Int
+	gasFeeCap  *uint256.Int
 	tip        *uint256.Int
 	initialGas uint64
 	value      *uint256.Int
@@ -156,15 +156,15 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
 	return &StateTransition{
-		gp:       gp,
-		evm:      evm,
-		msg:      msg,
-		gasPrice: msg.GasPrice(),
-		feeCap:   msg.FeeCap(),
-		tip:      msg.Tip(),
-		value:    msg.Value(),
-		data:     msg.Data(),
-		state:    evm.IntraBlockState,
+		gp:        gp,
+		evm:       evm,
+		msg:       msg,
+		gasPrice:  msg.GasPrice(),
+		gasFeeCap: msg.FeeCap(),
+		tip:       msg.Tip(),
+		value:     msg.Value(),
+		data:      msg.Data(),
+		state:     evm.IntraBlockState,
 	}
 }
 
@@ -194,9 +194,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	mgval := uint256.NewInt(st.msg.Gas())
 	mgval = mgval.Mul(mgval, st.gasPrice)
 	balanceCheck := mgval
-	if st.feeCap != nil {
+	if st.gasFeeCap != nil {
 		balanceCheck = uint256.NewInt(st.msg.Gas())
-		balanceCheck = balanceCheck.Mul(balanceCheck, st.feeCap)
+		balanceCheck = balanceCheck.Mul(balanceCheck, st.gasFeeCap)
 	}
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		if !gasBailout {
@@ -229,25 +229,27 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 				st.msg.From().Hex(), msgNonce, stNonce)
 		}
 	}
-	// Make sure the transaction feeCap is greater than the block's baseFee.
+	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules.IsLondon {
-		if l := st.feeCap.BitLen(); l > 256 {
-			return fmt.Errorf("%w: address %v, feeCap bit length: %d", ErrFeeCapVeryHigh,
-				st.msg.From().Hex(), l)
+		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
+		if !st.evm.Config.NoBaseFee || st.gasFeeCap.BitLen() > 0 || st.tip.BitLen() > 0 {
+			if l := st.gasFeeCap.BitLen(); l > 256 {
+				return fmt.Errorf("%w: address %v, gasFeeCap bit length: %d", ErrFeeCapVeryHigh,
+					st.msg.From().Hex(), l)
+			}
+			if l := st.tip.BitLen(); l > 256 {
+				return fmt.Errorf("%w: address %v, tip bit length: %d", ErrTipVeryHigh,
+					st.msg.From().Hex(), l)
+			}
+			if st.gasFeeCap.Cmp(st.tip) < 0 {
+				return fmt.Errorf("%w: address %v, tip: %s, gasFeeCap: %s", ErrTipAboveFeeCap,
+					st.msg.From().Hex(), st.gasFeeCap, st.tip)
+			}
+			if st.gasFeeCap.Cmp(st.evm.Context.BaseFee) < 0 {
+				return fmt.Errorf("%w: address %v, gasFeeCap: %d baseFee: %d", ErrFeeCapTooLow,
+					st.msg.From().Hex(), st.gasFeeCap.Uint64(), st.evm.Context.BaseFee.Uint64())
+			}
 		}
-		if l := st.tip.BitLen(); l > 256 {
-			return fmt.Errorf("%w: address %v, tip bit length: %d", ErrTipVeryHigh,
-				st.msg.From().Hex(), l)
-		}
-		if st.feeCap.Cmp(st.tip) < 0 {
-			return fmt.Errorf("%w: address %v, tip: %s, feeCap: %s", ErrTipAboveFeeCap,
-				st.msg.From().Hex(), st.feeCap, st.tip)
-		}
-		if st.feeCap.Cmp(st.evm.Context.BaseFee) < 0 {
-			return fmt.Errorf("%w: address %v, feeCap: %d baseFee: %d", ErrFeeCapTooLow,
-				st.msg.From().Hex(), st.feeCap.Uint64(), st.evm.Context.BaseFee.Uint64())
-		}
-
 	}
 	return st.buyGas(gasBailout)
 }
@@ -338,7 +340,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	effectiveTip := st.gasPrice
 	if st.evm.ChainRules.IsLondon {
-		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.feeCap, st.evm.Context.BaseFee))
+		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.gasFeeCap, st.evm.Context.BaseFee))
 	}
 	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 
