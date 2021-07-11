@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -151,7 +152,6 @@ func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_s
 
 func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
 	var outreq65, outreq66 *proto_sentry.SendMessageByIdRequest
-	var lastErr error
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
@@ -175,7 +175,10 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 			}
 
 			if sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{}); err1 != nil {
-				lastErr = err1
+				if isPeerNotFoundErr(err1) {
+					continue
+				}
+				log.Error("[SendTxsRequest]", "err", err1)
 			} else if sentPeers != nil && len(sentPeers.Peers) != 0 {
 				return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 			}
@@ -197,14 +200,15 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 			}
 
 			if sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq66, &grpc.EmptyCallOption{}); err1 != nil {
-				lastErr = err1
+				if isPeerNotFoundErr(err1) {
+					continue
+				}
+				log.Error("[SendTxsRequest]", "err", err1)
+
 			} else if sentPeers != nil && len(sentPeers.Peers) != 0 {
 				return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
 			}
 		}
-	}
-	if lastErr != nil {
-		log.Error("Could not sent get pooled txs request to any sentry", "error", lastErr)
 	}
 	return nil
 }
@@ -415,4 +419,8 @@ func RecvPeers(ctx context.Context,
 			wg.Done()
 		}
 	}
+}
+
+func isPeerNotFoundErr(err error) bool {
+	return strings.Contains(err.Error(), "peer not found")
 }

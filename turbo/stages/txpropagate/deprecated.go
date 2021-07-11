@@ -28,7 +28,7 @@ func BroadcastPendingTxsToNetwork(ctx context.Context, txPool *core.TxPool, rece
 	syncToNewPeersEvery := time.NewTicker(2 * time.Minute)
 	defer syncToNewPeersEvery.Stop()
 
-	broadcastLocalTransactionsEvery := time.NewTicker(10 * time.Minute)
+	broadcastLocalTransactionsEvery := time.NewTicker(5 * time.Minute)
 	defer broadcastLocalTransactionsEvery.Stop()
 
 	pooledTxHashes := make([]common.Hash, 128)
