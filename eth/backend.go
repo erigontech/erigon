@@ -385,7 +385,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		backend.sentryServers = append(backend.sentryServers, server65)
 		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
 		go func() {
-			logEvery := time.NewTicker(60 * time.Second)
+			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()
 
 			var logItems []interface{}
