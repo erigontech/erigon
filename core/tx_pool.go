@@ -546,7 +546,7 @@ func (pool *TxPool) AppendLocalHashes(buf []common.Hash) []common.Hash {
 	}
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	for txHash, _ := range pool.all.locals {
+	for txHash := range pool.all.locals {
 		buf = append(buf, txHash)
 	}
 	return buf
