@@ -144,14 +144,14 @@ func (tx DynamicFeeTransaction) payloadSize() (payloadSize int, nonceLen, gasLen
 		nonceLen = (bits.Len64(tx.Nonce) + 7) / 8
 	}
 	payloadSize += nonceLen
-	// size of Tip
+	// size of MaxPriorityFeePerGas
 	payloadSize++
 	var tipLen int
 	if tx.Tip.BitLen() >= 8 {
 		tipLen = (tx.Tip.BitLen() + 7) / 8
 	}
 	payloadSize += tipLen
-	// size of FeeCap
+	// size of MaxFeePerGas
 	payloadSize++
 	var feeCapLen int
 	if tx.FeeCap.BitLen() >= 8 {
@@ -282,11 +282,11 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 			return err
 		}
 	}
-	// encode Tip
+	// encode MaxPriorityFeePerGas
 	if err := tx.Tip.EncodeRLP(w); err != nil {
 		return err
 	}
-	// encode FeeCap
+	// encode MaxFeePerGas
 	if err := tx.FeeCap.EncodeRLP(w); err != nil {
 		return err
 	}
@@ -392,14 +392,14 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Tip: %d", len(b))
+		return fmt.Errorf("wrong size for MaxPriorityFeePerGas: %d", len(b))
 	}
 	tx.Tip = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
 	if len(b) > 32 {
-		return fmt.Errorf("wrong size for FeeCap: %d", len(b))
+		return fmt.Errorf("wrong size for MaxFeePerGas: %d", len(b))
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
