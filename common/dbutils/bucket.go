@@ -259,7 +259,7 @@ const (
 	Sequence      = "Sequence" // tbl_name -> seq_u64
 	HeadHeaderKey = "LastHeader"
 
-	Epoch = "Epoch" // block_num_u64+block_hash->transition_proof
+	Epoch = "DevEpoch" // block_num_u64+block_hash->transition_proof
 )
 
 // Keys

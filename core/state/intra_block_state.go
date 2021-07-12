@@ -444,7 +444,6 @@ func (sdb *IntraBlockState) SubBalance(addr common.Address, amount *uint256.Int)
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetBalance(addr common.Address, amount *uint256.Int) {
-	fmt.Printf("setBalance: %x,%d\n", addr, amount.Uint64())
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
