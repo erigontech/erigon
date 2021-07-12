@@ -168,7 +168,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType
 	defer logEvery.Stop()
 
 	i := 0
-	var prevK, prevV []byte
+	var prevK []byte
 	loadNextFunc := func(originalK, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
@@ -182,7 +182,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType
 		if bufType == SortableOldestAppearedBuffer && bytes.Equal(prevK, k) {
 			return nil
 		}
-		prevK, prevV = k, v
+		prevK = k
 
 		select {
 		default:
