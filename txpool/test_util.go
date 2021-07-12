@@ -69,3 +69,7 @@ func (m *MockSentry) Messages(ctx context.Context, in *sentry.MessagesRequest, o
 func (m *MockSentry) PeerCount(ctx context.Context, in *sentry.PeerCountRequest, opts ...grpc.CallOption) (*sentry.PeerCountReply, error) {
 	return nil, nil
 }
+
+func (m *MockSentry) Peers(ctx context.Context, in *sentry.PeersRequest, opts ...grpc.CallOption) (sentry.Sentry_PeersClient, error) {
+	return nil, nil
+}
