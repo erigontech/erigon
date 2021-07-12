@@ -17,12 +17,15 @@
 package txpool
 
 import (
+	"context"
 	"fmt"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 )
 
 func TestFetch(t *testing.T) {
 	mock := NewMockSentry()
-	fetch := NewFetch(mock)
+	fetch := NewFetch(context.Background(), []sentry.SentryClient{mock})
 	fmt.Printf("fetch: %+v\n", fetch)
 }
