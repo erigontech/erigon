@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -124,7 +125,13 @@ func (c *Collector) Load(logPrefix string, db ethdb.RwTx, toBucket string, loadF
 }
 
 func (c *Collector) Close(logPrefix string) {
-	disposeProviders(logPrefix, c.dataProviders)
+	totalSize := uint64(0)
+	for _, p := range c.dataProviders {
+		totalSize += p.Dispose()
+	}
+	if totalSize > 0 {
+		log.Info(fmt.Sprintf("[%s] etl: temp files removed successfully", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
+	}
 }
 
 func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {

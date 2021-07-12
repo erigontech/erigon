@@ -118,7 +118,9 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfAccountsBucket)
 	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfStorageBucket)
 	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	defer accTrieCollector.Close(logPrefix)
 	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	defer stTrieCollector.Close(logPrefix)
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(trie.NewRetainList(0), accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
@@ -348,7 +350,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	}
 
 	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	defer accTrieCollector.Close(logPrefix)
 	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	defer stTrieCollector.Close(logPrefix)
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
@@ -431,7 +435,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	}
 
 	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	defer accTrieCollector.Close(logPrefix)
 	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	defer stTrieCollector.Close(logPrefix)
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return err

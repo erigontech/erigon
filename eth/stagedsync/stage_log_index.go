@@ -99,7 +99,9 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndex
 	defer checkFlushEvery.Stop()
 
 	collectorTopics := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorTopics.Close(logPrefix)
 	collectorAddrs := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorAddrs.Close(logPrefix)
 
 	reader := bytes.NewReader(nil)
 

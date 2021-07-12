@@ -89,10 +89,10 @@ func Transform(
 	}
 	buffer := getBufferByType(args.BufferType, bufferSize)
 	collector := NewCollector(tmpdir, buffer)
+	defer collector.Close(logPrefix)
 
 	t := time.Now()
 	if err := extractBucketIntoFiles(logPrefix, db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, args.FixedBits, collector, extractFunc, args.Quit, args.LogDetailsExtract); err != nil {
-		disposeProviders(logPrefix, collector.dataProviders)
 		return err
 	}
 	log.Debug(fmt.Sprintf("[%s] Extraction finished", logPrefix), "it took", time.Since(t))
@@ -154,19 +154,6 @@ func extractBucketIntoFiles(
 		return err
 	}
 	return collector.flushBuffer(nil, true)
-}
-func disposeProviders(logPrefix string, providers []dataProvider) {
-	totalSize := uint64(0)
-	for _, p := range providers {
-		providerSize, err := p.Dispose()
-		if err != nil {
-			log.Warn(fmt.Sprintf("[%s] promoting hashed state, error while disposing provider", logPrefix), "provider", p, "err", err)
-		}
-		totalSize += providerSize
-	}
-	if totalSize > 0 {
-		log.Info(fmt.Sprintf("[%s] etl: temp files removed successfully", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
-	}
 }
 
 type currentTableReader struct {
