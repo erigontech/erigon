@@ -93,6 +93,7 @@ var (
 		IstanbulBlock:       big.NewInt(9_069_000),
 		MuirGlacierBlock:    big.NewInt(9_200_000),
 		BerlinBlock:         big.NewInt(12_244_000),
+		LondonBlock:         big.NewInt(12_965_000),
 		Ethash:              new(EthashConfig),
 	}
 
@@ -293,10 +294,10 @@ var (
 		ChainID:        big.NewInt(77),
 		HomesteadBlock: big.NewInt(0),
 		DAOForkBlock:   nil,
-		DAOForkSupport: true,
-		EIP150Block:    big.NewInt(0),
-		EIP155Block:    big.NewInt(0),
-		EIP158Block:    big.NewInt(0),
+		DAOForkSupport: false,
+		EIP150Block:    nil,
+		EIP155Block:    nil,
+		EIP158Block:    nil,
 		/*
 							"eip140Transition": "0x0",  in Byzantium
 							"eip211Transition": "0x0",  in Byzantium
@@ -651,6 +652,9 @@ func (c *ChainConfig) CheckCompatible(newcfg *ChainConfig, height uint64) *Confi
 // CheckConfigForkOrder checks that we don't "skip" any forks, geth isn't pluggable enough
 // to guarantee that forks can be implemented in a different order than on official networks
 func (c *ChainConfig) CheckConfigForkOrder() error {
+	if c.ChainID.Uint64() == 77 {
+		return nil
+	}
 	type fork struct {
 		name     string
 		block    *big.Int

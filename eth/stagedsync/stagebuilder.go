@@ -7,8 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type ChainEventNotifier interface {
@@ -16,36 +16,20 @@ type ChainEventNotifier interface {
 	OnNewPendingLogs(types.Logs)
 }
 
+type Notifications struct {
+	Events      *remotedbserver.Events
+	Accumulator *shards.Accumulator
+}
+
 // StageParameters contains the stage that stages receives at runtime when initializes.
 // Then the stage can use it to receive different useful functions.
 type StageParameters struct {
-	DB ethdb.Database
 	// QuitCh is a channel that is closed. This channel is useful to listen to when
 	// the stage can take significant time and gracefully shutdown at Ctrl+C.
 	QuitCh       <-chan struct{}
 	InitialCycle bool
-	mining       *MiningCfg
 
-	snapshotsDir    string
-	btClient        *snapshotsync.Client
-	SnapshotBuilder *snapshotsync.SnapshotMigrator
-	Accumulator     *shards.Accumulator // State change accumulator
-}
-
-type MiningCfg struct {
-	// noempty is the flag used to control whether the feature of pre-seal empty
-	// block is enabled. The default value is false(pre-seal is enabled by default).
-	// But in some special scenario the consensus engine will seal blocks instantaneously,
-	// in this case this feature will add all empty blocks into canonical chain
-	// non-stop and no real transaction will be included.
-	noempty bool
-
-	// runtime dat
-	Block *miningBlock
-}
-
-func StageMiningCfg(noempty bool) *MiningCfg {
-	return &MiningCfg{noempty: noempty, Block: &miningBlock{}}
+	snapshotsDir string
 }
 
 // StageBuilder represent an object to create a single stage for staged sync
@@ -106,10 +90,7 @@ func MiningStages(
 					ID:          stages.MiningCreateBlock,
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnMiningCreateBlockStage(s, tx,
-							createBlockCfg,
-							world.mining.Block,
-							world.QuitCh)
+						return SpawnMiningCreateBlockStage(s, tx, createBlockCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}
@@ -122,13 +103,7 @@ func MiningStages(
 					ID:          stages.MiningExecution,
 					Description: "Mining: construct new block from tx pool",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnMiningExecStage(s, tx,
-							execCfg,
-							world.mining.Block,
-							world.mining.Block.LocalTxs,
-							world.mining.Block.RemoteTxs,
-							world.mining.noempty,
-							world.QuitCh)
+						return SpawnMiningExecStage(s, tx, execCfg, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}
@@ -158,7 +133,7 @@ func MiningStages(
 						if err != nil {
 							return err
 						}
-						world.mining.Block.Header.Root = stateRoot
+						createBlockCfg.miner.MiningBlock.Header.Root = stateRoot
 						return nil
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
@@ -172,7 +147,7 @@ func MiningStages(
 					ID:          stages.MiningFinish,
 					Description: "Mining: create and propagate valid block",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnMiningFinishStage(s, tx, world.mining.Block, finish, world.QuitCh)
+						return SpawnMiningFinishStage(s, tx, finish, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error { return nil },
 				}

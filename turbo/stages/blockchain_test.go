@@ -364,8 +364,6 @@ func testBadHashes(t *testing.T) {
 	t.Skip("to support this error in Erigon")
 	// Create a pristine chain and database
 	m := newCanonical(t, 0)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 	var err error
 
 	// Create a chain, ban a hash and try to import
@@ -480,30 +478,30 @@ func TestChainTxReorgs(t *testing.T) {
 	// removed tx
 	txs := types.Transactions{pastDrop, freshDrop}
 	for i, txn := range txs {
-		if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn != nil {
+		if txn, _, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn != nil {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt != nil {
+		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt != nil {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
 	for i, txn := range txs {
-		if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
+		if txn, _, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
 			t.Errorf("add %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
 			t.Errorf("add %d: expected receipt to be found", i)
 		}
 	}
 	// shared tx
 	txs = types.Transactions{postponed, swapped}
 	for i, txn := range txs {
-		if txn, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
+		if txn, _, _, _, _ := rawdb.ReadTransaction(tx, txn.Hash()); txn == nil {
 			t.Errorf("share %d: expected tx to be found", i)
 		}
-		if rcpt, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
+		if rcpt, _, _, _, _ := rawdb.ReadReceipt(tx, txn.Hash()); rcpt == nil {
 			t.Errorf("share %d: expected receipt to be found", i)
 		}
 	}
@@ -1271,8 +1269,6 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
@@ -1291,31 +1287,35 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	statedb := state.New(state.NewDbStateReader(db))
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		statedb := state.New(state.NewPlainKvState(tx, 1))
 
-	// If all is correct, then slot 1 and 2 are zero
-	key1 := common.HexToHash("01")
-	var got uint256.Int
-	statedb.GetState(aa, &key1, &got)
-	if !got.IsZero() {
-		t.Errorf("got %d exp %d", got.Uint64(), 0)
-	}
-	key2 := common.HexToHash("02")
-	statedb.GetState(aa, &key2, &got)
-	if !got.IsZero() {
-		t.Errorf("got %d exp %d", got.Uint64(), 0)
-	}
-	// Also, 3 and 4 should be set
-	key3 := common.HexToHash("03")
-	statedb.GetState(aa, &key3, &got)
-	if got.Uint64() != 3 {
-		t.Errorf("got %d exp %d", got.Uint64(), 3)
-	}
-	key4 := common.HexToHash("04")
-	statedb.GetState(aa, &key4, &got)
-	if got.Uint64() != 4 {
-		t.Errorf("got %d exp %d", got.Uint64(), 4)
-	}
+		// If all is correct, then slot 1 and 2 are zero
+		key1 := common.HexToHash("01")
+		var got uint256.Int
+		statedb.GetState(aa, &key1, &got)
+		if !got.IsZero() {
+			t.Errorf("got %d exp %d", got.Uint64(), 0)
+		}
+		key2 := common.HexToHash("02")
+		statedb.GetState(aa, &key2, &got)
+		if !got.IsZero() {
+			t.Errorf("got %d exp %d", got.Uint64(), 0)
+		}
+		// Also, 3 and 4 should be set
+		key3 := common.HexToHash("03")
+		statedb.GetState(aa, &key3, &got)
+		if got.Uint64() != 3 {
+			t.Errorf("got %d exp %d", got.Uint64(), 3)
+		}
+		key4 := common.HexToHash("04")
+		statedb.GetState(aa, &key4, &got)
+		if got.Uint64() != 4 {
+			t.Errorf("got %d exp %d", got.Uint64(), 4)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestDeleteRecreateAccount tests a state-transition that contains deletion of a
@@ -1353,8 +1353,6 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1374,20 +1372,24 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	statedb := state.New(state.NewDbStateReader(db))
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		statedb := state.New(state.NewPlainKvState(tx, 1))
 
-	// If all is correct, then both slots are zero
-	key1 := common.HexToHash("01")
-	var got uint256.Int
-	statedb.GetState(aa, &key1, &got)
-	if !got.IsZero() {
-		t.Errorf("got %x exp %x", got, 0)
-	}
-	key2 := common.HexToHash("02")
-	statedb.GetState(aa, &key2, &got)
-	if !got.IsZero() {
-		t.Errorf("got %x exp %x", got, 0)
-	}
+		// If all is correct, then both slots are zero
+		key1 := common.HexToHash("01")
+		var got uint256.Int
+		statedb.GetState(aa, &key1, &got)
+		if !got.IsZero() {
+			t.Errorf("got %x exp %x", got, 0)
+		}
+		key2 := common.HexToHash("02")
+		statedb.GetState(aa, &key2, &got)
+		if !got.IsZero() {
+			t.Errorf("got %x exp %x", got, 0)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestDeleteRecreateSlotsAcrossManyBlocks tests multiple state-transition that contains both deletion
@@ -1664,8 +1666,6 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 	nonce := uint64(0)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *core.BlockGen) {
@@ -1680,28 +1680,33 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	// Import the canonical chain
-	statedb := state.New(state.NewPlainStateReader(db))
-	if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
-		t.Fatalf("Genesis err, got %v exp %v", got, exp)
-	}
-	// First block tries to create, but fails
-	{
-		block := chain.Blocks[0]
-		if err := m.InsertChain(chain.Slice(0, 1)); err != nil {
-			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
-		}
-		statedb = state.New(state.NewPlainStateReader(db))
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+
+		// Import the canonical chain
+		statedb := state.New(state.NewPlainKvState(tx, 1))
 		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
-			t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
+			t.Fatalf("Genesis err, got %v exp %v", got, exp)
 		}
-	}
-	// Import the rest of the blocks
-	for i, block := range chain.Blocks[1:] {
-		if err := m.InsertChain(chain.Slice(1+i, 2+i)); err != nil {
-			t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
+		// First block tries to create, but fails
+		{
+			block := chain.Blocks[0]
+			if err := m.InsertChain(chain.Slice(0, 1)); err != nil {
+				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
+			}
+			statedb = state.New(state.NewPlainKvState(tx, 0))
+			if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
+				t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
+			}
 		}
-	}
+		// Import the rest of the blocks
+		for i, block := range chain.Blocks[1:] {
+			if err := m.InsertChain(chain.Slice(1+i, 2+i)); err != nil {
+				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // TestEIP2718Transition tests that an EIP-2718 transaction will be accepted
@@ -1738,8 +1743,6 @@ func TestEIP2718Transition(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1835,8 +1838,6 @@ func TestEIP1559Transition(t *testing.T) {
 		signer = types.LatestSigner(gspec.Config)
 	)
 	m := stages.MockWithGenesis(t, gspec, key1)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *core.BlockGen) {
 		if i == 500 {
@@ -1887,24 +1888,29 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}
 
-	statedb := state.New(state.NewPlainStateReader(db))
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		statedb := state.New(state.NewPlainKvState(tx, 0))
 
-	// 3: Ensure that miner received only the tx's tip.
-	actual := statedb.GetBalance(block.Coinbase())
-	expected := new(uint256.Int).Add(
-		new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
-		ethash.ConstantinopleBlockReward,
-	)
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
-	}
+		// 3: Ensure that miner received only the tx's tip.
+		actual := statedb.GetBalance(block.Coinbase())
+		expected := new(uint256.Int).Add(
+			new(uint256.Int).SetUint64(block.GasUsed()*block.Transactions()[0].GetPrice().Uint64()),
+			ethash.ConstantinopleBlockReward,
+		)
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
+		}
 
-	// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
-	actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
-	expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
-	}
+		// 4: Ensure the tx sender paid for the gasUsed * (tip + block baseFee).
+		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr1))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GetPrice().Uint64() + block.BaseFee().Uint64()))
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("sender expenditure incorrect: expected %d, got %d", expected, actual)
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
 
 	chain, err = core.GenerateChain(m.ChainConfig, block, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{2})
@@ -1923,25 +1929,29 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	block = chain.Blocks[0]
-	statedb = state.New(state.NewPlainStateReader(db))
-	effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		statedb := state.New(state.NewPlainKvState(tx, 0))
+		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
-	// 6+5: Ensure that miner received only the tx's effective tip.
-	actual = statedb.GetBalance(block.Coinbase())
-	expected = new(uint256.Int).Add(
-		new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
-		ethash.ConstantinopleBlockReward,
-	)
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
-	}
+		// 6+5: Ensure that miner received only the tx's effective tip.
+		actual := statedb.GetBalance(block.Coinbase())
+		expected := new(uint256.Int).Add(
+			new(uint256.Int).SetUint64(block.GasUsed()*effectiveTip),
+			ethash.ConstantinopleBlockReward,
+		)
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("miner balance incorrect: expected %d, got %d", expected, actual)
+		}
 
-	// 4: Ensure the tx sender paid for the gasUsed * (effectiveTip + block baseFee).
-	actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
-	expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
-	if actual.Cmp(expected) != 0 {
-		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
-	}
+		// 4: Ensure the tx sender paid for the gasUsed * (effectiveTip + block baseFee).
+		actual = new(uint256.Int).Sub(funds, statedb.GetBalance(addr2))
+		expected = new(uint256.Int).SetUint64(block.GasUsed() * (effectiveTip + block.BaseFee().Uint64()))
+		if actual.Cmp(expected) != 0 {
+			t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
+		}
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 func current(kv ethdb.RwKV) *types.Block {

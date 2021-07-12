@@ -196,16 +196,13 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators
 		return e.finalityChecker, e.epochTransitionNumber, false
 	}
 	// extract other epoch set if it's not the same as the last.
-	fmt.Printf("aa3: %x,%x\n", lastTransition.BlockHash, e.epochTransitionHash)
 	if lastTransition.BlockHash != e.epochTransitionHash {
-		fmt.Printf("aa2: %T\n", validators)
 		proof, err := destructure_proofs(lastTransition.ProofRlp)
 		if err != nil {
 			panic(err)
 		}
 		first := proof.SignalNumber == 0
 		// use signal number so multi-set first calculation is correct.
-		fmt.Printf("aa1: %T\n", validators)
 		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof)
 		if err != nil {
 			panic(fmt.Errorf("proof produced by this engine; therefore it is valid; qed. %w", err))
@@ -512,8 +509,12 @@ func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, b
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *AuRa) Author(header *types.Header) (common.Address, error) {
+	/*
+	 let message = keccak(empty_step_rlp(self.step, &self.parent_hash));
+	        let public = publickey::recover(&self.signature.into(), &message)?;
+	        Ok(publickey::public_to_address(&public))
+	*/
 	return common.Address{}, nil
-	//return ecrecover(header, c.signatures)
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -521,6 +522,7 @@ func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
+//nolint
 func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) bool {
 	/*
 		self
@@ -531,6 +533,8 @@ func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash
 	*/
 	return false
 }
+
+//nolint
 func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
 	/*
 	   	    self.received_step_hashes
@@ -540,7 +544,9 @@ func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newH
 }
 
 /// Phase 3 verification. Check block information against parent. Returns either a null `Ok` or a general error detailing the problem with import.
+//nolint
 func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
+	return nil
 	step, err := headerStep(header)
 	if err != nil {
 		return err
@@ -788,8 +794,17 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 	//return nil
 }
 
-// Finalize implements consensus.Engine, ensuring no uncles are set, nor block
-// rewards given.
+func (c *AuRa) Initialize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	isEpochBegin := header.Number.Uint64() == 1
+	if !isEpochBegin {
+		return
+	}
+	err := c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
+	if err != nil {
+		log.Warn("aura initialize block: on epoch begin", "err", err)
+	}
+}
+
 func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 	// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 	beneficiaries, _, rewards, err := AccumulateRewards(cc, c, header, uncles, syscall)
@@ -1185,7 +1200,6 @@ func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCal
 	}
 	_ = res[0]
 	_ = res[1]
-	fmt.Printf("aaaaa: %#v, %#v\n", res[0], res[1])
 	return nil, nil
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
@@ -190,13 +189,6 @@ func (m *TxDb) Delete(bucket string, k, v []byte) error {
 		return err
 	}
 	return c.(ethdb.RwCursor).Delete(k, v)
-}
-
-func (m *TxDb) NewBatch() ethdb.DbWithPendingMutations {
-	return &mutation{
-		db:   m,
-		puts: btree.New(32),
-	}
 }
 
 func (m *TxDb) begin(ctx context.Context, flags ethdb.TxFlags) error {

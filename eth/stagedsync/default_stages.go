@@ -7,15 +7,17 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-func ReplacementStages(ctx context.Context,
+func DefaultStages(ctx context.Context,
 	sm ethdb.StorageMode,
 	headers HeadersCfg,
 	blockHashCfg BlockHashesCfg,
-	headersSnapshotGenCfg HeadersSnapshotGenCfg,
+	snapshotHeaders SnapshotHeadersCfg,
 	bodies BodiesCfg,
+	snapshotBodies SnapshotBodiesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
 	trans TranspileCfg,
+	snapshotState SnapshotStateCfg,
 	hashState HashStateCfg,
 	trieCfg TrieCfg,
 	history HistoryCfg,
@@ -66,29 +68,10 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnHeadersSnapshotGenerationStage(s, tx, headersSnapshotGenCfg, world.InitialCycle, world.SnapshotBuilder, world.btClient, world.QuitCh)
+						return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, world.InitialCycle, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						useExternalTx := tx != nil
-						if !useExternalTx {
-							var err error
-							tx, err = headersSnapshotGenCfg.db.BeginRw(context.Background())
-							if err != nil {
-								return err
-							}
-							defer tx.Rollback()
-						}
-
-						err := u.Done(tx)
-						if err != nil {
-							return err
-						}
-						if !useExternalTx {
-							if err := tx.Commit(); err != nil {
-								return err
-							}
-						}
-						return nil
+						return UnwindHeadersSnapshotGenerationStage(u, s, tx, snapshotHeaders, world.QuitCh)
 					},
 				}
 			},
@@ -117,29 +100,10 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnBodiesSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
+						return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						useExternalTx := tx != nil
-						if !useExternalTx {
-							var err error
-							tx, err = world.DB.RwKV().BeginRw(context.Background())
-							if err != nil {
-								return err
-							}
-							defer tx.Rollback()
-						}
-
-						err := u.Done(tx)
-						if err != nil {
-							return err
-						}
-						if !useExternalTx {
-							if err := tx.Commit(); err != nil {
-								return err
-							}
-						}
-						return nil
+						return UnwindBodiesSnapshotGenerationStage(u, s, tx, snapshotBodies, world.QuitCh)
 					},
 				}
 			},
@@ -166,10 +130,10 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Execution,
 					Description: "Execute blocks w/o hash checks",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnExecuteBlocksStage(s, u, tx, 0, ctx.Done(), exec, world.Accumulator)
+						return SpawnExecuteBlocksStage(s, u, tx, 0, ctx.Done(), exec, world.InitialCycle)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec, world.Accumulator)
+						return UnwindExecutionStage(u, s, tx, ctx.Done(), exec, world.InitialCycle)
 					},
 				}
 			},
@@ -200,10 +164,10 @@ func ReplacementStages(ctx context.Context,
 					Disabled:            world.snapshotsDir == "",
 					DisabledDescription: "Enable by --snapshot.layout",
 					ExecFunc: func(s *StageState, u Unwinder, tx ethdb.RwTx) error {
-						return SpawnStateSnapshotGenerationStage(s, world.DB.RwKV(), tx, world.snapshotsDir, world.btClient, world.QuitCh)
+						return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, world.QuitCh)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-						return u.Done(world.DB)
+						return UnwindStateSnapshotGenerationStage(u, s, tx, snapshotState, world.QuitCh)
 					},
 				}
 			},
@@ -346,7 +310,7 @@ func ReplacementStages(ctx context.Context,
 					ID:          stages.Finish,
 					Description: "Final: update current block for the RPC API",
 					ExecFunc: func(s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-						return FinishForward(s, tx, finish, world.btClient, world.SnapshotBuilder)
+						return FinishForward(s, tx, finish)
 					},
 					UnwindFunc: func(u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 						return UnwindFinish(u, s, tx, finish)

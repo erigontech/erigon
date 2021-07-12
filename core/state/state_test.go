@@ -35,8 +35,8 @@ import (
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {
-	db    ethdb.Database
-	kv    ethdb.RwKV // Same as db, but with a different interface
+	kv    ethdb.RwKV
+	tx    ethdb.RwTx
 	state *IntraBlockState
 	r     StateReader
 	w     StateWriter
@@ -102,12 +102,20 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	db := kv.NewMemDatabase()
-	s.db = db
-	s.kv = db.RwKV()
-	s.r = NewDbStateReader(s.db)
-	s.w = NewDbStateWriter(s.db, 0)
+	s.kv = kv.NewMemKV()
+	tx, err := s.kv.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	s.tx = tx
+	s.r = NewPlainKvState(tx, 0)
+	s.w = NewPlainKvState(tx, 0)
 	s.state = New(s.r)
+}
+
+func (s *StateSuite) TearDownTest(c *checker.C) {
+	s.tx.Rollback()
+	s.kv.Close()
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
@@ -168,10 +176,9 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-
-	db := kv.NewMemDatabase()
-	w := NewDbStateWriter(db, 0)
-	state := New(NewDbStateReader(db))
+	_, tx := kv.NewTestTx(t)
+	w := NewPlainKvState(tx, 0)
+	state := New(NewPlainKvState(tx, 0))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -196,7 +203,7 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewDbStateWriter(db, 1)
+	w = NewPlainKvState(tx, 1)
 
 	err = state.CommitBlock(params.Rules{}, w)
 	if err != nil {
