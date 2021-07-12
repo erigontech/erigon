@@ -26,6 +26,9 @@ import (
 
 func TestFetch(t *testing.T) {
 	mock := NewMockSentry()
-	fetch := NewFetch(context.Background(), []sentry.SentryClient{mock})
+	var genesisHash [32]byte
+	var networkId uint64 = 1
+	forks := []uint64{1, 5, 10}
+	fetch := NewFetch(context.Background(), []sentry.SentryClient{mock}, genesisHash, networkId, forks)
 	fmt.Printf("fetch: %+v\n", fetch)
 }

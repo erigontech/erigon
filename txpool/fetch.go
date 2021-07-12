@@ -18,9 +18,17 @@ package txpool
 
 import (
 	"context"
+	"errors"
+	"io"
+	"log"
 	"sync"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Fetch connects to sentry and impements eth/65 or eth/66 protocol regarding the transaction
@@ -30,10 +38,9 @@ import (
 type Fetch struct {
 	ctx           context.Context       // Context used for cancellation and closing of the fetcher
 	sentryClients []sentry.SentryClient // sentry clients that will be used for accessing the network
-	genesisHash   [32]byte              // Genesis hash of the network (for constructing StatusData message to sentry)
-	networkId     uint64                // Network Id of the network (for constructing StatusData message to sentry)
-	forks         []uint64              // list of forks that network went through (for constructing StatusData message to sentry)
+	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
 	wg            *sync.WaitGroup       // Waitgroup used for synchronisation in the tests (nil when not in tests)
+	logger        *log.Logger
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
@@ -45,17 +52,30 @@ func NewFetch(ctx context.Context,
 	networkId uint64,
 	forks []uint64,
 ) *Fetch {
+	statusData := &sentry.StatusData{
+		NetworkId:       networkId,
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(0)),
+		BestHash:        gointerfaces.ConvertHashToH256(genesisHash),
+		MaxBlock:        0,
+		ForkData: &sentry.Forks{
+			Genesis: gointerfaces.ConvertHashToH256(genesisHash),
+			Forks:   forks,
+		},
+	}
 	return &Fetch{
 		ctx:           ctx,
 		sentryClients: sentryClients,
-		genesisHash:   genesisHash,
-		networkId:     networkId,
-		forks:         forks,
+		statusData:    statusData,
+		logger:        log.Default(),
 	}
 }
 
 func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
 	f.wg = wg
+}
+
+func (f *Fetch) SetLogger(logger *log.Logger) {
+	f.logger = logger
 }
 
 // Start initialises connection to the sentry
@@ -77,10 +97,140 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 			return
 		default:
 		}
+		_, err := sentryClient.SetStatus(f.ctx, f.statusData, grpc.WaitForReady(true))
+		if err != nil {
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				return
+			}
+			// Report error
+			f.logger.Printf("[receiveMessageLoop] sentry not ready yet: %v\n", err)
+			return
+		}
+		streamCtx, cancel := context.WithCancel(f.ctx)
+		defer cancel()
 
+		stream, err := sentryClient.Messages(streamCtx, &sentry.MessagesRequest{Ids: []sentry.MessageId{
+			sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
+			sentry.MessageId_GET_POOLED_TRANSACTIONS_65,
+			sentry.MessageId_TRANSACTIONS_65,
+			sentry.MessageId_POOLED_TRANSACTIONS_65,
+			sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+			sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
+			sentry.MessageId_TRANSACTIONS_66,
+			sentry.MessageId_POOLED_TRANSACTIONS_66,
+		}}, grpc.WaitForReady(true))
+		if err != nil {
+			select {
+			case <-f.ctx.Done():
+				return
+			default:
+			}
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			f.logger.Printf("[receiveMessageLoop] Messages: %v\n", err)
+			return
+		}
+
+		var req *sentry.InboundMessage
+		for req, err = stream.Recv(); ; req, err = stream.Recv() {
+			if err != nil {
+				select {
+				case <-f.ctx.Done():
+					return
+				default:
+				}
+				if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					return
+				}
+				if errors.Is(err, io.EOF) {
+					return
+				}
+				f.logger.Printf("[receiveMessageLoop] stream.Recv: %v\n", err)
+				return
+			}
+			if req == nil {
+				return
+			}
+			if err = f.handleInboundMessage(req, sentryClient); err != nil {
+				f.logger.Printf("[receiveMessageLoop] Handling incoming message: %v\n", err)
+			}
+			if f.wg != nil {
+				f.wg.Done()
+			}
+		}
 	}
 }
 
-func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
+func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient sentry.SentryClient) error {
+	return nil
+}
 
+func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
+	for {
+		select {
+		case <-f.ctx.Done():
+			return
+		default:
+		}
+		_, err := sentryClient.SetStatus(f.ctx, f.statusData, grpc.WaitForReady(true))
+		if err != nil {
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				return
+			}
+			// Report error
+			f.logger.Printf("[receivePeerLoop] sentry not ready yet: %v\n", err)
+		}
+		streamCtx, cancel := context.WithCancel(f.ctx)
+		defer cancel()
+
+		stream, err := sentryClient.Peers(streamCtx, &sentry.PeersRequest{})
+		if err != nil {
+			select {
+			case <-f.ctx.Done():
+				return
+			default:
+			}
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			f.logger.Printf("[receivePeerLoop] Peers: %v\n", err)
+			return
+		}
+
+		var req *sentry.PeersReply
+		for req, err = stream.Recv(); ; req, err = stream.Recv() {
+			if err != nil {
+				select {
+				case <-f.ctx.Done():
+					return
+				default:
+				}
+				if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					return
+				}
+				if errors.Is(err, io.EOF) {
+					return
+				}
+				f.logger.Printf("[receivePeerLoop] stream.Recv: %v\n", err)
+				return
+			}
+			if req == nil {
+				return
+			}
+			switch req.Event {
+			case sentry.PeersReply_Connect:
+				//recentPeers.AddPeer(req.PeerId)
+			}
+			if f.wg != nil {
+				f.wg.Done()
+			}
+		}
+	}
 }
