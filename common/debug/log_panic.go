@@ -6,24 +6,22 @@ import (
 	"runtime/debug"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/ledgerwatch/erigon/log"
 )
 
 var sigc chan os.Signal
-var crashReportDir string
 
 func GetSigC(sig *chan os.Signal) {
 	sigc = *sig
 }
 
+/*
+var crashReportDir string
 func prettyTime() string {
 	time := fmt.Sprintf("%v", time.Now())
 	return strings.Replace(time[:19], " ", "-", 1)
 }
-
-/*
 func CheckForCrashes(datadir string) {
 	crashReportDir = filepath.Join(datadir, "crashreports")
 	if _, err := os.Stat(crashReportDir); err != nil && os.IsNotExist(err) {
