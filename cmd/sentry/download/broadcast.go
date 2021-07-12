@@ -129,7 +129,81 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 	}
 }
 
-func (cs *ControlServerImpl) BroadcastPooledTxs(ctx context.Context, txs []common.Hash) {
+func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []common.Hash) {
+	if len(txs) == 0 {
+		return
+	}
+
+	cs.lock.RLock()
+	defer cs.lock.RUnlock()
+	initialAmount := len(txs)
+	avgPeersPerSent65 := 0
+	avgPeersPerSent66 := 0
+	initialTxs := txs
+	for len(txs) > 0 {
+
+		pendingLen := maxTxPacketSize / common.HashLength
+		pending := make([]common.Hash, 0, pendingLen)
+
+		for i := 0; i < pendingLen && i < len(txs); i++ {
+			pending = append(pending, txs[i])
+		}
+		txs = txs[len(pending):]
+
+		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
+		if err != nil {
+			log.Error("BroadcastLocalPooledTxs", "error", err)
+		}
+		var req66, req65 *proto_sentry.OutboundMessageData
+		for _, sentry := range cs.sentries {
+			if !sentry.Ready() {
+				continue
+			}
+
+			switch sentry.Protocol() {
+			case eth.ETH65:
+				if req65 == nil {
+					req65 = &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
+						Data: data,
+					}
+				}
+
+				peers, err := sentry.SendMessageToAll(ctx, req65, &grpc.EmptyCallOption{})
+				if err != nil {
+					if isPeerNotFoundErr(err) {
+						continue
+					}
+					log.Error("BroadcastLocalPooledTxs", "error", err)
+				}
+				avgPeersPerSent65 = (avgPeersPerSent65 + len(peers.Peers)) / 2
+
+			case eth.ETH66:
+				if req66 == nil {
+					req66 = &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+						Data: data,
+					}
+				}
+				peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
+				if err != nil {
+					if isPeerNotFoundErr(err) {
+						continue
+					}
+					log.Error("BroadcastLocalPooledTxs", "error", err)
+				}
+				avgPeersPerSent66 = (avgPeersPerSent66 + len(peers.Peers)) / 2
+			}
+		}
+	}
+	if initialAmount == 1 {
+		log.Info("local tx propagated", "to_peers_amount", avgPeersPerSent65+avgPeersPerSent66, "tx_hash", initialTxs[0].String())
+	} else {
+		log.Info("local txs propagated", "to_peers_amount", avgPeersPerSent65+avgPeersPerSent66, "txs_amount", initialAmount)
+	}
+}
+
+func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs []common.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -148,7 +222,7 @@ func (cs *ControlServerImpl) BroadcastPooledTxs(ctx context.Context, txs []commo
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("BroadcastPooledTxs", "error", err)
+			log.Error("BroadcastRemotePooledTxs", "error", err)
 		}
 		var req66, req65 *proto_sentry.SendMessageToRandomPeersRequest
 		for _, sentry := range cs.sentries {
@@ -172,7 +246,7 @@ func (cs *ControlServerImpl) BroadcastPooledTxs(ctx context.Context, txs []commo
 					if isPeerNotFoundErr(err) {
 						continue
 					}
-					log.Error("BroadcastPooledTxs", "error", err)
+					log.Error("BroadcastRemotePooledTxs", "error", err)
 				}
 
 			case eth.ETH66:
@@ -189,9 +263,8 @@ func (cs *ControlServerImpl) BroadcastPooledTxs(ctx context.Context, txs []commo
 					if isPeerNotFoundErr(err) {
 						continue
 					}
-					log.Error("BroadcastPooledTxs", "error", err)
+					log.Error("BroadcastRemotePooledTxs", "error", err)
 				}
-				continue
 			}
 		}
 	}
