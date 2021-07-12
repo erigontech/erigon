@@ -7,7 +7,7 @@ require (
 	github.com/VictoriaMetrics/fastcache v1.5.8
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
-	github.com/aws/aws-sdk-go v1.34.21
+	github.com/aws/aws-sdk-go v1.39.4
 	github.com/blend/go-sdk v1.20210428.4 // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
