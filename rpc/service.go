@@ -27,7 +27,6 @@ import (
 	"unicode"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -220,7 +219,7 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 			buf = buf[:runtime.Stack(buf, false)]
 			log.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, buf))
 			errRes = errors.New("method handler crashed")
-			debug.WriteStackTraceOnPanic(string(buf))
+			//debug.WriteStackTraceOnPanic(string(buf))
 		}
 	}()
 	// Run the callback.
