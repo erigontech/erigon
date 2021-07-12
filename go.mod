@@ -9,7 +9,7 @@ require (
 	github.com/anacrolix/torrent v1.25.1
 	github.com/aws/aws-sdk-go v1.34.21
 	github.com/blend/go-sdk v1.20210428.4 // indirect
-	github.com/btcsuite/btcd v0.21.0-beta
+	github.com/btcsuite/btcd v0.22.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/cloudflare/cloudflare-go v0.13.2
 	github.com/consensys/gurvy v0.3.8
