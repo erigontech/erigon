@@ -57,7 +57,7 @@ require (
 	github.com/torquem-ch/mdbx-go v0.15.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli v1.22.4
+	github.com/urfave/cli v1.22.5
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	go.uber.org/atomic v1.8.0
