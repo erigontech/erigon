@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
@@ -53,6 +54,7 @@ func ExecuteBlockEphemerally(
 	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
+	epochReader consensus.EpochReader,
 	checkTEVM func(codeHash common.Hash) (bool, error),
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
@@ -65,7 +67,7 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit())
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs); err != nil {
+		if err := InitializeBlockExecution(engine, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -74,6 +76,7 @@ func ExecuteBlockEphemerally(
 		misc.ApplyDAOHardFork(ibs)
 	}
 	noop := state.NewNoopWriter()
+	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -123,7 +126,7 @@ func ExecuteBlockEphemerally(
 		}
 	}
 	if !vmConfig.ReadOnly {
-		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs); err != nil {
+		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader); err != nil {
 			return nil, err
 		}
 	}
@@ -149,14 +152,14 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	// Set infinite balance to the fake caller account.
-	fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
+	//fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
 
 	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
 	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}
-	ibs.SetNonce(SystemAddress, 0)
+	ibs.SetNonce(SystemAddress, 0) //hack - because syscall must use ApplyMessage instead of ApplyTx (and don't create tx at all). But CallContract must create tx.
 
 	//w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
 	//if err1 != nil {
@@ -191,7 +194,7 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	// Set infinite balance to the fake caller account.
-	fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
+	//fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
 
 	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
 	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
@@ -218,26 +221,45 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	engine.Finalize(cc, header, ibs, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+func FinalizeBlockExecution(engine consensus.Engine, header *types.Header,
+	txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig,
+	ibs *state.IntraBlockState, receipts types.Receipts, e consensus.EpochReader,
+) error {
+	//ibs.Print(cc.Rules(header.Number.Uint64()))
+	//fmt.Printf("====tx processing end====\n")
+
+	engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, func(contract common.Address, data []byte) ([]byte, error) {
 		return CallContract(contract, data, *cc, ibs, header, engine)
 	})
+	//fmt.Printf("====finalize start====\n")
+	//ibs.Print(cc.Rules(header.Number.Uint64()))
+	//fmt.Printf("====finalize end====\n")
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {
 		return fmt.Errorf("committing block %d failed: %v", header.Number.Uint64(), err)
 	}
+	if cc.ChainID.Uint64() == 77 { // hack for Sokol - don't understand why eip158 is enabled, but OE still save SystemAddress with nonce=0
+		acc0 := accounts.NewAccount()
+		acc0.Nonce = 1
+		acc := accounts.NewAccount()
+		acc.Nonce = 0
+		stateWriter.UpdateAccountData(SystemAddress, &acc0, &acc)
+	}
+
 	if err := stateWriter.WriteChangeSets(); err != nil {
 		return fmt.Errorf("writing changesets for block %d failed: %v", header.Number.Uint64(), err)
 	}
 	return nil
 }
 
-func InitializeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
+func InitializeBlockExecution(engine consensus.Engine, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	engine.Initialize(cc, header, ibs, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+	engine.Initialize(cc, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	})
+	//fmt.Printf("====InitializeBlockExecution start %d====\n", header.Number.Uint64())
+	//ibs.Print(cc.Rules(header.Number.Uint64()))
+	//fmt.Printf("====InitializeBlockExecution end====\n")
 
 	return nil
 }

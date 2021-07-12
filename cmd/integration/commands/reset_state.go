@@ -173,6 +173,9 @@ func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallTraceSet); err != nil {
 		return err
 	}
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Epoch); err != nil {
+		return err
+	}
 	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
