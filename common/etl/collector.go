@@ -178,7 +178,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType
 
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
 		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
-		// property, but files may overlap. skip repeated keys here
+		// property, but files may overlap. files are sorted, just skip repeated keys here
 		if bufType == SortableOldestAppearedBuffer && bytes.Equal(prevK, k) {
 			return nil
 		}
