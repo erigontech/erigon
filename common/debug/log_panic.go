@@ -3,7 +3,6 @@ package debug
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -24,6 +23,7 @@ func prettyTime() string {
 	return strings.Replace(time[:19], " ", "-", 1)
 }
 
+/*
 func CheckForCrashes(datadir string) {
 	crashReportDir = filepath.Join(datadir, "crashreports")
 	if _, err := os.Stat(crashReportDir); err != nil && os.IsNotExist(err) {
@@ -52,7 +52,7 @@ func CheckForCrashes(datadir string) {
 		}
 	}
 }
-
+*/
 var panicReplacer = strings.NewReplacer("\n", " ", "\t", "", "\r", "")
 
 // LogPanic - does log panic to logger and to <datadir>/crashreports then stops the process
@@ -63,8 +63,8 @@ func LogPanic() {
 	}
 
 	stack := string(debug.Stack())
-	log.Error("panic", "err", panicResult, "stack", panicReplacer.Replace(stack))
-	WriteStackTraceOnPanic(stack)
+	log.Error("catch panic", "err", panicResult, "stack", panicReplacer.Replace(stack))
+	//WriteStackTraceOnPanic(stack)
 	if sigc != nil {
 		sigc <- syscall.SIGINT
 	}
@@ -89,10 +89,12 @@ func ReportPanicAndRecover() (err error) {
 	default:
 		err = fmt.Errorf("%+v, trace: %s", typed, panicReplacer.Replace(stack))
 	}
-	WriteStackTraceOnPanic(stack)
+	//log.Error("panic", "err", panicResult, "stack", panicReplacer.Replace(stack))
+	//WriteStackTraceOnPanic(stack)
 	return err
 }
 
+/*
 func WriteStackTraceOnPanic(stack string) {
 	fileName := filepath.Join(crashReportDir, prettyTime()+".txt")
 	f, errFs := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
@@ -105,3 +107,4 @@ func WriteStackTraceOnPanic(stack string) {
 	f.Sync()
 	f.Close()
 }
+*/
