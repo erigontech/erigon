@@ -856,3 +856,17 @@ func ReadAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, 
 	}
 	return hash, number
 }
+
+func ReadEpoch(tx ethdb.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
+	k := make([]byte, 8+32)
+	binary.BigEndian.PutUint64(k, blockNum)
+	copy(k[8:], blockHash[:])
+	return tx.GetOne(dbutils.Epoch, k)
+}
+
+func WriteEpoch(tx ethdb.RwTx, blockNum uint64, blockHash common.Hash, transitionProof []byte) (err error) {
+	k := make([]byte, 8+32)
+	binary.BigEndian.PutUint64(k, blockNum)
+	copy(k[8:], blockHash[:])
+	return tx.Put(dbutils.Epoch, k, transitionProof)
+}
