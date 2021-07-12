@@ -267,14 +267,14 @@ func (so *stateObject) AddBalance(amount *uint256.Int) {
 
 	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount))
 
-	if so.Balance().IsUint64() {
-		//fmt.Printf("subBalance: %x,%d,%d,%s\n", so.address, amount.Uint64(), so.Balance().Uint64(), debug.Callers(7))
-		fmt.Printf("AddBalance: %x,%d,%d\n", so.address, amount.Uint64(), so.Balance().Uint64())
-	} else {
-		div := uint256.NewInt(1_000_000_000)
-		//fmt.Printf("subBalance: %x,%d,%d*%d,%s\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64(), debug.Callers(7))
-		fmt.Printf("AddBalance: %x,%d,%d*%d\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64())
-	}
+	//if so.Balance().IsUint64() {
+	//	//fmt.Printf("subBalance: %x,%d,%d,%s\n", so.address, amount.Uint64(), so.Balance().Uint64(), debug.Callers(7))
+	//	fmt.Printf("AddBalance: %x,%d,%d\n", so.address, amount.Uint64(), so.Balance().Uint64())
+	//} else {
+	//	div := uint256.NewInt(1_000_000_000)
+	//	//fmt.Printf("subBalance: %x,%d,%d*%d,%s\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64(), debug.Callers(7))
+	//	fmt.Printf("AddBalance: %x,%d,%d*%d\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64())
+	//}
 }
 
 // SubBalance removes amount from so's balance.
@@ -284,14 +284,14 @@ func (so *stateObject) SubBalance(amount *uint256.Int) {
 		return
 	}
 	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount))
-	if so.Balance().IsUint64() {
-		//fmt.Printf("subBalance: %x,%d,%d,%s\n", so.address, amount.Uint64(), so.Balance().Uint64(), debug.Callers(7))
-		fmt.Printf("subBalance: %x,%d,%d\n", so.address, amount.Uint64(), so.Balance().Uint64())
-	} else {
-		div := uint256.NewInt(1_000_000_000)
-		//fmt.Printf("subBalance: %x,%d,%d*%d,%s\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64(), debug.Callers(7))
-		fmt.Printf("subBalance: %x,%d,%d*%d\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64())
-	}
+	//if so.Balance().IsUint64() {
+	//	//fmt.Printf("subBalance: %x,%d,%d,%s\n", so.address, amount.Uint64(), so.Balance().Uint64(), debug.Callers(7))
+	//	fmt.Printf("subBalance: %x,%d,%d\n", so.address, amount.Uint64(), so.Balance().Uint64())
+	//} else {
+	//	div := uint256.NewInt(1_000_000_000)
+	//	//fmt.Printf("subBalance: %x,%d,%d*%d,%s\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64(), debug.Callers(7))
+	//	fmt.Printf("subBalance: %x,%d,%d*%d\n", so.address, amount.Uint64(), uint256.NewInt(0).Div(so.Balance(), div).Uint64(), div.Uint64())
+	//}
 }
 
 func (so *stateObject) SetBalance(amount *uint256.Int) {

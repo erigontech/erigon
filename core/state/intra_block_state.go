@@ -23,7 +23,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -407,9 +406,6 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int) {
-	if addr == common.HexToAddress("0x0000000000000000000000000000000000000000") {
-		fmt.Printf("callers: %s\n", debug.Callers(7))
-	}
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
@@ -668,7 +664,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	}
 
 	newObj := sdb.createObject(addr, previous)
-	fmt.Printf("77create accc ccc: %x, %t, %d,%d,%s\n", addr, contractCreation, newObj.data.Incarnation, newObj.data.Nonce, debug.Callers(7))
 
 	if contractCreation {
 		newObj.created = true

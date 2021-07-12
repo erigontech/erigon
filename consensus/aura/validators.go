@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"go.uber.org/atomic"
@@ -109,67 +110,67 @@ type ValidatorSet interface {
 	    fn genesis_epoch_data(&self, _header: &Header, _call: &Call) -> Result<Vec<u8>, String> {
 	        Ok(Vec::new())
 	    }
+	*/
+	// Whether this block is the last one in its epoch.
+	//
+	// Indicates that the validator set changed at the given block in a manner
+	// that doesn't require finality.
+	//
+	// `first` is true if this is the first block in the set.
+	signalEpochEnd(first bool, header *types.Header, receipts types.Receipts) ([]byte, bool)
+	/*
+	   // Whether the given block signals the end of an epoch, but change won't take effect
+	   // until finality.
+	   //
+	   // Engine should set `first` only if the header is genesis. Multiplexing validator
+	   // sets can set `first` to internal changes.
+	   fn signals_epoch_end(
+	       &self,
+	       first: bool,
+	       header: &Header,
+	       aux: AuxiliaryData,
+	   ) -> ::engines::EpochChange<EthereumMachine>;
 
-	    // Whether this block is the last one in its epoch.
-	    //
-	    // Indicates that the validator set changed at the given block in a manner
-	    // that doesn't require finality.
-	    //
-	    // `first` is true if this is the first block in the set.
-	    fn is_epoch_end(&self, first: bool, chain_head: &Header) -> Option<Vec<u8>>;
+	   // Recover the validator set from the given proof, the block number, and
+	   // whether this header is first in its set.
+	   //
+	   // May fail if the given header doesn't kick off an epoch or
+	   // the proof is invalid.
+	   //
+	   // Returns the set, along with a flag indicating whether finality of a specific
+	   // hash should be proven.
+	   fn epoch_set(
+	       &self,
+	       first: bool,
+	       machine: &EthereumMachine,
+	       number: BlockNumber,
+	       proof: &[u8],
+	   ) -> Result<(SimpleList, Option<H256>), ::error::Error>;
 
-	    // Whether the given block signals the end of an epoch, but change won't take effect
-	    // until finality.
-	    //
-	    // Engine should set `first` only if the header is genesis. Multiplexing validator
-	    // sets can set `first` to internal changes.
-	    fn signals_epoch_end(
-	        &self,
-	        first: bool,
-	        header: &Header,
-	        aux: AuxiliaryData,
-	    ) -> ::engines::EpochChange<EthereumMachine>;
+	   // Checks if a given address is a validator, with the given function
+	   // for executing synchronous calls to contracts.
+	   fn contains_with_caller(
+	       &self,
+	       parent_block_hash: &H256,
+	       address: &Address,
+	       caller: &Call,
+	   ) -> bool;
 
-	    // Recover the validator set from the given proof, the block number, and
-	    // whether this header is first in its set.
-	    //
-	    // May fail if the given header doesn't kick off an epoch or
-	    // the proof is invalid.
-	    //
-	    // Returns the set, along with a flag indicating whether finality of a specific
-	    // hash should be proven.
-	    fn epoch_set(
-	        &self,
-	        first: bool,
-	        machine: &EthereumMachine,
-	        number: BlockNumber,
-	        proof: &[u8],
-	    ) -> Result<(SimpleList, Option<H256>), ::error::Error>;
-
-	    // Checks if a given address is a validator, with the given function
-	    // for executing synchronous calls to contracts.
-	    fn contains_with_caller(
-	        &self,
-	        parent_block_hash: &H256,
-	        address: &Address,
-	        caller: &Call,
-	    ) -> bool;
-
-	    // Draws an validator nonce modulo number of validators.
-	    fn get_with_caller(&self, parent_block_hash: &H256, nonce: usize, caller: &Call) -> Address;
+	   // Draws an validator nonce modulo number of validators.
+	   fn get_with_caller(&self, parent_block_hash: &H256, nonce: usize, caller: &Call) -> Address;
 
 
-	    // Notifies about malicious behaviour.
-	    fn report_malicious(
-	        &self,
-	        _validator: &Address,
-	        _set_block: BlockNumber,
-	        _block: BlockNumber,
-	        _proof: Bytes,
-	    ) {
-	    }
-	    // Notifies about benign misbehaviour.
-	    fn report_benign(&self, _validator: &Address, _set_block: BlockNumber, _block: BlockNumber) {}
+	   // Notifies about malicious behaviour.
+	   fn report_malicious(
+	       &self,
+	       _validator: &Address,
+	       _set_block: BlockNumber,
+	       _block: BlockNumber,
+	       _proof: Bytes,
+	   ) {
+	   }
+	   // Notifies about benign misbehaviour.
+	   fn report_benign(&self, _validator: &Address, _set_block: BlockNumber, _block: BlockNumber) {}
 	*/
 }
 
@@ -285,6 +286,12 @@ func (s *Multi) onEpochBegin(_ bool, header *types.Header, caller consensus.Syst
 	setTransition, set := s.correctSetByNumber(header.Number.Uint64())
 	return set.onEpochBegin(setTransition == header.Number.Uint64(), header, caller)
 }
+func (s *Multi) signalEpochEnd(_ bool, header *types.Header, r types.Receipts) ([]byte, bool) {
+	num := header.Number.Uint64()
+	setBlock, set := s.correctSetByNumber(num)
+	first := setBlock == num
+	return set.signalEpochEnd(first, header, r)
+}
 
 type SimpleList struct {
 	validators []common.Address
@@ -311,6 +318,10 @@ func (s *SimpleList) countWithCaller(parentHash common.Hash, caller Call) (uint6
 }
 func (s *SimpleList) genesisEpochData(header *types.Header, caller Call) ([]byte, error) {
 	return []byte{}, nil
+}
+
+func (s *SimpleList) signalEpochEnd(_ bool, header *types.Header, r types.Receipts) ([]byte, bool) {
+	return nil, false
 }
 
 // Draws an validator nonce modulo number of validators.
@@ -642,6 +653,105 @@ func (s *ValidatorSafeContract) onEpochBegin(first bool, header *types.Header, c
 	return nil
 }
 
+func (s *ValidatorSafeContract) signalEpochEnd(first bool, header *types.Header, r types.Receipts) ([]byte, bool) {
+	//TODO: return real proof - return nil now
+
+	// transition to the first block of a contract requires finality but has no log event.
+	if first {
+		/*
+				     debug!(target: "engine", "signalling transition to fresh contract.");
+			         let state_proof = Arc::new(StateProof {
+			             contract_address: self.contract_address,
+			             header: header.clone(),
+			         });
+			         return ::engines::EpochChange::Yes(::engines::Proof::WithState(state_proof as Arc<_>));
+		*/
+		return nil, true
+	}
+
+	// otherwise, we're checking for logs.
+	//let bloom = self.expected_bloom(header);
+	//let header_bloom = header.log_bloom();
+	//if &bloom & header_bloom != bloom {
+	//	return ::engines::EpochChange::No;
+	//}
+
+	/*
+		        match receipts {
+		            None => ::engines::EpochChange::Unsure(AuxiliaryRequest::Receipts),
+		            Some(receipts) => match self.extract_from_event(bloom, header, receipts) {
+		                None => ::engines::EpochChange::No,
+		                Some(list) => {
+		                    info!(target: "engine", "Signal for transition within contract. New list: {:?}",
+								&*list);
+
+		                    let proof = encode_proof(&header, receipts);
+		                    ::engines::EpochChange::Yes(::engines::Proof::Known(proof))
+		                }
+		            },
+		        }
+	*/
+	_, ok := s.extractFromEvent(header, r)
+	return nil, ok
+}
+
+func (s *ValidatorSafeContract) extractFromEvent(header *types.Header, receipts types.Receipts) (*SimpleList, bool) {
+	if len(receipts) == 0 {
+		return nil, false
+	}
+
+	// iterate in reverse because only the _last_ change in a given
+	// block actually has any effect.
+	// the contract should only increment the nonce once.
+	for i := len(receipts) - 1; i >= 0; i-- {
+		logs := receipts[i].Logs
+		for j := len(logs) - 1; j >= 0; j-- {
+			l := logs[j]
+			found := l.Address == s.contractAddress && len(l.Topics) == 2 && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
+			if found {
+				return nil, true
+			}
+		}
+	}
+
+	/*
+					  let check_log = |log: &LogEntry| {
+		            log.address == self.contract_address
+		                && log.topics.len() == 2
+		                && log.topics[0] == *EVENT_NAME_HASH
+		                && log.topics[1] == *header.parent_hash()
+		        };
+
+		        //// iterate in reverse because only the _last_ change in a given
+		        //// block actually has any effect.
+		        //// the contract should only increment the nonce once.
+		        let mut decoded_events = receipts
+		            .iter()
+		            .rev()
+		            .filter(|r| r.log_bloom.contains_bloom(&bloom))
+		            .flat_map(|r| r.logs.iter())
+		            .filter(move |l| check_log(l))
+		            .filter_map(|log| {
+		                validator_set::events::initiate_change::parse_log(
+		                    (log.topics.clone(), log.data.clone()).into(),
+		                )
+		                .ok()
+		            });
+
+		        // only last log is taken into account
+		        decoded_events.next().map(|matched_event| {
+		            let l = SimpleList::new(matched_event.new_set);
+		            println!("matched_event: {:?}", l);
+		            l
+		        })
+	*/
+	return nil, false
+}
+
+const EVENT_NAME = "InitiateChange(bytes32,address[])"
+
+var EVENT_NAME_HASH = crypto.Keccak256Hash([]byte(EVENT_NAME))
+
 func (s *ValidatorSafeContract) onCloseBlock(header *types.Header, ourAddress common.Address) error {
 	// Skip the rest of the function unless there has been a transition to POSDAO AuRa.
 	if s.posdaoTransition != nil && header.Number.Uint64() < *s.posdaoTransition {
@@ -715,6 +825,9 @@ func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Ad
 }
 func (s *ValidatorContract) genesisEpochData(header *types.Header, call Call) ([]byte, error) {
 	return s.validators.genesisEpochData(header, call)
+}
+func (s *ValidatorContract) signalEpochEnd(first bool, header *types.Header, r types.Receipts) ([]byte, bool) {
+	return s.validators.signalEpochEnd(first, header, r)
 }
 
 func proveInitial(contractAddr common.Address, header *types.Header, caller Call) ([]byte, error) {
