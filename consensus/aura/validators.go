@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/aura/auraabi"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -692,6 +696,9 @@ func (s *ValidatorSafeContract) signalEpochEnd(first bool, header *types.Header,
 		        }
 	*/
 	_, ok := s.extractFromEvent(header, r)
+	//if header.Number.Uint64() == 205821 {
+	//	panic(1)
+	//}
 	return nil, ok
 }
 
@@ -703,14 +710,52 @@ func (s *ValidatorSafeContract) extractFromEvent(header *types.Header, receipts 
 	// iterate in reverse because only the _last_ change in a given
 	// block actually has any effect.
 	// the contract should only increment the nonce once.
-	for i := len(receipts) - 1; i >= 0; i-- {
-		logs := receipts[i].Logs
-		for j := len(logs) - 1; j >= 0; j-- {
-			l := logs[j]
-			found := l.Address == s.contractAddress && len(l.Topics) == 2 && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
-			if found {
-				return nil, true
-			}
+	lastReceipt := receipts[len(receipts)-1]
+	if len(lastReceipt.Logs) == 0 {
+		return nil, false
+	}
+	logs := lastReceipt.Logs
+	//for i := len(logs) - 1; i >= 0; i-- {
+	for i := 0; i < len(logs); i++ {
+		l := logs[i]
+		if len(l.Topics) != 2 {
+			continue
+		}
+		found := l.Address == s.contractAddress && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
+		if !found {
+			continue
+		}
+
+		parsed, err := abi.JSON(strings.NewReader(auraabi.ValidatorSetABI))
+		if err != nil {
+			panic(err)
+		}
+		contract := bind.NewBoundContract(l.Address, parsed, nil, nil, nil)
+		if err != nil {
+			panic(err)
+		}
+		event := new(auraabi.ValidatorSetInitiateChange)
+		if err := contract.UnpackLog(event, "InitiateChange", *l); err != nil {
+			panic(err)
+		}
+		_ = event.NewSet
+
+		//auraabi.NewValidatorSetFilterer()
+		fmt.Printf("#ddd: %x\n", event.NewSet)
+		fmt.Printf("#aa: %x,%x\n", receipts[0].Logs[0].Topics[0], EVENT_NAME_HASH)
+		fmt.Printf("#bb: %x,%x\n", receipts[0].Logs[1].Topics[0], EVENT_NAME_HASH)
+		//if header.Number.Uint64() == 672 {
+		if header.Number.Uint64() == 205821 {
+			panic(1)
+		}
+
+		/*
+			validator_set::events::initiate_change::parse_log(
+					(log.topics.clone(), log.data.clone()).into(),
+			)
+		*/
+		if found {
+			return nil, true
 		}
 	}
 

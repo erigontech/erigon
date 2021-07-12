@@ -50,6 +50,7 @@ Not implemented features from OS:
  - two_thirds_majority_transition - because no chains in OE where this is != MaxUint64 - means 1/2 majority used everywhere
  - emptyStepsTransition - same
 
+Repo with solidity sources: https://github.com/poanetwork/posdao-contracts
 */
 
 type StepDurationInfo struct {
@@ -802,7 +803,7 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, e consensus.EpochReader, heade
 	// 	let is_epoch_begin = chain.epoch_transition(parent.number(), *header.parent_hash()).is_some();
 
 	if header.Number.Uint64() == 1 {
-		e.PutEpoch(header.ParentHash, 0, []byte{1}) //TODO: block 0 hardcoded - need fix it inside validators
+		_ = e.PutEpoch(header.ParentHash, 0, []byte{1}) //TODO: block 0 hardcoded - need fix it inside validators
 	}
 
 	epoch, err := e.GetEpoch(header.ParentHash, header.Number.Uint64()-1)
@@ -840,7 +841,7 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		return
 	}
 	for i := range beneficiaries {
-		fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
+		//fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
 		state.AddBalance(beneficiaries[i], rewards[i])
 	}
 
@@ -849,7 +850,8 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	//c.cfg.Validators.isEpochEnd()
 	_, ok := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, r)
 	if ok {
-		e.PutEpoch(header.Hash(), header.Number.Uint64(), []byte{1}) //TODO: put correct proof
+		//fmt.Printf("put echo: %d\n", header.Number.Uint64())
+		_ = e.PutEpoch(header.Hash(), header.Number.Uint64(), []byte{1}) //TODO: put correct proof
 	}
 }
 
