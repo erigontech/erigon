@@ -59,7 +59,8 @@ type ChainReader interface {
 	HasBlock(hash common.Hash, number uint64) bool
 }
 
-type SystemCall func(address common.Address, in []byte) ([]byte, error)
+type SystemCall func(contract common.Address, data []byte) ([]byte, error)
+type Call func(contract common.Address, data []byte) ([]byte, error)
 
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
@@ -86,6 +87,9 @@ type Engine interface {
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.
 	Prepare(chain ChainHeaderReader, header *types.Header) error
+
+	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
+	Initialize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.

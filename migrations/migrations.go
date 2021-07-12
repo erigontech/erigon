@@ -249,7 +249,7 @@ func (m *Migrator) Apply(kv ethdb.RwKV, datadir string) error {
 	return nil
 }
 
-func MarshalMigrationPayload(db ethdb.Getter) ([]byte, error) {
+func MarshalMigrationPayload(db ethdb.KVGetter) ([]byte, error) {
 	s := map[string][]byte{}
 
 	buf := bytes.NewBuffer(nil)

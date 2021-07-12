@@ -73,7 +73,7 @@ func (s *State) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
 }
 
 func (s *State) UnwindTo(blockNumber uint64, tx TxOrDb, badBlock common.Hash) error {
-	log.Info("UnwindTo", "block", blockNumber)
+	log.Info("UnwindTo", "block", blockNumber, "bad_block_hash", badBlock)
 	for _, stage := range s.unwindOrder {
 		if stage.Disabled {
 			continue

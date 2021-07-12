@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -57,10 +56,9 @@ func TestHeaderStep(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -98,10 +96,9 @@ func TestMineBlockWith1Tx(t *testing.T) {
 		}
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-		notifier := &remotedbserver.Events{}
 		initialCycle := true
 		highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,10 +167,9 @@ func TestReorg(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	notifier := &remotedbserver.Events{}
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -227,7 +223,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -271,7 +267,7 @@ func TestReorg(t *testing.T) {
 
 	// This is unwind step
 	highestSeenHeader = uint64(long1.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -309,7 +305,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short2.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -407,9 +403,8 @@ func TestAnchorReplace(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	highestSeenHeader := uint64(long.TopBlock.NumberU64())
-	notifier := &remotedbserver.Events{}
 	initialCycle := true
-	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -515,9 +510,8 @@ func TestAnchorReplace2(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	highestSeenHeader := uint64(long.TopBlock.NumberU64())
-	notifier := &remotedbserver.Events{}
 	initialCycle := true
-	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.ChainConfig, notifier, initialCycle, nil, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 		t.Fatal(err)
 	}
 }

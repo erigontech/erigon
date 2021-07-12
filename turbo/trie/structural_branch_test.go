@@ -17,7 +17,6 @@
 package trie_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -31,7 +30,8 @@ import (
 )
 
 func TestIHCursor(t *testing.T) {
-	db, require := kv.NewTestDB(t), require.New(t)
+	_, tx := kv.NewTestTx(t)
+	require := require.New(t)
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
 
 	newV := make([]byte, 0, 1024)
@@ -39,7 +39,7 @@ func TestIHCursor(t *testing.T) {
 		k := common.FromHex(ks)
 		integrity.AssertSubset(k, hasTree, hasState)
 		integrity.AssertSubset(k, hasHash, hasState)
-		_ = db.Put(dbutils.TrieOfAccountsBucket, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
+		_ = tx.Put(dbutils.TrieOfAccountsBucket, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
 	}
 
 	put("00", 0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []common.Hash{hash})
@@ -55,10 +55,6 @@ func TestIHCursor(t *testing.T) {
 	put("050001", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 	put("05000f", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
 	put("06", 0b0000000000000001, 0b0000000000000000, 0b0000000000000001, []common.Hash{hash})
-
-	tx, err := db.RwKV().BeginRw(context.Background())
-	require.NoError(err)
-	defer tx.Rollback()
 
 	integrity.Trie(tx, false, nil)
 

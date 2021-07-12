@@ -177,32 +177,26 @@ it can run from a snapshot of a database for read-only calls.
 
 #### **For local DB**
 
-This is only possible if RPC daemon runs on the same computer as Erigon. This mode of operation uses shared memory access to the database of Erigon, which is reported to have better performance than accessing via TPC socket (see "For remote DB" section below)
+This is only possible if RPC daemon runs on the same computer as Erigon. This mode uses shared memory access to the database of Erigon, which has better performance than accessing via TPC socket (see "For remote DB" section below). Provide both `--datadir` and `--private.api.addr` options:
 ```
+> make erigon
+> ./build/bin/erigon --private.api.addr=localhost:9090
 > make rpcdaemon
-> ./build/bin/rpcdaemon --datadir ~/Library/Erigon/ --http.api=eth,debug,net
+> ./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
 ```
-
-In this mode, some RPC API methods do not work. Please see "For dual mode" section below on how to fix that.
 
 #### **For remote DB**
 
 This works regardless of whether RPC daemon is on the same computer with Erigon, or on a different one. They use TPC socket connection to pass data between them. To use this mode, run Erigon in one terminal window
 
 ```
+> make erigon
 > ./build/bin/erigon --private.api.addr=localhost:9090
-```
-
-Run RPC daemon
-```
-> ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net
+> make rpcdaemon
+> ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
 ```
 
 **gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
-
-**For dual mode**
-
-If both `--datadir` and `--private.api.addr` options are used for RPC daemon, it works in a "dual" mode. This only works when RPC daemon is on the same computer as Erigon. In this mode, most data transfer from Erigon to RPC daemon happens via shared memory, only certain things (like new header notifications) happen via TPC socket.
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go), [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
 
@@ -312,6 +306,10 @@ If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
 Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel non-batched way.
 
-### rpcdaemon "Dual-Mode" does not work with Docker Container
+### rpcdaemon "Local-Mode" does not work with Docker Container
 
-Running rpcdaemon in "Dual-Mode" (including the `--datadir` flag) generally results in better performance for RPC calls, however, this does not work when running erigon and rpcdaemon in separate containers. For the absolute best performance bare metal is recommended at this time.
+Running rpcdaemon in "Local-Mode" (including the `--datadir` flag) generally results in better performance for 
+RPC calls, however, this does not work when running erigon and rpcdaemon in separate containers and datadir as volume.
+But it works fine if run erigon and rpcdaemon in same container. 
+For the absolute best performance bare metal is recommended at this time.
+Please, help us configure Docker volume driver to support MMAP files with POSIX file-locks (MDBX).

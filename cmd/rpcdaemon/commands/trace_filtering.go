@@ -25,7 +25,10 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 	defer tx.Rollback()
 
-	blockNumber := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	if err != nil {
+		return nil, err
+	}
 	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}

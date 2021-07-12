@@ -135,19 +135,22 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = vm.NewStructLogger(logconfig)
 	}
-	db := kv.NewMemDatabase()
+	db := kv.NewMemKV()
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
-		_, err := gen.Commit(db, false)
-		if err != nil {
-			return err
-		}
+		gen.MustCommit(db)
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
 		genesisConfig = new(core.Genesis)
 	}
-	statedb = state.New(state.NewPlainStateReader(db))
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	statedb = state.New(state.NewPlainStateReader(tx))
 	if ctx.GlobalString(SenderFlag.Name) != "" {
 		sender = common.HexToAddress(ctx.GlobalString(SenderFlag.Name))
 	}
@@ -281,11 +284,6 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		tx, err1 := db.RwKV().BeginRo(context.Background())
-		if err1 != nil {
-			return fmt.Errorf("transition cannot open tx: %v", err1)
-		}
-		defer tx.Rollback()
 		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
 	}
 

@@ -175,7 +175,7 @@ func (sdb *IntraBlockState) Error() error {
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
-func (sdb *IntraBlockState) Reset() error {
+func (sdb *IntraBlockState) Reset() {
 	sdb.stateObjects = make(map[common.Address]*stateObject)
 	sdb.stateObjectsDirty = make(map[common.Address]struct{})
 	sdb.thash = common.Hash{}
@@ -186,7 +186,6 @@ func (sdb *IntraBlockState) Reset() error {
 	sdb.preimages = make(map[common.Hash][]byte)
 	sdb.clearJournalAndRefund()
 	sdb.accessList = newAccessList()
-	return nil
 }
 
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
@@ -500,6 +499,7 @@ func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, valu
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (sdb *IntraBlockState) SetStorage(addr common.Address, storage Storage) {
+	fmt.Printf("SetStorage: %x, %s\n ", addr, storage.String())
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetStorage(storage)

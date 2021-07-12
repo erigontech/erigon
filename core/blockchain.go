@@ -23,7 +23,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -64,6 +63,12 @@ func ExecuteBlockEphemerally(
 	usedGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
+
+	if !vmConfig.ReadOnly {
+		if err := InitializeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs); err != nil {
+			return nil, err
+		}
+	}
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
@@ -126,6 +131,52 @@ func ExecuteBlockEphemerally(
 	return receipts, nil
 }
 
+// SystemAddress - sender address for internal state updates.
+var SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+
+func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
+	gp := new(GasPool)
+	gp.AddGas(50_000_000)
+	var gasUsed uint64
+
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+
+	noop := state.NewNoopWriter()
+	tx, err := SysCallContractTx(contract, data, ibs)
+	if err != nil {
+		return nil, fmt.Errorf("SysCallContract: %w ", err)
+	}
+	// Set infinite balance to the fake caller account.
+	fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
+
+	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
+	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
+	if err != nil {
+		return result, fmt.Errorf("SysCallContract: %w ", err)
+	}
+	ibs.SetNonce(SystemAddress, 0)
+
+	//w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
+	//if err1 != nil {
+	//	panic(err1)
+	//}
+	//encoder := json.NewEncoder(w)
+	//logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+	//if err2 := encoder.Encode(logs); err2 != nil {
+	//	panic(err2)
+	//}
+	return result, nil
+}
+
+// from the null sender, with 50M gas.
+func SysCallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
+	//nonce := ibs.GetNonce(SystemAddress)
+	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data)
+	return tx.FakeSign(SystemAddress)
+}
+
 func CallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
 	gp := new(GasPool)
 	gp.AddGas(50_000_000)
@@ -137,24 +188,33 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 	noop := state.NewNoopWriter()
 	tx, err := CallContractTx(contract, data, ibs)
 	if err != nil {
-		return nil, fmt.Errorf("CallContract: %w ", err)
+		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	// Set infinite balance to the fake caller account.
-	from := ibs.GetOrNewStateObject(common.Address{})
-	from.SetBalance(uint256.NewInt(0).SetAllOne())
+	fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
 
-	_, result, err = ApplyTransaction(&chainConfig, nil, engine, nil, gp, ibs, noop, header, tx, &gasUsed, vm.Config{}, nil)
+	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
+	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
 	if err != nil {
-		return result, fmt.Errorf("CallContract: %w ", err)
+		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}
+	//w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
+	//if err1 != nil {
+	//	panic(err1)
+	//}
+	//encoder := json.NewEncoder(w)
+	//logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+	//if err2 := encoder.Encode(logs); err2 != nil {
+	//	panic(err2)
+	//}
 	return result, nil
 }
 
 // from the null sender, with 50M gas.
 func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
-	var from common.Address
+	from := common.Address{}
 	nonce := ibs.GetNonce(from)
-	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num1, data)
+	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
 	return tx.FakeSign(from)
 }
 
@@ -170,5 +230,14 @@ func FinalizeBlockExecution(engine consensus.Engine, header *types.Header, txs t
 	if err := stateWriter.WriteChangeSets(); err != nil {
 		return fmt.Errorf("writing changesets for block %d failed: %v", header.Number.Uint64(), err)
 	}
+	return nil
+}
+
+func InitializeBlockExecution(engine consensus.Engine, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
+	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	engine.Initialize(cc, header, ibs, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+		return SysCallContract(contract, data, *cc, ibs, header, engine)
+	})
+
 	return nil
 }

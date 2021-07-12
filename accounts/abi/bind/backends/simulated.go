@@ -244,8 +244,8 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 		return nil, err
 	}
 	defer tx.Rollback()
-	receipt, _, _, _ := rawdb.ReadReceipt(tx, txHash)
-	return receipt, nil
+	receipt, _, _, _, err := rawdb.ReadReceipt(tx, txHash)
+	return receipt, err
 }
 
 // TransactionByHash checks the pool of pending transactions in addition to the
@@ -266,7 +266,10 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if txn != nil {
 		return txn, true, nil
 	}
-	txn, _, _, _ = rawdb.ReadTransaction(tx, txHash)
+	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash)
+	if err != nil {
+		return nil, false, err
+	}
 	if txn != nil {
 		return txn, false, nil
 	}
