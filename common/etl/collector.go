@@ -66,7 +66,7 @@ func NewCriticalCollector(tmpdir string, sortableBuffer Buffer) *Collector {
 }
 
 func NewCollector(tmpdir string, sortableBuffer Buffer) *Collector {
-	c := &Collector{autoClean: true, bufType: getTypByBuffer(sortableBuffer)}
+	c := &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer)}
 	encoder := codec.NewEncoder(nil, &cbor)
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
