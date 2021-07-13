@@ -73,3 +73,9 @@ func (m *MockSentry) PeerCount(ctx context.Context, in *sentry.PeerCountRequest,
 func (m *MockSentry) Peers(ctx context.Context, in *sentry.PeersRequest, opts ...grpc.CallOption) (sentry.Sentry_PeersClient, error) {
 	return nil, nil
 }
+
+type MockSentryMessageClient struct {
+	grpc.ClientStream
+}
+
+func (m *MockSentryMessageClient) 

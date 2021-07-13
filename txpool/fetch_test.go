@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -29,6 +28,8 @@ func TestFetch(t *testing.T) {
 	var genesisHash [32]byte
 	var networkId uint64 = 1
 	forks := []uint64{1, 5, 10}
-	fetch := NewFetch(context.Background(), []sentry.SentryClient{mock}, genesisHash, networkId, forks)
-	fmt.Printf("fetch: %+v\n", fetch)
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
+	fetch := NewFetch(ctx, []sentry.SentryClient{mock}, genesisHash, networkId, forks)
+	fetch.Start()
 }

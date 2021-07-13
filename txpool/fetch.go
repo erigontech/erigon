@@ -22,6 +22,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -102,9 +103,10 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
-			// Report error
+			// Report error and wait more
 			f.logger.Printf("[receiveMessageLoop] sentry not ready yet: %v\n", err)
-			return
+			time.Sleep(time.Second)
+			continue
 		}
 		streamCtx, cancel := context.WithCancel(f.ctx)
 		defer cancel()
@@ -181,8 +183,10 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
-			// Report error
+			// Report error and wait more
 			f.logger.Printf("[receivePeerLoop] sentry not ready yet: %v\n", err)
+			time.Sleep(time.Second)
+			continue
 		}
 		streamCtx, cancel := context.WithCancel(f.ctx)
 		defer cancel()
@@ -226,11 +230,17 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 			}
 			switch req.Event {
 			case sentry.PeersReply_Connect:
-				//recentPeers.AddPeer(req.PeerId)
+				if err = f.handleNewPeer(req, sentryClient); err != nil {
+					f.logger.Printf("[receivePeerLoop] Handling new peer: %v\n", err)
+				}
 			}
 			if f.wg != nil {
 				f.wg.Done()
 			}
 		}
 	}
+}
+
+func (f *Fetch) handleNewPeer(req *sentry.PeersReply, sentryClient sentry.SentryClient) error {
+	return nil
 }
