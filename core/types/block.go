@@ -942,6 +942,8 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	return b
 }
 
+// NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
+// in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(header *Header, txs []Transaction, uncles []*Header) *Block {
 	return &Block{header: header, td: new(big.Int), transactions: txs, uncles: uncles}
 }
