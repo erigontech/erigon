@@ -204,7 +204,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 		//if you run from scratch
-		if len(ethTXLast)==8 {
+		if len(ethTXLast) == 8 {
 			err = db.Put(dbutils.Sequence, []byte(dbutils.EthTx), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(ethTXLast)+1))
 			if err != nil {
 				return err
@@ -216,7 +216,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 		//if you run from scratch
-		if len(ethTXLast)==8 {
+		if len(ethTXLast) == 8 {
 			err = db.Put(dbutils.Sequence, []byte(dbutils.NonCanonicalTXBucket), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(nonCanonicalTXLast)+1))
 			if err != nil {
 				return err
