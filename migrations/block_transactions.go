@@ -172,7 +172,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 
-		err = db.(ethdb.BucketMigrator).ClearBucket(dbutils.EthTx)
+		err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.EthTx)
 		if err != nil {
 			return err
 		}
@@ -203,18 +203,24 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 		if err != nil {
 			return err
 		}
-		err = db.Put(dbutils.Sequence, []byte(dbutils.EthTx), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(ethTXLast)+1))
-		if err != nil {
-			return err
+		//if you run from scratch
+		if len(ethTXLast)==8 {
+			err = db.Put(dbutils.Sequence, []byte(dbutils.EthTx), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(ethTXLast)+1))
+			if err != nil {
+				return err
+			}
 		}
 
 		nonCanonicalTXLast, _, err := db.Last(dbutils.NonCanonicalTXBucket)
 		if err != nil {
 			return err
 		}
-		err = db.Put(dbutils.Sequence, []byte(dbutils.NonCanonicalTXBucket), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(nonCanonicalTXLast)+1))
-		if err != nil {
-			return err
+		//if you run from scratch
+		if len(ethTXLast)==8 {
+			err = db.Put(dbutils.Sequence, []byte(dbutils.NonCanonicalTXBucket), dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(nonCanonicalTXLast)+1))
+			if err != nil {
+				return err
+			}
 		}
 
 		return CommitProgress(db, nil, true)
