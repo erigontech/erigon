@@ -19,6 +19,7 @@ package direct
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/anacrolix/log"
@@ -27,6 +28,46 @@ import (
 
 	"google.golang.org/grpc"
 )
+
+const (
+	ETH65 = 65
+	ETH66 = 66
+)
+
+var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+	ETH65: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_65:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_65:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_65:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_65:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_NODE_DATA_65:                 GetNodeDataMsg,
+		proto_sentry.MessageId_NODE_DATA_65:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_65:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_65:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_65:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_65:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_65:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_65:           PooledTransactionsMsg,
+	},
+	ETH66: {
+		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		proto_sentry.MessageId_GET_NODE_DATA_66:                 GetNodeDataMsg,
+		proto_sentry.MessageId_NODE_DATA_66:                     NodeDataMsg,
+		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
+		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+	},
+}
 
 type SentryClient interface {
 	sentry.SentryClient
@@ -77,9 +118,9 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusDat
 	defer c.Unlock()
 	switch reply.Protocol {
 	case sentry.Protocol_ETH65:
-		c.protocol = eth.ETH65
+		c.protocol = ETH65
 	case sentry.Protocol_ETH66:
-		c.protocol = eth.ETH66
+		c.protocol = ETH66
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
@@ -107,12 +148,16 @@ func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentry.PeerCount
 type SentryClientDirect struct {
 	protocol uint
 	server   sentry.SentryServer
+	logger   *log.Logger
 }
 
 func NewSentryClientDirect(protocol uint, sentryServer sentry.SentryServer) *SentryClientDirect {
-	return &SentryClientDirect{protocol: protocol, server: sentryServer}
+	return &SentryClientDirect{protocol: protocol, server: sentryServer, logger: log.Default()}
 }
 
+func (c *SentryClientDirect) SetLogger(logger *log.Logger) {
+	c.logger = logger
+}
 func (c *SentryClientDirect) Protocol() uint    { return c.protocol }
 func (c *SentryClientDirect) Ready() bool       { return true }
 func (c *SentryClientDirect) MarkDisconnected() {}
@@ -213,7 +258,7 @@ func (c *SentryClientDirect) Messages(ctx context.Context, in *sentry.MessagesRe
 	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
 	go func() {
 		if err := c.server.Messages(in, streamServer); err != nil {
-			log.Error("ReceiveMessages returned", "error", err)
+			c.logger.Printf("Messages returned: %v\n", err)
 		}
 		close(messageCh)
 	}()
@@ -225,7 +270,7 @@ func (c *SentryClientDirect) Peers(ctx context.Context, in *sentry.PeersRequest,
 	streamServer := &SentryReceivePeersServerDirect{ch: messageCh, ctx: ctx}
 	go func() {
 		if err := c.server.Peers(in, streamServer); err != nil {
-			log.Error("ReceiveMessages returned", "error", err)
+			c.logger.Printf("Peers returned: %v\n", err)
 		}
 		close(messageCh)
 	}()
@@ -234,7 +279,7 @@ func (c *SentryClientDirect) Peers(ctx context.Context, in *sentry.PeersRequest,
 
 func filterIds(in []sentry.MessageId, protocol uint) (filtered []sentry.MessageId) {
 	for _, id := range in {
-		if _, ok := eth.FromProto[protocol][id]; ok {
+		if _, ok := FromProto[protocol][id]; ok {
 			filtered = append(filtered, id)
 		}
 	}
