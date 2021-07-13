@@ -18,6 +18,7 @@ package aura
 
 import (
 	"bytes"
+	"container/list"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -59,14 +60,14 @@ type StepDurationInfo struct {
 	StepDuration        uint64
 }
 
-// Holds 2 proofs inside: ValidatorSetProof and FinalityProof
+// EpochTransitionProof - Holds 2 proofs inside: ValidatorSetProof and FinalityProof
 type EpochTransitionProof struct {
 	SignalNumber  uint64
 	SetProof      []byte
 	FinalityProof []byte
 }
 
-// SetProof - validator set proof
+// ValidatorSetProof - validator set proof
 type ValidatorSetProof struct {
 	Header   *types.Header
 	Receipts types.Receipts
@@ -161,7 +162,7 @@ func (r ReceivedStepHashes) dropAncient(step uint64) {
 type EpochManager struct {
 	epochTransitionHash   common.Hash // H256,
 	epochTransitionNumber uint64      // BlockNumber
-	finalityChecker       RollingFinality
+	finalityChecker       *RollingFinality
 	force                 bool
 }
 
@@ -175,7 +176,7 @@ func NewEpochManager() *EpochManager {
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
 //nolint
-func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators ValidatorSet, hash common.Hash) (RollingFinality, uint64, bool) {
+func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, validators ValidatorSet, hash common.Hash) (*RollingFinality, uint64, bool) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
 		lastWasParent = *e.finalityChecker.lastPushed == hash
@@ -300,33 +301,6 @@ func epochTransition(blockNum uint64, blockHash common.Hash) (transition EpochTr
 		       })
 		}
 	*/
-}
-
-//nolint
-type unAssembledHeader struct {
-	h common.Hash // H256
-	n uint64      // BlockNumber
-	a []common.Address
-}
-
-// RollingFinality checker for authority round consensus.
-// Stores a chain of unfinalized hashes that can be pushed onto.
-//nolint
-type RollingFinality struct {
-	headers    []unAssembledHeader //nolint
-	signers    *SimpleList
-	signCount  map[common.Address]uint
-	lastPushed *common.Hash // Option<H256>,
-}
-
-/// Create a blank finality checker under the given validator set.
-func NewRollingFinality(signers []common.Address) RollingFinality {
-	return RollingFinality{
-		signers: NewSimpleList(signers),
-		//headers: VecDeque::new(),
-		//sign_count: HashMap::new(),
-		//last_pushed: None
-	}
 }
 
 // AuRa
@@ -833,7 +807,7 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, e consensus.EpochReader, heade
 	}
 }
 
-func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, syscall consensus.SystemCall) {
+func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) {
 	// accumulateRewards retrieves rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 	beneficiaries, _, rewards, err := AccumulateRewards(cc, c, header, uncles, syscall)
 	if err != nil {
@@ -845,6 +819,17 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		state.AddBalance(beneficiaries[i], rewards[i])
 	}
 
+	err = c.EpochManager.finalityChecker.buildAncestrySubChain(func(hash common.Hash) ([]common.Address, common.Hash, uint64, bool) {
+		h := chain.GetHeaderByHash(hash)
+		if h == nil {
+			return nil, common.Hash{}, 0, false
+		}
+		return []common.Address{h.Coinbase}, h.Hash(), h.Number.Uint64(), true
+	}, header.ParentHash, c.EpochManager.epochTransitionHash)
+	if err != nil {
+		log.Error("buildAncestrySubChain", "err", err)
+		return
+	}
 	// t_nb 9.13 check epoch end. Related only to AuRa and it seems light engine
 	//c.check_epoch_end(&header, &finalized, &chain, client)
 	//c.cfg.Validators.isEpochEnd()
@@ -859,8 +844,8 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 //}
 
 // FinalizeAndAssemble implements consensus.Engine
-func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, syscall consensus.SystemCall) (*types.Block, error) {
-	c.Finalize(chainConfig, header, state, txs, uncles, r, e, syscall)
+func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (*types.Block, error) {
+	c.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
 
 	// Assemble and return the final block for sealing
 	return types.NewBlock(header, txs, uncles, r), nil
@@ -1422,4 +1407,166 @@ func EmptyStepRlp(step uint64, parentHash common.Hash) ([]byte, error) {
 		h common.Hash
 	}
 	return rlp.EncodeToBytes(A{s: step, h: parentHash})
+}
+
+//nolint
+type unAssembledHeader struct {
+	hash    common.Hash
+	number  uint64
+	signers []common.Address
+}
+type unAssembledHeaders struct {
+	l *list.List
+}
+
+func (u unAssembledHeaders) PushBack(header *unAssembledHeader)  { u.l.PushBack(header) }
+func (u unAssembledHeaders) PushFront(header *unAssembledHeader) { u.l.PushFront(header) }
+func (u unAssembledHeaders) Pop() *unAssembledHeader {
+	e := u.l.Front()
+	if e == nil {
+		return nil
+	}
+	u.l.Remove(e)
+	return e.Value.(*unAssembledHeader)
+}
+func (u unAssembledHeaders) Front() *unAssembledHeader {
+	e := u.l.Front()
+	if e == nil {
+		return nil
+	}
+	return e.Value.(*unAssembledHeader)
+}
+
+// RollingFinality checker for authority round consensus.
+// Stores a chain of unfinalized hashes that can be pushed onto.
+//nolint
+type RollingFinality struct {
+	headers    unAssembledHeaders //nolint
+	signers    *SimpleList
+	signCount  map[common.Address]uint
+	lastPushed *common.Hash // Option<H256>,
+}
+
+// NewRollingFinality creates a blank finality checker under the given validator set.
+func NewRollingFinality(signers []common.Address) *RollingFinality {
+	return &RollingFinality{
+		signers:   NewSimpleList(signers),
+		headers:   unAssembledHeaders{l: list.New()},
+		signCount: map[common.Address]uint{},
+	}
+}
+
+// Clears the finality status, but keeps the validator set.
+func (f *RollingFinality) clear() {
+	f.headers = unAssembledHeaders{l: list.New()}
+	f.signCount = map[common.Address]uint{}
+	f.lastPushed = nil
+}
+
+// Push a hash onto the rolling finality checker (implying `subchain_head` == head.parent)
+//
+// Fails if `signer` isn't a member of the active validator set.
+// Returns a list of all newly finalized headers.
+func (f *RollingFinality) push(head common.Hash, num uint64, signers []common.Address) (newlyFinalized []common.Hash, err error) {
+	for i := range signers {
+		if !f.hasSigner(signers[i]) {
+			return nil, fmt.Errorf("unknown validator")
+		}
+	}
+
+	f.addSigners(signers)
+	f.headers.PushBack(&unAssembledHeader{hash: head, number: num, signers: signers})
+
+	for f.isFinalized() {
+		e := f.headers.Pop()
+		if e == nil {
+			panic("headers length always greater than sign count length")
+		}
+		f.removeSigners(e.signers)
+		newlyFinalized = append(newlyFinalized, e.hash)
+	}
+	f.lastPushed = &head
+	return newlyFinalized, nil
+}
+
+// isFinalized returns whether the first entry in `self.headers` is finalized.
+func (f *RollingFinality) isFinalized() bool {
+	e := f.headers.Front()
+	if e == nil {
+		return false
+	}
+	return len(f.signCount)*2 > len(f.signers.validators)
+}
+func (f *RollingFinality) hasSigner(signer common.Address) bool {
+	for j := range f.signers.validators {
+		if f.signers.validators[j] == signer {
+			return true
+
+		}
+	}
+	return false
+}
+func (f *RollingFinality) addSigners(signers []common.Address) bool {
+	for i := range signers {
+		count, ok := f.signCount[signers[i]]
+		if ok {
+			f.signCount[signers[i]] = count + 1
+		} else {
+			f.signCount[signers[i]] = 1
+		}
+	}
+	return false
+}
+func (f *RollingFinality) removeSigners(signers []common.Address) {
+	for i := range signers {
+		count, ok := f.signCount[signers[i]]
+		if !ok {
+			panic("all hashes in `header` should have entries in `sign_count` for their signers")
+			//continue
+		}
+		if count > 1 {
+			f.signCount[signers[i]] = count - 1
+		} else {
+			delete(f.signCount, signers[i])
+		}
+	}
+}
+func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]common.Address, common.Hash, uint64, bool), parentHash, epochTransitionHash common.Hash) error { // starts from chainHeadParentHash
+	f.clear()
+	var signers []common.Address
+
+	for {
+		blockSigners, blockHash, blockNum, ok := get(parentHash)
+		if !ok {
+			return nil
+		}
+		if blockHash == epochTransitionHash {
+			return nil
+		}
+		signers = append(signers[:0], blockSigners...)
+		for i := range signers {
+			if !f.hasSigner(signers[i]) {
+				return fmt.Errorf("unknown validator")
+			}
+		}
+		if f.lastPushed == nil {
+			copyHash := parentHash
+			f.lastPushed = &copyHash
+		}
+		f.addSigners(signers)
+		f.headers.PushFront(&unAssembledHeader{hash: blockHash, number: blockNum, signers: signers})
+		// break when we've got our first finalized block.
+		if f.isFinalized() {
+			e := f.headers.Pop()
+			if e == nil {
+				panic("we just pushed a block")
+			}
+			f.removeSigners(e.signers)
+			log.Debug("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
+			break
+		}
+
+		parentHash = blockHash
+	}
+	return nil
 }
