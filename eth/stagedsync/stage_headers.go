@@ -360,3 +360,14 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
+
+type epochReader struct {
+	tx ethdb.RwTx
+}
+
+func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadEpoch(cr.tx, number, hash)
+}
+func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
+	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
+}

@@ -23,7 +23,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -247,6 +246,11 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 	}
 	return nil
 }
+func (so *stateObject) printTrie() {
+	for key, value := range so.dirtyStorage {
+		fmt.Printf("WriteAccountStorage: %x,%x,%s\n", so.address, key, value.Hex())
+	}
+}
 
 // AddBalance adds amount to so's balance.
 // It is used to add funds to the destination account of a transfer.
@@ -260,6 +264,7 @@ func (so *stateObject) AddBalance(amount *uint256.Int) {
 
 		return
 	}
+
 	so.SetBalance(new(uint256.Int).Add(so.Balance(), amount))
 }
 
