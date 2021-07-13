@@ -703,7 +703,7 @@ func ReadBlock(tx ethdb.KVGetter, hash common.Hash, number uint64) *types.Block 
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+	return types.NewBlockFromStorage(header, body.Transactions, body.Uncles)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.

@@ -942,6 +942,10 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	return b
 }
 
+func NewBlockFromStorage(header *Header, txs []Transaction, uncles []*Header) *Block {
+	return &Block{header: header, td: new(big.Int), transactions: txs, uncles: uncles}
+}
+
 // NewBlockWithHeader creates a blxock with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
