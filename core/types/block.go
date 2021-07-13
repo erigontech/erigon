@@ -1140,8 +1140,6 @@ func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-// TODO: copies
-
 func (b *Block) Uncles() []*Header          { return b.uncles }
 func (b *Block) Transactions() Transactions { return b.transactions }
 
@@ -1185,6 +1183,14 @@ func (b *Block) Body() *Body {
 	bd := &Body{Transactions: b.transactions, Uncles: b.uncles}
 	bd.SendersFromTxs()
 	return bd
+}
+func (b *Block) SendersToTxs(senders []common.Address) {
+	if senders == nil {
+		return
+	}
+	for i, tx := range b.transactions {
+		tx.SetSender(senders[i])
+	}
 }
 
 // RawBody creates a RawBody based on the block. It is not very efficient, so
