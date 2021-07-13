@@ -846,7 +846,10 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 		}
 	}
 	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
-	ss.statusData = statusData
+	if ss.statusData == nil || statusData.MaxBlock != 0 {
+		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
+		ss.statusData = statusData
+	}
 	return reply, nil
 }
 

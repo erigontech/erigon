@@ -229,6 +229,7 @@ func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlSer
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 			return nil
 		}
+		return err
 	}
 	return nil
 }
