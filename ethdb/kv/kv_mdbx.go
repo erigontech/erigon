@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
 	"runtime"
 	"sort"
 	"strings"
@@ -114,13 +113,10 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
 		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
 	}
-	var logger log.Logger
+	logger := log.New("mdbx", opts.label.String())
 	var err error
 	if opts.inMem {
-		logger = log.New("mdbx", "inMem")
 		opts.path = testKVPath()
-	} else {
-		logger = log.New("mdbx", path.Base(opts.path))
 	}
 
 	env, err := mdbx.NewEnv()
