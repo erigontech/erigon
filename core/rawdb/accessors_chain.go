@@ -568,7 +568,7 @@ func ReadReceipts(db ethdb.Tx, block *types.Block, senders []common.Address) typ
 	if receipts == nil {
 		return nil
 	}
-	block.Body().SendersToTxs(senders)
+	block.SendersToTxs(senders)
 	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err)
 		return nil
@@ -703,7 +703,8 @@ func ReadBlock(tx ethdb.KVGetter, hash common.Hash, number uint64) *types.Block 
 	if body == nil {
 		return nil
 	}
-	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+	//return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -725,7 +726,7 @@ func ReadBlockWithSenders(db ethdb.Tx, hash common.Hash, number uint64) (*types.
 	if len(senders) != block.Transactions().Len() {
 		return nil, nil, nil
 	}
-	block.Body().SendersToTxs(senders)
+	block.SendersToTxs(senders)
 	return block, senders, nil
 }
 
