@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -28,8 +29,10 @@ type MockSentry struct {
 	sentry.UnimplementedSentryServer
 	streams      map[sentry.MessageId][]sentry.Sentry_MessagesServer
 	peersStreams []sentry.Sentry_PeersServer
+	StreamWg     sync.WaitGroup
 	sentMessages []*sentry.OutboundMessageData
 	ctx          context.Context
+	lock         sync.RWMutex
 }
 
 func NewMockSentry(ctx context.Context) *MockSentry {
@@ -40,6 +43,8 @@ var PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
+	ms.lock.RLock()
+	defer ms.lock.RUnlock()
 	for _, stream := range ms.streams[req.Id] {
 		if err := stream.Send(req); err != nil {
 			errs = append(errs, err)
@@ -49,13 +54,6 @@ func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
 }
 
 func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
-	return nil, nil
-}
-func (ms *MockSentry) PeerMinBlock(context.Context, *sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
-	return nil, nil
-}
-func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *sentry.SendMessageByMinBlockRequest) (*sentry.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
 func (ms *MockSentry) SendMessageById(_ context.Context, r *sentry.SendMessageByIdRequest) (*sentry.SentPeers, error) {
@@ -77,13 +75,15 @@ func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.Se
 	return &sentry.SetStatusReply{Protocol: sentry.Protocol_ETH66}, nil
 }
 func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry_MessagesServer) error {
+	ms.lock.Lock()
 	if ms.streams == nil {
 		ms.streams = map[sentry.MessageId][]sentry.Sentry_MessagesServer{}
 	}
-
 	for _, id := range req.Ids {
 		ms.streams[id] = append(ms.streams[id], stream)
 	}
+	ms.lock.Unlock()
+	ms.StreamWg.Done()
 	select {
 	case <-ms.ctx.Done():
 		return nil
@@ -96,7 +96,10 @@ func (ms *MockSentry) PeerCount(_ context.Context, req *sentry.PeerCountRequest)
 }
 
 func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_PeersServer) error {
+	ms.lock.Lock()
 	ms.peersStreams = append(ms.peersStreams, stream)
+	ms.lock.Unlock()
+	ms.StreamWg.Done()
 	select {
 	case <-ms.ctx.Done():
 		return nil

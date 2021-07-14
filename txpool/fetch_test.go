@@ -37,7 +37,9 @@ func TestFetch(t *testing.T) {
 	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
+	mock.StreamWg.Add(2)
 	fetch.Start()
+	mock.StreamWg.Wait()
 	// Send one transaction id
 	wg.Add(1)
 	errs := mock.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, Data: nil, PeerId: PeerId})
