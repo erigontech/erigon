@@ -194,7 +194,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 
-		err = ethTXCollector.Load("noncanonicaltx", db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.NonCanonicalTXBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
+		err = nonCanonicalCollector.Load("noncanonicaltx", db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.NonCanonicalTXBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
 		if err != nil {
 			return err
 		}
