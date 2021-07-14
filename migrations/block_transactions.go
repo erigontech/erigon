@@ -67,7 +67,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 				nonCanonicalCollector = nil
 			}
 		case loadStep:
-			if nonCanonicalCollector == nil || ethTXCollector == nil || bodiesCollector == nil {
+			if ethTXCollector == nil || bodiesCollector == nil {
 				return ErrMigrationETLFilesDeleted
 			}
 			defer func() {
@@ -80,7 +80,9 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 				}
 				bodiesCollector.Close(logPrefix)
 				ethTXCollector.Close(logPrefix)
-				nonCanonicalCollector.Close(logPrefix)
+				if nonCanonicalCollector != nil {
+					nonCanonicalCollector.Close(logPrefix)
+				}
 			}()
 
 			goto LoadStep
@@ -173,20 +175,19 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 		}
 
 		err = bodiesCollector.Flush()
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 
 		err = ethTXCollector.Flush()
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 
 		err = nonCanonicalCollector.Flush()
-		if err!=nil {
+		if err != nil {
 			return err
 		}
-
 
 		err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.EthTx)
 		if err != nil {
@@ -210,9 +211,11 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 
-		err = nonCanonicalCollector.Load("noncanonicaltx", db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.NonCanonicalTXBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
-		if err != nil {
-			return err
+		if nonCanonicalCollector != nil {
+			err = nonCanonicalCollector.Load("noncanonicaltx", db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.NonCanonicalTXBucket, etl.IdentityLoadFunc, etl.TransformArgs{})
+			if err != nil {
+				return err
+			}
 		}
 
 		ethTXLast, _, err := db.Last(dbutils.EthTx)
