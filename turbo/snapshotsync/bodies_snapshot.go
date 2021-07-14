@@ -68,8 +68,9 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 		}
 
 		newExpectedTx := expectedBaseTxId
-		err = ethdb.Walk(readEthTXCursor, dbutils.EncodeBlockNumber(baseTxId), 0, func(k, v []byte) (bool, error) {
-			if newExpectedTx >= expectedBaseTxId+uint64(amount) {
+		newExpectedTx++
+		err = ethdb.Walk(readEthTXCursor, dbutils.EncodeBlockNumber(baseTxId+1), 0, func(k, v []byte) (bool, error) {
+			if newExpectedTx >= expectedBaseTxId+uint64(amount)+1 {
 				return false, nil
 			}
 			err = writeEthTXCursor.Append(dbutils.EncodeBlockNumber(newExpectedTx), common.CopyBytes(v))
@@ -82,11 +83,11 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 		if err != nil {
 			return false, err
 		}
-		if newExpectedTx > expectedBaseTxId+uint64(amount) {
+		if newExpectedTx > expectedBaseTxId+uint64(amount)+1 {
 			fmt.Println("newExpectedTx > expectedBaseTxId+amount", newExpectedTx, expectedBaseTxId, amount, "block", common.Bytes2Hex(k))
 			return false, errors.New("newExpectedTx > expectedBaseTxId+amount")
 		}
-		expectedBaseTxId += uint64(amount)
+		expectedBaseTxId += uint64(amount) + 2
 		return true, nil
 	})
 	if err != nil {

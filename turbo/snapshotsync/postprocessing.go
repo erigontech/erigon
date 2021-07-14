@@ -93,7 +93,8 @@ func PostProcessBodies(db ethdb.Database) error {
 		return errors.New("incorrect transaction id in body snapshot")
 	}
 	secKey := make([]byte, 8)
-	binary.BigEndian.PutUint64(secKey, binary.BigEndian.Uint64(k)+1)
+	//additional tx at the end
+	binary.BigEndian.PutUint64(secKey, binary.BigEndian.Uint64(k)+2)
 	err = tx.Put(dbutils.Sequence, []byte(dbutils.EthTx), secKey)
 	if err != nil {
 		return err

@@ -199,8 +199,9 @@ const (
 	HeadersBucket         = "Header"                 // block_num_u64 + hash -> header (RLP)
 	HeaderTDBucket        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
-	BlockBodyPrefix      = "BlockBody"               // block_num_u64 + hash -> block body
-	EthTx                = "BlockTransaction"        // tbl_sequence_u64 -> rlp(tx)
+	BlockBodyPrefix = "BlockBody"        // block_num_u64 + hash -> block body
+	EthTx           = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx). There are two additional
+	// transactions before and after the block
 	NonCanonicalTXBucket = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx) for transactions from none canonical bodies
 	BlockReceiptsPrefix  = "Receipt"                 // block_num_u64 -> canonical block receipts (non-canonical are not stored)
 	Log                  = "TransactionLog"          // block_num_u64 + txId -> logs of transaction
