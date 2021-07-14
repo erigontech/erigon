@@ -129,7 +129,7 @@ func NewDumper(db ethdb.Tx, blockNumber uint64) *Dumper {
 	}
 }
 
-func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, startAddress common.Address, maxResults int) ([]byte, error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
 	var nextKey []byte
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
@@ -222,18 +222,18 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 }
 
 // RawDump returns the entire state an a single large object
-func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
+func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.DumpToCollector(dump, excludeCode, excludeStorage, excludeMissingPreimages, common.Address{}, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, common.Address{}, 0)
 	return *dump
 }
 
 // Dump returns a JSON string representing the entire state as a single json-object
-func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
-	dump := d.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
+func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
+	dump := d.RawDump(excludeCode, excludeStorage)
 	json, err := json.MarshalIndent(dump, "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
@@ -242,26 +242,26 @@ func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool)
 }
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
-func (d *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
+func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, common.Address{}, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
-func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start common.Address, maxResults int) (IteratorDump, error) {
+func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start common.Address, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	var err error
-	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
+	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, start, maxResults)
 	return *iterator, err
 }
 
 func (d *Dumper) DefaultRawDump() Dump {
-	return d.RawDump(false, false, false)
+	return d.RawDump(false, false)
 }
 
 // DefaultDump returns a JSON string representing the state with the default params
 func (d *Dumper) DefaultDump() []byte {
-	return d.Dump(false, false, false)
+	return d.Dump(false, false)
 }

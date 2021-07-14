@@ -139,10 +139,6 @@ var (
 		Name:  "nostorage",
 		Usage: "Exclude storage entries (save db lookups)",
 	}
-	IncludeIncompletesFlag = cli.BoolFlag{
-		Name:  "incompletes",
-		Usage: "Include accounts for which we don't have the address (missing preimage)",
-	}
 	ExcludeCodeFlag = cli.BoolFlag{
 		Name:  "nocode",
 		Usage: "Exclude contract code (save db lookups)",
@@ -1204,10 +1200,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 
 	if ctx.GlobalIsSet(DocRootFlag.Name) {
 		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
-	}
-	if ctx.GlobalIsSet(VMEnableDebugFlag.Name) {
-		// TODO(fjl): force-enable this in --dev mode
-		cfg.EnablePreimageRecording = ctx.GlobalBool(VMEnableDebugFlag.Name)
 	}
 
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
