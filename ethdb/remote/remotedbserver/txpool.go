@@ -43,7 +43,7 @@ func (s *TxPoolServer) Version(context.Context, *emptypb.Empty) (*types2.Version
 func (s *TxPoolServer) All(context.Context, *proto_txpool.AllRequest) (*proto_txpool.AllReply, error) {
 	pending, queued := s.txPool.Content()
 	reply := &proto_txpool.AllReply{}
-	reply.Txs = make([]*proto_txpool.AllReply_Tx, 0, 16)
+	reply.Txs = make([]*proto_txpool.AllReply_Tx, 0, 32)
 	for addr, list := range pending {
 		addrBytes := addr.Bytes()
 		for i := range list {
