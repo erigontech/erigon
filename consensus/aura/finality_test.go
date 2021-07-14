@@ -28,18 +28,21 @@ func TestRollingFinality(t *testing.T) {
 		// blocks of the unverified chain become verified.
 		l, err := f.push(common.Hash{byte(6)}, 6, []common.Address{signers[4]})
 		assert.NoError(t, err)
-		assert.Equal(t, []common.Hash{{0}, {1}, {2}, {3}}, l)
+		for i := uint64(0); i < 4; i++ {
+			assert.Equal(t, common.Hash{byte(i)}, l[i].hash)
+		}
+		assert.Equal(t, 4, len(l))
 	})
 	t.Run("FromAncestry", func(t *testing.T) {
 		signers := []common.Address{{0}, {1}, {2}, {3}, {4}, {5}}
 		f := NewRollingFinality(signers)
 		i := 12
-		get := func(hash common.Hash) ([]common.Address, common.Hash, uint64, bool) {
+		get := func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
 			i--
 			if i == -1 {
-				return nil, common.Hash{}, 0, false
+				return nil, common.Hash{}, common.Hash{}, 0, false
 			}
-			return []common.Address{signers[i%6]}, common.Hash{byte(i)}, uint64(i), true
+			return []common.Address{signers[i%6]}, common.Hash{byte(i)}, common.Hash{byte(i - 1)}, uint64(i), true
 		}
 		err := f.buildAncestrySubChain(get, common.Hash{11}, common.Hash{99})
 		assert.NoError(t, err)
@@ -50,12 +53,12 @@ func TestRollingFinality(t *testing.T) {
 		signers := []common.Address{{0}, {1}, {2}, {3}, {4}, {5}}
 		f := NewRollingFinality(signers)
 		i := 12
-		get := func(hash common.Hash) ([]common.Address, common.Hash, uint64, bool) {
+		get := func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
 			i--
 			if i == -1 {
-				return nil, common.Hash{}, 0, false
+				return nil, common.Hash{}, common.Hash{}, 0, false
 			}
-			return []common.Address{signers[i%6], signers[(i+1)%6], signers[(i+2)%6]}, common.Hash{byte(i)}, uint64(i), true
+			return []common.Address{signers[i%6], signers[(i+1)%6], signers[(i+2)%6]}, common.Hash{byte(i)}, common.Hash{byte(i - 1)}, uint64(i), true
 		}
 		err := f.buildAncestrySubChain(get, common.Hash{11}, common.Hash{99})
 		assert.NoError(t, err)

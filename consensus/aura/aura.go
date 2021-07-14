@@ -845,12 +845,12 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		finalized = []unAssembledHeader{}
 	} else {
 		if c.EpochManager.finalityChecker.lastPushed == nil || *c.EpochManager.finalityChecker.lastPushed != header.ParentHash {
-			err = c.EpochManager.finalityChecker.buildAncestrySubChain(func(hash common.Hash) ([]common.Address, common.Hash, uint64, bool) {
+			err = c.EpochManager.finalityChecker.buildAncestrySubChain(func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
 				h := chain.GetHeaderByHash(hash)
 				if h == nil {
-					return nil, common.Hash{}, 0, false
+					return nil, common.Hash{}, common.Hash{}, 0, false
 				}
-				return []common.Address{h.Coinbase}, h.Hash(), h.Number.Uint64(), true
+				return []common.Address{h.Coinbase}, h.Hash(), h.ParentHash, h.Number.Uint64(), true
 			}, header.ParentHash, c.EpochManager.epochTransitionHash)
 			if err != nil {
 				return fmt.Errorf("buildAncestrySubChain: %w", err)
@@ -892,7 +892,7 @@ func isEpochEnd(chain consensus.ChainHeaderReader, e consensus.EpochReader, fina
 		if finalized[i].hash == header.Hash() {
 			finalizedHeader = header
 		} else {
-			chain.GetHeader(finalized[i].hash, finalized[i].number)
+			finalizedHeader = chain.GetHeader(finalized[i].hash, finalized[i].number)
 		}
 		signalNumber := finalizedHeader.Number
 		finalityProof = append(finalityProof, finalizedHeader)
@@ -1560,8 +1560,6 @@ func (f *RollingFinality) clear() {
 func (f *RollingFinality) push(head common.Hash, num uint64, signers []common.Address) (newlyFinalized []unAssembledHeader, err error) {
 	for i := range signers {
 		if !f.hasSigner(signers[i]) {
-			fmt.Printf("s: %x,%x\n", signers, f.signers)
-			panic(1)
 			return nil, fmt.Errorf("unknown validator")
 		}
 	}
@@ -1623,12 +1621,12 @@ func (f *RollingFinality) removeSigners(signers []common.Address) {
 		}
 	}
 }
-func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]common.Address, common.Hash, uint64, bool), parentHash, epochTransitionHash common.Hash) error { // starts from chainHeadParentHash
+func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool), parentHash, epochTransitionHash common.Hash) error { // starts from chainHeadParentHash
 	f.clear()
 	var signers []common.Address
 
 	for {
-		blockSigners, blockHash, blockNum, ok := get(parentHash)
+		blockSigners, blockHash, newParentHash, blockNum, ok := get(parentHash)
 		if !ok {
 			return nil
 		}
@@ -1638,7 +1636,6 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 		signers = append(signers[:0], blockSigners...)
 		for i := range signers {
 			if !f.hasSigner(signers[i]) {
-				fmt.Printf("f: %x, %x\n", f.signers, signers)
 				return fmt.Errorf("unknown validator: blockNum=%d", blockNum)
 			}
 		}
@@ -1659,7 +1656,7 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 			break
 		}
 
-		parentHash = blockHash
+		parentHash = newParentHash
 	}
 	return nil
 }
