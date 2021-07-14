@@ -229,6 +229,7 @@ func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlSer
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 			return nil
 		}
+		return err
 	}
 	return nil
 }
@@ -320,6 +321,9 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 		}
 
 		if _, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			if isPeerNotFoundErr(err) {
+				continue
+			}
 			return fmt.Errorf("send header request: %v", err)
 		}
 	}
@@ -359,6 +363,9 @@ func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_se
 		}
 
 		if _, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			if isPeerNotFoundErr(err) {
+				continue
+			}
 			return fmt.Errorf("send header request: %v", err)
 		}
 	}
@@ -704,6 +711,9 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
+		if isPeerNotFoundErr(err) {
+			return nil
+		}
 		return fmt.Errorf("send bodies response: %v", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
@@ -735,6 +745,9 @@ func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
+		if isPeerNotFoundErr(err) {
+			return nil
+		}
 		return fmt.Errorf("send bodies response: %v", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
@@ -772,6 +785,9 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
+		if isPeerNotFoundErr(err) {
+			return nil
+		}
 		return fmt.Errorf("send bodies response: %v", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
@@ -806,6 +822,9 @@ func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sen
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
+		if isPeerNotFoundErr(err) {
+			return nil
+		}
 		return fmt.Errorf("send bodies response: %v", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))

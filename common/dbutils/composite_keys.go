@@ -28,12 +28,18 @@ func DecodeBlockNumber(number []byte) (uint64, error) {
 
 // HeaderKey = num (uint64 big endian) + hash
 func HeaderKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
+	k := make([]byte, NumberLength+common.HashLength)
+	binary.BigEndian.PutUint64(k, number)
+	copy(k[NumberLength:], hash[:])
+	return k
 }
 
 // BlockBodyKey = num (uint64 big endian) + hash
 func BlockBodyKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
+	k := make([]byte, NumberLength+common.HashLength)
+	binary.BigEndian.PutUint64(k, number)
+	copy(k[NumberLength:], hash[:])
+	return k
 }
 
 // ReceiptsKey = blockN (uint64 big endian)
