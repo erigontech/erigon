@@ -18,58 +18,91 @@ package txpool
 
 import (
 	"context"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type MockSentry struct {
+	sentry.UnimplementedSentryServer
+	streams      map[sentry.MessageId][]sentry.Sentry_MessagesServer
+	StreamWg     sync.WaitGroup
+	peersStream  sentry.Sentry_PeersServer
+	sentMessages []*sentry.OutboundMessageData
+	ctx          context.Context
 }
 
-func NewMockSentry() *MockSentry {
+func NewMockSentry(ctx context.Context) *MockSentry {
 	return &MockSentry{}
 }
 
-func (m *MockSentry) PenalizePeer(ctx context.Context, in *sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return nil, nil
+// Stream returns stream, waiting if necessary
+func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
+	ms.StreamWg.Wait()
+	for _, stream := range ms.streams[req.Id] {
+		if err := stream.Send(req); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
-func (m *MockSentry) PeerMinBlock(ctx context.Context, in *sentry.PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-
-func (m *MockSentry) SendMessageByMinBlock(ctx context.Context, in *sentry.SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (ms *MockSentry) PeerMinBlock(context.Context, *sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
-
-func (m *MockSentry) SendMessageById(ctx context.Context, in *sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *sentry.SendMessageByMinBlockRequest) (*sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-
-func (m *MockSentry) SendMessageToRandomPeers(ctx context.Context, in *sentry.SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageById(_ context.Context, r *sentry.SendMessageByIdRequest) (*sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-
-func (m *MockSentry) SendMessageToAll(ctx context.Context, in *sentry.OutboundMessageData, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
+func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *sentry.SendMessageToRandomPeersRequest) (*sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-
-func (m *MockSentry) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
+func (ms *MockSentry) SendMessageToAll(_ context.Context, r *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
+	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
 }
+func (ms *MockSentry) SentMessage(i int) *sentry.OutboundMessageData {
+	return ms.sentMessages[i]
+}
+func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.SetStatusReply, error) {
+	return &sentry.SetStatusReply{Protocol: sentry.Protocol_ETH66}, nil
+}
+func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry_MessagesServer) error {
+	if ms.streams == nil {
+		ms.streams = map[sentry.MessageId][]sentry.Sentry_MessagesServer{}
+	}
 
-// Subscribe to receive messages.
-// Calling multiple times with a different set of ids starts separate streams.
-// It is possible to subscribe to the same set if ids more than once.
-func (m *MockSentry) Messages(ctx context.Context, in *sentry.MessagesRequest, opts ...grpc.CallOption) (sentry.Sentry_MessagesClient, error) {
-	return nil, nil
+	for _, id := range req.Ids {
+		ms.streams[id] = append(ms.streams[id], stream)
+	}
+	ms.StreamWg.Done()
+	select {
+	case <-ms.ctx.Done():
+		return nil
+	case <-stream.Context().Done():
+		return nil
+	}
+}
+func (ms *MockSentry) PeerCount(_ context.Context, req *sentry.PeerCountRequest) (*sentry.PeerCountReply, error) {
+	return &sentry.PeerCountReply{Count: 1}, nil
 }
 
-func (m *MockSentry) PeerCount(ctx context.Context, in *sentry.PeerCountRequest, opts ...grpc.CallOption) (*sentry.PeerCountReply, error) {
-	return nil, nil
-}
-
-func (m *MockSentry) Peers(ctx context.Context, in *sentry.PeersRequest, opts ...grpc.CallOption) (sentry.Sentry_PeersClient, error) {
-	return nil, nil
+func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_PeersServer) error {
+	ms.peersStream = stream
+	ms.StreamWg.Done()
+	select {
+	case <-ms.ctx.Done():
+		return nil
+	case <-stream.Context().Done():
+		return nil
+	}
 }

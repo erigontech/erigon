@@ -22,7 +22,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/anacrolix/log"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 
@@ -34,38 +33,38 @@ const (
 	ETH66 = 66
 )
 
-var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
+var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
 	ETH65: {
-		proto_sentry.MessageId_GET_BLOCK_HEADERS_65:             GetBlockHeadersMsg,
-		proto_sentry.MessageId_BLOCK_HEADERS_65:                 BlockHeadersMsg,
-		proto_sentry.MessageId_GET_BLOCK_BODIES_65:              GetBlockBodiesMsg,
-		proto_sentry.MessageId_BLOCK_BODIES_65:                  BlockBodiesMsg,
-		proto_sentry.MessageId_GET_NODE_DATA_65:                 GetNodeDataMsg,
-		proto_sentry.MessageId_NODE_DATA_65:                     NodeDataMsg,
-		proto_sentry.MessageId_GET_RECEIPTS_65:                  GetReceiptsMsg,
-		proto_sentry.MessageId_RECEIPTS_65:                      ReceiptsMsg,
-		proto_sentry.MessageId_NEW_BLOCK_HASHES_65:              NewBlockHashesMsg,
-		proto_sentry.MessageId_NEW_BLOCK_65:                     NewBlockMsg,
-		proto_sentry.MessageId_TRANSACTIONS_65:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: NewPooledTransactionHashesMsg,
-		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       GetPooledTransactionsMsg,
-		proto_sentry.MessageId_POOLED_TRANSACTIONS_65:           PooledTransactionsMsg,
+		sentry.MessageId_GET_BLOCK_HEADERS_65:             struct{}{},
+		sentry.MessageId_BLOCK_HEADERS_65:                 struct{}{},
+		sentry.MessageId_GET_BLOCK_BODIES_65:              struct{}{},
+		sentry.MessageId_BLOCK_BODIES_65:                  struct{}{},
+		sentry.MessageId_GET_NODE_DATA_65:                 struct{}{},
+		sentry.MessageId_NODE_DATA_65:                     struct{}{},
+		sentry.MessageId_GET_RECEIPTS_65:                  struct{}{},
+		sentry.MessageId_RECEIPTS_65:                      struct{}{},
+		sentry.MessageId_NEW_BLOCK_HASHES_65:              struct{}{},
+		sentry.MessageId_NEW_BLOCK_65:                     struct{}{},
+		sentry.MessageId_TRANSACTIONS_65:                  struct{}{},
+		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: struct{}{},
+		sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       struct{}{},
+		sentry.MessageId_POOLED_TRANSACTIONS_65:           struct{}{},
 	},
 	ETH66: {
-		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
-		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
-		proto_sentry.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
-		proto_sentry.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
-		proto_sentry.MessageId_GET_NODE_DATA_66:                 GetNodeDataMsg,
-		proto_sentry.MessageId_NODE_DATA_66:                     NodeDataMsg,
-		proto_sentry.MessageId_GET_RECEIPTS_66:                  GetReceiptsMsg,
-		proto_sentry.MessageId_RECEIPTS_66:                      ReceiptsMsg,
-		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
-		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
-		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
-		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
-		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentry.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
+		sentry.MessageId_BLOCK_HEADERS_66:                 struct{}{},
+		sentry.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
+		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
+		sentry.MessageId_GET_NODE_DATA_66:                 struct{}{},
+		sentry.MessageId_NODE_DATA_66:                     struct{}{},
+		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
+		sentry.MessageId_RECEIPTS_66:                      struct{}{},
+		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
+		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
+		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
+		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: struct{}{},
+		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
+		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
 	},
 }
 
@@ -279,7 +278,7 @@ func (c *SentryClientDirect) Peers(ctx context.Context, in *sentry.PeersRequest,
 
 func filterIds(in []sentry.MessageId, protocol uint) (filtered []sentry.MessageId) {
 	for _, id := range in {
-		if _, ok := FromProto[protocol][id]; ok {
+		if _, ok := ProtoIds[protocol][id]; ok {
 			filtered = append(filtered, id)
 		}
 	}

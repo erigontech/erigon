@@ -20,16 +20,19 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 )
 
 func TestFetch(t *testing.T) {
-	mock := NewMockSentry()
 	var genesisHash [32]byte
 	var networkId uint64 = 1
 	forks := []uint64{1, 5, 10}
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
-	fetch := NewFetch(ctx, []sentry.SentryClient{mock}, genesisHash, networkId, forks)
+	mock := NewMockSentry(ctx)
+	sentryClient := direct.NewSentryClientDirect(direct.ETH66, mock)
+
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks)
 	fetch.Start()
 }
