@@ -58,10 +58,6 @@ type StateTransition struct {
 	data       []byte
 	state      vm.IntraBlockState
 	evm        *vm.EVM
-
-	//some pre-allocated intermediate variables
-	sharedBuyGas        *uint256.Int
-	sharedBuyGasBalance *uint256.Int
 }
 
 // Message represents a message sent to a contract.
@@ -169,9 +165,6 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		value:     msg.Value(),
 		data:      msg.Data(),
 		state:     evm.IntraBlockState,
-
-		sharedBuyGas:        uint256.NewInt(0),
-		sharedBuyGasBalance: uint256.NewInt(0),
 	}
 }
 
@@ -198,12 +191,11 @@ func (st *StateTransition) to() common.Address {
 }
 
 func (st *StateTransition) buyGas(gasBailout bool) error {
-	mgval := st.sharedBuyGas
-	mgval.SetUint64(st.msg.Gas())
+	mgval := uint256.NewInt(st.msg.Gas())
 	mgval = mgval.Mul(mgval, st.gasPrice)
 	balanceCheck := mgval
 	if st.gasFeeCap != nil {
-		balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
+		balanceCheck = uint256.NewInt(st.msg.Gas())
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.gasFeeCap)
 	}
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
