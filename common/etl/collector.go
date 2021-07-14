@@ -106,6 +106,11 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
+//only for migrations
+func (c *Collector) Flush() error {
+	return c.flushBuffer(nil, true)
+}
+
 func (c *Collector) Load(logPrefix string, db ethdb.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		if c.autoClean {

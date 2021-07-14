@@ -172,6 +172,22 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 			return err
 		}
 
+		err = bodiesCollector.Flush()
+		if err!=nil {
+			return err
+		}
+
+		err = ethTXCollector.Flush()
+		if err!=nil {
+			return err
+		}
+
+		err = nonCanonicalCollector.Flush()
+		if err!=nil {
+			return err
+		}
+
+
 		err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.EthTx)
 		if err != nil {
 			return err
