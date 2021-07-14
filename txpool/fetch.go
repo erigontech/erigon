@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -168,6 +169,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 }
 
 func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient sentry.SentryClient) error {
+	fmt.Printf("got inbound message\n")
 	return nil
 }
 

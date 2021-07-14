@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -34,5 +35,16 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, mock)
 
 	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks)
+	var wg sync.WaitGroup
+	fetch.SetWaitGroup(&wg)
 	fetch.Start()
+	// Send one transaction id
+	wg.Add(1)
+	errs := mock.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, Data: nil, PeerId: PeerId})
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("sending new pool tx hashes 66 (%d): %v", i, err)
+		}
+	}
+	wg.Wait()
 }

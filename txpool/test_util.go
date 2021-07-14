@@ -18,8 +18,8 @@ package txpool
 
 import (
 	"context"
-	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -27,19 +27,19 @@ import (
 type MockSentry struct {
 	sentry.UnimplementedSentryServer
 	streams      map[sentry.MessageId][]sentry.Sentry_MessagesServer
-	StreamWg     sync.WaitGroup
-	peersStream  sentry.Sentry_PeersServer
+	peersStreams []sentry.Sentry_PeersServer
 	sentMessages []*sentry.OutboundMessageData
 	ctx          context.Context
 }
 
 func NewMockSentry(ctx context.Context) *MockSentry {
-	return &MockSentry{}
+	return &MockSentry{ctx: ctx}
 }
+
+var PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
-	ms.StreamWg.Wait()
 	for _, stream := range ms.streams[req.Id] {
 		if err := stream.Send(req); err != nil {
 			errs = append(errs, err)
@@ -84,7 +84,6 @@ func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry
 	for _, id := range req.Ids {
 		ms.streams[id] = append(ms.streams[id], stream)
 	}
-	ms.StreamWg.Done()
 	select {
 	case <-ms.ctx.Done():
 		return nil
@@ -97,8 +96,7 @@ func (ms *MockSentry) PeerCount(_ context.Context, req *sentry.PeerCountRequest)
 }
 
 func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_PeersServer) error {
-	ms.peersStream = stream
-	ms.StreamWg.Done()
+	ms.peersStreams = append(ms.peersStreams, stream)
 	select {
 	case <-ms.ctx.Done():
 		return nil
