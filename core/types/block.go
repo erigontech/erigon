@@ -569,6 +569,11 @@ func (h *Header) SanityCheck() error {
 	if eLen := len(h.Extra); eLen > 100*1024 {
 		return fmt.Errorf("too large block extradata: size %d", eLen)
 	}
+	if h.BaseFee != nil {
+		if bfLen := h.BaseFee.BitLen(); bfLen > 256 {
+			return fmt.Errorf("too large base fee: bitlen %d", bfLen)
+		}
+	}
 	return nil
 }
 
@@ -937,6 +942,14 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	return b
 }
 
+// NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
+// in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header) *Block {
+	b := &Block{header: header, td: new(big.Int), transactions: txs, uncles: uncles}
+	b.hash.Store(hash)
+	return b
+}
+
 // NewBlockWithHeader creates a blxock with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
@@ -1129,8 +1142,6 @@ func (b *StorageBlock) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-// TODO: copies
-
 func (b *Block) Uncles() []*Header          { return b.uncles }
 func (b *Block) Transactions() Transactions { return b.transactions }
 
@@ -1143,7 +1154,7 @@ func (b *Block) Transaction(hash common.Hash) Transaction {
 	return nil
 }
 
-func (b *Block) Number() *big.Int     { return new(big.Int).Set(b.header.Number) }
+func (b *Block) Number() *big.Int     { return b.header.Number }
 func (b *Block) GasLimit() uint64     { return b.header.GasLimit }
 func (b *Block) GasUsed() uint64      { return b.header.GasUsed }
 func (b *Block) Difficulty() *big.Int { return new(big.Int).Set(b.header.Difficulty) }
@@ -1174,6 +1185,14 @@ func (b *Block) Body() *Body {
 	bd := &Body{Transactions: b.transactions, Uncles: b.uncles}
 	bd.SendersFromTxs()
 	return bd
+}
+func (b *Block) SendersToTxs(senders []common.Address) {
+	if senders == nil {
+		return
+	}
+	for i, tx := range b.transactions {
+		tx.SetSender(senders[i])
+	}
 }
 
 // RawBody creates a RawBody based on the block. It is not very efficient, so

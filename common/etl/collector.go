@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -31,6 +32,7 @@ type Collector struct {
 	dataProviders   []dataProvider
 	allFlushed      bool
 	autoClean       bool
+	bufType         int
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
@@ -65,7 +67,7 @@ func NewCriticalCollector(tmpdir string, sortableBuffer Buffer) *Collector {
 }
 
 func NewCollector(tmpdir string, sortableBuffer Buffer) *Collector {
-	c := &Collector{autoClean: true}
+	c := &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer)}
 	encoder := codec.NewEncoder(nil, &cbor)
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
@@ -117,17 +119,23 @@ func (c *Collector) Load(logPrefix string, db ethdb.RwTx, toBucket string, loadF
 			return e
 		}
 	}
-	if err := loadFilesIntoBucket(logPrefix, db, toBucket, c.dataProviders, loadFunc, args); err != nil {
+	if err := loadFilesIntoBucket(logPrefix, db, toBucket, c.bufType, c.dataProviders, loadFunc, args); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (c *Collector) Close(logPrefix string) {
-	disposeProviders(logPrefix, c.dataProviders)
+	totalSize := uint64(0)
+	for _, p := range c.dataProviders {
+		totalSize += p.Dispose()
+	}
+	if totalSize > 0 {
+		log.Info(fmt.Sprintf("[%s] etl: temp files removed successfully", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
+	}
 }
 
-func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
+func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType int, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 
@@ -167,12 +175,21 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, provide
 	defer logEvery.Stop()
 
 	i := 0
+	var prevK []byte
 	loadNextFunc := func(originalK, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
 		}
 		i++
+
+		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
+		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
+		// property, but files may overlap. files are sorted, just skip repeated keys here
+		if bufType == SortableOldestAppearedBuffer && bytes.Equal(prevK, k) {
+			return nil
+		}
+		prevK = k
 
 		select {
 		default:

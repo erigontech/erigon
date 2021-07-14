@@ -12,34 +12,32 @@ import (
 )
 
 type MiningFinishCfg struct {
-	db              ethdb.RwKV
-	chainConfig     params.ChainConfig
-	engine          consensus.Engine
-	pendingBlocksCh chan<- *types.Block
-	minedBlocksCh   chan<- *types.Block
-	sealCancel      <-chan struct{}
+	db          ethdb.RwKV
+	chainConfig params.ChainConfig
+	engine      consensus.Engine
+	sealCancel  <-chan struct{}
+	miningState MiningState
 }
 
 func StageMiningFinishCfg(
 	db ethdb.RwKV,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
-	pendingBlocksCh chan<- *types.Block,
-	minedBlocksCh chan<- *types.Block,
+	miningState MiningState,
 	sealCancel <-chan struct{},
 ) MiningFinishCfg {
 	return MiningFinishCfg{
-		db:              db,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		pendingBlocksCh: pendingBlocksCh,
-		minedBlocksCh:   minedBlocksCh,
-		sealCancel:      sealCancel,
+		db:          db,
+		chainConfig: chainConfig,
+		engine:      engine,
+		miningState: miningState,
+		sealCancel:  sealCancel,
 	}
 }
 
-func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, cfg MiningFinishCfg, quit <-chan struct{}) error {
+func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, cfg MiningFinishCfg, quit <-chan struct{}) error {
 	logPrefix := s.state.LogPrefix()
+	current := cfg.miningState.MiningBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	//if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
@@ -47,7 +45,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, 
 	//}
 
 	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts)
-	*current = miningBlock{} // hack to clean global data
+	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
@@ -59,12 +57,12 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, 
 
 	// Tests may set pre-calculated nonce
 	if block.Header().Nonce.Uint64() != 0 {
-		cfg.minedBlocksCh <- block
+		cfg.miningState.MiningResultCh <- block
 		s.Done()
 		return nil
 	}
 
-	cfg.pendingBlocksCh <- block
+	cfg.miningState.PendingResultCh <- block
 
 	log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
 		"number", block.NumberU64(),
@@ -75,7 +73,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, current *miningBlock, 
 	)
 
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: kv.WrapIntoTxDB(tx)}
-	if err := cfg.engine.Seal(chain, block, cfg.minedBlocksCh, cfg.sealCancel); err != nil {
+	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}
 

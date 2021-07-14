@@ -228,7 +228,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
-	blockNumber := rawdb.ReadTxLookupEntry(tx, hash)
+	blockNumber, err := rawdb.ReadTxLookupEntry(tx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}

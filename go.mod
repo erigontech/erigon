@@ -3,9 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.16
 
 require (
-	github.com/Azure/azure-storage-blob-go v0.10.0
 	github.com/RoaringBitmap/roaring v0.6.0
-	github.com/VictoriaMetrics/fastcache v1.5.8
+	github.com/VictoriaMetrics/fastcache v1.6.0
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
 	github.com/aws/aws-sdk-go v1.34.21
@@ -35,13 +34,13 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
 	github.com/holiman/uint256 v1.2.0
-	github.com/huin/goupnp v1.0.1-0.20200620063722-49508fba0031
+	github.com/huin/goupnp v1.0.1-0.20210626160114-33cdcbb30dda
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e
 	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20210701162843-a58e7da26f29
+	github.com/ledgerwatch/erigon-lib v0.0.0-20210709133046-4df3c6b79da0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mattn/go-colorable v0.1.7
@@ -58,7 +57,7 @@ require (
 	github.com/torquem-ch/mdbx-go v0.15.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli v1.22.4
+	github.com/urfave/cli v1.22.5
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	go.uber.org/atomic v1.8.0

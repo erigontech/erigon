@@ -100,11 +100,21 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	msg := args.ToMessage(GasCap)
-
+	var baseFee *uint256.Int
+	if header != nil && header.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		if overflow {
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+		}
+	}
+	msg, err := args.ToMessage(GasCap, baseFee)
+	if err != nil {
+		return nil, err
+	}
 	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
 
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{})
+	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
@@ -127,6 +137,13 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 }
 
 func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx ethdb.Tx) (vm.BlockContext, vm.TxContext) {
+	var baseFee uint256.Int
+	if header.Eip1559 {
+		overflow := baseFee.SetFromBig(header.BaseFee)
+		if overflow {
+			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
+		}
+	}
 	return vm.BlockContext{
 			CanTransfer: core.CanTransfer,
 			Transfer:    core.Transfer,
@@ -137,6 +154,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			Time:        header.Time,
 			Difficulty:  new(big.Int).Set(header.Difficulty),
 			GasLimit:    header.GasLimit,
+			BaseFee:     &baseFee,
 		},
 		vm.TxContext{
 			Origin:   msg.From(),

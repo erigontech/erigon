@@ -73,7 +73,6 @@ func TestMatreshkaStream(t *testing.T) {
 		Open()
 	_ = chaindata
 	defer snkv.Close()
-	db := kv2.NewObjectDatabase(snkv)
 
 	tx, err := snkv.BeginRw(context.Background())
 	if err != nil {
@@ -109,11 +108,11 @@ func TestMatreshkaStream(t *testing.T) {
 	limit := currentBlock.Number.Uint64()
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
-	stateReaderWriter := NewDebugReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(db, tx, blockNum))
+	stateReaderWriter := NewDebugReaderWriter(state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNum))
 	tt := time.Now()
 	ttt := time.Now()
 	for currentBlock := blockNum; currentBlock < blockNum+limit; currentBlock++ {
-		stateReaderWriter.UpdateWriter(state.NewPlainStateWriter(db, tx, currentBlock))
+		stateReaderWriter.UpdateWriter(state.NewPlainStateWriter(tx, tx, currentBlock))
 		block, err := rawdb.ReadBlockByNumber(tx, currentBlock)
 		if err != nil {
 			t.Fatal(err, currentBlock)
@@ -121,7 +120,7 @@ func TestMatreshkaStream(t *testing.T) {
 
 		checkTEVM := ethdb.GetCheckTEVM(tx)
 
-		_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{NoReceipts: true}, getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter, checkTEVM)
+		_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{NoReceipts: true}, getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter, nil, checkTEVM)
 		if err != nil {
 			t.Fatal(err, currentBlock)
 		}

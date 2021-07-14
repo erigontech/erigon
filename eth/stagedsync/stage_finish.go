@@ -13,18 +13,22 @@ import (
 )
 
 type FinishCfg struct {
-	db     ethdb.RwKV
-	tmpDir string
+	db        ethdb.RwKV
+	tmpDir    string
+	btClient  *snapshotsync.Client
+	snBuilder *snapshotsync.SnapshotMigrator
 }
 
-func StageFinishCfg(db ethdb.RwKV, tmpDir string) FinishCfg {
+func StageFinishCfg(db ethdb.RwKV, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) FinishCfg {
 	return FinishCfg{
-		db:     db,
-		tmpDir: tmpDir,
+		db:        db,
+		tmpDir:    tmpDir,
+		btClient:  btClient,
+		snBuilder: snBuilder,
 	}
 }
 
-func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) error {
+func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -45,14 +49,14 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg, btClient *snapsh
 		return nil
 	}
 
-	if snBuilder != nil && useExternalTx {
+	if cfg.snBuilder != nil && useExternalTx {
 		snBlock := snapshotsync.CalculateEpoch(executionAt, snapshotsync.EpochSize)
-		err = snBuilder.AsyncStages(snBlock, cfg.db, tx, btClient, true)
+		err = cfg.snBuilder.AsyncStages(snBlock, cfg.db, tx, cfg.btClient, true)
 		if err != nil {
 			return err
 		}
-		if snBuilder.Replaced() {
-			err = snBuilder.SyncStages(snBlock, cfg.db, tx)
+		if cfg.snBuilder.Replaced() {
+			err = cfg.snBuilder.SyncStages(snBlock, cfg.db, tx)
 			if err != nil {
 				return err
 			}

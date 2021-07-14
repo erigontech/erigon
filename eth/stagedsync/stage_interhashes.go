@@ -88,7 +88,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 
 	if err == nil {
 		if cfg.checkRoot && root != expectedRootHash {
-			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x", logPrefix, to, root, expectedRootHash))
+			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 			if to > s.BlockNumber {
 				log.Warn("Unwinding due to incorrect root hash", "to", to-1)
 				if err = u.UnwindTo(to-1, tx, headerHash); err != nil {
@@ -118,7 +118,9 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfAccountsBucket)
 	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfStorageBucket)
 	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	defer accTrieCollector.Close(logPrefix)
 	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	defer stTrieCollector.Close(logPrefix)
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(trie.NewRetainList(0), accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
@@ -348,7 +350,9 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	}
 
 	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	defer accTrieCollector.Close(logPrefix)
 	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	defer stTrieCollector.Close(logPrefix)
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
@@ -431,7 +435,9 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	}
 
 	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	defer accTrieCollector.Close(logPrefix)
 	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	defer stTrieCollector.Close(logPrefix)
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return err

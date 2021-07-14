@@ -1,31 +1,20 @@
-FROM golang:1.16-alpine3.13 as builder
-
-ARG git_commit
-ENV GIT_COMMIT=$git_commit
-
-ARG git_branch
-ENV GIT_BRANCH=$git_branch
-
-ARG git_tag
-ENV GIT_TAG=$git_tag
-
-# for linters to avoid warnings. we won't use linters in Docker anyway
-ENV LATEST_COMMIT="undefined"
+FROM docker.io/library/golang:1.16-alpine3.13 as builder
 
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
 WORKDIR /app
-
-# next 2 lines helping utilize docker cache
-COPY go.mod go.sum ./
-RUN go mod download
-
 ADD . .
-RUN make all
 
-FROM alpine:3.13
+RUN make erigon rpcdaemon integration sentry
+
+FROM docker.io/library/alpine:3.13
+
+RUN mkdir -p /var/lib/erigon
+VOLUME /var/lib/erigon
 
 RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
-EXPOSE 8545 8546 30303 30303/udp 8080 9090 6060
+WORKDIR /var/lib/erigon
+
+EXPOSE 8545 8546 30303 30303/udp 30304 30304/udp 8080 9090 6060

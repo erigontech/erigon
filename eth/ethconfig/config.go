@@ -78,9 +78,11 @@ var Defaults = Config{
 		Recommit: 3 * time.Second,
 	},
 	TxPool:      core.DefaultTxPoolConfig,
-	RPCGasCap:   25000000,
+	RPCGasCap:   50000000,
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
+
+	BodyDownloadTimeoutSeconds: 30,
 }
 
 func init() {
@@ -109,6 +111,13 @@ func init() {
 
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
+type Snapshot struct {
+	Enabled bool
+	Mode    snapshotsync.SnapshotMode
+	Dir     string
+	Seeding bool
+}
+
 // Config contains configuration options for ETH protocol.
 type Config struct {
 	// The genesis block, which is inserted if the database is empty.
@@ -124,11 +133,10 @@ type Config struct {
 
 	P2PEnabled bool
 
-	StorageMode     ethdb.StorageMode
-	BatchSize       datasize.ByteSize // Batch size for execution stage
-	SnapshotMode    snapshotsync.SnapshotMode
-	SnapshotSeeding bool
-	SnapshotLayout  bool
+	StorageMode ethdb.StorageMode
+	BatchSize   datasize.ByteSize // Batch size for execution stage
+
+	Snapshot Snapshot
 
 	BlockDownloaderWindow int
 
@@ -178,7 +186,11 @@ type Config struct {
 	// CheckpointOracle is the configuration for checkpoint oracle.
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
-	StateStream bool
+	StateStream                bool
+	BodyDownloadTimeoutSeconds int // TODO change to duration
+
+	// SyncLoopThrottle sets a minimum time between staged loop iterations
+	SyncLoopThrottle time.Duration
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {

@@ -99,8 +99,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	froms := map[string]*roaring64.Bitmap{}
 	tos := map[string]*roaring64.Bitmap{}
 	collectorFrom := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorFrom.Close(logPrefix)
 	collectorTo := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-
+	defer collectorTo.Close(logPrefix)
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 

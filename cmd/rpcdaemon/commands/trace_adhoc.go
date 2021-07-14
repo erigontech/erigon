@@ -12,6 +12,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	math2 "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -42,16 +43,16 @@ const (
 
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
 type TraceCallParam struct {
-	From       *common.Address   `json:"from"`
-	To         *common.Address   `json:"to"`
-	Gas        *hexutil.Uint64   `json:"gas"`
-	GasPrice   *hexutil.Big      `json:"gasPrice"`
-	Tip        *hexutil.Big      `json:"maxPriorityFeePerGas"`
-	FeeCap     *hexutil.Big      `json:"maxFeePerGas"`
-	Value      *hexutil.Big      `json:"value"`
-	Data       hexutil.Bytes     `json:"data"`
-	AccessList *types.AccessList `json:"accessList"`
-	traceTypes []string
+	From                 *common.Address   `json:"from"`
+	To                   *common.Address   `json:"to"`
+	Gas                  *hexutil.Uint64   `json:"gas"`
+	GasPrice             *hexutil.Big      `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big      `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.Big      `json:"maxFeePerGas"`
+	Value                *hexutil.Big      `json:"value"`
+	Data                 hexutil.Bytes     `json:"data"`
+	AccessList           *types.AccessList `json:"accessList"`
+	traceTypes           []string
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -95,7 +96,7 @@ type TraceCallVmTrace struct {
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
-func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
+func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (types.Message, error) {
 	// Set sender address or use zero address if none specified.
 	var addr common.Address
 	if args.From != nil {
@@ -114,25 +115,51 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
 		gas = globalGasCap
 	}
-	gasPrice := new(uint256.Int)
-	if args.GasPrice != nil {
-		overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
-		if overflow {
-			panic(fmt.Errorf("args.GasPrice higher than 2^256-1"))
+	var (
+		gasPrice  *uint256.Int
+		gasFeeCap *uint256.Int
+		gasTipCap *uint256.Int
+	)
+	if baseFee == nil {
+		// If there's no basefee, then it must be a non-1559 execution
+		gasPrice = new(uint256.Int)
+		if args.GasPrice != nil {
+			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
+			if overflow {
+				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+			}
 		}
-	}
-	var tip *uint256.Int
-	if args.Tip != nil {
-		overflow := tip.SetFromBig(args.Tip.ToInt())
-		if overflow {
-			panic(fmt.Errorf("args.Tip higher than 2^256-1"))
-		}
-	}
-	var feeCap *uint256.Int
-	if args.FeeCap != nil {
-		overflow := feeCap.SetFromBig(args.FeeCap.ToInt())
-		if overflow {
-			panic(fmt.Errorf("args.FeeCap higher than 2^256-1"))
+		gasFeeCap, gasTipCap = gasPrice, gasPrice
+	} else {
+		// A basefee is provided, necessitating 1559-type execution
+		if args.GasPrice != nil {
+			// User specified the legacy gas field, convert to 1559 gas typing
+			gasPrice, overflow := uint256.FromBig(args.GasPrice.ToInt())
+			if overflow {
+				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+			}
+			gasFeeCap, gasTipCap = gasPrice, gasPrice
+		} else {
+			// User specified 1559 gas feilds (or none), use those
+			gasFeeCap = new(uint256.Int)
+			if args.MaxFeePerGas != nil {
+				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
+				if overflow {
+					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				}
+			}
+			gasTipCap = new(uint256.Int)
+			if args.MaxPriorityFeePerGas != nil {
+				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
+				if overflow {
+					return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
+				}
+			}
+			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
+			gasPrice = new(uint256.Int)
+			if gasFeeCap.BitLen() > 0 || gasTipCap.BitLen() > 0 {
+				gasPrice = math2.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
+			}
 		}
 	}
 	value := new(uint256.Int)
@@ -151,8 +178,8 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64) types.Message {
 		accessList = *args.AccessList
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, feeCap, tip, data, accessList, false /* checkNonce */)
-	return msg
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */)
+	return msg, nil
 }
 
 // OpenEthereum-style tracer
@@ -479,7 +506,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	txn, blockHash, blockNumber, _ := rawdb.ReadTransaction(tx, txHash)
+	txn, blockHash, blockNumber, _, err := rawdb.ReadTransaction(tx, txHash)
+	if err != nil {
+		return nil, err
+	}
 	if txn == nil {
 		return nil, nil
 	}
@@ -759,7 +789,18 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// Get a new instance of the EVM.
-	msg := args.ToMessage(api.gasCap)
+	var baseFee *uint256.Int
+	if header != nil && header.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		if overflow {
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+		}
+	}
+	msg, err := args.ToMessage(api.gasCap, baseFee)
+	if err != nil {
+		return nil, err
+	}
 
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
 	blockCtx.GasLimit = math.MaxUint64
@@ -926,7 +967,18 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		}
 
 		// Get a new instance of the EVM.
-		msg := args.ToMessage(api.gasCap)
+		var baseFee *uint256.Int
+		if header != nil && header.BaseFee != nil {
+			var overflow bool
+			baseFee, overflow = uint256.FromBig(header.BaseFee)
+			if overflow {
+				return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+			}
+		}
+		msg, err := args.ToMessage(api.gasCap, baseFee)
+		if err != nil {
+			return nil, err
+		}
 
 		useParent := false
 		if header == nil {

@@ -59,6 +59,8 @@ type ExecuteBlockCfg struct {
 	writeCallTraces bool
 	writeTEVM       bool
 	pruningDistance uint64
+	stateStream     bool
+	accumulator     *shards.Accumulator
 }
 
 func StageExecuteBlocksCfg(
@@ -72,6 +74,8 @@ func StageExecuteBlocksCfg(
 	chainConfig *params.ChainConfig,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
+	accumulator *shards.Accumulator,
+	stateStream bool,
 	tmpdir string,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
@@ -86,6 +90,8 @@ func StageExecuteBlocksCfg(
 		engine:          engine,
 		vmConfig:        vmConfig,
 		tmpdir:          tmpdir,
+		accumulator:     accumulator,
+		stateStream:     stateStream,
 	}
 }
 
@@ -104,11 +110,11 @@ func executeBlock(
 	batch ethdb.Database,
 	cfg ExecuteBlockCfg,
 	writeChangesets bool,
-	accumulator *shards.Accumulator,
 	checkTEVM func(contractHash common.Hash) (bool, error),
+	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter := newStateReaderWriter(batch, tx, blockNum, block.Hash(), writeChangesets, accumulator)
+	stateReader, stateWriter := newStateReaderWriter(batch, tx, blockNum, block.Hash(), writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
@@ -119,7 +125,7 @@ func executeBlock(
 		cfg.vmConfig.Tracer = callTracer
 	}
 
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, checkTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, checkTEVM)
 	if err != nil {
 		return err
 	}
@@ -198,6 +204,8 @@ func newStateReaderWriter(
 	blockHash common.Hash,
 	writeChangesets bool,
 	accumulator *shards.Accumulator,
+	initialCycle bool,
+	stateStream bool,
 ) (state.StateReader, state.WriterWithChangeSets) {
 
 	var stateReader state.StateReader
@@ -205,8 +213,10 @@ func newStateReaderWriter(
 
 	stateReader = state.NewPlainStateReader(batch)
 
-	if accumulator != nil {
+	if !initialCycle && stateStream {
 		accumulator.StartChange(blockNum, blockHash, false)
+	} else {
+		accumulator = nil
 	}
 	if writeChangesets {
 		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum).SetAccumulator(accumulator)
@@ -217,7 +227,7 @@ func newStateReaderWriter(
 	return stateReader, stateWriter
 }
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -246,7 +256,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	}
 
 	var batch ethdb.DbWithPendingMutations
-	batch = kv.NewBatch(tx)
+	batch = kv.NewBatch(tx, quit)
 	defer batch.Rollback()
 
 	logEvery := time.NewTicker(logInterval)
@@ -290,7 +300,7 @@ Loop:
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
-		if err = executeBlock(block, tx, batch, cfg, writeChangesets, accumulator, checkTEVMCode); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, writeChangesets, checkTEVMCode, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
 			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
 				return unwindErr
@@ -318,7 +328,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = kv.NewBatch(tx)
+			batch = kv.NewBatch(tx, quit)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
@@ -429,7 +439,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTx, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -446,7 +456,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	logPrefix := s.state.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err := unwindExecutionStage(u, s, tx, quit, cfg, accumulator); err != nil {
+	if err := unwindExecutionStage(u, s, tx, quit, cfg, initialCycle); err != nil {
 		return err
 	}
 	if err := u.Done(tx); err != nil {
@@ -461,12 +471,13 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	logPrefix := s.state.LogPrefix()
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
-	if accumulator != nil {
+	var accumulator *shards.Accumulator
+	if !initialCycle && cfg.stateStream {
 		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("%s: reading canonical hash of unwind point: %v", logPrefix, err)
@@ -477,6 +488,8 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
+	defer changes.Close(logPrefix)
+
 	if err := changes.Load(logPrefix, tx, stateBucket, func(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
 			if len(value) > 0 {

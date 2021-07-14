@@ -3,37 +3,43 @@ version: '2.2'
 services:
 
   erigon:
-    image: turbo-geth:latest
+    image: thorax/erigon:latest
     build: .
-    command: erigon --metrics --metrics.addr="0.0.0.0" --metrics.port="6060" --private.api.addr="0.0.0.0:9090" --pprof --pprof.addr="0.0.0.0" --pprof.port="6061"
+    command: erigon --datadir=/var/lib/erigon --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --private.api.addr=0.0.0.0:9090 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
     volumes:
-      - ${XDG_DATA_HOME:-~/.local/share}/erigon:/root/.local/share/erigon
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon:/var/lib/erigon
     ports:
-      - 30303:30303/tcp
-      - 30303:30303/udp
+      - "30303:30303/tcp"
+      - "30303:30303/udp"
+      - "30304:30304/tcp"
+      - "30304:30304/udp"
+    restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.27.1
+    image: prom/prometheus:v2.28.1
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports:
-      - 9090:9090
+      - "9090:9090"
     volumes:
       - ${ERIGON_PROMETHEUS_CONFIG:-./cmd/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-prometheus:/prometheus
+    restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:8.0.3
+    image: grafana/grafana:8.0.4
     ports:
-      - 3000:3000
+      - "3000:3000"
     volumes:
       - ${ERIGON_GRAFANA_CONFIG:-./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
       - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
+    restart: unless-stopped
 
   rpcdaemon:
-    image: turbo-geth:latest
-    command: rpcdaemon --private.api.addr="erigon:9090" --http.addr="0.0.0.0" --http.vhosts="*" --http.corsdomain="*" --http.api="eth,debug,net"
+    image: thorax/erigon:latest
+    command: rpcdaemon --private.api.addr=erigon:9090 --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net
     ports:
-      - 8545:8545
+      - "8545:8545"
+    restart: unless-stopped
 

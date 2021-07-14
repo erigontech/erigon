@@ -19,7 +19,7 @@ import (
 
 type MiningExecCfg struct {
 	db          ethdb.RwKV
-	mining      params.MiningConfig
+	miningState MiningState
 	notifier    ChainEventNotifier
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
@@ -29,7 +29,7 @@ type MiningExecCfg struct {
 
 func StageMiningExecCfg(
 	db ethdb.RwKV,
-	mining params.MiningConfig,
+	miningState MiningState,
 	notifier ChainEventNotifier,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
@@ -38,7 +38,7 @@ func StageMiningExecCfg(
 ) MiningExecCfg {
 	return MiningExecCfg{
 		db:          db,
-		mining:      mining,
+		miningState: miningState,
 		notifier:    notifier,
 		chainConfig: chainConfig,
 		engine:      engine,
@@ -50,9 +50,13 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, current *miningBlock, localTxs, remoteTxs types.TransactionsStream, noempty bool, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
 	cfg.vmConfig.NoReceipts = false
 	logPrefix := s.state.LogPrefix()
+	current := cfg.miningState.MiningBlock
+	localTxs := current.LocalTxs
+	remoteTxs := current.RemoteTxs
+	noempty := true
 
 	ibs := state.New(state.NewPlainStateReader(tx))
 	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
@@ -76,7 +80,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, curre
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, localTxs, cfg.mining.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, localTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -88,7 +92,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, curre
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, remoteTxs, cfg.mining.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, remoteTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -101,7 +105,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, curre
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(cfg.engine, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs); err != nil {
+	if err := core.FinalizeBlockExecution(cfg.engine, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil); err != nil {
 		return err
 	}
 
@@ -141,7 +145,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, curre
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *miningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
@@ -150,7 +154,7 @@ func addTransactionsToMiningBlock(current *miningBlock, chainConfig params.Chain
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 
-	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *miningBlock) ([]*types.Log, error) {
+	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
 		receipt, _, err := core.ApplyTransaction(&chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, checkTEVM)
 		if err != nil {

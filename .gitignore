@@ -68,3 +68,5 @@ docker-compose.dev.yml
 
 /ethdb/*.fail
 
+libmdbx/build/*
+tests/testdata/*

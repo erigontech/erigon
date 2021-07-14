@@ -2,6 +2,7 @@ package etl
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"strconv"
 
@@ -272,5 +273,18 @@ func getBufferByType(tp int, size datasize.ByteSize) Buffer {
 		return NewOldestEntryBuffer(size)
 	default:
 		panic("unknown buffer type " + strconv.Itoa(tp))
+	}
+}
+
+func getTypeByBuffer(b Buffer) int {
+	switch b.(type) {
+	case *sortableBuffer:
+		return SortableSliceBuffer
+	case *appendSortableBuffer:
+		return SortableAppendBuffer
+	case *oldestEntrySortableBuffer:
+		return SortableOldestAppearedBuffer
+	default:
+		panic(fmt.Sprintf("unknown buffer type: %T ", b))
 	}
 }

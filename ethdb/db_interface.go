@@ -74,16 +74,6 @@ type Database interface {
 	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
 
-	// NewBatch - starts in-mem batch
-	//
-	// Common pattern:
-	//
-	// batch := db.NewBatch()
-	// defer batch.Rollback()
-	// ... some calculations on `batch`
-	// batch.Commit()
-	//
-	NewBatch() DbWithPendingMutations                                         //
 	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 

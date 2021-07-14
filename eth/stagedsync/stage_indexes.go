@@ -132,6 +132,7 @@ func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, sta
 	defer checkFlushEvery.Stop()
 
 	collectorUpdates := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorUpdates.Close(logPrefix)
 
 	if err := changeset.Walk(tx, changesetBucket, dbutils.EncodeBlockNumber(start), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= stop {

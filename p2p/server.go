@@ -767,7 +767,7 @@ running:
 			}
 
 		case op := <-srv.peerOp:
-			// This channel is used by Peers and PeerCount.
+			// This channel is used by GoodPeers and PeerCount.
 			op(peers)
 			srv.peerOpDone <- struct{}{}
 
@@ -1080,7 +1080,7 @@ func (srv *Server) runPeer(p *Peer) {
 
 	// Broadcast peer drop to external subscribers. This needs to be
 	// after the send to delpeer so subscribers have a consistent view of
-	// the peer set (i.e. Server.Peers() doesn't include the peer when the
+	// the peer set (i.e. Server.GoodPeers() doesn't include the peer when the
 	// event is received.
 	srv.peerFeed.Send(&PeerEvent{
 		Type:          PeerEventTypeDrop,
