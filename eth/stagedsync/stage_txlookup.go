@@ -81,8 +81,8 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 		}
 
 		blockNumBytes := new(big.Int).SetUint64(blocknum).Bytes()
-		for _, tx := range body.Transactions {
-			if err := next(k, tx.Hash().Bytes(), blockNumBytes); err != nil {
+		for _, txn := range body.Transactions {
+			if err := next(k, txn.Hash().Bytes(), blockNumBytes); err != nil {
 				return err
 			}
 		}
@@ -145,10 +145,6 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		if blockNumber > s.BlockNumber {
 			return false, nil
-		}
-
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
 		}
 
 		body := new(types.BodyForStorage)

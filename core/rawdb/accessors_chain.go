@@ -859,15 +859,56 @@ func ReadAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, 
 }
 
 func ReadEpoch(tx ethdb.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
-	k := make([]byte, 8+32)
+	k := make([]byte, dbutils.NumberLength+common.HashLength)
 	binary.BigEndian.PutUint64(k, blockNum)
-	copy(k[8:], blockHash[:])
+	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.GetOne(dbutils.Epoch, k)
+}
+func FindEpochBeforeOrEqualNumber(tx ethdb.Tx, n uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+	c, err := tx.Cursor(dbutils.Epoch)
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
+	defer c.Close()
+	k := make([]byte, dbutils.NumberLength)
+	binary.BigEndian.PutUint64(k, n)
+	k, v, err := c.Seek(k)
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
+	if k != nil {
+		num := binary.BigEndian.Uint64(k)
+		if num == n {
+			return n, common.BytesToHash(k[dbutils.NumberLength:]), v, nil
+		}
+	}
+	k, v, err = c.Prev()
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
+	if k == nil {
+		return 0, common.Hash{}, nil, nil
+	}
+	return binary.BigEndian.Uint64(k), common.BytesToHash(k[dbutils.NumberLength:]), v, nil
 }
 
 func WriteEpoch(tx ethdb.RwTx, blockNum uint64, blockHash common.Hash, transitionProof []byte) (err error) {
+	k := make([]byte, dbutils.NumberLength+common.HashLength)
+	binary.BigEndian.PutUint64(k, blockNum)
+	copy(k[dbutils.NumberLength:], blockHash[:])
+	return tx.Put(dbutils.Epoch, k, transitionProof)
+}
+
+func ReadPendingEpoch(tx ethdb.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
 	k := make([]byte, 8+32)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[8:], blockHash[:])
-	return tx.Put(dbutils.Epoch, k, transitionProof)
+	return tx.GetOne(dbutils.PendingEpoch, k)
+}
+
+func WritePendingEpoch(tx ethdb.RwTx, blockNum uint64, blockHash common.Hash, transitionProof []byte) (err error) {
+	k := make([]byte, 8+32)
+	binary.BigEndian.PutUint64(k, blockNum)
+	copy(k[8:], blockHash[:])
+	return tx.Put(dbutils.PendingEpoch, k, transitionProof)
 }
