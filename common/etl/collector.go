@@ -108,7 +108,7 @@ func (c *Collector) Collect(k, v []byte) error {
 
 //only for migrations
 func (c *Collector) Flush() error {
-	return c.flushBuffer(nil, true)
+	return c.flushBuffer(nil, false)
 }
 
 func (c *Collector) Load(logPrefix string, db ethdb.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
