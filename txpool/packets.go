@@ -20,8 +20,8 @@ import "fmt"
 
 const ParseHashErrorPrefix = "parse hash payload"
 
-// ParseHash extracts the next hash from the RLP encoding (payload) from a given position
-// it appends the hash to the given slice, reusing the space if there is enough capacity
+// ParseHash extracts the next hash from the RLP encoding (payload) from a given position.
+// It appends the hash to the given slice, reusing the space if there is enough capacity
 // The first returned value is the slice where hash is appended to.
 // The second returned value is the new position in the RLP payload after the extraction
 // of the hash.
@@ -69,4 +69,12 @@ func ParseHashesCount(payload []byte, pos int) (int, int, error) {
 		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", ParseHashErrorPrefix)
 	}
 	return dataLen / 33, dataPos + dataLen, nil
+}
+
+// EncodeHashes produces RLP encoding of given number of hashes, as RLP list
+// It appends encoding to the given given slice (encodeBuf), reusing the space
+// there is there is enough capacity.
+// The first returned value is rthe slice where encodinfg
+func EncodeHashes(hashes []byte, count int, encodeBuf []byte) ([]byte, error) {
+	return nil, nil
 }
