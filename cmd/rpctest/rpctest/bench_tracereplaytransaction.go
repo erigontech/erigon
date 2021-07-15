@@ -73,9 +73,9 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 				if resg.Err == nil && resg.Result.Get("error") == nil {
 					recording = false
 					if err := compareResults(res.Result, resg.Result); err != nil {
-						fmt.Printf("Different traceTransaction block %d, tx %s: %v\n", bn, tx.Hash, err)
+						fmt.Printf("Different trace_replayTransaction block %d, tx %s: %v\n", bn, tx.Hash, err)
 						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
+						fmt.Printf("\n\nOE response=================================\n%s\n", resg.Response)
 						return
 					}
 				}
