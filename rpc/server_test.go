@@ -111,7 +111,7 @@ func runTestScript(t *testing.T, file string) {
 				})
 				b, _ := json.Marshal(msgs)
 				sent = string(b)
-				msgs, batch = parseMessage(json.RawMessage(want))
+				msgs, _ = parseMessage(json.RawMessage(want))
 				sort.Slice(msgs, func(i, j int) bool {
 					return string(msgs[i].ID) < string(msgs[j].ID)
 				})
