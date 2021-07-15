@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"encoding/hex"
 	"sync"
 	"testing"
 
@@ -42,7 +43,12 @@ func TestFetch(t *testing.T) {
 	mock.StreamWg.Wait()
 	// Send one transaction id
 	wg.Add(1)
-	errs := mock.Send(&sentry.InboundMessage{Id: sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, Data: nil, PeerId: PeerId})
+	data, _ := hex.DecodeString("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328")
+	errs := mock.Send(&sentry.InboundMessage{
+		Id:     sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		Data:   data,
+		PeerId: PeerId,
+	})
 	for i, err := range errs {
 		if err != nil {
 			t.Errorf("sending new pool tx hashes 66 (%d): %v", i, err)

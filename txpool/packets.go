@@ -16,7 +16,11 @@
 
 package txpool
 
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+	"math/bits"
+)
 
 const ParseHashErrorPrefix = "parse hash payload"
 
@@ -68,13 +72,44 @@ func ParseHashesCount(payload []byte, pos int) (int, int, error) {
 	if dataLen%33 != 0 {
 		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", ParseHashErrorPrefix)
 	}
-	return dataLen / 33, dataPos + dataLen, nil
+	return dataLen / 33, dataPos, nil
 }
 
 // EncodeHashes produces RLP encoding of given number of hashes, as RLP list
 // It appends encoding to the given given slice (encodeBuf), reusing the space
 // there is there is enough capacity.
-// The first returned value is rthe slice where encodinfg
+// The first returned value is the slice where encodinfg
 func EncodeHashes(hashes []byte, count int, encodeBuf []byte) ([]byte, error) {
-	return nil, nil
+	var prefixLen int
+	dataLen := count * 33
+	var beLen int
+	if dataLen < 56 {
+		prefixLen = 1
+	} else {
+		beLen = (bits.Len64(uint64(dataLen)) + 7) / 8
+		prefixLen = 1 + beLen
+	}
+	var encoding []byte
+	if total := len(encodeBuf) + dataLen + prefixLen; cap(encodeBuf) >= total {
+		encoding = encodeBuf[:dataLen+prefixLen] // Reuse the space in pkbuf, is it has enough capacity
+	} else {
+		encoding = make([]byte, total)
+		copy(encoding, encodeBuf)
+	}
+	if dataLen < 56 {
+		encoding[0] = 192 + byte(dataLen)
+	} else {
+		encoding[0] = 247 + byte(beLen)
+		binary.BigEndian.PutUint64(encoding[1:], uint64(beLen))
+		copy(encoding[1:], encoding[9-beLen:9])
+	}
+	hashP := 0
+	encP := prefixLen
+	for i := 0; i < count; i++ {
+		encoding[encP] = 128 + 32
+		copy(encoding[encP+1:encP+33], hashes[hashP:hashP+32])
+		encP += 33
+		hashP += 32
+	}
+	return encoding, nil
 }

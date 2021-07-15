@@ -63,3 +63,39 @@ func TestParseHash(t *testing.T) {
 		})
 	}
 }
+
+var hashEncodeTests = []struct {
+	payloadStr  string
+	hashesStr   string
+	hashCount   int
+	expectedErr bool
+}{
+	{payloadStr: "e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, expectedErr: false},
+}
+
+func TestEncodeHash(t *testing.T) {
+	for i, tt := range hashEncodeTests {
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			var payload []byte
+			var hashes []byte
+			var err error
+			var encodeBuf []byte
+			if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
+				t.Fatal(err)
+			}
+			if hashes, err = hex.DecodeString(tt.hashesStr); err != nil {
+				t.Fatal(err)
+			}
+			if encodeBuf, err = EncodeHashes(hashes, tt.hashCount, encodeBuf); err != nil {
+				if !tt.expectedErr {
+					t.Fatal(err)
+				}
+			} else if tt.expectedErr {
+				t.Fatalf("expected error when encoding")
+			}
+			if !bytes.Equal(payload, encodeBuf) {
+				t.Errorf("encoding expected %x, got %x", payload, encodeBuf)
+			}
+		})
+	}
+}
