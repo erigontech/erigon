@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
@@ -180,6 +181,8 @@ func NewEpochManager() *EpochManager {
 		force:           true,
 	}
 }
+
+func (e *EpochManager) noteNewEpoch() { e.force = true }
 
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
@@ -868,6 +871,7 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		return err
 	}
 	if epochEndProof != nil {
+		c.EpochManager.noteNewEpoch()
 		log.Info("[aura] epoch transition", "block_num", header.Number.Uint64())
 		if err := e.PutEpoch(header.Hash(), header.Number.Uint64(), epochEndProof); err != nil {
 			return err
