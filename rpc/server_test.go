@@ -19,10 +19,12 @@ package rpc
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"io"
 	"io/ioutil"
 	"net"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +104,20 @@ func runTestScript(t *testing.T, file string) {
 				t.Fatalf("read error: %v", err)
 			}
 			sent = strings.TrimRight(sent, "\r\n")
+			msgs, batch := parseMessage(json.RawMessage(sent))
+			if batch {
+				sort.Slice(msgs, func(i, j int) bool {
+					return string(msgs[i].ID) < string(msgs[j].ID)
+				})
+				b, _ := json.Marshal(msgs)
+				sent = string(b)
+				msgs, batch = parseMessage(json.RawMessage(want))
+				sort.Slice(msgs, func(i, j int) bool {
+					return string(msgs[i].ID) < string(msgs[j].ID)
+				})
+				b, _ = json.Marshal(msgs)
+				want = string(b)
+			}
 			if sent != want {
 				t.Errorf("wrong line from server\ngot:  %s\nwant: %s", sent, want)
 			}
