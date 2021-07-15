@@ -137,9 +137,6 @@ type (
 	addLogChange struct {
 		txhash common.Hash
 	}
-	addPreimageChange struct {
-		hash common.Hash
-	}
 	touchChange struct {
 		account *common.Address
 	}
@@ -242,14 +239,6 @@ func (ch addLogChange) revert(s *IntraBlockState) {
 }
 
 func (ch addLogChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch addPreimageChange) revert(s *IntraBlockState) {
-	delete(s.preimages, ch.hash)
-}
-
-func (ch addPreimageChange) dirtied() *common.Address {
 	return nil
 }
 

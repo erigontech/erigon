@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/metrics"
 )
 
-const ReadersLimit = 2000 // MDBX_READERS_LIMIT on 64bit system
+const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
