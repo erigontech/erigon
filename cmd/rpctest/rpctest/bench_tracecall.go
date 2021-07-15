@@ -113,6 +113,7 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 					return
 				}
 				if resg.Err == nil && resg.Result.Get("error") == nil {
+					recording = false
 					if err := compareResults(res.Result, resg.Result); err != nil {
 						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
 						if errs != nil {

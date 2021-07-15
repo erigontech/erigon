@@ -158,15 +158,15 @@ func main() {
 	}
 	with(benchTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var bench12Cmd = &cobra.Command{
-		Use:   "bench12",
+	var benchDebugTraceCallCmd = &cobra.Command{
+		Use:   "benchDebugTraceCall",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench12(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.BenchDebugTraceCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench12Cmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
+	with(benchDebugTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench13Cmd = &cobra.Command{
 		Use:   "bench13",
@@ -251,7 +251,7 @@ func main() {
 		bench9Cmd,
 		benchTraceTransactionCmd,
 		benchTraceCallCmd,
-		bench12Cmd,
+		benchDebugTraceCallCmd,
 		bench13Cmd,
 		benchTraceBlockCmd,
 		benchTraceFilterCmd,
