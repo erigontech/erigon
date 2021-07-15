@@ -594,6 +594,8 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 				traceResult.StateDiff = sdMap
 				stateWriter = sd
 				initialIbs = ibs.Copy()
+			}
+			if traceTypeStateDiff || traceTypeTrace {
 				vmConfig = vm.Config{Debug: traceTypeTrace, Tracer: &ot}
 			}
 		}
@@ -708,6 +710,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 			traceResult.StateDiff = sdMap
 			stateWriter = sd
 			initialIbs = ibs.Copy()
+		}
+		if traceTypeStateDiff || traceTypeTrace {
 			vmConfig = vm.Config{Debug: traceTypeTrace, Tracer: &ot}
 		}
 		_, execResult, err := core.ApplyTransaction(chainConfig, getHeader, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
