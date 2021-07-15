@@ -23,6 +23,7 @@ func main() {
 		blockFrom   uint64
 		blockTo     uint64
 		recordFile  string
+		errorFile   string
 	)
 	withErigonUrl := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
@@ -39,6 +40,9 @@ func main() {
 	}
 	withRecord := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&recordFile, "recordFile", "", "File where to record requests and responses to")
+	}
+	withErrorFile := func(cmd *cobra.Command) {
+		cmd.Flags().StringVar(&recordFile, "errorFile", "", "File where to record errors (when responses do not match)")
 	}
 	with := func(cmd *cobra.Command, opts ...func(*cobra.Command)) {
 		for i := range opts {
@@ -114,15 +118,15 @@ func main() {
 	}
 	with(bench7Cmd, withErigonUrl, withGethUrl)
 
-	var bench8Cmd = &cobra.Command{
-		Use:   "bench8",
+	var benchEthGetLogsCmd = &cobra.Command{
+		Use:   "benchEthGetLogs",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench8(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.BenchEthGetLogs(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench8Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
+	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var bench9Cmd = &cobra.Command{
 		Use:   "bench9",
@@ -144,35 +148,35 @@ func main() {
 	}
 	with(benchTraceTransactionCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
-	var bench11Cmd = &cobra.Command{
-		Use:   "bench11",
+	var benchTraceCallCmd = &cobra.Command{
+		Use:   "benchTraceCall",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench11(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.BenchTraceCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
-	with(bench11Cmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
+	with(benchTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
-	var bench12Cmd = &cobra.Command{
-		Use:   "bench12",
+	var benchDebugTraceCallCmd = &cobra.Command{
+		Use:   "benchDebugTraceCall",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench12(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.BenchDebugTraceCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench12Cmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
+	with(benchDebugTraceCallCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
-	var bench13Cmd = &cobra.Command{
-		Use:   "bench13",
+	var benchTraceCallManyCmd = &cobra.Command{
+		Use:   "benchTraceCallMany",
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Bench13(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
+			rpctest.BenchTraceCallMany(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile)
 		},
 	}
-	with(bench13Cmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
+	with(benchTraceCallManyCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord)
 
 	var benchTraceBlockCmd = &cobra.Command{
 		Use:   "benchTraceBlock",
@@ -243,12 +247,12 @@ func main() {
 		bench5Cmd,
 		bench6Cmd,
 		bench7Cmd,
-		bench8Cmd,
+		benchEthGetLogsCmd,
 		bench9Cmd,
 		benchTraceTransactionCmd,
-		bench11Cmd,
-		bench12Cmd,
-		bench13Cmd,
+		benchTraceCallCmd,
+		benchDebugTraceCallCmd,
+		benchTraceCallManyCmd,
 		benchTraceBlockCmd,
 		benchTraceFilterCmd,
 		benchTxReceiptCmd,

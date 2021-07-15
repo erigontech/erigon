@@ -6,26 +6,15 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/ledgerwatch/erigon/common"
 )
 
-// Transactions on which OpenEthereum reports incorrect traces
-var wrongTxs = []string{
-	//"0xfbd66bcbc4cb374946f350ca6835571b09f68c5f635ff9fc533c3fa2ac0d19cb", // Block 9000004
-	//"0x928b01dd36bcf142bf0d4b1e75239bec8ee68a68aa3739e4f9a1b4a17785651b", // Block 9000010
-	//"0x45b60cfbcad50b24b313a40644061f36e04b4baf516a9db1a8a386863eed6070", // Block 9000023
-	//"0x9d2cb4ad7851bd745a952d9e0d42e1c3d6ee1d37ce37eb05863bdce82016078b", // Block 9000027
-	"0xcee0adc637910d9baa3c60e186ac0c270af89a836a5277846926b6913d5cee65", // Block 9500001
-}
-
-// bench1 compares response of Erigon with Geth
+// bench12 compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func Bench11(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
-	setRoutes(erigonURL, oeURL)
+func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
@@ -44,11 +33,6 @@ func Bench11(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
-	}
-
-	skipTxs := make(map[common.Hash]struct{})
-	for _, txHash := range wrongTxs {
-		skipTxs[common.HexToHash(txHash)] = struct{}{}
 	}
 
 	reqGen.reqID++
@@ -95,34 +79,34 @@ func Bench11(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 		}
 
 		for _, tx := range b.Result.Transactions {
-			if _, skip := skipTxs[common.HexToHash(tx.Hash)]; skip {
-				continue
-			}
-			recording := rec != nil // This flag will be set to false if recording is not to be performed
 			reqGen.reqID++
-			request := reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
-			res = reqGen.Erigon2("trace_call", request)
+
+			request := reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
+			recording := rec != nil // This flag will be set to false if recording is not to be performed
+			res := reqGen.Erigon2("debug_traceCall", request)
 			if res.Err != nil {
-				fmt.Printf("Could not trace call (Erigon) %s: %v\n", tx.Hash, res.Err)
+				fmt.Printf("Could not debug traceCall (Erigon) %d: %v\n", bn, res.Err)
 				return
 			}
 			if errVal := res.Result.Get("error"); errVal != nil {
-				fmt.Printf("Error tracing call (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+				fmt.Printf("Error debugging call (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 				return
 			}
+
 			if needCompare {
-				resg := reqGen.Geth2("trace_call", request)
+				resg := reqGen.Geth2("debug_traceCall", request)
 				if resg.Err != nil {
-					fmt.Printf("Could not trace call (oe) %s: %v\n", tx.Hash, resg.Err)
+					fmt.Printf("Could not debug traceCall (geth) %d: %v\n", bn, res.Err)
 					return
 				}
 				if errVal := resg.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing call (oe): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+					fmt.Printf("Error debugging call (geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 					return
 				}
 				if resg.Err == nil && resg.Result.Get("error") == nil {
+					recording = false
 					if err := compareResults(res.Result, resg.Result); err != nil {
-						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
+						fmt.Printf("Different debug traceCall block %d, tx %x: %v\n", bn, tx.Hash, err)
 						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
 						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
 						return
