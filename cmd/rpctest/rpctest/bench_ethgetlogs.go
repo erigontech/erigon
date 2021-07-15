@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-func Bench8(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
