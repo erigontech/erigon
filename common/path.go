@@ -27,7 +27,7 @@ import (
 // for such names. It adds the operation system name and Go runtime version
 // the name.
 func MakeName(name, version string) string {
-	return fmt.Sprintf("%s/v%s/%s/%s", name, version, runtime.GOOS, runtime.Version())
+	return fmt.Sprintf("%s/%s/%s-%s/%s", name, version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 }
 
 // FileExist checks if a file exists at filePath.
