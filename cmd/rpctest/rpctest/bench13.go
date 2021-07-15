@@ -38,11 +38,6 @@ func Bench13(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 		client: client,
 	}
 
-	skipTxs := make(map[common.Hash]struct{})
-	for _, txHash := range wrongTxs {
-		skipTxs[common.HexToHash(txHash)] = struct{}{}
-	}
-
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)

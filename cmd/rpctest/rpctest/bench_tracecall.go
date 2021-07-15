@@ -6,25 +6,14 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/ledgerwatch/erigon/common"
 )
-
-// Transactions on which OpenEthereum reports incorrect traces
-var wrongTxs = []string{
-	//"0xfbd66bcbc4cb374946f350ca6835571b09f68c5f635ff9fc533c3fa2ac0d19cb", // Block 9000004
-	//"0x928b01dd36bcf142bf0d4b1e75239bec8ee68a68aa3739e4f9a1b4a17785651b", // Block 9000010
-	//"0x45b60cfbcad50b24b313a40644061f36e04b4baf516a9db1a8a386863eed6070", // Block 9000023
-	//"0x9d2cb4ad7851bd745a952d9e0d42e1c3d6ee1d37ce37eb05863bdce82016078b", // Block 9000027
-	"0xcee0adc637910d9baa3c60e186ac0c270af89a836a5277846926b6913d5cee65", // Block 9500001
-}
 
 // bench1 compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func Bench11(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -40,15 +29,21 @@ func Bench11(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 		rec = bufio.NewWriter(f)
 		defer rec.Flush()
 	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if ferr != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
+	}
 
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
-	}
-
-	skipTxs := make(map[common.Hash]struct{})
-	for _, txHash := range wrongTxs {
-		skipTxs[common.HexToHash(txHash)] = struct{}{}
 	}
 
 	reqGen.reqID++
@@ -95,9 +90,6 @@ func Bench11(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 		}
 
 		for _, tx := range b.Result.Transactions {
-			if _, skip := skipTxs[common.HexToHash(tx.Hash)]; skip {
-				continue
-			}
 			recording := rec != nil // This flag will be set to false if recording is not to be performed
 			reqGen.reqID++
 			request := reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
@@ -123,9 +115,17 @@ func Bench11(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 				if resg.Err == nil && resg.Result.Get("error") == nil {
 					if err := compareResults(res.Result, resg.Result); err != nil {
 						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
-						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-						return
+						if errs != nil {
+							fmt.Fprintf(errs, "Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
+							fmt.Fprintf(errs, "\n\nTG response=================================\n%s\n", res.Response)
+							fmt.Fprintf(errs, "\n\nG response=================================\n%s\n", resg.Response)
+							errs.Flush() // nolint:errcheck
+							// Keep going
+						} else {
+							fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
+							fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
+							return
+						}
 					}
 				}
 			}
