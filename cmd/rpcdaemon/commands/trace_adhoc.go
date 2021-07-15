@@ -28,6 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
+const callTimeout = 5 * time.Minute
+
 const (
 	CALL               = "call"
 	CALLCODE           = "callcode"
@@ -725,8 +727,6 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 
 	return traceResults, nil
 }
-
-const callTimeout = 5 * time.Minute
 
 // Call implements trace_call.
 func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTypes []string, blockNrOrHash *rpc.BlockNumberOrHash) (*TraceCallResult, error) {
