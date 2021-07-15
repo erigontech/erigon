@@ -726,6 +726,7 @@ func (tx *MdbxTx) Commit() error {
 	if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
 		tx.PrintDebugInfo()
 	}
+	tx.CollectMetrics()
 
 	latency, err := tx.tx.Commit()
 	if err != nil {
