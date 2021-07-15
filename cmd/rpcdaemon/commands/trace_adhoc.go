@@ -521,6 +521,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, fmt.Errorf("block %d not found", blockNumber)
 	}
 
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
+
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
@@ -591,7 +595,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 				vmConfig = vm.Config{Debug: traceTypeTrace, Tracer: &ot}
 			}
 		}
-		_, execResult, err := core.ApplyTransaction(chainConfig, nil, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
+		_, execResult, err := core.ApplyTransaction(chainConfig, getHeader, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 		}
@@ -630,6 +634,10 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	block := rawdb.ReadBlock(tx, blockHash, blockNumber)
 	if block == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, blockHash)
+	}
+
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
 	}
 
 	var stateReader state.StateReader
@@ -700,7 +708,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 			initialIbs = ibs.Copy()
 			vmConfig = vm.Config{Debug: traceTypeTrace, Tracer: &ot}
 		}
-		_, execResult, err := core.ApplyTransaction(chainConfig, nil, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
+		_, execResult, err := core.ApplyTransaction(chainConfig, getHeader, nil, &block.Header().Coinbase, gp, ibs, stateWriter, block.Header(), txn, usedGas, vmConfig, nil)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), txn.Hash().Hex(), err)
 		}
