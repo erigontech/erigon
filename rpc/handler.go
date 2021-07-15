@@ -17,6 +17,7 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -142,7 +144,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 			return
 		}
 
-		answers := make([]*jsonrpcMessage, 0, len(msgs))
+		answers := make([]interface{}, 0, len(msgs))
 		if allMethodsAreThreadSafe {
 			// All goroutines will place results right to this array. Because requests order must match reply orders.
 			answersWithNils := make([]*jsonrpcMessage, len(msgs))
@@ -169,10 +171,18 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 				}
 			}
 		} else {
-			answers = make([]*jsonrpcMessage, 0, len(msgs))
+			answers = make([]interface{}, 0, len(msgs))
+			buf := bytes.NewBuffer(nil)
+			stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
 			for _, msg := range calls {
+				buf.Reset()
+				stream.Reset(buf)
 				if answer := h.handleCallMsg(cp, msg, stream); answer != nil {
 					answers = append(answers, answer)
+				} else {
+					if buf.Len() > 0 {
+						answers = append(answers, json.RawMessage(common.CopyBytes(buf.Bytes())))
+					}
 				}
 			}
 		}
