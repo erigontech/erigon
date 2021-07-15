@@ -135,8 +135,15 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 				break
 			}
 		}
-		// Here we can take mutex to stream and write responses when they arrive but probably not worth it
-		answersBytes := make([][]byte, len(msgs))
+		stream.WriteArrayStart()
+		firstResponse := true
+		writeToStream := func(buffer []byte) {
+			if !firstResponse {
+				stream.WriteMore()
+			}
+			stream.Write(buffer)
+			firstResponse = false
+		}
 		if allMethodsAreThreadSafe {
 			// All goroutines will place results right to this array. Because requests order must match reply orders.
 			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
@@ -144,6 +151,8 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 			defer close(boundedConcurrency)
 			wg := sync.WaitGroup{}
 			wg.Add(len(msgs))
+			streamMutex := sync.Mutex{}
+
 			for i := range calls {
 				boundedConcurrency <- struct{}{}
 				go func(i int) {
@@ -152,54 +161,47 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 						<-boundedConcurrency
 					}()
 					cb := h.reg.callback(calls[i].Method)
+					var buffer []byte
 					if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
 						batchStream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
 						h.handleCallMsg(cp, calls[i], batchStream)
-						answersBytes[i] = batchStream.Buffer()
+						buffer = batchStream.Buffer()
 					} else {
 						// Marshal inside goroutine (parallel)
 						response := h.handleCallMsg(cp, calls[i], stream)
 						if response != nil {
-							b, _ := json.Marshal(response)
-							answersBytes[i] = b
+							buffer, _ = json.Marshal(response)
 						}
+					}
+					streamMutex.Lock()
+					defer streamMutex.Unlock()
+					if buffer != nil {
+						writeToStream(buffer)
 					}
 				}(i)
 			}
 			wg.Wait()
 		} else {
-			for i, msg := range calls {
+			for _, msg := range calls {
 				cb := h.reg.callback(msg.Method)
 				if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
-					batchStream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
-					h.handleCallMsg(cp, msg, batchStream)
-					answersBytes[i] = batchStream.Buffer()
+					if !firstResponse {
+						stream.WriteMore()
+					}
+					// Can be response here empty?
+					h.handleCallMsg(cp, msg, stream)
+					firstResponse = false
 				} else {
 					response := h.handleCallMsg(cp, msg, stream)
 					if response != nil {
 						b, _ := json.Marshal(response)
-						answersBytes[i] = b
+						writeToStream(b)
 					}
 				}
 
 			}
 		}
 
-		stream.WriteArrayStart()
-		firstResponse := true
-		for _, answer := range answersBytes {
-			if answer != nil {
-				if !firstResponse {
-					stream.WriteMore()
-				}
-				if answer[len(answer)-1] == []byte("\n")[0] {
-					stream.Write(answer[:len(answer)-1])
-				} else {
-					stream.Write(answer)
-				}
-				firstResponse = false
-			}
-		}
 		stream.WriteArrayEnd()
 		stream.Flush()
 
@@ -233,6 +235,8 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 		}
 		if needWriteStream {
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+		} else {
+			stream.Write([]byte("\n"))
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -526,7 +530,6 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 			stream.WriteObjectEnd()
 		}
 		stream.WriteObjectEnd()
-		stream.Write([]byte("\n"))
 		stream.Flush()
 		return nil
 	} else {
