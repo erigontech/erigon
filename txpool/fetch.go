@@ -169,7 +169,21 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 }
 
 func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient sentry.SentryClient) error {
-	fmt.Printf("got inbound message\n")
+	switch req.Id {
+	case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65:
+		hashCount, pos, err := ParseHashesCount(req.Data, 0)
+		if err != nil {
+			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
+		}
+		var hashbuf [32]byte
+		for i := 0; i < hashCount; i++ {
+			_, pos, err = ParseHash(req.Data, pos, hashbuf[:0])
+			if err != nil {
+				return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
+			}
+			fmt.Printf("Got hash: %x\n", hashbuf[:])
+		}
+	}
 	return nil
 }
 

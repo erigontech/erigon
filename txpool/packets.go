@@ -26,12 +26,16 @@ const ParseHashErrorPrefix = "parse hash payload"
 // The second returned value is the new position in the RLP payload after the extraction
 // of the hash.
 func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
+	payloadLen := len(payload)
 	dataPos, dataLen, list, err := prefix(payload, pos)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: to len: %w", ParseHashErrorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: hash len: %w", ParseHashErrorPrefix, err)
 	}
 	if list {
 		return nil, 0, fmt.Errorf("%s: hash must be a string, not list", ParseHashErrorPrefix)
+	}
+	if dataPos+dataLen > payloadLen {
+		return nil, 0, fmt.Errorf("%s: unexpected end of payload after hash", ParseHashErrorPrefix)
 	}
 	if dataLen != 32 {
 		return nil, 0, fmt.Errorf("%s: hash must be 32 bytes long", ParseHashErrorPrefix)
@@ -45,4 +49,24 @@ func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
 	}
 	copy(hash, payload[dataPos:dataPos+dataLen])
 	return hash, dataPos + dataLen, nil
+}
+
+// ParseHashesCount looks at the RLP length prefix for list of 32-byte hashes
+// and returns number of hashes in the list to expect
+func ParseHashesCount(payload []byte, pos int) (int, int, error) {
+	payloadLen := len(payload)
+	dataPos, dataLen, list, err := prefix(payload, pos)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s: hashes len: %w", ParseHashErrorPrefix, err)
+	}
+	if !list {
+		return 0, 0, fmt.Errorf("%s: hashes must be a list, not string", ParseHashErrorPrefix)
+	}
+	if dataPos+dataLen > payloadLen {
+		return 0, 0, fmt.Errorf("%s: unexpected end of payload after hashes", ParseHashErrorPrefix)
+	}
+	if dataLen%33 != 0 {
+		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", ParseHashErrorPrefix)
+	}
+	return dataLen / 33, dataPos + dataLen, nil
 }
