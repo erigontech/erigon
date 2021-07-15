@@ -198,7 +198,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 		firstResponse := true
 		for _, answer := range answersBytes {
 			if answer != nil {
-				if firstResponse != true {
+				if !firstResponse {
 					stream.WriteMore()
 				}
 				if answer[len(answer)-1] == []byte("\n")[0] {
