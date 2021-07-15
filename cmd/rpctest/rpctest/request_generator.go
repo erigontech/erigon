@@ -187,7 +187,7 @@ func (g *RequestGenerator) traceFilterTo(prevBn uint64, bn uint64, account commo
 }
 
 func (g *RequestGenerator) traceReplayTransaction(hash string) string {
-	const template = `{"jsonrpc":"2.0","method":"trace_teplayTransaction","params":["%s", ["trace", "stateDiff"]],"id":%d}`
+	const template = `{"jsonrpc":"2.0","method":"trace_replayTransaction","params":["%s", ["trace", "stateDiff"]],"id":%d}`
 	return fmt.Sprintf(template, hash, g.reqID)
 }
 
