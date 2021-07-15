@@ -147,8 +147,6 @@ type Config struct {
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
-	Preimages bool
-
 	// Mining options
 	Miner params.MiningConfig
 
@@ -163,9 +161,6 @@ type Config struct {
 
 	// Gas Price Oracle options
 	GPO gasprice.Config
-
-	// Enables tracking of SHA3 preimages in the VM
-	EnablePreimageRecording bool
 
 	// Enables the dbg protocol
 	EnableDebugProtocol bool

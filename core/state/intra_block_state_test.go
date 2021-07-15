@@ -148,15 +148,6 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 			args: make([]int64, 1),
 		},
 		{
-			name: "AddPreimage",
-			fn: func(a testAction, s *IntraBlockState) {
-				preimage := []byte{1}
-				hash := common.BytesToHash(preimage)
-				s.AddPreimage(hash, preimage)
-			},
-			args: make([]int64, 1),
-		},
-		{
 			name: "AddAddressToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
 				s.AddAddressToAccessList(addr)
