@@ -372,11 +372,11 @@ func compareAccountRanges(erigon, geth map[common.Address]state.DumpAccount) boo
 			different = true
 		}
 		// We do not compare Root, because Erigon does not compute it
-		if eriAcc.CodeHash != gethAcc.CodeHash {
+		if eriAcc.CodeHash.String() != gethAcc.CodeHash.String() {
 			fmt.Printf("Different codehash for %x: erigon %s, geth %s\n", addr, eriAcc.CodeHash, gethAcc.CodeHash)
 			different = true
 		}
-		if eriAcc.Code != gethAcc.Code {
+		if eriAcc.Code.String() != gethAcc.Code.String() {
 			fmt.Printf("Different codehash for %x: erigon %s, geth %s\n", addr, eriAcc.Code, gethAcc.Code)
 			different = true
 		}
