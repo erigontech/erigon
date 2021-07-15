@@ -71,13 +71,6 @@ type handler struct {
 	maxBatchConcurrency uint
 }
 
-// Custom bytes type which writes to JSON as is
-type JSONBytes []byte
-
-func (a JSONBytes) MarshalJSON() ([]byte, error) {
-	return a, nil
-}
-
 type callProc struct {
 	ctx       context.Context
 	notifiers []*Notifier
@@ -153,7 +146,6 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 			wg.Add(len(msgs))
 			for i := range calls {
 				boundedConcurrency <- struct{}{}
-				// Here we can take mutex to stream and write responses when they arrive but probably not worth it
 				go func(i int) {
 					defer func() {
 						wg.Done()
@@ -183,7 +175,6 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 					h.handleCallMsg(cp, msg, batchStream)
 					answersBytes[i] = batchStream.Buffer()
 				} else {
-					// Marshal inside goroutine (parallel)
 					response := h.handleCallMsg(cp, msg, stream)
 					if response != nil {
 						b, _ := json.Marshal(response)
@@ -213,7 +204,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 		stream.Flush()
 
 		if needWriteStream {
-			h.conn.writeJSON(cp.ctx, JSONBytes(stream.Buffer()))
+			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
 		} else {
 			stream.Write([]byte("\n"))
 		}
@@ -241,7 +232,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 			h.conn.writeJSON(cp.ctx, answer)
 		}
 		if needWriteStream {
-			h.conn.writeJSON(cp.ctx, JSONBytes(stream.Buffer()))
+			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
