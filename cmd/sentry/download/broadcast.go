@@ -176,7 +176,7 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 					}
 					log.Error("BroadcastLocalPooledTxs", "error", err)
 				}
-				avgPeersPerSent65 = (avgPeersPerSent65 + len(peers.Peers)) / 2
+				avgPeersPerSent65 += len(peers.Peers)
 
 			case eth.ETH66:
 				if req66 == nil {
@@ -192,7 +192,7 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 					}
 					log.Error("BroadcastLocalPooledTxs", "error", err)
 				}
-				avgPeersPerSent66 = (avgPeersPerSent66 + len(peers.Peers)) / 2
+				avgPeersPerSent66 += len(peers.Peers)
 			}
 		}
 	}
