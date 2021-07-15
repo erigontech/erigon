@@ -30,7 +30,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
@@ -222,6 +221,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 			panic(fmt.Errorf("proof produced by this engine is invalid: %w", err))
 		}
 		epochSet := list.validators
+		log.Info("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber, "l", list.validators)
 		e.finalityChecker = NewRollingFinality(epochSet)
 	}
 	e.epochTransitionHash = lastTransition.BlockHash
@@ -1618,26 +1618,24 @@ func (f *RollingFinality) removeSigners(signers []common.Address) {
 			panic("all hashes in `header` should have entries in `sign_count` for their signers")
 			//continue
 		}
-		if count > 1 {
-			f.signCount[signers[i]] = count - 1
-		} else {
+		if count <= 1 {
 			delete(f.signCount, signers[i])
+		} else {
+			f.signCount[signers[i]] = count - 1
 		}
 	}
 }
 func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool), parentHash, epochTransitionHash common.Hash) error { // starts from chainHeadParentHash
 	f.clear()
-	var signers []common.Address
 
 	for {
-		blockSigners, blockHash, newParentHash, blockNum, ok := get(parentHash)
+		signers, blockHash, newParentHash, blockNum, ok := get(parentHash)
 		if !ok {
 			return nil
 		}
 		if blockHash == epochTransitionHash {
 			return nil
 		}
-		signers = append(signers[:0], blockSigners...)
 		for i := range signers {
 			if !f.hasSigner(signers[i]) {
 				return fmt.Errorf("unknown validator: blockNum=%d", blockNum)
@@ -1656,7 +1654,7 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 				panic("we just pushed a block")
 			}
 			f.removeSigners(e.signers)
-			log.Debug("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
+			log.Info("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
 			break
 		}
 
