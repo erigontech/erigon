@@ -266,8 +266,8 @@ func ReadTransactions(db ethdb.KVGetter, baseTxId uint64, amount uint32, canonic
 	reader := bytes.NewReader(nil)
 	stream := rlp.NewStream(reader, 0)
 	txs := make([]types.Transaction, amount)
-	baseTxId++ //skip transaction before block
-	binary.BigEndian.PutUint64(txIdKey, baseTxId)
+	firstRealTransaction := baseTxId + 1
+	binary.BigEndian.PutUint64(txIdKey, firstRealTransaction)
 	i := uint32(0)
 
 	bucket := dbutils.EthTx
@@ -291,8 +291,7 @@ func ReadTransactions(db ethdb.KVGetter, baseTxId uint64, amount uint32, canonic
 }
 
 func WriteTransactions(db ethdb.RwTx, bucket string, txs []types.Transaction, baseTxId uint64) error {
-	baseTxId++ //skip transaction before block
-	txId := baseTxId
+	txId := baseTxId + 1 //skip transaction before block
 	buf := bytes.NewBuffer(nil)
 	c, err := db.RwCursor(bucket)
 	if err != nil {
@@ -319,8 +318,7 @@ func WriteTransactions(db ethdb.RwTx, bucket string, txs []types.Transaction, ba
 }
 
 func WriteRawTransactions(db ethdb.RwTx, txs [][]byte, baseTxId uint64) error {
-	baseTxId++ //skip transaction before block
-	txId := baseTxId
+	txId := baseTxId + 1 //skip transaction before block
 	c, err := db.RwCursor(dbutils.EthTx)
 	if err != nil {
 		return err
@@ -341,7 +339,7 @@ func WriteRawTransactions(db ethdb.RwTx, txs [][]byte, baseTxId uint64) error {
 
 func DeleteTransactions(db ethdb.RwTx, bucket string, baseTxId uint64, amount uint32) error {
 	k := make([]byte, 8)
-	//add transactions before and after the block
+	//transactions before and after the block
 	for i := baseTxId; i < baseTxId+uint64(amount)+2; i++ {
 		binary.BigEndian.PutUint64(k, i)
 		err := db.Delete(bucket, k, nil)

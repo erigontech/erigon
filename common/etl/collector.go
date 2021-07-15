@@ -108,6 +108,9 @@ func (c *Collector) Collect(k, v []byte) error {
 
 //only for migrations
 func (c *Collector) Flush() error {
+	defer func() {
+		c.allFlushed = true
+	}()
 	return c.flushBuffer(nil, false)
 }
 

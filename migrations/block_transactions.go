@@ -120,7 +120,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 							return err
 						}
 
-						err = ethTXCollector.Collect(dbutils.EncodeBlockNumber(ethTXIndex+uint64(i)), common.CopyBytes(v))
+						err = ethTXCollector.Collect(dbutils.EncodeBlockNumber(ethTXIndex+uint64(i)+1), common.CopyBytes(v))
 						if err != nil {
 							return err
 						}
@@ -131,8 +131,9 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 						}
 					}
 				}
+
 				bfsNew.BaseTxId = ethTXIndex
-				ethTXIndex += uint64(bfsNew.TxAmount)
+				ethTXIndex += uint64(bfsNew.TxAmount) + 2
 			} else {
 				bfsNew.Canonical = false
 				if bfsNew.TxAmount > 0 {
@@ -145,7 +146,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 							return err
 						}
 
-						err = nonCanonicalCollector.Collect(dbutils.EncodeBlockNumber(nonCanonicalIndex+uint64(i)), common.CopyBytes(v))
+						err = nonCanonicalCollector.Collect(dbutils.EncodeBlockNumber(nonCanonicalIndex+uint64(i)+1), common.CopyBytes(v))
 						if err != nil {
 							return err
 						}
@@ -157,7 +158,7 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 					}
 				}
 				bfsNew.BaseTxId = nonCanonicalIndex
-				nonCanonicalIndex += uint64(bfsNew.TxAmount)
+				nonCanonicalIndex += uint64(bfsNew.TxAmount) + 2
 			}
 			bodyBytes, err := rlp.EncodeToBytes(bfsNew)
 			if err != nil {

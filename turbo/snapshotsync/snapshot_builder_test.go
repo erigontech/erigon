@@ -870,7 +870,6 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint
 
 	var blockNum uint64
 	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
-		//fmt.Println(common.Bytes2Hex(k))
 		if binary.BigEndian.Uint64(k[:8]) != blockNum {
 			t.Fatal("incorrect block number", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
 		}
