@@ -237,7 +237,6 @@ func printLogs(tx ethdb.RwTx, timings []interface{}) error {
 func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		panic(1)
 		var err error
 		tx, err = db.BeginRw(context.Background())
 		if err != nil {
