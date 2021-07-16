@@ -214,7 +214,7 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 }
 
 func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
-	dbTx, err := s.db.BeginRw(ctx)
+	dbTx, err := s.db.BeginRw(ctx) //nolint
 	if err != nil {
 		return nil, err
 	}

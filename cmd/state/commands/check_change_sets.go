@@ -227,6 +227,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 					return err
 				}
 				rwtx, err = chainDb.BeginRw(context.Background())
+				defer rwtx.Rollback()
 				if err != nil {
 					return err
 				}

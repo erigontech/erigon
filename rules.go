@@ -35,7 +35,10 @@ func txDeferRollback(m dsl.Matcher) {
 	).
 		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
 		//At(m["unlock"]).
-		Report(`add "defer $tx.Rollback()" right after transaction creation error check. Or consider use "$db.View" or "$db.Update" .`)
+		Report(`Add "defer $tx.Rollback()" right after transaction creation error check. 
+			If you are in the loop - consider use "$db.View" or "$db.Update" or extract whole transaction to function.
+			Without rollback in defer - app can deadlock on error or panic.
+			`)
 
 }
 

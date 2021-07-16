@@ -485,16 +485,11 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	tm := time.After(time.Second * 10)
 	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
-		roTx, err := db.BeginRo(context.Background())
+		err = db.View(context.Background(), func(tx ethdb.Tx) error { return sb.Final(tx) })
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		err = sb.Final(roTx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		roTx.Rollback()
 		select {
 		case <-tm:
 			t.Fatal("timeout")
@@ -1087,8 +1082,8 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	defer tx.Rollback()
+
 	dataTo := uint64(15)
 	snapshotTo := uint64(10)
 	err = GenerateBodyData(tx, 0, dataTo)
@@ -1105,6 +1100,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer readTX.Rollback()
 
 	bodySnapshotPath := filepath.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
 	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
@@ -1121,6 +1117,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer bodySnapshotTX.Rollback()
 
 	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
 	ethTXCursor, err := bodySnapshotTX.Cursor(dbutils.EthTx)
@@ -1131,8 +1128,8 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	bodySnapshotTX.Rollback()
+
 	ch := make(chan struct{})
 	db.UpdateSnapshots("bodies", kvSnapshot, ch)
 	select {
@@ -1144,6 +1141,8 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer withBodySnapshotTX.Rollback()
+
 	verifyFullBodiesData(t, withBodySnapshotTX, dataTo)
 	withBodySnapshotTX.Rollback()
 
@@ -1151,6 +1150,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rwTX.Rollback()
 
 	err = RemoveBlocksData(db, rwTX, snapshotTo)
 	if err != nil {
@@ -1166,6 +1166,8 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer withBodySnapshotTX.Rollback()
+
 	verifyFullBodiesData(t, withBodySnapshotTX, dataTo)
 	withBodySnapshotTX.Rollback()
 
@@ -1175,6 +1177,8 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer writeDBKVRoTX.Rollback()
+
 	verifyPrunedBlocksData(t, writeDBKVRoTX, snapshotTo, dataTo, binary.BigEndian.Uint64(lastTxID))
 	writeDBKVRoTX.Rollback()
 
@@ -1182,6 +1186,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
 
 	//snapshot to 20
 	dataFrom := uint64(16)
@@ -1202,6 +1207,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer readTX.Rollback()
 
 	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
 	if err != nil {
@@ -1218,6 +1224,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer bodySnapshotTX.Rollback()
 
 	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
 	ethTXCursor, err = bodySnapshotTX.Cursor(dbutils.EthTx)
@@ -1241,6 +1248,8 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer withBodySnapshotTX.Rollback()
+
 	verifyFullBodiesData(t, withBodySnapshotTX, dataTo)
 	withBodySnapshotTX.Rollback()
 
@@ -1248,6 +1257,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rwTX.Rollback()
 
 	err = RemoveBlocksData(db, rwTX, snapshotTo)
 	if err != nil {
@@ -1263,6 +1273,7 @@ func TestPruneBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer withBodySnapshotTX.Rollback()
 
 	verifyFullBodiesData(t, withBodySnapshotTX, dataTo)
 	withBodySnapshotTX.Rollback()
