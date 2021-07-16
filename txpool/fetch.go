@@ -41,6 +41,7 @@ type Fetch struct {
 	ctx           context.Context       // Context used for cancellation and closing of the fetcher
 	sentryClients []sentry.SentryClient // sentry clients that will be used for accessing the network
 	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
+	pool          Pool                  // Transaction pool implementation
 	wg            *sync.WaitGroup       // Waitgroup used for synchronisation in the tests (nil when not in tests)
 	logger        *log.Logger
 }
@@ -53,6 +54,7 @@ func NewFetch(ctx context.Context,
 	genesisHash [32]byte,
 	networkId uint64,
 	forks []uint64,
+	pool Pool,
 ) *Fetch {
 	statusData := &sentry.StatusData{
 		NetworkId:       networkId,
@@ -68,6 +70,7 @@ func NewFetch(ctx context.Context,
 		ctx:           ctx,
 		sentryClients: sentryClients,
 		statusData:    statusData,
+		pool:          pool,
 		logger:        log.Default(),
 	}
 }
@@ -176,12 +179,23 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 		}
 		var hashbuf [32]byte
+		var unknownHashes []byte
+		var unknownCount int
 		for i := 0; i < hashCount; i++ {
 			_, pos, err = ParseHash(req.Data, pos, hashbuf[:0])
 			if err != nil {
 				return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 			}
-			fmt.Printf("Got hash: %x\n", hashbuf[:])
+			if !f.pool.IdHashKnown(hashbuf[:]) {
+				unknownHashes = append(unknownHashes, hashbuf[:]...)
+			}
+		}
+		if len(unknownHashes) > 0 {
+			var encodedHashes []byte
+			if encodedHashes, err = EncodeHashes(unknownHashes, unknownCount, nil); err != nil {
+				return err
+			}
+
 		}
 	}
 	return nil

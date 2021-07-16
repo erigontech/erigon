@@ -396,7 +396,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: V: %w", ParseTransactionErrorPrefix, err)
 		}
-		fmt.Printf("Legacy V: %d\n", ctx.chainId)
 		// Compute chainId from V
 		if ctx.chainId.Eq(&ctx.n27) || ctx.chainId.Eq(&ctx.n28) {
 			// Do not add chain id and two extra zeros
