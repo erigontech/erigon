@@ -80,15 +80,12 @@ func ParseHashesCount(payload []byte, pos int) (int, int, error) {
 // there is there is enough capacity.
 // The first returned value is the slice where encodinfg
 func EncodeHashes(hashes []byte, count int, encodeBuf []byte) ([]byte, error) {
-	var prefixLen int
 	dataLen := count * 33
 	var beLen int
-	if dataLen < 56 {
-		prefixLen = 1
-	} else {
+	if dataLen >= 56 {
 		beLen = (bits.Len64(uint64(dataLen)) + 7) / 8
-		prefixLen = 1 + beLen
 	}
+	prefixLen := 1 + beLen
 	var encoding []byte
 	if total := len(encodeBuf) + dataLen + prefixLen; cap(encodeBuf) >= total {
 		encoding = encodeBuf[:dataLen+prefixLen] // Reuse the space in pkbuf, is it has enough capacity
@@ -116,14 +113,68 @@ func EncodeHashes(hashes []byte, count int, encodeBuf []byte) ([]byte, error) {
 
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
 func EncodeGetPooledTransactions66(hashes []byte, count int, requestId uint64, encodeBuf []byte) ([]byte, error) {
-	var prefixLen int
 	requestIdLen := (bits.Len64(requestId) + 7) / 8
-	dataLen := count * 33
-	var beLen int
-	if dataLen < 56 {
-		prefixLen = 1
-	} else {
-		beLen = (bits.Len64(uint64(dataLen)) + 7) / 8
-		prefixLen = 1 + beLen
+	hashesLen := count * 33
+	var hashesBeLen int
+	if hashesLen >= 56 {
+		hashesBeLen = (bits.Len64(uint64(hashesLen)) + 7) / 8
 	}
+	dataLen := requestIdLen + hashesLen + 1 + hashesBeLen
+	if requestId == 0 || requestId >= 128 {
+		dataLen++
+	}
+	var dataBeLen int
+	if dataLen >= 56 {
+		dataBeLen = (bits.Len64(uint64(dataLen)) + 7) / 8
+	}
+	prefixLen := 1 + dataBeLen
+	var encoding []byte
+	if total := len(encodeBuf) + dataLen + prefixLen; cap(encodeBuf) >= total {
+		encoding = encodeBuf[:dataLen+prefixLen] // Reuse the space in pkbuf, is it has enough capacity
+	} else {
+		encoding = make([]byte, total)
+		copy(encoding, encodeBuf)
+	}
+	pos := 0
+	// Length prefix for the entire structure
+	if dataLen < 56 {
+		encoding[pos] = 192 + byte(dataLen)
+	} else {
+		encoding[pos] = 247 + byte(dataBeLen)
+		binary.BigEndian.PutUint64(encoding[pos+1:], uint64(dataBeLen))
+		copy(encoding[pos+1:], encoding[pos+9-dataBeLen:pos+9])
+	}
+	pos += prefixLen
+	// encode requestId
+	if requestId == 0 || requestId > 128 {
+		encoding[pos] = 128 + byte(requestIdLen)
+	} else {
+		encoding[pos] = byte(requestId)
+	}
+	pos++
+	if requestId > 128 {
+		binary.BigEndian.PutUint64(encoding[pos:], requestId)
+		copy(encoding[pos:], encoding[pos+8-requestIdLen:pos+8])
+		pos += requestIdLen
+	}
+	// Encode length prefix for hashes
+	if hashesLen < 56 {
+		encoding[pos] = 192 + byte(hashesLen)
+		pos++
+	} else {
+		encoding[pos] = 247 + byte(hashesBeLen)
+		pos++
+		binary.BigEndian.PutUint64(encoding[pos:], uint64(hashesBeLen))
+		copy(encoding[pos:], encoding[pos+8-hashesBeLen:pos+8])
+		pos += hashesBeLen
+	}
+	hashP := 0
+	for i := 0; i < count; i++ {
+		encoding[pos] = 128 + 32
+		pos++
+		copy(encoding[pos:pos+32], hashes[hashP:hashP+32])
+		pos += 32
+		hashP += 32
+	}
+	return encoding, nil
 }

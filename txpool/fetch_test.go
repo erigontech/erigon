@@ -34,8 +34,8 @@ func TestFetch(t *testing.T) {
 	defer cancelFn()
 	mock := NewMockSentry(ctx)
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, mock)
-
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks)
+	mockPool := &MockPool{}
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, mockPool)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	mock.StreamWg.Add(2)

@@ -107,3 +107,10 @@ func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_Peers
 		return nil
 	}
 }
+
+type MockPool struct {
+}
+
+func (mp *MockPool) IdHashKnown(hash []byte) bool {
+	return false
+}

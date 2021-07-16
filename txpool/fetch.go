@@ -191,11 +191,25 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 			}
 		}
 		if len(unknownHashes) > 0 {
-			var encodedHashes []byte
-			if encodedHashes, err = EncodeHashes(unknownHashes, unknownCount, nil); err != nil {
+			var encodedRequest []byte
+			var messageId sentry.MessageId
+			if req.Id == sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66 {
+				if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, unknownCount, uint64(1), nil); err != nil {
+					return err
+				}
+				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
+			} else {
+				if encodedRequest, err = EncodeHashes(unknownHashes, unknownCount, nil); err != nil {
+					return err
+				}
+				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_65
+			}
+			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
+				Data:   &sentry.OutboundMessageData{Id: messageId, Data: encodedRequest},
+				PeerId: req.PeerId,
+			}, &grpc.EmptyCallOption{}); err != nil {
 				return err
 			}
-
 		}
 	}
 	return nil
