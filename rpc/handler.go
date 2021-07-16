@@ -130,13 +130,6 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 	h.startCallProc(func(cp *callProc) {
 		stream.WriteArrayStart()
 		firstResponse := true
-		writeToStream := func(buffer []byte) {
-			if !firstResponse {
-				stream.WriteMore()
-			}
-			stream.Write(buffer)
-			firstResponse = false
-		}
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
 		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
@@ -145,9 +138,29 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 		wg.Add(len(msgs))
 		streamMutex := sync.Mutex{}
 
+		writeToStream := func(buffer []byte) {
+			if len(buffer) == 0 {
+				return
+			}
+
+			streamMutex.Lock()
+			defer streamMutex.Unlock()
+
+			if !firstResponse {
+				stream.WriteMore()
+			}
+			stream.Write(buffer)
+			firstResponse = false
+		}
+
 		for i := range calls {
 			if calls[i].isSubscribe() {
-				continue
+				// Force subscribe call to work in non-streaming mode
+				response := h.handleCallMsg(cp, calls[i], nil)
+				if response != nil {
+					b, _ := json.Marshal(response)
+					writeToStream(b)
+				}
 			}
 			boundedConcurrency <- struct{}{}
 			go func(i int) {
@@ -156,48 +169,22 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 					<-boundedConcurrency
 				}()
 				cb := h.reg.callback(calls[i].Method)
-				var buffer []byte
+				var response *jsonrpcMessage
 				if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
 					batchStream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
-					h.handleCallMsg(cp, calls[i], batchStream)
-					buffer = batchStream.Buffer()
+					response = h.handleCallMsg(cp, calls[i], batchStream)
+					writeToStream(batchStream.Buffer())
 				} else {
-					// Marshal inside goroutine (parallel)
-					response := h.handleCallMsg(cp, calls[i], stream)
-					if response != nil {
-						buffer, _ = json.Marshal(response)
-					}
+					response = h.handleCallMsg(cp, calls[i], stream)
 				}
-				streamMutex.Lock()
-				defer streamMutex.Unlock()
-				if buffer != nil {
+				// Marshal inside goroutine (parallel)
+				if response != nil {
+					buffer, _ := json.Marshal(response)
 					writeToStream(buffer)
 				}
 			}(i)
 		}
 		wg.Wait()
-
-		for _, msg := range calls {
-			if !msg.isSubscribe() {
-				continue
-			}
-			// Can isSubscribe be streamable?
-			cb := h.reg.callback(msg.Method)
-			if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
-				if !firstResponse {
-					stream.WriteMore()
-				}
-				// Can be response here empty?
-				h.handleCallMsg(cp, msg, stream)
-				firstResponse = false
-			} else {
-				response := h.handleCallMsg(cp, msg, stream)
-				if response != nil {
-					b, _ := json.Marshal(response)
-					writeToStream(b)
-				}
-			}
-		}
 
 		stream.WriteArrayEnd()
 		stream.Flush()
