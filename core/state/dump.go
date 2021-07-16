@@ -40,9 +40,9 @@ type Dumper struct {
 type DumpAccount struct {
 	Balance   string            `json:"balance"`
 	Nonce     uint64            `json:"nonce"`
-	Root      string            `json:"root"`
-	CodeHash  string            `json:"codeHash"`
-	Code      string            `json:"code,omitempty"`
+	Root      hexutil.Bytes     `json:"root"`
+	CodeHash  hexutil.Bytes     `json:"codeHash"`
+	Code      hexutil.Bytes     `json:"code,omitempty"`
 	Storage   map[string]string `json:"storage,omitempty"`
 	Address   *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
 	SecureKey *hexutil.Bytes    `json:"key,omitempty"`     // If we don't have address, we can output the key
@@ -160,8 +160,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
+			Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: hexutil.Bytes(emptyCodeHash[:]),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
@@ -184,9 +184,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
 			}
 			if codeHash != nil {
-				account.CodeHash = common.Bytes2Hex(codeHash)
+				account.CodeHash = codeHash
 			} else {
-				account.CodeHash = emptyCodeHash.String()
+				account.CodeHash = emptyCodeHash[:]
 			}
 
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
@@ -194,7 +194,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
 					return nil, err
 				}
-				account.Code = common.Bytes2Hex(code)
+				account.Code = code
 			}
 		}
 
@@ -213,7 +213,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				}); err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addr, err)
 			}
-			account.Root = t.Hash().String()
+			account.Root = t.Hash().Bytes()
 		}
 		c.OnAccount(addr, *account)
 	}
