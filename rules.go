@@ -43,21 +43,13 @@ func txDeferRollback(m dsl.Matcher) {
 }
 
 func closeCollector(m dsl.Matcher) {
-	m.Match(
-		`$c := etl.NewCollector($*_); $close`,
-	).
+	m.Match(`$c := etl.NewCollector($*_); $close`).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
 		Report(`Add "defer $c.Close()" right after collector creation`)
 }
 
 func passValuesByContext(m dsl.Matcher) {
-	m.Match(
-		`ctx.WithValue($*_)`,
-	).
-		//Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
-		Report(`Don't pass app-level parameters by context, pass them as-is or as typed objects`)
+	m.Match(`ctx.WithValue($*_)`).Report(`Don't pass app-level parameters by context, pass them as-is or as typed objects`)
 }
 
 func mismatchingUnlock(m dsl.Matcher) {
@@ -74,7 +66,7 @@ func mismatchingUnlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.$unlock()`).
 		Where(m["unlock"].Text == "RUnlock").
 		At(m["unlock"]).
-		Report(`maybe $mu.Unlock() was intended?
+		Report(`maybe $2mu.Unlock() was intended?
 			Rules are in ./rules.go file.`)
 
 	m.Match(`$mu.RLock(); defer $mu.$unlock()`).
