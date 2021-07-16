@@ -2,6 +2,7 @@ package integrity
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
@@ -22,7 +23,8 @@ func AssertSubset(prefix []byte, a, b uint16) {
 	}
 }
 
-func Trie(tx ethdb.Tx, slowChecks bool, quit <-chan struct{}) {
+func Trie(tx ethdb.Tx, slowChecks bool, ctx context.Context) {
+	quit := ctx.Done()
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 	seek := make([]byte, 256)

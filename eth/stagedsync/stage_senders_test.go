@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -16,6 +17,7 @@ import (
 )
 
 func TestSenders(t *testing.T) {
+	ctx := context.Background()
 	db, tx := kv.NewTestTx(t)
 	require := require.New(t)
 
@@ -106,7 +108,7 @@ func TestSenders(t *testing.T) {
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
 	cfg := StageSendersCfg(db, params.TestChainConfig, "")
-	err := SpawnRecoverSendersStage(cfg, &StageState{Stage: stages.Senders}, nil, tx, 3, nil)
+	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx)
 	assert.NoError(t, err)
 
 	{

@@ -23,13 +23,13 @@ type TxPropagate struct {
 	deliveredAnnounces map[string]map[common.Hash]struct{}
 
 	/*
-		// Stage 1: Waiting lists for newly discovered transactions that might be
+		// ID 1: Waiting lists for newly discovered transactions that might be
 		// broadcast without needing explicit request/reply round trips.
 		waitlist  map[common.Hash]map[string]struct{} // Transactions waiting for an potential broadcast
 		waittime  map[common.Hash]mclock.AbsTime      // Timestamps when transactions were added to the waitlist
 		waitslots map[string]map[common.Hash]struct{} // Waiting announcement sgroupped by peer (DoS protection)
 
-		// Stage 2: Queue of transactions that waiting to be allocated to some peer
+		// ID 2: Queue of transactions that waiting to be allocated to some peer
 		// to be retrieved directly.
 		announces map[string]map[common.Hash]struct{} // Set of announced transactions, grouped by origin peer
 		announced map[common.Hash]map[string]struct{} // Set of download locations, grouped by transaction hash

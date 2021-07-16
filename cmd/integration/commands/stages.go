@@ -386,18 +386,16 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	stage3 := stage(sync, tx, stages.Senders)
 	log.Info("Stage2", "progress", stage2.BlockNumber)
 	log.Info("Stage3", "progress", stage3.BlockNumber)
-	ch := make(chan struct{})
-	defer close(ch)
 
 	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
+		u := &stagedsync.UnwindState{ID: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
 		err = stagedsync.UnwindSendersStage(u, stage3, tx, cfg)
 		if err != nil {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, sync, tx, block, ch)
+		err = stagedsync.SpawnRecoverSendersStage(cfg, stage3, sync, tx, block, ctx)
 		if err != nil {
 			return err
 		}
@@ -434,18 +432,17 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	}
 
 	log.Info("Stage4", "progress", execStage.BlockNumber)
-	ch := ctx.Done()
 	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.Execution, UnwindPoint: execStage.BlockNumber - unwind}
-		err := stagedsync.UnwindExecutionStage(u, execStage, nil, ch, cfg, false)
+		u := &stagedsync.UnwindState{ID: stages.Execution, UnwindPoint: execStage.BlockNumber - unwind}
+		err := stagedsync.UnwindExecutionStage(u, execStage, nil, ctx, cfg, false)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(execStage, sync, nil, block, ch, cfg, false)
+	err := stagedsync.SpawnExecuteBlocksStage(execStage, sync, nil, block, ctx, cfg, false)
 	if err != nil {
 		return err
 	}
@@ -472,20 +469,19 @@ func stageTrie(db ethdb.RwKV, ctx context.Context) error {
 
 	log.Info("Stage4", "progress", execStage.BlockNumber)
 	log.Info("Stage5", "progress", trieStage.BlockNumber)
-	ch := ctx.Done()
 	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.IntermediateHashes, UnwindPoint: trieStage.BlockNumber - unwind}
-		if err := stagedsync.UnwindIntermediateHashesStage(u, trieStage, nil, cfg, ch); err != nil {
+		u := &stagedsync.UnwindState{ID: stages.IntermediateHashes, UnwindPoint: trieStage.BlockNumber - unwind}
+		if err := stagedsync.UnwindIntermediateHashesStage(u, trieStage, nil, cfg, ctx); err != nil {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(trieStage, nil /* Unwinder */, nil, cfg, ch); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(trieStage, nil /* Unwinder */, nil, cfg, ctx); err != nil {
 			return err
 		}
 	}
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		integrity.Trie(tx, integritySlow, ch)
+		integrity.Trie(tx, integritySlow, ctx)
 		return nil
 	}); err != nil {
 		return err
@@ -516,16 +512,15 @@ func stageHashState(db ethdb.RwKV, ctx context.Context) error {
 	stage6 := stage(sync, tx, stages.HashState)
 	log.Info("Stage5", "progress", stage5.BlockNumber)
 	log.Info("Stage6", "progress", stage6.BlockNumber)
-	ch := ctx.Done()
 	cfg := stagedsync.StageHashStateCfg(db, tmpdir)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
-		err = stagedsync.UnwindHashStateStage(u, stage6, tx, cfg, ch)
+		u := &stagedsync.UnwindState{ID: stages.HashState, UnwindPoint: stage6.BlockNumber - unwind}
+		err = stagedsync.UnwindHashStateStage(u, stage6, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnHashStateStage(stage6, tx, cfg, ch)
+		err = stagedsync.SpawnHashStateStage(stage6, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
@@ -553,13 +548,13 @@ func stageLogIndex(db ethdb.RwKV, ctx context.Context) error {
 
 	execAt := progress(tx, stages.Execution)
 	s := stage(sync, tx, stages.LogIndex)
-	log.Info("Stage exec", "progress", execAt)
-	log.Info("Stage log index", "progress", s.BlockNumber)
+	log.Info("ID exec", "progress", execAt)
+	log.Info("ID log index", "progress", s.BlockNumber)
 	ch := ctx.Done()
 
 	cfg := stagedsync.StageLogIndexCfg(db, tmpdir)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
+		u := &stagedsync.UnwindState{ID: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
 		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ch)
 		if err != nil {
 			return err
@@ -594,17 +589,17 @@ func stageCallTraces(kv ethdb.RwKV, ctx context.Context) error {
 
 	execStage := progress(tx, stages.Execution)
 	s := stage(sync, tx, stages.CallTraces)
-	log.Info("Stage exec", "progress", execStage)
+	log.Info("ID exec", "progress", execStage)
 	if block != 0 {
 		s.BlockNumber = block
 		log.Info("Overriding initial state", "block", block)
 	}
-	log.Info("Stage call traces", "progress", s.BlockNumber)
+	log.Info("ID call traces", "progress", s.BlockNumber)
 	ch := ctx.Done()
 	cfg := stagedsync.StageCallTracesCfg(kv, block, batchSize, tmpdir, chainConfig, engine)
 
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
+		u := &stagedsync.UnwindState{ID: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
 		err = stagedsync.UnwindCallTraces(u, s, tx, ch, cfg)
 		if err != nil {
 			return err
@@ -636,18 +631,18 @@ func stageHistory(db ethdb.RwKV, ctx context.Context) error {
 	execStage := progress(tx, stages.Execution)
 	stageStorage := stage(sync, tx, stages.StorageHistoryIndex)
 	stageAcc := stage(sync, tx, stages.AccountHistoryIndex)
-	log.Info("Stage exec", "progress", execStage)
-	log.Info("Stage acc history", "progress", stageAcc.BlockNumber)
-	log.Info("Stage storage history", "progress", stageStorage.BlockNumber)
+	log.Info("ID exec", "progress", execStage)
+	log.Info("ID acc history", "progress", stageAcc.BlockNumber)
+	log.Info("ID storage history", "progress", stageStorage.BlockNumber)
 	ch := ctx.Done()
 
 	cfg := stagedsync.StageHistoryCfg(db, tmpdir)
 	if unwind > 0 { //nolint:staticcheck
-		u := &stagedsync.UnwindState{Stage: stages.StorageHistoryIndex, UnwindPoint: stageStorage.BlockNumber - unwind}
+		u := &stagedsync.UnwindState{ID: stages.StorageHistoryIndex, UnwindPoint: stageStorage.BlockNumber - unwind}
 		if err := stagedsync.UnwindStorageHistoryIndex(u, stageStorage, tx, cfg, ch); err != nil {
 			return err
 		}
-		u = &stagedsync.UnwindState{Stage: stages.AccountHistoryIndex, UnwindPoint: stageAcc.BlockNumber - unwind}
+		u = &stagedsync.UnwindState{ID: stages.AccountHistoryIndex, UnwindPoint: stageAcc.BlockNumber - unwind}
 		if err := stagedsync.UnwindAccountHistoryIndex(u, stageAcc, tx, cfg, ch); err != nil {
 			return err
 		}
@@ -687,7 +682,7 @@ func stageTxLookup(db ethdb.RwKV, ctx context.Context) error {
 
 	cfg := stagedsync.StageTxLookupCfg(db, tmpdir)
 	if unwind > 0 {
-		u := &stagedsync.UnwindState{Stage: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
+		u := &stagedsync.UnwindState{ID: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
 		s := stage(sync, tx, stages.TxLookup)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ch)
 		if err != nil {
@@ -833,7 +828,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	miner := stagedsync.NewMiningState(&cfg.Miner)
 
 	stMining := stagedsync.New(
-		stagedsync.MiningStages(
+		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, txPool, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
@@ -841,17 +836,16 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder(),
-		stagedsync.OptionalParameters{},
 	)
 
 	var sync *stagedsync.State
 	var miningSync *stagedsync.State
 	if err := db.View(context.Background(), func(tx ethdb.Tx) (err error) {
-		sync, err = st.Prepare(nil, tx, ctx.Done(), false)
+		sync, err = st.Prepare(nil, tx)
 		if err != nil {
 			return nil
 		}
-		miningSync, err = stMining.Prepare(nil, tx, ctx.Done(), false)
+		miningSync, err = stMining.Prepare(nil, tx)
 		if err != nil {
 			return nil
 		}
