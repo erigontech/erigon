@@ -255,9 +255,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	if err1 != nil {
 		return err1
 	}
-	defer func() {
-		dstTx.Rollback()
-	}()
+	defer dstTx.Rollback()
 
 	commitEvery := time.NewTicker(5 * time.Second)
 	defer commitEvery.Stop()
