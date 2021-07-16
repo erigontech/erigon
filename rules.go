@@ -34,13 +34,30 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err = $db.Begin($ctx); $chk; $rollback`,
 	).
 		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
-		//At(m["unlock"]).
+		//At(m["rollback"]).
 		Report(`Add "defer $tx.Rollback()" right after transaction creation error check. 
 			If you are in the loop - consider use "$db.View" or "$db.Update" or extract whole transaction to function.
 			Without rollback in defer - app can deadlock on error or panic.
 			Rules are in ./rules.go file.
 			`)
+}
 
+func closeCollector(m dsl.Matcher) {
+	m.Match(
+		`$c := etl.NewCollector($*_); $close`,
+	).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		//At(m["rollback"]).
+		Report(`Add "defer $c.Close()" right after collector creation`)
+}
+
+func passValuesByContext(m dsl.Matcher) {
+	m.Match(
+		`ctx.WithValue($*_)`,
+	).
+		//Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		//At(m["rollback"]).
+		Report(`Don't pass app-level parameters by context, pass them as-is or as typed objects`)
 }
 
 func mismatchingUnlock(m dsl.Matcher) {

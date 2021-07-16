@@ -550,17 +550,16 @@ func stageLogIndex(db ethdb.RwKV, ctx context.Context) error {
 	s := stage(sync, tx, stages.LogIndex)
 	log.Info("ID exec", "progress", execAt)
 	log.Info("ID log index", "progress", s.BlockNumber)
-	ch := ctx.Done()
 
 	cfg := stagedsync.StageLogIndexCfg(db, tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{ID: stages.LogIndex, UnwindPoint: s.BlockNumber - unwind}
-		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ch)
+		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
 	} else {
-		if err := stagedsync.SpawnLogIndex(s, tx, cfg, ch); err != nil {
+		if err := stagedsync.SpawnLogIndex(s, tx, cfg, ctx); err != nil {
 			return err
 		}
 	}
@@ -595,17 +594,17 @@ func stageCallTraces(kv ethdb.RwKV, ctx context.Context) error {
 		log.Info("Overriding initial state", "block", block)
 	}
 	log.Info("ID call traces", "progress", s.BlockNumber)
-	ch := ctx.Done()
+
 	cfg := stagedsync.StageCallTracesCfg(kv, block, batchSize, tmpdir, chainConfig, engine)
 
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{ID: stages.CallTraces, UnwindPoint: s.BlockNumber - unwind}
-		err = stagedsync.UnwindCallTraces(u, s, tx, ch, cfg)
+		err = stagedsync.UnwindCallTraces(u, s, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
 	} else {
-		if err := stagedsync.SpawnCallTraces(s, tx, ch, cfg); err != nil {
+		if err := stagedsync.SpawnCallTraces(s, tx, cfg, ctx); err != nil {
 			return err
 		}
 	}
@@ -634,24 +633,23 @@ func stageHistory(db ethdb.RwKV, ctx context.Context) error {
 	log.Info("ID exec", "progress", execStage)
 	log.Info("ID acc history", "progress", stageAcc.BlockNumber)
 	log.Info("ID storage history", "progress", stageStorage.BlockNumber)
-	ch := ctx.Done()
 
 	cfg := stagedsync.StageHistoryCfg(db, tmpdir)
 	if unwind > 0 { //nolint:staticcheck
 		u := &stagedsync.UnwindState{ID: stages.StorageHistoryIndex, UnwindPoint: stageStorage.BlockNumber - unwind}
-		if err := stagedsync.UnwindStorageHistoryIndex(u, stageStorage, tx, cfg, ch); err != nil {
+		if err := stagedsync.UnwindStorageHistoryIndex(u, stageStorage, tx, cfg, ctx); err != nil {
 			return err
 		}
 		u = &stagedsync.UnwindState{ID: stages.AccountHistoryIndex, UnwindPoint: stageAcc.BlockNumber - unwind}
-		if err := stagedsync.UnwindAccountHistoryIndex(u, stageAcc, tx, cfg, ch); err != nil {
+		if err := stagedsync.UnwindAccountHistoryIndex(u, stageAcc, tx, cfg, ctx); err != nil {
 			return err
 		}
 	} else {
 
-		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ch); err != nil {
+		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
 			return err
 		}
-		if err := stagedsync.SpawnStorageHistoryIndex(stageStorage, tx, cfg, ch); err != nil {
+		if err := stagedsync.SpawnStorageHistoryIndex(stageStorage, tx, cfg, ctx); err != nil {
 			return err
 		}
 	}
@@ -678,18 +676,17 @@ func stageTxLookup(db ethdb.RwKV, ctx context.Context) error {
 	}
 	stage9 := stage(sync, tx, stages.TxLookup)
 	log.Info("Stage9", "progress", stage9.BlockNumber)
-	ch := ctx.Done()
 
 	cfg := stagedsync.StageTxLookupCfg(db, tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{ID: stages.TxLookup, UnwindPoint: stage9.BlockNumber - unwind}
 		s := stage(sync, tx, stages.TxLookup)
-		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ch)
+		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnTxLookup(stage9, tx, cfg, ch)
+		err = stagedsync.SpawnTxLookup(stage9, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}

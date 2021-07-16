@@ -42,11 +42,11 @@ func StageLogIndexCfg(db ethdb.RwKV, tmpDir string) LogIndexCfg {
 	}
 }
 
-func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan struct{}) error {
+func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan st
 		start++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, cfg, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, start, cfg, ctx); err != nil {
 		return err
 	}
 
@@ -84,7 +84,8 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan st
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, quit <-chan struct{}) error {
+func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, ctx context.Context) error {
+	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -216,11 +217,12 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndex
 	return nil
 }
 
-func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quitCh <-chan struct{}) error {
+func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) error {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}

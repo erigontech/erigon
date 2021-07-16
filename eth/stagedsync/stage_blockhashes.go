@@ -33,16 +33,17 @@ func StageBlockHashesCfg(db ethdb.RwKV, tmpDir string) BlockHashesCfg {
 	}
 }
 
-func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, quit <-chan struct{}) error {
+func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
+	quit := ctx.Done()
 	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
@@ -86,11 +87,11 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, quit 
 	return nil
 }
 
-func UnwindBlockHashStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg) error {
+func UnwindBlockHashStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
