@@ -1,5 +1,9 @@
-// +build trick_go_mod_tidy
+// +build tools
 
+package tools
+
+// https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
+//
 // This module is just a hack for 'go mod tidy' command
 //
 // Problem is - 'go mod tidy' removes from go.mod file lines if you don't use them in source code
@@ -11,8 +15,6 @@
 // use `make devtools` - does install all binary deps of right version
 
 // build tag 'trick_go_mod_tidy' - is used to hide warnings of IDEA (because we can't import `main` packages in go)
-
-package main
 
 import (
 	_ "github.com/fjl/gencodec"
