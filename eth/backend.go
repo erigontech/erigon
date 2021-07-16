@@ -270,13 +270,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	backend.minedBlocks = miner.MiningResultCh
 
 	mining := stagedsync.New(
-		stagedsync.MiningStages(
+		stagedsync.MiningStages(backend.downloadCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainKV, miner, *backend.chainConfig, backend.engine, backend.txPool, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainKV, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainKV, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainKV, false, true, tmpdir),
 			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder(), stagedsync.OptionalParameters{})
+		), stagedsync.MiningUnwindOrder())
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {

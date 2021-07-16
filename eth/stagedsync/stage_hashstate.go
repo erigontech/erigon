@@ -27,7 +27,7 @@ func StageHashStateCfg(db ethdb.RwKV, tmpDir string) HashStateCfg {
 	}
 }
 
-func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -58,11 +58,11 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-
 		log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, quit); err != nil {
+		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx.Done()); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx, cfg, quit); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx, cfg, ctx.Done()); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}
@@ -79,7 +79,7 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-
 	return nil
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -91,7 +91,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Hash
 	}
 
 	logPrefix := s.state.LogPrefix()
-	if err := unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, quit); err != nil {
+	if err := unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx.Done()); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 	if err := u.Done(tx); err != nil {

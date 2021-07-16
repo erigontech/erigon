@@ -150,18 +150,18 @@ type TxFetcher struct {
 
 	underpriced mapset.Set // Transactions discarded as too cheap (don't re-fetch)
 
-	// Stage 1: Waiting lists for newly discovered transactions that might be
+	// ID 1: Waiting lists for newly discovered transactions that might be
 	// broadcast without needing explicit request/reply round trips.
 	waitlist  map[common.Hash]map[string]struct{} // Transactions waiting for an potential broadcast
 	waittime  map[common.Hash]mclock.AbsTime      // Timestamps when transactions were added to the waitlist
 	waitslots map[string]map[common.Hash]struct{} // Waiting announcement sgroupped by peer (DoS protection)
 
-	// Stage 2: Queue of transactions that waiting to be allocated to some peer
+	// ID 2: Queue of transactions that waiting to be allocated to some peer
 	// to be retrieved directly.
 	announces map[string]map[common.Hash]struct{} // Set of announced transactions, grouped by origin peer
 	announced map[common.Hash]map[string]struct{} // Set of download locations, grouped by transaction hash
 
-	// Stage 3: Set of transactions currently being retrieved, some which may be
+	// ID 3: Set of transactions currently being retrieved, some which may be
 	// fulfilled and some rescheduled. Note, this step shares 'announces' from the
 	// previous stage to avoid having to duplicate (need it for DoS checks).
 	fetching   map[common.Hash]string              // Transaction set currently being retrieved
@@ -385,7 +385,7 @@ func (f *TxFetcher) loop() {
 				if f.alternates[hash] != nil {
 					f.alternates[hash][ann.origin] = struct{}{}
 
-					// Stage 2 and 3 share the set of origins per tx
+					// ID 2 and 3 share the set of origins per tx
 					if announces := f.announces[ann.origin]; announces != nil {
 						announces[hash] = struct{}{}
 					} else {
@@ -398,7 +398,7 @@ func (f *TxFetcher) loop() {
 				if f.announced[hash] != nil {
 					f.announced[hash][ann.origin] = struct{}{}
 
-					// Stage 2 and 3 share the set of origins per tx
+					// ID 2 and 3 share the set of origins per tx
 					if announces := f.announces[ann.origin]; announces != nil {
 						announces[hash] = struct{}{}
 					} else {

@@ -50,7 +50,8 @@ func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig, tmpdir string)
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, quitCh <-chan struct{}) error {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, ctx context.Context) error {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error

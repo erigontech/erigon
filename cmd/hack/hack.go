@@ -1788,7 +1788,7 @@ func advanceExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "progress", stageExec)
+	log.Info("ID exec", "progress", stageExec)
 	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec+1); err != nil {
 		return err
 	}
@@ -1796,7 +1796,7 @@ func advanceExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "changed to", stageExec)
+	log.Info("ID exec", "changed to", stageExec)
 	if err = stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
 		return err
 	}
@@ -1819,7 +1819,7 @@ func backExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "progress", stageExec)
+	log.Info("ID exec", "progress", stageExec)
 	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec-1); err != nil {
 		return err
 	}
@@ -1827,7 +1827,7 @@ func backExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "changed to", stageExec)
+	log.Info("ID exec", "changed to", stageExec)
 	if err = tx.Commit(); err != nil {
 		return err
 	}
