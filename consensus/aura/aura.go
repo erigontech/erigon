@@ -46,6 +46,8 @@ import (
 	"go.uber.org/atomic"
 )
 
+const DEBUG_LOG_FROM = 362_300
+
 /*
 Not implemented features from OS:
  - two_thirds_majority_transition - because no chains in OE where this is != MaxUint64 - means 1/2 majority used everywhere
@@ -205,6 +207,9 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 	// DB lookup.
 	lastTransition, ok := epochTransitionFor2(chain, er, hash)
 	if !ok {
+		if lastTransition.BlockNumber > DEBUG_LOG_FROM {
+			fmt.Printf("zoom1: %d\n", lastTransition.BlockNumber)
+		}
 		return e.finalityChecker, e.epochTransitionNumber, false
 	}
 
@@ -215,13 +220,20 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 			panic(err)
 		}
 		first := proof.SignalNumber == 0
+		if lastTransition.BlockNumber > DEBUG_LOG_FROM {
+			fmt.Printf("zoom2: %d,%d\n", lastTransition.BlockNumber, len(proof.SetProof))
+		}
+
 		// use signal number so multi-set first calculation is correct.
 		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof)
 		if err != nil {
 			panic(fmt.Errorf("proof produced by this engine is invalid: %w", err))
 		}
 		epochSet := list.validators
-		log.Info("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber, "l", list.validators)
+		log.Info("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
+		if lastTransition.BlockNumber > DEBUG_LOG_FROM {
+			fmt.Printf("= validators: %x\n", list.validators)
+		}
 		e.finalityChecker = NewRollingFinality(epochSet)
 	}
 	e.epochTransitionHash = lastTransition.BlockHash
@@ -525,6 +537,7 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
+//nolit
 func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
@@ -830,42 +843,28 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	}
 
 	// check_and_lock_block -> check_epoch_end_signal (after enact)
+	if header.Number.Uint64() >= DEBUG_LOG_FROM {
+		fmt.Printf("finalize1: %d,%d\n", header.Number.Uint64(), len(r))
+	}
 	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, r)
 	if err != nil {
 		return err
 	}
 	if pendingTransitionProof != nil {
+		if header.Number.Uint64() >= DEBUG_LOG_FROM {
+			fmt.Printf("insert_pending_trancition: %d\n", header.Number.Uint64())
+		}
 		if err = e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return err
+		}
+	} else {
+		if header.Number.Uint64() >= DEBUG_LOG_FROM {
+			fmt.Printf("no_pending_transitions: %d\n", header.Number.Uint64())
 		}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
 
-	// commit_block -> aura.build_finality
-	var finalized []unAssembledHeader
-	_, _, ok := c.EpochManager.zoomToAfter(chain, e, c.cfg.Validators, header.ParentHash, call)
-	if !ok {
-		finalized = []unAssembledHeader{}
-	} else {
-		if c.EpochManager.finalityChecker.lastPushed == nil || *c.EpochManager.finalityChecker.lastPushed != header.ParentHash {
-			err = c.EpochManager.finalityChecker.buildAncestrySubChain(func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
-				h := chain.GetHeaderByHash(hash)
-				if h == nil {
-					return nil, common.Hash{}, common.Hash{}, 0, false
-				}
-				return []common.Address{h.Coinbase}, h.Hash(), h.ParentHash, h.Number.Uint64(), true
-			}, header.ParentHash, c.EpochManager.epochTransitionHash)
-			if err != nil {
-				return fmt.Errorf("buildAncestrySubChain: %w", err)
-			}
-		}
-	}
-
-	finalized, err = c.EpochManager.finalityChecker.push(header.Hash(), header.Number.Uint64(), []common.Address{header.Coinbase})
-	if err != nil {
-		panic(err)
-	}
-	// commit_block -> aura.build_finality END
+	finalized, err := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, call)
 	epochEndProof, err := isEpochEnd(chain, e, finalized, header)
 	if err != nil {
 		return err
@@ -878,8 +877,32 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		}
 	}
 
+	//os.Exit(1)
 	return nil
 }
+
+func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, call consensus.Call) ([]unAssembledHeader, error) {
+	// commit_block -> aura.build_finality
+	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, call)
+	if !ok {
+		return []unAssembledHeader{}, nil
+	}
+	if e.finalityChecker.lastPushed == nil || *e.finalityChecker.lastPushed != header.ParentHash {
+		if err := e.finalityChecker.buildAncestrySubChain(func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
+			h := chain.GetHeaderByHash(hash)
+			if h == nil {
+				return nil, common.Hash{}, common.Hash{}, 0, false
+			}
+			return []common.Address{h.Coinbase}, h.Hash(), h.ParentHash, h.Number.Uint64(), true
+		}, header.ParentHash, e.epochTransitionHash); err != nil {
+			log.Warn("buildAncestrySubChain", "err", err)
+			return []unAssembledHeader{}, nil
+		}
+	}
+
+	return e.finalityChecker.push(header.Hash(), header.Number.Uint64(), []common.Address{header.Coinbase})
+}
+
 func isEpochEnd(chain consensus.ChainHeaderReader, e consensus.EpochReader, finalized []unAssembledHeader, header *types.Header) ([]byte, error) {
 	// commit_block -> aura.is_epoch_end
 	for i := range finalized {
@@ -1568,6 +1591,7 @@ func (f *RollingFinality) push(head common.Hash, num uint64, signers []common.Ad
 		}
 	}
 
+	//fmt.Printf("add2:%x\n", signers)
 	f.addSigners(signers)
 	f.headers.PushBack(&unAssembledHeader{hash: head, number: num, signers: signers})
 
@@ -1576,6 +1600,7 @@ func (f *RollingFinality) push(head common.Hash, num uint64, signers []common.Ad
 		if e == nil {
 			panic("headers length always greater than sign count length")
 		}
+		//fmt.Printf("remove2:%x\n", e.signers)
 		f.removeSigners(e.signers)
 		newlyFinalized = append(newlyFinalized, *e)
 	}
@@ -1645,6 +1670,7 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 			copyHash := parentHash
 			f.lastPushed = &copyHash
 		}
+		//fmt.Printf("add1:%d,%x\n", blockNum, signers)
 		f.addSigners(signers)
 		f.headers.PushFront(&unAssembledHeader{hash: blockHash, number: blockNum, signers: signers})
 		// break when we've got our first finalized block.
@@ -1653,6 +1679,7 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 			if e == nil {
 				panic("we just pushed a block")
 			}
+			//fmt.Printf("remove:%x\n", e.signers)
 			f.removeSigners(e.signers)
 			log.Info("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
 			break
