@@ -91,6 +91,9 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 		bodiesCollector = etl.NewCriticalCollector(bodiesPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		ethTXCollector = etl.NewCriticalCollector(ethtxPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		nonCanonicalCollector = etl.NewCriticalCollector(nonCanonicalPath, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer bodiesCollector.Close("bodies")
+		defer ethTXCollector.Close("ethtx")
+		defer nonCanonicalCollector.Close("noncanonical")
 
 		err = db.ForEach(dbutils.BlockBodyPrefix, []byte{}, func(k, v []byte) error {
 			blockNum := binary.BigEndian.Uint64(k[:8])
