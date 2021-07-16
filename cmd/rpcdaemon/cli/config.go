@@ -139,7 +139,7 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	if len(version) != 12 {
 		return fmt.Errorf("database does not have major schema version. upgrade and restart Erigon core")
 	}
-	major := binary.BigEndian.Uint32(version[:])
+	major := binary.BigEndian.Uint32(version)
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool

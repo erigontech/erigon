@@ -36,16 +36,16 @@ type CallTracesCfg struct {
 
 func StageCallTracesCfg(
 	db ethdb.RwKV,
-	ToBlock uint64,
-	BatchSize datasize.ByteSize,
+	toBlock uint64,
+	batchSize datasize.ByteSize,
 	tmpdir string,
 	chainConfig *params.ChainConfig,
 	engine consensus.Engine,
 ) CallTracesCfg {
 	return CallTracesCfg{
 		db:          db,
-		ToBlock:     ToBlock,
-		BatchSize:   BatchSize,
+		ToBlock:     toBlock,
+		BatchSize:   batchSize,
 		tmpdir:      tmpdir,
 		chainConfig: chainConfig,
 		engine:      engine,

@@ -344,7 +344,7 @@ func (t *Trie) HashOfHexKey(hexKey []byte) (common.Hash, error) {
 	}
 	var hash common.Hash
 	if hn, ok := nd.(hashNode); ok {
-		copy(hash[:], hn.hash[:])
+		copy(hash[:], hn.hash)
 	} else {
 		h := t.newHasherFunc()
 		defer returnHasherToPool(h)

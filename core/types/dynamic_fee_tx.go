@@ -262,7 +262,7 @@ func (tx DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -322,15 +322,15 @@ func (tx DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize
 		return err
 	}
 	// encode Data
-	if err := EncodeString(tx.Data, w, b[:]); err != nil {
+	if err := EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	// prefix
-	if err := EncodeStructSizePrefix(accessListLen, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b[:]); err != nil {
+	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
 		return err
 	}
 	// encode V

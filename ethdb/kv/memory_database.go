@@ -37,23 +37,13 @@ func NewMemKV() ethdb.RwKV {
 
 func NewTestKV(t testing.TB) ethdb.RwKV {
 	kv := NewMemKV()
-	switch tt := t.(type) {
-	case *testing.T:
-		if tt != nil {
-			tt.Cleanup(kv.Close)
-		}
-	}
+	t.Cleanup(kv.Close)
 	return kv
 }
 
 func NewTestTx(t testing.TB) (ethdb.RwKV, ethdb.RwTx) {
 	kv := NewMemKV()
-	switch tt := t.(type) {
-	case *testing.T:
-		if tt != nil {
-			tt.Cleanup(kv.Close)
-		}
-	}
+	t.Cleanup(kv.Close)
 	tx, err := kv.BeginRw(context.Background()) //nolint
 	if err != nil {
 		t.Fatal(err)

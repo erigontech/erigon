@@ -47,7 +47,7 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	key := []byte{uint8(1)}
 	val := []byte{uint8(1)}
 
-	keyHash, err := common.HashData(key[:])
+	keyHash, err := common.HashData(key)
 	if err != nil {
 		t.Fatal(err)
 	}

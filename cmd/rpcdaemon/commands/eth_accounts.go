@@ -87,18 +87,18 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err1
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err1
 	}
 	defer tx.Rollback()
 
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty[:], 32)), err
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 
 	location := common.HexToHash(index)
@@ -106,5 +106,5 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	if err != nil {
 		res = empty
 	}
-	return hexutil.Encode(common.LeftPadBytes(res[:], 32)), err
+	return hexutil.Encode(common.LeftPadBytes(res, 32)), err
 }
