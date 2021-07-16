@@ -22,12 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-const (
-	// defaultTraceTimeout is the amount of time a single transaction can execute
-	// by default before being forcefully aborted.
-	defaultTraceTimeout = 5 * time.Second
-)
-
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
 	GetBlockByHash(hash common.Hash) (*types.Block, error)
@@ -98,7 +92,7 @@ func TraceTx(
 	switch {
 	case config != nil && config.Tracer != nil:
 		// Define a meaningful timeout of a single transaction trace
-		timeout := defaultTraceTimeout
+		timeout := callTimeout
 		if config.Timeout != nil {
 			if timeout, err = time.ParseDuration(*config.Timeout); err != nil {
 				stream.WriteNil()

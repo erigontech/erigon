@@ -11,12 +11,12 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
-// bench13 compares response of Erigon with Geth
+// BenchTraceCallMany compares response of Erigon with Geth
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func Bench13(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
 	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -36,11 +36,6 @@ func Bench13(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
-	}
-
-	skipTxs := make(map[common.Hash]struct{})
-	for _, txHash := range wrongTxs {
-		skipTxs[common.HexToHash(txHash)] = struct{}{}
 	}
 
 	reqGen.reqID++
@@ -127,6 +122,7 @@ func Bench13(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockT
 				return
 			}
 			if resg.Err == nil && resg.Result.Get("error") == nil {
+				recording = false
 				if err := compareResults(res.Result, resg.Result); err != nil {
 					fmt.Printf("Different traceManys block %d: %v\n", bn, err)
 					fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
