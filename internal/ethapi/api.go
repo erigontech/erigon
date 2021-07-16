@@ -919,7 +919,9 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
-		result.Accesses = &t.AccessList
+		if len(t.AccessList) > 0 {
+			result.Accesses = &t.AccessList
+		}
 	case *types.DynamicFeeTransaction:
 		chainId.Set(t.ChainID)
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
@@ -928,7 +930,9 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
-		result.Accesses = &t.AccessList
+		if len(t.AccessList) > 0 {
+			result.Accesses = &t.AccessList
+		}
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	result.From, _ = tx.Sender(*signer)

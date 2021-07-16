@@ -35,7 +35,8 @@ func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir strin
 	}
 }
 
-func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg TrieCfg, quit <-chan struct{}) (common.Hash, error) {
+func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) (common.Hash, error) {
+	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -379,7 +380,8 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	return hash, nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TrieCfg, quit <-chan struct{}) error {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) error {
+	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error

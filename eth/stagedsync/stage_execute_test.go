@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -9,6 +10,7 @@ import (
 )
 
 func TestUnwindExecutionStagePlainStatic(t *testing.T) {
+	ctx := context.Background()
 	_, tx1 := kv.NewTestTx(t)
 	_, tx2 := kv.NewTestTx(t)
 
@@ -19,9 +21,9 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
-	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
-	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockCfg{writeReceipts: true}, false)
+	u := &UnwindState{ID: stages.Execution, UnwindPoint: 50}
+	s := &StageState{ID: stages.Execution, BlockNumber: 100}
+	err = UnwindExecutionStage(u, s, tx2, ctx, ExecuteBlockCfg{writeReceipts: true}, false)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -30,6 +32,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 }
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
+	ctx := context.Background()
 	_, tx1 := kv.NewTestTx(t)
 	_, tx2 := kv.NewTestTx(t)
 
@@ -40,9 +43,9 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
-	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
-	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockCfg{writeReceipts: true}, false)
+	u := &UnwindState{ID: stages.Execution, UnwindPoint: 50}
+	s := &StageState{ID: stages.Execution, BlockNumber: 100}
+	err = UnwindExecutionStage(u, s, tx2, ctx, ExecuteBlockCfg{writeReceipts: true}, false)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}
@@ -52,6 +55,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	t.Skip("not supported yet, to be restored")
+	ctx := context.Background()
 	_, tx1 := kv.NewTestTx(t)
 	_, tx2 := kv.NewTestTx(t)
 
@@ -62,9 +66,9 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while saving progress: %v", err)
 	}
-	u := &UnwindState{Stage: stages.Execution, UnwindPoint: 50}
-	s := &StageState{Stage: stages.Execution, BlockNumber: 100}
-	err = UnwindExecutionStage(u, s, tx2, nil, ExecuteBlockCfg{writeReceipts: true}, false)
+	u := &UnwindState{ID: stages.Execution, UnwindPoint: 50}
+	s := &StageState{ID: stages.Execution, BlockNumber: 100}
+	err = UnwindExecutionStage(u, s, tx2, ctx, ExecuteBlockCfg{writeReceipts: true}, false)
 	if err != nil {
 		t.Errorf("error while unwinding state: %v", err)
 	}

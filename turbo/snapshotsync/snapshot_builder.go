@@ -180,7 +180,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi ethdb.RwKV, r
 			}
 		}()
 		for i := range stages {
-			log.Info("Stage", "i", i)
+			log.Info("ID", "i", i)
 			innerErr = stages[i](dbi, tx, migrateToBlock)
 			if innerErr != nil {
 				return innerErr

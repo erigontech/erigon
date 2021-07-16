@@ -72,7 +72,7 @@ func (s *State) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
 	return state.BlockNumber, err
 }
 
-func (s *State) UnwindTo(blockNumber uint64, tx TxOrDb, badBlock common.Hash) error {
+func (s *State) UnwindTo(blockNumber uint64, tx ethdb.RwTx, badBlock common.Hash) error {
 	log.Info("UnwindTo", "block", blockNumber, "bad_block_hash", badBlock.String())
 	for _, stage := range s.unwindOrder {
 		if stage.Disabled {
@@ -148,19 +148,19 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageSta
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
+func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	var timings []interface{}
 	for !s.IsDone() {
 		if !s.unwindStack.Empty() {
 			for unwind := s.unwindStack.Pop(); unwind != nil; unwind = s.unwindStack.Pop() {
-				if err := s.SetCurrentStage(unwind.Stage); err != nil {
+				if err := s.SetCurrentStage(unwind.ID); err != nil {
 					return err
 				}
 				t := time.Now()
-				if err := s.unwindStage(unwind, db, tx); err != nil {
+				if err := s.unwindStage(firstCycle, unwind, db, tx); err != nil {
 					return err
 				}
-				timings = append(timings, "Unwind "+string(unwind.Stage), time.Since(t))
+				timings = append(timings, "Unwind "+string(unwind.ID), time.Since(t))
 			}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
@@ -188,7 +188,7 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx) error {
 		}
 
 		t := time.Now()
-		if err := s.runStage(stage, db, tx); err != nil {
+		if err := s.runStage(stage, db, tx, firstCycle); err != nil {
 			return err
 		}
 		timings = append(timings, string(stage.ID), time.Since(t))
@@ -234,7 +234,7 @@ func printLogs(tx ethdb.RwTx, timings []interface{}) error {
 	return nil
 }
 
-func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
+func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -257,7 +257,7 @@ func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
 
 	start := time.Now()
 	logPrefix := s.LogPrefix()
-	if err = stage.ExecFunc(stageState, s, tx); err != nil {
+	if err = stage.ExecFunc(firstCycle, stageState, s, tx); err != nil {
 		return err
 	}
 
@@ -267,7 +267,7 @@ func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
 	return nil
 }
 
-func (s *State) unwindStage(unwind *UnwindState, db ethdb.RwKV, tx ethdb.RwTx) error {
+func (s *State) unwindStage(firstCycle bool, unwind *UnwindState, db ethdb.RwKV, tx ethdb.RwTx) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -279,8 +279,8 @@ func (s *State) unwindStage(unwind *UnwindState, db ethdb.RwKV, tx ethdb.RwTx) e
 	}
 
 	start := time.Now()
-	log.Info("Unwinding...", "stage", string(unwind.Stage))
-	stage, err := s.StageByID(unwind.Stage)
+	log.Info("Unwinding...", "stage", string(unwind.ID))
+	stage, err := s.StageByID(unwind.ID)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func (s *State) unwindStage(unwind *UnwindState, db ethdb.RwKV, tx ethdb.RwTx) e
 		return nil
 	}
 	var stageState *StageState
-	stageState, err = s.StageState(unwind.Stage, tx)
+	stageState, err = s.StageState(unwind.ID, tx)
 	if err != nil {
 		return err
 	}
@@ -304,13 +304,13 @@ func (s *State) unwindStage(unwind *UnwindState, db ethdb.RwKV, tx ethdb.RwTx) e
 		tx = nil
 	}
 
-	err = stage.UnwindFunc(unwind, stageState, tx)
+	err = stage.UnwindFunc(firstCycle, unwind, stageState, tx)
 	if err != nil {
 		return err
 	}
 
 	if time.Since(start) > 30*time.Second {
-		log.Info("Unwinding... DONE!", "stage", string(unwind.Stage))
+		log.Info("Unwinding... DONE!", "stage", string(unwind.ID))
 	}
 	return nil
 }

@@ -54,7 +54,7 @@ func NewTestTx(t testing.TB) (ethdb.RwKV, ethdb.RwTx) {
 			tt.Cleanup(kv.Close)
 		}
 	}
-	tx, err := kv.BeginRw(context.Background())
+	tx, err := kv.BeginRw(context.Background()) //nolint
 	if err != nil {
 		t.Fatal(err)
 	}

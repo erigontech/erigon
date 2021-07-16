@@ -4,62 +4,33 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 )
 
 type StagedSync struct {
-	PrefetchedBlocks *bodydownload.PrefetchedBlocks
-	stageBuilders    StageBuilders
-	unwindOrder      UnwindOrder
-	Notifier         ChainEventNotifier
-	params           OptionalParameters
+	stages      []*Stage
+	unwindOrder UnwindOrder
+	Notifier    ChainEventNotifier
 }
 
-// OptionalParameters contains any non-necessary parateres you can specify to fine-tune
-// and experiment on StagedSync.
-type OptionalParameters struct {
-	// StateReaderBuilder is a function that returns state reader for the block execution stage.
-	// It can be used to add someting like bloom filters to figure out non-existing accounts and similar experiments.
-	StateReaderBuilder StateReaderBuilder
-
-	// StateReaderBuilder is a function that returns state writer for the block execution stage.
-	// It can be used to update bloom or other types of filters between block execution.
-	StateWriterBuilder StateWriterBuilder
-
-	SnapshotDir      string
-	TorrentClient    *snapshotsync.Client
-	SnapshotMigrator *snapshotsync.SnapshotMigrator
-}
-
-func New(stages StageBuilders, unwindOrder UnwindOrder, params OptionalParameters) *StagedSync {
+func New(stages []*Stage, unwindOrder UnwindOrder) *StagedSync {
 	return &StagedSync{
-		PrefetchedBlocks: bodydownload.NewPrefetchedBlocks(),
-		stageBuilders:    stages,
-		unwindOrder:      unwindOrder,
-		params:           params,
+		stages:      stages,
+		unwindOrder: unwindOrder,
 	}
 }
 
-func (stagedSync *StagedSync) Prepare(
-	db ethdb.RwKV,
-	tx ethdb.Tx,
-	quitCh <-chan struct{},
-	initialCycle bool,
-) (*State, error) {
-	stages := stagedSync.stageBuilders.Build(
-		StageParameters{
-			QuitCh:       quitCh,
-			InitialCycle: initialCycle,
-			snapshotsDir: stagedSync.params.SnapshotDir,
-		},
-	)
-	state := NewState(stages)
+func (stagedSync *StagedSync) Prepare(db ethdb.RwKV, tx ethdb.Tx) (*State, error) {
+	state := NewState(stagedSync.stages)
 
 	state.unwindOrder = make([]*Stage, len(stagedSync.unwindOrder))
 
 	for i, stageIndex := range stagedSync.unwindOrder {
-		state.unwindOrder[i] = stages[stageIndex]
+		for _, s := range stagedSync.stages {
+			if s.ID == stageIndex {
+				state.unwindOrder[i] = s
+				break
+			}
+		}
 	}
 
 	if tx != nil {
@@ -74,11 +45,4 @@ func (stagedSync *StagedSync) Prepare(
 		}
 	}
 	return state, nil
-}
-
-func (stagedSync *StagedSync) GetSnapshotMigratorFinal() func(tx ethdb.Tx) error {
-	if stagedSync.params.SnapshotMigrator != nil {
-		return stagedSync.params.SnapshotMigrator.Final
-	}
-	return nil
 }

@@ -52,8 +52,7 @@ func NewStagedSync(
 ) *stagedsync.StagedSync {
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, sm, headers, blockHashes, snapshotHeader, bodies, snapshotBodies, senders, exec, trans, snapshotState, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
-		stagedsync.ReplacementUnwindOrder(),
-		stagedsync.OptionalParameters{},
+		stagedsync.DefaultUnwindOrder(),
 	)
 }
 
@@ -82,12 +81,12 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, sync.GetSnapshotMigratorFinal()); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
 
-			log.Error("Stage loop failure", "error", err)
+			log.Error("ID loop failure", "error", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header downloader", "error", recoveryErr)
 			}
@@ -152,7 +151,7 @@ func StageLoopStep(
 	if notifications != nil && notifications.Accumulator != nil {
 		notifications.Accumulator.Reset()
 	}
-	st, err1 := sync.Prepare(db, nil, ctx.Done(), initialCycle)
+	st, err1 := sync.Prepare(db, nil)
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
@@ -168,7 +167,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(db, tx)
+	err = st.Run(db, tx, initialCycle)
 	if err != nil {
 		return err
 	}
@@ -230,16 +229,11 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		return err
 	}
 	defer tx.Rollback()
-	miningState, err := mining.Prepare(
-		nil,
-		tx,
-		ctx.Done(),
-		false,
-	)
+	miningState, err := mining.Prepare(nil, tx)
 	if err != nil {
 		return err
 	}
-	if err = miningState.Run(nil, tx); err != nil {
+	if err = miningState.Run(nil, tx, false); err != nil {
 		return err
 	}
 	tx.Rollback()
