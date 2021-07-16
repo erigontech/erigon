@@ -485,16 +485,11 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	tm := time.After(time.Second * 10)
 	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
-		roTx, err := db.BeginRo(context.Background())
+		err = db.View(context.Background(), func(tx ethdb.Tx) error { return sb.Final(tx) })
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		err = sb.Final(roTx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		roTx.Rollback()
 		select {
 		case <-tm:
 			t.Fatal("timeout")
