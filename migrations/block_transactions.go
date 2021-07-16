@@ -203,6 +203,10 @@ var splitCanonicalAndNonCanonicalTransactionsBuckets = Migration{
 		if err = CommitProgress(db, []byte(loadStep), false); err != nil {
 			return fmt.Errorf("committing the removal of table: %w", err)
 		}
+		//magic))
+		if err = CommitProgress(db, []byte(loadStep), false); err != nil {
+			return fmt.Errorf("committing the removal of table: %w", err)
+		}
 
 	LoadStep:
 		err = bodiesCollector.Load("bodies", db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{})
