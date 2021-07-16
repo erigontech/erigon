@@ -113,3 +113,17 @@ func EncodeHashes(hashes []byte, count int, encodeBuf []byte) ([]byte, error) {
 	}
 	return encoding, nil
 }
+
+// EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
+func EncodeGetPooledTransactions66(hashes []byte, count int, requestId uint64, encodeBuf []byte) ([]byte, error) {
+	var prefixLen int
+	requestIdLen := (bits.Len64(requestId) + 7) / 8
+	dataLen := count * 33
+	var beLen int
+	if dataLen < 56 {
+		prefixLen = 1
+	} else {
+		beLen = (bits.Len64(uint64(dataLen)) + 7) / 8
+		prefixLen = 1 + beLen
+	}
+}
