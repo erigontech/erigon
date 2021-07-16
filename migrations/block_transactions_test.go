@@ -17,6 +17,7 @@ import (
 
 func TestBlockTransactions(t *testing.T) {
 	db := kv.NewTestDB(t)
+	defer db.Close()
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
