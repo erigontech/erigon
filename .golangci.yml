@@ -24,18 +24,18 @@ linters-settings:
     # By default list of stable checks is used.
     enabled-checks:
       - ruleguard
-    #      - rangeValCopy
+      - truncateCmp
     #      - defaultCaseOrder
 
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
       - regexpMust
-      - hugeParam
+      #      - hugeParam
+      - rangeValCopy
       - exitAfterDefer
       - elseif
       - dupBranchBody
       - assignOp
-      - rangeValCopy
       - singleCaseSwitch
       - unlambda
       - captLocal
@@ -51,6 +51,22 @@ linters-settings:
       - experimental
     ruleguard:
       rules: "rules.go"
+    settings:
+      hugeParam:
+        # size in bytes that makes the warning trigger (default 80)
+        sizeThreshold: 1000
+      rangeExprCopy:
+        # size in bytes that makes the warning trigger (default 512)
+        sizeThreshold: 512
+        # whether to check test functions (default true)
+        skipTestFuncs: true
+      truncateCmp:
+        # whether to skip int/uint/uintptr types (default true)
+        skipArchDependent: true
+      underef:
+        # whether to skip (*x).method() calls where x is a pointer receiver (default true)
+        skipRecvDeref: true
+
   govet:
     disable:
       - deepequalerrors
