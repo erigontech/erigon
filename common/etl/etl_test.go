@@ -100,7 +100,7 @@ func TestFileDataProviders(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	disposeProviders("logPrefix", collector.dataProviders)
+	collector.Close("logPrefix")
 
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)

@@ -99,8 +99,9 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	froms := map[string]*roaring64.Bitmap{}
 	tos := map[string]*roaring64.Bitmap{}
 	collectorFrom := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorFrom.Close(logPrefix)
 	collectorTo := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-
+	defer collectorTo.Close(logPrefix)
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
@@ -120,7 +121,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		if len(v) != common.AddressLength+1 {
 			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
 		}
-		mapKey := string(common.CopyBytes(v[:common.AddressLength]))
+		mapKey := string(v[:common.AddressLength])
 		if v[common.AddressLength]&1 > 0 {
 			m, ok := froms[mapKey]
 			if !ok {
@@ -219,8 +220,11 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
 	lastChunkKey := make([]byte, 128)
+	reader := bytes.NewReader(nil)
+	reader2 := bytes.NewReader(nil)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if _, err := currentBitmap.ReadFrom(bytes.NewReader(v)); err != nil {
+		reader.Reset(v)
+		if _, err := currentBitmap.ReadFrom(reader); err != nil {
 			return err
 		}
 		lastChunkKey = lastChunkKey[:len(k)+8]
@@ -233,7 +237,8 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 
 		if len(lastChunkBytes) > 0 {
 			lastChunk := roaring64.New()
-			_, err = lastChunk.ReadFrom(bytes.NewReader(lastChunkBytes))
+			reader2.Reset(lastChunkBytes)
+			_, err = lastChunk.ReadFrom(reader2)
 			if err != nil {
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
@@ -314,7 +319,7 @@ func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <
 		if len(v) != common.AddressLength+1 {
 			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
 		}
-		mapKey := string(common.CopyBytes(v[:common.AddressLength]))
+		mapKey := string(v[:common.AddressLength])
 		if v[common.AddressLength]&1 > 0 {
 			froms[mapKey] = struct{}{}
 		}

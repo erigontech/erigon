@@ -50,10 +50,26 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	if currentBlock >= highestBlock {
 		return false, nil
 	}
+
 	// Otherwise gather the block sync stats
-	return map[string]hexutil.Uint64{
+	type S struct {
+		StageName   string         `json:"stage_name"`
+		BlockNumber hexutil.Uint64 `json:"block_number"`
+	}
+	stagesMap := make([]S, len(stages.AllStages))
+	for i, stage := range stages.AllStages {
+		progress, err := stages.GetStageProgress(tx, stage)
+		if err != nil {
+			return nil, err
+		}
+		stagesMap[i].StageName = string(stage)
+		stagesMap[i].BlockNumber = hexutil.Uint64(progress)
+	}
+
+	return map[string]interface{}{
 		"currentBlock": hexutil.Uint64(currentBlock),
 		"highestBlock": hexutil.Uint64(highestBlock),
+		"stages":       stagesMap,
 	}, nil
 }
 

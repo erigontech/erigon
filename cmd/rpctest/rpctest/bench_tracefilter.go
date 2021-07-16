@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/ledgerwatch/erigon/common"
 )
 
 // Compares response of Erigon with OpenEthereum
@@ -35,11 +33,6 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
-	}
-
-	skipTxs := make(map[common.Hash]struct{})
-	for _, txHash := range wrongTxs {
-		skipTxs[common.HexToHash(txHash)] = struct{}{}
 	}
 
 	reqGen.reqID++

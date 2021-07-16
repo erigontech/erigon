@@ -47,7 +47,7 @@ func Replay(erigonURL string, recordFile string) {
 			return
 		}
 		if err := compareResults(res.Result, expectedResult); err != nil {
-			fmt.Printf("Different results for %s\n", request)
+			fmt.Printf("Different results for %s:\n %v\n", request, err)
 			fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
 			fmt.Printf("\n\nG response=================================\n%s\n", s.Bytes())
 			return

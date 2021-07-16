@@ -28,10 +28,11 @@ func BroadcastPendingTxsToNetwork(ctx context.Context, txPool *core.TxPool, rece
 	syncToNewPeersEvery := time.NewTicker(2 * time.Minute)
 	defer syncToNewPeersEvery.Stop()
 
-	broadcastLocalTransactionsEvery := time.NewTicker(5 * time.Minute)
+	broadcastLocalTransactionsEvery := time.NewTicker(2 * time.Minute)
 	defer broadcastLocalTransactionsEvery.Stop()
 
-	pooledTxHashes := make([]common.Hash, 128)
+	localTxHashes := make([]common.Hash, 128)
+	remoteTxHashes := make([]common.Hash, 128)
 
 	for {
 		select {
@@ -40,21 +41,29 @@ func BroadcastPendingTxsToNetwork(ctx context.Context, txPool *core.TxPool, rece
 		case <-ctx.Done():
 			return
 		case e := <-txsCh: // new txs
-			pooledTxHashes = pooledTxHashes[:0]
+			// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
+			localTxHashes = localTxHashes[:0]
+			remoteTxHashes = remoteTxHashes[:0]
 			for i := range e.Txs {
-				pooledTxHashes = append(pooledTxHashes, e.Txs[i].Hash())
+				h := e.Txs[i].Hash()
+				if txPool.IsLocalTx(h) {
+					localTxHashes = append(localTxHashes, h)
+				} else {
+					remoteTxHashes = append(remoteTxHashes, h)
+				}
 			}
-			s.BroadcastPooledTxs(ctx, pooledTxHashes)
+			s.BroadcastLocalPooledTxs(ctx, localTxHashes)
+			s.BroadcastRemotePooledTxs(ctx, remoteTxHashes)
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := recentPeers.GetAndClean()
 			if len(newPeers) == 0 {
 				continue
 			}
-			pooledTxHashes = txPool.AppendHashes(pooledTxHashes[:0])
-			s.PropagatePooledTxsToPeersList(ctx, newPeers, pooledTxHashes)
+			remoteTxHashes = txPool.AppendHashes(remoteTxHashes[:0])
+			s.PropagatePooledTxsToPeersList(ctx, newPeers, remoteTxHashes)
 		case <-broadcastLocalTransactionsEvery.C: // periodically broadcast local txs to random peers
-			pooledTxHashes = txPool.AppendLocalHashes(pooledTxHashes[:0])
-			s.BroadcastPooledTxs(ctx, pooledTxHashes)
+			localTxHashes = txPool.AppendLocalHashes(localTxHashes[:0])
+			s.BroadcastLocalPooledTxs(ctx, localTxHashes)
 		}
 	}
 }

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	fmt "fmt"
+	"fmt"
+	"os"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
@@ -14,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
-	"os"
 )
 
 func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.RwTx, toBlock uint64) error {
@@ -164,8 +165,11 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 		return fmt.Errorf("get ethtx cursor %w", err)
 	}
 
+	logPrefix := "RemoveBlocksData"
 	bodiesCollector := etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer bodiesCollector.Close(logPrefix)
 	ethTXCollector := etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer ethTXCollector.Close(logPrefix)
 	err = ethdb.Walk(blockBodyWriteCursor, dbutils.BlockBodyKey(0, common.Hash{}), 0, func(k, v []byte) (bool, error) {
 		if binary.BigEndian.Uint64(k) > newSnapshot {
 			return false, nil

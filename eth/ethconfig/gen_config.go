@@ -14,23 +14,21 @@ import (
 // MarshalTOML marshals as TOML.
 func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
-		Genesis                 *core.Genesis `toml:",omitempty"`
-		NetworkID               uint64
-		EthDiscoveryURLs        []string
-		Whitelist               map[uint64]common.Hash `toml:"-"`
-		StorageMode             string
-		OnlyAnnounce            bool
-		Preimages               bool
-		Miner                   params.MiningConfig
-		Ethash                  ethash.Config
-		TxPool                  core.TxPoolConfig
-		GPO                     gasprice.Config
-		EnablePreimageRecording bool
-		DocRoot                 string                         `toml:"-"`
-		RPCGasCap               uint64                         `toml:",omitempty"`
-		RPCTxFeeCap             float64                        `toml:",omitempty"`
-		Checkpoint              *params.TrustedCheckpoint      `toml:",omitempty"`
-		CheckpointOracle        *params.CheckpointOracleConfig `toml:",omitempty"`
+		Genesis          *core.Genesis `toml:",omitempty"`
+		NetworkID        uint64
+		EthDiscoveryURLs []string
+		Whitelist        map[uint64]common.Hash `toml:"-"`
+		StorageMode      string
+		OnlyAnnounce     bool
+		Miner            params.MiningConfig
+		Ethash           ethash.Config
+		TxPool           core.TxPoolConfig
+		GPO              gasprice.Config
+		DocRoot          string                         `toml:"-"`
+		RPCGasCap        uint64                         `toml:",omitempty"`
+		RPCTxFeeCap      float64                        `toml:",omitempty"`
+		Checkpoint       *params.TrustedCheckpoint      `toml:",omitempty"`
+		CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -38,12 +36,10 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Whitelist = c.Whitelist
 	enc.StorageMode = c.StorageMode.ToString()
-	enc.Preimages = c.Preimages
 	enc.Miner = c.Miner
 	enc.Ethash = c.Ethash
 	enc.TxPool = c.TxPool
 	enc.GPO = c.GPO
-	enc.EnablePreimageRecording = c.EnablePreimageRecording
 	enc.DocRoot = c.DocRoot
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
@@ -55,26 +51,24 @@ func (c Config) MarshalTOML() (interface{}, error) {
 // UnmarshalTOML unmarshals from TOML.
 func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
-		Genesis                 *core.Genesis `toml:",omitempty"`
-		NetworkID               *uint64
-		EthDiscoveryURLs        []string
-		Whitelist               map[uint64]common.Hash `toml:"-"`
-		Mode                    *string
-		OnlyAnnounce            *bool
-		SkipBcVersionCheck      *bool `toml:"-"`
-		DatabaseHandles         *int  `toml:"-"`
-		DatabaseFreezer         *string
-		Preimages               *bool
-		Miner                   *params.MiningConfig
-		Ethash                  *ethash.Config
-		TxPool                  *core.TxPoolConfig
-		GPO                     *gasprice.Config
-		EnablePreimageRecording *bool
-		DocRoot                 *string                        `toml:"-"`
-		RPCGasCap               *uint64                        `toml:",omitempty"`
-		RPCTxFeeCap             *float64                       `toml:",omitempty"`
-		Checkpoint              *params.TrustedCheckpoint      `toml:",omitempty"`
-		CheckpointOracle        *params.CheckpointOracleConfig `toml:",omitempty"`
+		Genesis            *core.Genesis `toml:",omitempty"`
+		NetworkID          *uint64
+		EthDiscoveryURLs   []string
+		Whitelist          map[uint64]common.Hash `toml:"-"`
+		Mode               *string
+		OnlyAnnounce       *bool
+		SkipBcVersionCheck *bool `toml:"-"`
+		DatabaseHandles    *int  `toml:"-"`
+		DatabaseFreezer    *string
+		Miner              *params.MiningConfig
+		Ethash             *ethash.Config
+		TxPool             *core.TxPoolConfig
+		GPO                *gasprice.Config
+		DocRoot            *string                        `toml:"-"`
+		RPCGasCap          *uint64                        `toml:",omitempty"`
+		RPCTxFeeCap        *float64                       `toml:",omitempty"`
+		Checkpoint         *params.TrustedCheckpoint      `toml:",omitempty"`
+		CheckpointOracle   *params.CheckpointOracleConfig `toml:",omitempty"`
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -99,9 +93,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		}
 		c.StorageMode = mode
 	}
-	if dec.Preimages != nil {
-		c.Preimages = *dec.Preimages
-	}
 	if dec.Miner != nil {
 		c.Miner = *dec.Miner
 	}
@@ -113,9 +104,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.GPO != nil {
 		c.GPO = *dec.GPO
-	}
-	if dec.EnablePreimageRecording != nil {
-		c.EnablePreimageRecording = *dec.EnablePreimageRecording
 	}
 	if dec.DocRoot != nil {
 		c.DocRoot = *dec.DocRoot

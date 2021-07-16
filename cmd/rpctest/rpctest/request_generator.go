@@ -186,6 +186,11 @@ func (g *RequestGenerator) traceFilterTo(prevBn uint64, bn uint64, account commo
 	return sb.String()
 }
 
+func (g *RequestGenerator) traceReplayTransaction(hash string) string {
+	const template = `{"jsonrpc":"2.0","method":"trace_replayTransaction","params":["%s", ["trace", "stateDiff"]],"id":%d}`
+	return fmt.Sprintf(template, hash, g.reqID)
+}
+
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
 	err := post(g.client, routes[target], body, response)

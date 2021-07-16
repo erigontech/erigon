@@ -782,7 +782,9 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Id]
-	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
+	if msgcode != eth.NewBlockMsg &&
+		msgcode != eth.NewPooledTransactionHashesMsg && // to broadcast new local transactions
+		msgcode != eth.NewBlockHashesMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
@@ -846,7 +848,10 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 		}
 	}
 	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
-	ss.statusData = statusData
+	if ss.statusData == nil || statusData.MaxBlock != 0 {
+		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
+		ss.statusData = statusData
+	}
 	return reply, nil
 }
 

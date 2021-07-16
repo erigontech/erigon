@@ -128,6 +128,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 
 func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
 	collector := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close("TxLookup")
 
 	logPrefix := s.state.LogPrefix()
 	c, err := tx.Cursor(dbutils.BlockBodyPrefix)

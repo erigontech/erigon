@@ -276,11 +276,6 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 		panic(err)
 	}
 
-	evm := interpreter.evm
-	if evm.Config.EnablePreimageRecording {
-		evm.IntraBlockState.AddPreimage(interpreter.hasherBuf, data)
-	}
-
 	size.SetBytes(interpreter.hasherBuf[:])
 	return nil, nil
 }
