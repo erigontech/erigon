@@ -17,11 +17,12 @@ import (
 
 func TestBlockTransactions(t *testing.T) {
 	db := kv.NewTestDB(t)
-	defer db.Close()
 	tx, err := db.Begin(context.Background(), ethdb.RW)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	defer tx.Rollback()
 	for blockNum := uint64(1); blockNum <= 3; blockNum++ {
 		for blockID := 1; blockID < 4; blockID++ {
 			bodyForStorage := new(BodyForStorageDeprecated)
@@ -110,7 +111,7 @@ func TestBlockTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	tx.Rollback()
 	seq, err := db.ReadSequence(dbutils.EthTx)
 	if err != nil {
 		t.Fatal(err)
