@@ -40,6 +40,6 @@ func decodeFieldElement(in []byte) ([]byte, error) {
 		}
 	}
 	out := make([]byte, 48)
-	copy(out[:], in[16:])
+	copy(out, in[16:])
 	return out, nil
 }

@@ -28,11 +28,12 @@ func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool, startFunc func()) TxPoolCf
 	}
 }
 
-func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, quitCh <-chan struct{}) error {
+func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Context) error {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -148,7 +149,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	return nil
 }
 
-func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, quitCh <-chan struct{}) error {
+func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Context) error {
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
 		return nil
@@ -162,6 +163,7 @@ func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, q
 		}
 		defer tx.Rollback()
 	}
+	quitCh := ctx.Done()
 
 	logPrefix := s.state.LogPrefix()
 	if cfg.pool != nil && cfg.pool.IsStarted() {

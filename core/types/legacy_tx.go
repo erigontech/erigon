@@ -290,7 +290,7 @@ func (tx LegacyTx) MarshalBinary(w io.Writer) error {
 
 func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
 	// prefix
-	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	if tx.Nonce > 0 && tx.Nonce < 128 {
@@ -336,7 +336,7 @@ func (tx LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, g
 	if err := tx.Value.EncodeRLP(w); err != nil {
 		return err
 	}
-	if err := EncodeString(tx.Data, w, b[:]); err != nil {
+	if err := EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
 	if err := tx.V.EncodeRLP(w); err != nil {

@@ -37,16 +37,17 @@ func StageHistoryCfg(db ethdb.RwKV, tmpDir string) HistoryCfg {
 	}
 }
 
-func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, quitCh <-chan struct{}) error {
+func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
+	quitCh := ctx.Done()
 
 	executionAt, err := s.ExecutionAt(tx)
 	logPrefix := s.state.LogPrefix()
@@ -80,16 +81,17 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, quit
 	return nil
 }
 
-func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, quitCh <-chan struct{}) error {
+func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
+	quitCh := ctx.Done()
 
 	executionAt, err := s.ExecutionAt(tx)
 	logPrefix := s.state.LogPrefix()
@@ -220,17 +222,18 @@ func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, sta
 	return nil
 }
 
-func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, quitCh <-chan struct{}) error {
+func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
+	quitCh := ctx.Done()
 	logPrefix := s.state.LogPrefix()
 	if err := unwindHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
@@ -248,7 +251,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 	return nil
 }
 
-func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, quitCh <-chan struct{}) error {
+func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -258,6 +261,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 		}
 		defer tx.Rollback()
 	}
+	quitCh := ctx.Done()
 
 	logPrefix := s.state.LogPrefix()
 	if err := unwindHistory(logPrefix, tx, dbutils.StorageChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {

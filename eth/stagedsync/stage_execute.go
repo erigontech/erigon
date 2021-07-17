@@ -65,12 +65,12 @@ type ExecuteBlockCfg struct {
 
 func StageExecuteBlocksCfg(
 	kv ethdb.RwKV,
-	WriteReceipts bool,
-	WriteCallTraces bool,
+	writeReceipts bool,
+	writeCallTraces bool,
 	writeTEVM bool,
 	pruningDistance uint64,
-	BatchSize datasize.ByteSize,
-	ChangeSetHook ChangeSetHook,
+	batchSize datasize.ByteSize,
+	changeSetHook ChangeSetHook,
 	chainConfig *params.ChainConfig,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
@@ -80,12 +80,12 @@ func StageExecuteBlocksCfg(
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:              kv,
-		writeReceipts:   WriteReceipts,
-		writeCallTraces: WriteCallTraces,
+		writeReceipts:   writeReceipts,
+		writeCallTraces: writeCallTraces,
 		writeTEVM:       writeTEVM,
 		pruningDistance: pruningDistance,
-		batchSize:       BatchSize,
-		changeSetHook:   ChangeSetHook,
+		batchSize:       batchSize,
+		changeSetHook:   changeSetHook,
 		chainConfig:     chainConfig,
 		engine:          engine,
 		vmConfig:        vmConfig,
@@ -486,11 +486,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		}
 		accumulator.StartChange(u.UnwindPoint, hash, true /* unwind */)
 	}
-	changes, errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, cfg.tmpdir, quit)
+
+	changes := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer changes.Close(logPrefix)
+	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 	if errRewind != nil {
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
-	defer changes.Close(logPrefix)
 
 	if err := changes.Load(logPrefix, tx, stateBucket, func(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {

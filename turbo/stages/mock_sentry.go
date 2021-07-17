@@ -150,7 +150,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	mock := &MockSentry{
 		t:           t,
-		DB:          kv.NewTestKV(t),
 		tmpdir:      tmpdir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
@@ -162,6 +161,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
 		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
+	}
+	if t != nil {
+		mock.DB = kv.NewTestKV(t)
+	} else {
+		mock.DB = kv.NewMemKV()
 	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)

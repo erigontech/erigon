@@ -161,7 +161,7 @@ func (s *astack) updateHash() {
 }
 
 func (s *astack) Push(value AbsValue) {
-	rest := s.values[:]
+	rest := s.values
 	s.values = nil
 	s.values = append(s.values, value)
 	s.values = append(s.values, rest...)

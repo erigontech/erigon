@@ -40,10 +40,10 @@ func (lq LinkQueue) Len() int {
 // For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
 // insert headers in the ascending order of their block heights.
 func (lq LinkQueue) Less(i, j int) bool {
-	if (*lq[i]).persisted {
-		return (*lq[i]).blockHeight < (*lq[j]).blockHeight
+	if lq[i].persisted {
+		return lq[i].blockHeight < lq[j].blockHeight
 	}
-	return (*lq[i]).blockHeight > (*lq[j]).blockHeight
+	return lq[i].blockHeight > lq[j].blockHeight
 }
 
 // Swap (part of heap.Interface) moves two links in the queue into each other's places. Note that each link has idx attribute that is getting adjusted during
@@ -89,11 +89,11 @@ func (aq AnchorQueue) Len() int {
 }
 
 func (aq AnchorQueue) Less(i, j int) bool {
-	if (*aq[i]).timestamp == (*aq[j]).timestamp {
+	if aq[i].timestamp == aq[j].timestamp {
 		// When timestamps are the same, we prioritise low block height anchors
-		return (*aq[i]).blockHeight < (*aq[j]).blockHeight
+		return aq[i].blockHeight < aq[j].blockHeight
 	}
-	return (*aq[i]).timestamp < (*aq[j]).timestamp
+	return aq[i].timestamp < aq[j].timestamp
 }
 
 func (aq AnchorQueue) Swap(i, j int) {
