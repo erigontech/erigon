@@ -255,9 +255,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	if err1 != nil {
 		return err1
 	}
-	defer func() {
-		dstTx.Rollback()
-	}()
+	defer dstTx.Rollback()
 
 	commitEvery := time.NewTicker(5 * time.Second)
 	defer commitEvery.Stop()
@@ -341,14 +339,6 @@ MainLoop:
 	if err != nil {
 		return err
 	}
-	dstTx, err = dst.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	err = dstTx.Commit()
-	if err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -370,9 +360,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 	if err1 != nil {
 		return err1
 	}
-	defer func() {
-		dstTx.Rollback()
-	}()
+	defer dstTx.Rollback()
 
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
@@ -419,6 +407,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 				if err != nil {
 					return err
 				}
+				defer dstTx.Rollback()
 				c, err = dstTx.RwCursor(name)
 				if err != nil {
 					return err
@@ -439,14 +428,6 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 		//}
 	}
 	err := dstTx.Commit()
-	if err != nil {
-		return err
-	}
-	dstTx, err = dst.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	err = dstTx.Commit()
 	if err != nil {
 		return err
 	}

@@ -14,8 +14,59 @@ linters:
     - structcheck
     - unused
     - varcheck
+    - gocritic
 
 linters-settings:
+  gocritic:
+    # Which checks should be enabled; can't be combined with 'disabled-checks';
+    # See https://go-critic.github.io/overview#checks-overview
+    # To check which checks are enabled run `GL_DEBUG=gocritic golangci-lint run`
+    # By default list of stable checks is used.
+    enabled-checks:
+      - ruleguard
+      - truncateCmp
+    #      - defaultCaseOrder
+
+    # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
+    disabled-checks:
+      - regexpMust
+      #      - hugeParam
+      - rangeValCopy
+      - exitAfterDefer
+      - elseif
+      - dupBranchBody
+      - assignOp
+      - singleCaseSwitch
+      - unlambda
+      - captLocal
+      - commentFormatting
+      - ifElseChain
+      - appendAssign
+
+    # Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
+    # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
+    enabled-tags:
+      - performance
+    disabled-tags:
+      - experimental
+    ruleguard:
+      rules: "rules.go"
+    settings:
+      hugeParam:
+        # size in bytes that makes the warning trigger (default 80)
+        sizeThreshold: 1000
+      rangeExprCopy:
+        # size in bytes that makes the warning trigger (default 512)
+        sizeThreshold: 512
+        # whether to check test functions (default true)
+        skipTestFuncs: true
+      truncateCmp:
+        # whether to skip int/uint/uintptr types (default true)
+        skipArchDependent: true
+      underef:
+        # whether to skip (*x).method() calls where x is a pointer receiver (default true)
+        skipRecvDeref: true
+
   govet:
     disable:
       - deepequalerrors
@@ -45,6 +96,8 @@ issues:
         - gosec
         - unused
         - deadcode
+        - gocritic
     - path: metrics/sample\.go
       linters:
         - gosec
+        - gocritic

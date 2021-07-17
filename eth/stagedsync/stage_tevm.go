@@ -23,35 +23,29 @@ import (
 var stageTranspileGauge = metrics.NewRegisteredGauge("stage/tevm", nil)
 
 type TranspileCfg struct {
-	db            ethdb.RwKV
-	batchSize     datasize.ByteSize
-	readerBuilder StateReaderBuilder
-	writerBuilder StateWriterBuilder
-	chainConfig   *params.ChainConfig
+	db          ethdb.RwKV
+	batchSize   datasize.ByteSize
+	chainConfig *params.ChainConfig
 }
 
 func StageTranspileCfg(
 	kv ethdb.RwKV,
 	batchSize datasize.ByteSize,
-	readerBuilder StateReaderBuilder,
-	writerBuilder StateWriterBuilder,
 	chainConfig *params.ChainConfig,
 ) TranspileCfg {
 	return TranspileCfg{
-		db:            kv,
-		batchSize:     batchSize,
-		readerBuilder: readerBuilder,
-		writerBuilder: writerBuilder,
-		chainConfig:   chainConfig,
+		db:          kv,
+		batchSize:   batchSize,
+		chainConfig: chainConfig,
 	}
 }
 
-func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
+func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, cfg TranspileCfg, ctx context.Context) error {
 	var prevStageProgress uint64
 	var errStart error
 
 	if tx == nil {
-		errStart = cfg.db.View(context.Background(), func(tx ethdb.Tx) error {
+		errStart = cfg.db.View(ctx, func(tx ethdb.Tx) error {
 			prevStageProgress, errStart = stages.GetStageProgress(tx, stages.Execution)
 			return errStart
 		})
@@ -74,7 +68,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 	}
 
 	stageProgress := uint64(0)
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Contract translation", logPrefix), "from", s.BlockNumber, "to", to)
 	}
@@ -88,7 +82,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 
 	var err error
 	for stageProgress <= toBlock {
-		stageProgress, err = transpileBatch(logPrefix, stageProgress, to, cfg, tx, observedAddresses, observedCodeHashes, quit)
+		stageProgress, err = transpileBatch(logPrefix, stageProgress, to, cfg, tx, observedAddresses, observedCodeHashes, ctx.Done())
 		if err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
@@ -277,11 +271,10 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 	return currentContract, currentTime
 }
 
-func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan struct{}, cfg TranspileCfg) error {
+func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TranspileCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -351,14 +344,12 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan
 		}
 	}
 
-	err = u.Done(tx)
-	logPrefix := s.state.LogPrefix()
-	if err != nil {
+	logPrefix := s.LogPrefix()
+	if err = u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		err = tx.Commit()
-		if err != nil {
+		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
 		}
 	}
@@ -368,4 +359,26 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan
 // todo: TBD actual TEVM translator
 func transpileCode(code []byte) ([]byte, error) {
 	return append(make([]byte, 0, len(code)), code...), nil
+}
+
+func PruneTranspileStage(p *PruneState, tx ethdb.RwTx, cfg TranspileCfg, initialCycle bool, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := p.LogPrefix()
+	if err = p.Done(tx); err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
 }

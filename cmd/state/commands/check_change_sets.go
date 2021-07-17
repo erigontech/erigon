@@ -230,6 +230,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				if err != nil {
 					return err
 				}
+				defer rwtx.Rollback()
 				historyTx.Rollback()
 				historyTx, err = historyDb.BeginRo(context.Background())
 				if err != nil {

@@ -47,7 +47,7 @@ func (fe *fe) setBytes(in []byte) *fe {
 		l = size
 	}
 	padded := make([]byte, size)
-	copy(padded[size-l:], in[:])
+	copy(padded[size-l:], in)
 	var a int
 	for i := 0; i < 6; i++ {
 		a = size - i*8

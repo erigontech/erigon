@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 )
 
 func TestLogIndex(t *testing.T) {
-	require := require.New(t)
+	require, ctx := require.New(t), context.Background()
 	db, tx := kv.NewTestTx(t)
 
 	addr1, addr2 := common.HexToAddress("0x0"), common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2")
@@ -49,7 +50,7 @@ func TestLogIndex(t *testing.T) {
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Millisecond
-	err = promoteLogIndex("logPrefix", tx, 0, cfgCopy, nil)
+	err = promoteLogIndex("logPrefix", tx, 0, cfgCopy, ctx)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)

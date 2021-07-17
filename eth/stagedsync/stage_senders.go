@@ -50,7 +50,8 @@ func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig, tmpdir string)
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, quitCh <-chan struct{}) error {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, ctx context.Context) error {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -74,7 +75,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 		s.Done()
 		return nil
 	}
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Started", logPrefix), "from", s.BlockNumber, "to", to)
 	}
@@ -326,25 +327,44 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 	}
 }
 
-func UnwindSendersStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg SendersCfg) error {
+func UnwindSendersStage(s *UnwindState, tx ethdb.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	err := u.Done(tx)
-	logPrefix := s.state.LogPrefix()
-	if err != nil {
+	logPrefix := s.LogPrefix()
+	if err = s.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		err = tx.Commit()
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
+}
+
+func PruneSendersStage(s *PruneState, tx ethdb.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := s.LogPrefix()
+	if err = s.Done(tx); err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
 		}
 	}

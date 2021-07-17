@@ -33,16 +33,16 @@ func StageBlockHashesCfg(db ethdb.RwKV, tmpDir string) BlockHashesCfg {
 	}
 }
 
-func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, quit <-chan struct{}) error {
+func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
+	quit := ctx.Done()
 	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
@@ -58,7 +58,7 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, quit 
 	endKey := dbutils.HeaderKey(headNumber, headHash) // Make sure we stop at head
 
 	//todo do we need non canonical headers ?
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err := etl.Transform(
 		logPrefix,
 		tx,
@@ -75,36 +75,56 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, quit 
 	); err != nil {
 		return err
 	}
-	if err := s.DoneAndUpdate(tx, headNumber); err != nil {
+	if err = s.DoneAndUpdate(tx, headNumber); err != nil {
 		return err
 	}
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func UnwindBlockHashStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg) error {
+func UnwindBlockHashStage(u *UnwindState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	err := u.Done(tx)
-	logPrefix := s.state.LogPrefix()
-	if err != nil {
+	logPrefix := u.LogPrefix()
+
+	if err = u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		err = tx.Commit()
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
+}
+
+func PruneBlockHashStage(p *PruneState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := p.LogPrefix()
+	if err = p.Done(tx); err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
 		}
 	}

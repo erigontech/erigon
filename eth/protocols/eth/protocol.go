@@ -939,7 +939,7 @@ func (ptp66 *PooledTransactionsPacket66) DecodeRLP(s *rlp.Stream) error {
 	}
 	var tx types.Transaction
 	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
-		(*ptp66).PooledTransactionsPacket = append((*ptp66).PooledTransactionsPacket, tx)
+		ptp66.PooledTransactionsPacket = append(ptp66.PooledTransactionsPacket, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err

@@ -42,11 +42,11 @@ func StageLogIndexCfg(db ethdb.RwKV, tmpDir string) LogIndexCfg {
 	}
 }
 
-func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan struct{}) error {
+func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -54,7 +54,7 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan st
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
@@ -68,7 +68,7 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan st
 		start++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, cfg, quit); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, start, cfg, ctx); err != nil {
 		return err
 	}
 
@@ -84,7 +84,8 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan st
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, quit <-chan struct{}) error {
+func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, ctx context.Context) error {
+	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -216,18 +217,18 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndex
 	return nil
 }
 
-func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quitCh <-chan struct{}) error {
+func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, cfg, quitCh); err != nil {
 		return err
 	}
@@ -235,13 +236,11 @@ func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCf
 	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("%s: %w", logPrefix, err)
 	}
-
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -322,5 +321,26 @@ func truncateBitmaps(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to
 		}
 	}
 
+	return nil
+}
+
+func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if err = s.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }

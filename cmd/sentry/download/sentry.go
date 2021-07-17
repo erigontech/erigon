@@ -708,7 +708,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	x, ok := ss.GoodPeers.Load(peerID)
 	if !ok {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
+		//TODO: enable after support peer to sentry mapping
+		//return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
+		return &proto_sentry.SentPeers{}, nil
 	}
 	peerInfo := x.(*PeerInfo)
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]

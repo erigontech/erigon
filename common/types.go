@@ -249,7 +249,7 @@ func (a *Address) checksumHex() []byte {
 			buf[i] -= 32
 		}
 	}
-	return buf[:]
+	return buf
 }
 
 func (a Address) hex() []byte {

@@ -12,18 +12,16 @@ import (
 func TestUnwindStackLoadFromDb(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
 
-	stack := NewPersistentUnwindStack()
-
+	stack := NewPersistentUnwindStack(nil)
 	stages := []stages.SyncStage{stages.Bodies, stages.Headers, stages.Execution}
-
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}, nil}, tx)
 		assert.NoError(t, err)
 	}
 
-	stack2 := NewPersistentUnwindStack()
+	stack2 := NewPersistentUnwindStack(nil)
 	for i := range stages {
 		err := stack2.AddFromDB(tx, stages[i])
 		assert.NoError(t, err)
@@ -36,14 +34,12 @@ func TestUnwindStackLoadFromDb(t *testing.T) {
 func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
 
-	stack := NewPersistentUnwindStack()
-
+	stack := NewPersistentUnwindStack(nil)
 	stages := []stages.SyncStage{stages.Bodies, stages.Headers, stages.Execution}
-
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}, nil}, tx)
 		assert.NoError(t, err)
 	}
 
@@ -52,7 +48,7 @@ func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
 	err := u.Done(tx)
 	assert.NoError(t, err)
 
-	stack2 := NewPersistentUnwindStack()
+	stack2 := NewPersistentUnwindStack(nil)
 	for i := range stages {
 		err := stack2.AddFromDB(tx, stages[i])
 		assert.NoError(t, err)
@@ -65,21 +61,19 @@ func TestUnwindStackLoadFromDbAfterDone(t *testing.T) {
 func TestUnwindStackLoadFromDbNoDone(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
 
-	stack := NewPersistentUnwindStack()
-
+	stack := NewPersistentUnwindStack(nil)
 	stages := []stages.SyncStage{stages.Bodies, stages.Headers, stages.Execution}
-
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}, nil}, tx)
 		assert.NoError(t, err)
 	}
 
 	u := stack.Pop()
 	assert.NotNil(t, u)
 
-	stack2 := NewPersistentUnwindStack()
+	stack2 := NewPersistentUnwindStack(nil)
 	for i := range stages {
 		err := stack2.AddFromDB(tx, stages[i])
 		assert.NoError(t, err)
@@ -92,14 +86,14 @@ func TestUnwindStackLoadFromDbNoDone(t *testing.T) {
 func TestUnwindStackPopAndEmpty(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
 
-	stack := NewPersistentUnwindStack()
+	stack := NewPersistentUnwindStack(nil)
 
 	stages := []stages.SyncStage{stages.Bodies, stages.Headers, stages.Execution}
 
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}, nil}, tx)
 		assert.NoError(t, err)
 	}
 
@@ -123,22 +117,22 @@ func TestUnwindStackPopAndEmpty(t *testing.T) {
 }
 
 func TestUnwindOverrideWithLower(t *testing.T) {
-	db := kv.NewTestDB(t)
+	_, tx := kv.NewTestTx(t)
 
-	stack := NewPersistentUnwindStack()
+	stack := NewPersistentUnwindStack(nil)
 
 	stages := []stages.SyncStage{stages.Bodies, stages.Headers, stages.Execution}
 
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, db)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}, nil}, tx)
 		assert.NoError(t, err)
 	}
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	err := stack.Add(UnwindState{stages[0], 5, common.Hash{}}, db)
+	err := stack.Add(UnwindState{stages[0], 5, common.Hash{}, nil}, tx)
 	assert.NoError(t, err)
 
 	// we append if the next unwind is to the lower block
@@ -148,20 +142,20 @@ func TestUnwindOverrideWithLower(t *testing.T) {
 func TestUnwindOverrideWithHigher(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
 
-	stack := NewPersistentUnwindStack()
+	stack := NewPersistentUnwindStack(nil)
 
 	stages := []stages.SyncStage{stages.Bodies, stages.Headers, stages.Execution}
 
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}, nil}, tx)
 		assert.NoError(t, err)
 	}
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	err := stack.Add(UnwindState{stages[0], 105, common.Hash{}}, tx)
+	err := stack.Add(UnwindState{stages[0], 105, common.Hash{}, nil}, tx)
 	assert.NoError(t, err)
 
 	// we ignore if next unwind is to the higher block
@@ -171,20 +165,18 @@ func TestUnwindOverrideWithHigher(t *testing.T) {
 func TestUnwindOverrideWithTheSame(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
 
-	stack := NewPersistentUnwindStack()
-
+	stack := NewPersistentUnwindStack(nil)
 	stages := []stages.SyncStage{stages.Bodies, stages.Headers, stages.Execution}
-
 	points := []uint64{10, 20, 30}
 
 	for i := range stages {
-		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}}, tx)
+		err := stack.Add(UnwindState{stages[i], points[i], common.Hash{}, nil}, tx)
 		assert.NoError(t, err)
 	}
 
 	assert.Equal(t, 3, len(stack.unwindStack))
 
-	err := stack.Add(UnwindState{stages[0], 10, common.Hash{}}, tx)
+	err := stack.Add(UnwindState{stages[0], 10, common.Hash{}, nil}, tx)
 	assert.NoError(t, err)
 
 	// we ignore if next unwind is to the higher block

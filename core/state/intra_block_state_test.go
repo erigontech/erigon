@@ -345,12 +345,8 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 
 func TestAccessList(t *testing.T) {
 	// Some helpers
-	addr := func(a string) common.Address {
-		return common.HexToAddress(a)
-	}
-	slot := func(a string) common.Hash {
-		return common.HexToHash(a)
-	}
+	addr := common.HexToAddress
+	slot := common.HexToHash
 
 	_, tx := kv.NewTestTx(t)
 	state := New(NewPlainKvState(tx, 0))
