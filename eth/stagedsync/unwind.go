@@ -20,7 +20,7 @@ type UnwindState struct {
 	CurrentBlockNumber uint64
 	// If unwind is caused by a bad block, this hash is not empty
 	BadBlock common.Hash
-	state    *State
+	state    *StagedSync
 }
 
 func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }
@@ -36,7 +36,7 @@ func (u *UnwindState) Skip() {}
 type PruneState struct {
 	ID         stages.SyncStage
 	PrunePoint uint64 // PrunePoint is the block to prune to.
-	state      *State
+	state      *StagedSync
 }
 
 func (u *PruneState) LogPrefix() string { return u.state.LogPrefix() }

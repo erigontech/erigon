@@ -140,10 +140,6 @@ func StageLoopStep(
 	if notifications != nil && notifications.Accumulator != nil {
 		notifications.Accumulator.Reset()
 	}
-	st, err1 := sync.Prepare()
-	if err1 != nil {
-		return fmt.Errorf("prepare staged sync: %w", err1)
-	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
@@ -156,7 +152,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(db, tx, initialCycle)
+	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return err
 	}
@@ -202,7 +198,7 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, st.PrevUnwindPoint(), notifications.Events, db)
+	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, db)
 	if err != nil {
 		return err
 	}
@@ -218,11 +214,7 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		return err
 	}
 	defer tx.Rollback()
-	miningState, err := mining.Prepare()
-	if err != nil {
-		return err
-	}
-	if err = miningState.Run(nil, tx, false); err != nil {
+	if err = mining.Run(nil, tx, false); err != nil {
 		return err
 	}
 	tx.Rollback()
