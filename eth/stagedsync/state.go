@@ -143,6 +143,9 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 				if err := s.SetCurrentStage(s.unwindOrder[i].ID); err != nil {
 					return err
 				}
+				if s.unwindOrder[i].Disabled {
+					continue
+				}
 				t := time.Now()
 				if err := s.unwindStage(firstCycle, s.unwindOrder[i].ID, db, tx); err != nil {
 					return err
@@ -286,9 +289,6 @@ func (s *State) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.
 	unwind.BadBlock = s.badBlock
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
-		if unwind.Skip(); err != nil {
-			return err
-		}
 		return nil
 	}
 	if !useExternalTx {

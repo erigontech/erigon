@@ -316,8 +316,6 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		if err = s.DoneAndUpdate(tx, maxNum); err != nil {
 			return err
 		}
-	} else if u.Skip(); err != nil {
-		return err
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {

@@ -386,6 +386,20 @@ func TestStateUnwind(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
+	//check that at unwind disabled stage not appear
+	flow = flow[:0]
+	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
+	state.UnwindTo(100, common.Hash{})
+	err = state.Run(db, tx, true)
+	assert.NoError(t, err)
+
+	expectedFlow = []stages.SyncStage{
+		unwindOf(stages.Senders), unwindOf(stages.Bodies), unwindOf(stages.Headers),
+		stages.Headers, stages.Bodies, stages.Senders,
+	}
+
+	assert.Equal(t, expectedFlow, flow)
+
 }
 
 func TestStateUnwindEmptyUnwinder(t *testing.T) {
