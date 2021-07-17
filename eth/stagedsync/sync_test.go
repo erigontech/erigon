@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestStateStagesSuccess(t *testing.T) {
+func TestStagesSuccess(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 	s := []*Stage{
 		{
@@ -50,7 +50,7 @@ func TestStateStagesSuccess(t *testing.T) {
 	assert.Equal(t, expectedFlow, flow)
 }
 
-func TestStateDisabledStages(t *testing.T) {
+func TestDisabledStages(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 	s := []*Stage{
 		{
@@ -90,7 +90,7 @@ func TestStateDisabledStages(t *testing.T) {
 	assert.Equal(t, expectedFlow, flow)
 }
 
-func TestStateErroredStage(t *testing.T) {
+func TestErroredStage(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 	expectedErr := errors.New("test error")
 	s := []*Stage{
@@ -130,7 +130,7 @@ func TestStateErroredStage(t *testing.T) {
 	assert.Equal(t, expectedFlow, flow)
 }
 
-func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
+func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -228,7 +228,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	assert.Equal(t, 1500, int(stageState.BlockNumber))
 }
 
-func TestStateUnwind(t *testing.T) {
+func TestUnwind(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -336,7 +336,7 @@ func TestStateUnwind(t *testing.T) {
 
 }
 
-func TestStateUnwindEmptyUnwinder(t *testing.T) {
+func TestUnwindEmptyUnwinder(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 	unwound := false
 	s := []*Stage{
@@ -410,7 +410,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 }
 
-func TestStateSyncDoTwice(t *testing.T) {
+func TestSyncDoTwice(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 
 	s := []*Stage{
@@ -515,7 +515,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 	assert.Equal(t, expectedFlow, flow)
 }
 
-func TestStateSyncInterruptLongUnwind(t *testing.T) {
+func TestSyncInterruptLongUnwind(t *testing.T) {
 	// interrupt a stage that is too big to fit in one batch,
 	// so the db is in inconsitent state, so we have to restart with that
 	flow := make([]stages.SyncStage, 0)
