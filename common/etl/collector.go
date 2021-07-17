@@ -131,7 +131,7 @@ func (c *Collector) Close(logPrefix string) {
 		totalSize += p.Dispose()
 	}
 	if totalSize > 0 {
-		log.Info(fmt.Sprintf("[%s] etl: temp files removed successfully", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
+		log.Info(fmt.Sprintf("[%s] etl: temp files removed", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
 	}
 }
 
