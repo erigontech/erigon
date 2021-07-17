@@ -223,6 +223,9 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 			}
 		}
 
+		// Anchor is removed from the map, but not from the anchorQueue
+		// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
+		// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
 		delete(hd.anchors, anchor.parentHash)
 		// Add all headers in the segments as links to this anchor
 		var prevLink *Link
@@ -275,6 +278,9 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 			break
 		}
 	}
+	// Anchor is removed from the map, but not from the anchorQueue
+	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
+	// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
 	delete(hd.anchors, anchor.parentHash)
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink

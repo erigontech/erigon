@@ -45,6 +45,7 @@ func (m *getPutkvMachine) Init(t *rapid.T) {
 
 	txSn, err := m.snKV.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer txSn.Rollback()
 
 	txModel, err := m.modelKV.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -133,9 +134,9 @@ func (m *getPutkvMachine) Begin(t *rapid.T) {
 	if m.modelTX != nil && m.snTX != nil {
 		return
 	}
-	mtx, err := m.modelKV.BeginRw(context.Background())
+	mtx, err := m.modelKV.BeginRw(context.Background()) //nolint
 	require.NoError(t, err)
-	sntx, err := m.snKV.BeginRw(context.Background())
+	sntx, err := m.snKV.BeginRw(context.Background()) //nolint
 	require.NoError(t, err)
 	m.modelTX = mtx
 	m.snTX = sntx
@@ -189,6 +190,7 @@ func (m *getKVMachine) Init(t *rapid.T) {
 
 	txSn, err := m.snKV.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer txSn.Rollback()
 
 	txModel, err := m.modelKV.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -343,9 +345,9 @@ func (m *cursorKVMachine) Begin(t *rapid.T) {
 		return
 	}
 
-	mtx, err := m.modelKV.BeginRw(context.Background())
+	mtx, err := m.modelKV.BeginRw(context.Background()) //nolint
 	require.NoError(t, err)
-	sntx, err := m.snKV.BeginRw(context.Background())
+	sntx, err := m.snKV.BeginRw(context.Background()) //nolint
 	require.NoError(t, err)
 	m.modelTX = mtx
 	m.snTX = sntx

@@ -79,7 +79,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
 }
 
-// AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block range
+// AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
 func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, startKey []byte, maxResults int, excludeCode, excludeStorage bool) (state.IteratorDump, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {

@@ -14,9 +14,16 @@ linters:
     - structcheck
     - unused
     - varcheck
+    - gocritic
 #    - forcetypeassert
 
 linters-settings:
+  gocritic:
+    enabled-checks:
+      - ruleguard
+    settings:
+      ruleguard:
+        rules: "rules.go"
   govet:
     disable:
       - deepequalerrors

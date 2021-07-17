@@ -168,6 +168,7 @@ func TestMatreshkaStream(t *testing.T) {
 			if err != nil {
 				t.Fatal(err, currentBlock)
 			}
+			defer tx.Rollback()
 
 			dr := time.Since(ttt)
 			fmt.Println(currentBlock, "finished", "acc-", accDiffLen, "st-", stDiffLen, "codes - ", codesDiffLen, "all -", time.Since(tt), "chunk - ", dr, "blocks/s", 10000/dr.Seconds())
