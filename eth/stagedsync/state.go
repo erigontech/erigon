@@ -202,6 +202,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	if err := printLogs(tx, timings); err != nil {
 		return err
 	}
+	s.currentStage = 0
 	return nil
 }
 
