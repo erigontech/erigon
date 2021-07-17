@@ -74,6 +74,7 @@ func (opts snapshotOpts) Open() *SnapshotKV {
 
 type SnapshotKV struct {
 	db              ethdb.RwKV
+	tmpDB           ethdb.RwKV
 	headersSnapshot ethdb.RoKV
 	bodiesSnapshot  ethdb.RoKV
 	stateSnapshot   ethdb.RoKV
@@ -149,6 +150,14 @@ func (s *SnapshotKV) WriteDB() ethdb.RwKV {
 	return s.db
 }
 
+func (s *SnapshotKV) TempDB() ethdb.RwKV {
+	return s.tmpDB
+}
+
+func (s *SnapshotKV) SetTempDB(kv ethdb.RwKV)  {
+	s.tmpDB = kv
+}
+
 //todo
 func (s *SnapshotKV) HeadersSnapshot() ethdb.RoKV {
 	return s.headersSnapshot
@@ -201,6 +210,16 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.tmpDB!=nil {
+		tmpTX,err:=s.tmpDB.BeginRo(context.Background())
+		if err!=nil {
+		    return nil, err
+		}
+		dbTx = &snTX{
+			dbTX: tmpTX,
+			stateTX: dbTx,
+		}
+	}
 	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
 	if err != nil {
 		return nil, err
@@ -217,6 +236,17 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 	dbTx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	if s.tmpDB!=nil {
+		tmpTX,err:=s.tmpDB.BeginRw(context.Background())
+		if err!=nil {
+			return nil, err
+		}
+		dbTx = &snTX{
+			dbTX: tmpTX,
+			stateTX: dbTx,
+		}
 	}
 
 	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
@@ -583,6 +613,11 @@ func (s *snCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, nil, err
 	}
+
+	for ;bytes.Equal(dbVal,DeletedValue); {
+		dbKey, dbVal, err = s.dbCursor.Next()
+	}
+
 	sndbKey, sndbVal, err := s.snCursor.Seek(seek)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, nil, err

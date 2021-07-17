@@ -1072,6 +1072,88 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 
 	}
 }
+func TestPlainStateProxy(t *testing.T) {
+	data := []KvData{
+		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{2}, V: []byte{2}},
+	}
+	snapshotDB, err := GenStateData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+
+	mainDB := NewTestKV(t)
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
+		Open()
+	err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return tx.Put(dbutils.PlainStateBucket, []byte{3}, []byte{3})
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	tmpDB := NewTestKV(t)
+	kv.SetTempDB(tmpDB)
+
+	err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		fmt.Println(tx.Put(dbutils.BlockBodyPrefix, []byte{1}, []byte{99}))
+		return tx.Put(dbutils.PlainStateBucket, []byte{4}, []byte{4})
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println("Full State")
+	err = kv.View(context.Background(), func(tx ethdb.Tx) error {
+		fmt.Println(tx.GetOne(dbutils.BlockBodyPrefix, []byte{1}))
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			fmt.Println(k,v)
+			return nil
+		})
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	fmt.Println("Tmp db")
+	err = kv.tmpDB.View(context.Background(), func(tx ethdb.Tx) error {
+		fmt.Println(tx.GetOne(dbutils.BlockBodyPrefix, []byte{1}))
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			fmt.Println(k,v)
+			return nil
+		})
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	fmt.Println("Write DB")
+	err = kv.WriteDB().View(context.Background(), func(tx ethdb.Tx) error {
+		fmt.Println(tx.GetOne(dbutils.BlockBodyPrefix, []byte{1}))
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			fmt.Println(k,v)
+			return nil
+		})
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+	fmt.Println("State snapshot")
+	err = kv.StateSnapshot().View(context.Background(), func(tx ethdb.Tx) error {
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			fmt.Println(k,v)
+			return nil
+		})
+	})
+	if err!=nil {
+	    t.Fatal(err)
+	}
+
+
+
+}
 
 func printBucket(kv ethdb.RoKV, bucket string) {
 	fmt.Println("+Print bucket", bucket)
