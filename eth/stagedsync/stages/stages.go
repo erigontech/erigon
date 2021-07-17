@@ -55,8 +55,6 @@ var (
 	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
 )
 
-const UnwindPointName = "UnwindPoint"
-
 var AllStages = []SyncStage{
 	Headers,
 	BlockHashes,
