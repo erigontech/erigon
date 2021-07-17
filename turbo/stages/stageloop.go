@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -11,7 +10,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -120,7 +118,7 @@ func StageLoopStep(
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
-	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
+	var origin, hashStateStageProgress, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
@@ -134,15 +132,6 @@ func StageLoopStep(
 		if err != nil {
 			return err
 		}
-		var v []byte
-		v, err = tx.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			unwindTo = binary.BigEndian.Uint64(v)
-		}
-
 		return nil
 	}); err != nil {
 		return err
@@ -151,7 +140,7 @@ func StageLoopStep(
 	if notifications != nil && notifications.Accumulator != nil {
 		notifications.Accumulator.Reset()
 	}
-	st, err1 := sync.Prepare(db, nil)
+	st, err1 := sync.Prepare()
 	if err1 != nil {
 		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
@@ -213,7 +202,7 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifications.Events, db)
+	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, st.PrevUnwindPoint(), notifications.Events, db)
 	if err != nil {
 		return err
 	}
@@ -229,7 +218,7 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		return err
 	}
 	defer tx.Rollback()
-	miningState, err := mining.Prepare(nil, tx)
+	miningState, err := mining.Prepare()
 	if err != nil {
 		return err
 	}
@@ -307,7 +296,7 @@ func NewStagedSync2(
 		stagedsync.StageTrieCfg(db, true, true, tmpdir),
 		stagedsync.StageHistoryCfg(db, tmpdir),
 		stagedsync.StageLogIndexCfg(db, tmpdir),
-		stagedsync.StageCallTracesCfg(db, 0, cfg.BatchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
+		stagedsync.StageCallTracesCfg(db, 0, tmpdir),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			for i := range txPoolServer.Sentries {

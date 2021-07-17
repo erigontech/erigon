@@ -94,9 +94,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 			if to > s.BlockNumber {
 				log.Warn("Unwinding due to incorrect root hash", "to", to-1)
-				if err = u.UnwindTo(to-1, tx, headerHash); err != nil {
-					return trie.EmptyRoot, err
-				}
+				u.UnwindTo(to-1, headerHash)
 			}
 			s.Done()
 		} else if err = s.DoneAndUpdate(tx, to); err != nil {
@@ -489,9 +487,6 @@ func ResetHashState(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.HashState, 0); err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -504,9 +499,6 @@ func ResetIH(tx ethdb.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStageUnwind(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
 	return nil
@@ -568,9 +560,6 @@ func PruneIntermediateHashesStage(s *PruneState, tx ethdb.RwTx, cfg TrieCfg, ctx
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

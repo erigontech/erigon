@@ -234,10 +234,6 @@ const (
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
-	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind = "SyncStageUnwind"
-	// Position to where to prune sync stages: stageName -> stageData
-	SyncStagePrune = "SyncStagePrune"
 
 	CliqueBucket             = "Clique"
 	CliqueSeparateBucket     = "CliqueSeparate"
@@ -308,7 +304,6 @@ var Buckets = []string{
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,
 	SyncStageProgress,
-	SyncStageUnwind,
 	PlainStateBucket,
 	PlainContractCodeBucket,
 	AccountChangeSetBucket,

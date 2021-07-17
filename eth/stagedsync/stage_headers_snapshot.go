@@ -153,9 +153,6 @@ func PruneHeadersSnapshotGenerationStage(u *PruneState, tx ethdb.RwTx, cfg Snaps
 		defer tx.Rollback()
 	}
 
-	if err := u.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
