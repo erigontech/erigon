@@ -52,8 +52,8 @@ type MockSentry struct {
 	tmpdir          string
 	Engine          consensus.Engine
 	ChainConfig     *params.ChainConfig
-	Sync            *stagedsync.StagedSync
-	MiningSync      *stagedsync.StagedSync
+	Sync            *stagedsync.Sync
+	MiningSync      *stagedsync.Sync
 	PendingBlocks   chan *types.Block
 	MinedBlocks     chan *types.Block
 	downloader      *download.ControlServerImpl
@@ -287,7 +287,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
 		stagedsync.StageHistoryCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageLogIndexCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageCallTracesCfg(mock.DB, 0, cfg.BatchSize, mock.tmpdir, mock.ChainConfig, mock.Engine),
+		stagedsync.StageCallTracesCfg(mock.DB, 0, mock.tmpdir),
 		stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
 		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 			mock.StreamWg.Add(1)

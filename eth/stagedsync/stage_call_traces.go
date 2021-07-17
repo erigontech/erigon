@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
@@ -26,29 +25,20 @@ import (
 )
 
 type CallTracesCfg struct {
-	db          ethdb.RwKV
-	ToBlock     uint64 // not setting this params means no limit
-	BatchSize   datasize.ByteSize
-	tmpdir      string
-	chainConfig *params.ChainConfig
-	engine      consensus.Engine
+	db      ethdb.RwKV
+	ToBlock uint64 // not setting this params means no limit
+	tmpdir  string
 }
 
 func StageCallTracesCfg(
 	db ethdb.RwKV,
 	toBlock uint64,
-	batchSize datasize.ByteSize,
 	tmpdir string,
-	chainConfig *params.ChainConfig,
-	engine consensus.Engine,
 ) CallTracesCfg {
 	return CallTracesCfg{
-		db:          db,
-		ToBlock:     toBlock,
-		BatchSize:   batchSize,
-		tmpdir:      tmpdir,
-		chainConfig: chainConfig,
-		engine:      engine,
+		db:      db,
+		ToBlock: toBlock,
+		tmpdir:  tmpdir,
 	}
 }
 
@@ -281,8 +271,8 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTrac
 	}
 	quitCh := ctx.Done()
 
-	logPrefix := s.LogPrefix()
-	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quitCh, cfg); err != nil {
+	logPrefix := u.LogPrefix()
+	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quitCh, cfg); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -299,7 +289,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTrac
 	return nil
 }
 
-func unwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <-chan struct{}, cfg CallTracesCfg) error {
+func DoUnwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <-chan struct{}, cfg CallTracesCfg) error {
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
 
@@ -421,9 +411,6 @@ func PruneCallTraces(s *PruneState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

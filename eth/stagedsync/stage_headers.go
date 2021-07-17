@@ -185,9 +185,7 @@ func HeadersForward(
 		timer.Stop()
 	}
 	if headerInserter.Unwind() {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx, common.Hash{}); err != nil {
-			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
-		}
+		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
 	} else if headerInserter.GetHighest() != 0 {
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
@@ -318,8 +316,6 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		if err = s.DoneAndUpdate(tx, maxNum); err != nil {
 			return err
 		}
-	} else if err = u.Skip(tx); err != nil {
-		return err
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -391,9 +387,6 @@ func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Cont
 	}
 
 	logPrefix := p.LogPrefix()
-	if err = p.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)

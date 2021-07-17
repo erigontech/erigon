@@ -7,10 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-var DefaultStages2 = map[stages.SyncStage]ExecFunc{
-	stages.Headers: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error { return nil },
-}
-
 func DefaultStages(ctx context.Context,
 	sm ethdb.StorageMode,
 	headers HeadersCfg,

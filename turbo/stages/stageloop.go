@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -11,7 +10,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -49,7 +47,7 @@ func NewStagedSync(
 	txPool stagedsync.TxPoolCfg,
 	finish stagedsync.FinishCfg,
 	test bool,
-) *stagedsync.StagedSync {
+) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, sm, headers, blockHashes, snapshotHeader, bodies, snapshotBodies, senders, exec, trans, snapshotState, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
 		stagedsync.DefaultUnwindOrder(),
@@ -60,7 +58,7 @@ func NewStagedSync(
 func StageLoop(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *stagedsync.Notifications,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
@@ -112,7 +110,7 @@ func StageLoop(
 func StageLoopStep(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
 	notifications *stagedsync.Notifications,
 	initialCycle bool,
@@ -120,7 +118,7 @@ func StageLoopStep(
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
-	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
+	var origin, hashStateStageProgress, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
@@ -134,15 +132,6 @@ func StageLoopStep(
 		if err != nil {
 			return err
 		}
-		var v []byte
-		v, err = tx.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			unwindTo = binary.BigEndian.Uint64(v)
-		}
-
 		return nil
 	}); err != nil {
 		return err
@@ -150,10 +139,6 @@ func StageLoopStep(
 
 	if notifications != nil && notifications.Accumulator != nil {
 		notifications.Accumulator.Reset()
-	}
-	st, err1 := sync.Prepare(db, nil)
-	if err1 != nil {
-		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
@@ -167,7 +152,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(db, tx, initialCycle)
+	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return err
 	}
@@ -213,7 +198,7 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifications.Events, db)
+	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, db)
 	if err != nil {
 		return err
 	}
@@ -221,7 +206,7 @@ func StageLoopStep(
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
+func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
@@ -229,11 +214,7 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		return err
 	}
 	defer tx.Rollback()
-	miningState, err := mining.Prepare(nil, tx)
-	if err != nil {
-		return err
-	}
-	if err = miningState.Run(nil, tx, false); err != nil {
+	if err = mining.Run(nil, tx, false); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -252,7 +233,7 @@ func NewStagedSync2(
 	client *snapshotsync.Client,
 	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
-) (*stagedsync.StagedSync, error) {
+) (*stagedsync.Sync, error) {
 	var pruningDistance uint64
 	if !cfg.StorageMode.History {
 		pruningDistance = params.FullImmutabilityThreshold
@@ -307,7 +288,7 @@ func NewStagedSync2(
 		stagedsync.StageTrieCfg(db, true, true, tmpdir),
 		stagedsync.StageHistoryCfg(db, tmpdir),
 		stagedsync.StageLogIndexCfg(db, tmpdir),
-		stagedsync.StageCallTracesCfg(db, 0, cfg.BatchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
+		stagedsync.StageCallTracesCfg(db, 0, tmpdir),
 		stagedsync.StageTxLookupCfg(db, tmpdir),
 		stagedsync.StageTxPoolCfg(db, txPool, func() {
 			for i := range txPoolServer.Sentries {

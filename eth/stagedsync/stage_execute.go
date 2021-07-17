@@ -298,9 +298,7 @@ Loop:
 
 		if err = executeBlock(block, tx, batch, cfg, writeChangesets, checkTEVMCode, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
-			if unwindErr := u.UnwindTo(blockNum-1, tx, block.Hash()); unwindErr != nil {
-				return unwindErr
-			}
+			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
 		stageProgress = blockNum
@@ -449,7 +447,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx cont
 		}
 		defer tx.Rollback()
 	}
-	logPrefix := s.LogPrefix()
+	logPrefix := u.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	if err = unwindExecutionStage(u, s, tx, quit, cfg, initialCycle); err != nil {
@@ -620,9 +618,6 @@ func PruneExecutionStage(p *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	}
 
 	logPrefix := p.LogPrefix()
-	if err = p.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)

@@ -42,7 +42,7 @@ func TestStateStagesSuccess(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
+	state := New(s, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -85,7 +85,7 @@ func TestStateDisabledStages(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
+	state := New(s, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -131,7 +131,7 @@ func TestStateRepeatedStage(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
+	state := New(s, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -174,8 +174,7 @@ func TestStateErroredStage(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, expectedErr, err)
@@ -234,7 +233,8 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					return u.UnwindTo(1500, tx, common.Hash{})
+					u.UnwindTo(1500, common.Hash{})
+					return nil
 				}
 				s.Done()
 				return nil
@@ -261,8 +261,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID})
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -331,10 +330,7 @@ func TestStateUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -362,8 +358,7 @@ func TestStateUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID})
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -387,6 +382,20 @@ func TestStateUnwind(t *testing.T) {
 	stageState, err = state.StageState(stages.Senders, tx)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
+
+	//check that at unwind disabled stage not appear
+	flow = flow[:0]
+	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
+	state.UnwindTo(100, common.Hash{})
+	err = state.Run(db, tx, true)
+	assert.NoError(t, err)
+
+	expectedFlow = []stages.SyncStage{
+		unwindOf(stages.Senders), unwindOf(stages.Bodies), unwindOf(stages.Headers),
+		stages.Headers, stages.Bodies, stages.Senders,
+	}
+
+	assert.Equal(t, expectedFlow, flow)
 
 }
 
@@ -429,10 +438,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -444,8 +450,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -501,12 +506,12 @@ func TestStateSyncDoTwice(t *testing.T) {
 		},
 	}
 
-	state := NewState(s)
+	state := New(s, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
 
-	state = NewState(s)
+	state = New(s, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -562,14 +567,14 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 	}
 
-	state := NewState(s)
+	state := New(s, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, expectedErr, err)
 
 	expectedErr = nil
 
-	state = NewState(s)
+	state = New(s, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -627,10 +632,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -647,16 +649,16 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Error(t, errInterrupted, err)
 
-	state = NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err = state.LoadUnwindInfo(tx)
-	assert.NoError(t, err)
+	//state = NewState(s)
+	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}
+	//err = state.LoadUnwindInfo(tx)
+	//assert.NoError(t, err)
+	//state.UnwindTo(500, common.Hash{})
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
