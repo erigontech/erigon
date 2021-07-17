@@ -43,10 +43,6 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-type StateReaderBuilder func(ethdb.Database) state.StateReader
-
-type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) state.WriterWithChangeSets
-
 type ExecuteBlockCfg struct {
 	db              ethdb.RwKV
 	batchSize       datasize.ByteSize
@@ -227,11 +223,10 @@ func newStateReaderWriter(
 	return stateReader, stateWriter
 }
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) error {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
 		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
@@ -251,7 +246,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 		s.Done()
 		return nil
 	}
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
@@ -346,24 +341,24 @@ Loop:
 		}
 	}
 
-	if err := s.Update(batch, stageProgress); err != nil {
+	if err = s.Update(batch, stageProgress); err != nil {
 		return err
 	}
-	if err := batch.Commit(); err != nil {
+	if err = batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
 	// Prune changesets if needed
 	if cfg.pruningDistance > 0 {
-		if err := pruneDupSortedBucket(tx, logPrefix, "account changesets", dbutils.AccountChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
+		if err = pruneDupSortedBucket(tx, logPrefix, "account changesets", dbutils.AccountChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
 			return err
 		}
-		if err := pruneDupSortedBucket(tx, logPrefix, "storage changesets", dbutils.StorageChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
+		if err = pruneDupSortedBucket(tx, logPrefix, "storage changesets", dbutils.StorageChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
 			return err
 		}
 	}
 
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -440,7 +435,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTx, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) error {
+func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	quit := ctx.Done()
 	if u.UnwindPoint >= s.BlockNumber {
 		s.Done()
@@ -448,25 +443,24 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx cont
 	}
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
 		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	if err := unwindExecutionStage(u, s, tx, quit, cfg, initialCycle); err != nil {
+	if err = unwindExecutionStage(u, s, tx, quit, cfg, initialCycle); err != nil {
 		return err
 	}
-	if err := u.Done(tx); err != nil {
+	if err = u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -474,7 +468,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx cont
 }
 
 func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	stateBucket := dbutils.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
@@ -613,4 +607,26 @@ func min(a, b uint64) uint64 {
 		return a
 	}
 	return b
+}
+
+func PruneExecutionStage(p *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := p.LogPrefix()
+	if err = p.Done(tx); err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
 }

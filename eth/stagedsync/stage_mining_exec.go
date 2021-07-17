@@ -52,7 +52,7 @@ func StageMiningExecCfg(
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
 	cfg.vmConfig.NoReceipts = false
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 	localTxs := current.LocalTxs
 	remoteTxs := current.RemoteTxs

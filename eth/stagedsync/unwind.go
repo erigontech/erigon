@@ -19,9 +19,12 @@ type UnwindState struct {
 	UnwindPoint uint64
 	// If unwind is caused by a bad block, this hash is not empty
 	BadBlock common.Hash
+	state    *State
 }
 
-// Done() updates the DB state of the stage.
+func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }
+
+// Done updates the DB state of the stage.
 func (u *UnwindState) Done(db ethdb.Putter) error {
 	err := stages.SaveStageProgress(db, u.ID, u.UnwindPoint)
 	if err != nil {
@@ -30,17 +33,18 @@ func (u *UnwindState) Done(db ethdb.Putter) error {
 	return stages.SaveStageUnwind(db, u.ID, 0)
 }
 
-// Skip() ignores the unwind
+// Skip ignores the unwind
 func (u *UnwindState) Skip(db ethdb.Putter) error {
 	return stages.SaveStageUnwind(db, u.ID, 0)
 }
 
 type PersistentUnwindStack struct {
 	unwindStack []UnwindState
+	state       *State
 }
 
-func NewPersistentUnwindStack() *PersistentUnwindStack {
-	return &PersistentUnwindStack{make([]UnwindState, 0)}
+func NewPersistentUnwindStack(state *State) *PersistentUnwindStack {
+	return &PersistentUnwindStack{make([]UnwindState, 0), state}
 }
 
 func (s *PersistentUnwindStack) AddFromDB(db ethdb.KVGetter, stageID stages.SyncStage) error {
@@ -62,7 +66,7 @@ func (s *PersistentUnwindStack) LoadFromDB(db ethdb.KVGetter, stageID stages.Syn
 		return nil, err
 	}
 	if unwindPoint > 0 {
-		return &UnwindState{stageID, unwindPoint, common.Hash{}}, nil
+		return &UnwindState{stageID, unwindPoint, common.Hash{}, s.state}, nil
 	}
 	return nil, nil
 }
@@ -90,4 +94,23 @@ func (s *PersistentUnwindStack) Pop() *UnwindState {
 	unwind := s.unwindStack[len(s.unwindStack)-1]
 	s.unwindStack = s.unwindStack[:len(s.unwindStack)-1]
 	return &unwind
+}
+
+// PruneState contains the information about unwind.
+type PruneState struct {
+	ID         stages.SyncStage
+	PrunePoint uint64 // PrunePoint is the block to prune to.
+	state      *State
+}
+
+func (u *PruneState) LogPrefix() string { return u.state.LogPrefix() }
+
+// Done updates the DB state of the stage.
+func (u *PruneState) Done(db ethdb.Putter) error {
+	return stages.SaveStagePrune(db, u.ID, 0)
+}
+
+// Skip ignores the prune
+func (u *PruneState) Skip(db ethdb.Putter) error {
+	return stages.SaveStagePrune(db, u.ID, 0)
 }

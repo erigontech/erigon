@@ -228,25 +228,45 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 		"sys", common.StorageSize(m.Sys))
 }
 
-func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesCfg) error {
+func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
-	err := u.Done(tx)
-	logPrefix := s.state.LogPrefix()
-	if err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+
+	logPrefix := u.LogPrefix()
+	if err = u.Done(tx); err != nil {
+		return fmt.Errorf("[%s]: reset: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		err = tx.Commit()
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
+}
+
+func PruneBodiesStage(s *PruneState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := s.LogPrefix()
+	if err = s.Done(tx); err != nil {
+		return fmt.Errorf("[%s]: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
 		}
 	}
 	return nil

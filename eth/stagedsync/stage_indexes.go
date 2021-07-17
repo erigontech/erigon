@@ -50,7 +50,7 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	quitCh := ctx.Done()
 
 	executionAt, err := s.ExecutionAt(tx)
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
@@ -94,7 +94,7 @@ func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	quitCh := ctx.Done()
 
 	executionAt, err := s.ExecutionAt(tx)
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: logs index: getting last executed block: %w", logPrefix, err)
 	}
@@ -222,10 +222,9 @@ func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, sta
 	return nil
 }
 
-func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
+func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -234,7 +233,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 	}
 
 	quitCh := ctx.Done()
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err := unwindHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
@@ -251,11 +250,11 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 	return nil
 }
 
-func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
+func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -263,7 +262,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 	}
 	quitCh := ctx.Done()
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err := unwindHistory(logPrefix, tx, dbutils.StorageChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
@@ -347,5 +346,47 @@ func truncateBitmaps64(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, 
 		}
 	}
 
+	return nil
+}
+
+func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if err = s.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if err = s.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
