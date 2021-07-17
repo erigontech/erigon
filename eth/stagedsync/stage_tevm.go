@@ -23,26 +23,20 @@ import (
 var stageTranspileGauge = metrics.NewRegisteredGauge("stage/tevm", nil)
 
 type TranspileCfg struct {
-	db            ethdb.RwKV
-	batchSize     datasize.ByteSize
-	readerBuilder StateReaderBuilder
-	writerBuilder StateWriterBuilder
-	chainConfig   *params.ChainConfig
+	db          ethdb.RwKV
+	batchSize   datasize.ByteSize
+	chainConfig *params.ChainConfig
 }
 
 func StageTranspileCfg(
 	kv ethdb.RwKV,
 	batchSize datasize.ByteSize,
-	readerBuilder StateReaderBuilder,
-	writerBuilder StateWriterBuilder,
 	chainConfig *params.ChainConfig,
 ) TranspileCfg {
 	return TranspileCfg{
-		db:            kv,
-		batchSize:     batchSize,
-		readerBuilder: readerBuilder,
-		writerBuilder: writerBuilder,
-		chainConfig:   chainConfig,
+		db:          kv,
+		batchSize:   batchSize,
+		chainConfig: chainConfig,
 	}
 }
 
