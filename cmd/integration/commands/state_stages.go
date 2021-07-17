@@ -148,7 +148,6 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 	defer tx.Rollback()
 
 	tmpDir := path.Join(datadir, etl.TmpDirName)
-	must(clearUnwindStack(tx, ctx))
 	quit := ctx.Done()
 
 	var batchSize datasize.ByteSize
@@ -431,7 +430,6 @@ func loopIh(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, tmpdir), ctx); err != nil {
 		return err
 	}
-	_ = clearUnwindStack(tx, ctx)
 	must(tx.Commit())
 	tx, err = db.BeginRw(ctx)
 	must(err)
@@ -481,7 +479,6 @@ func loopExec(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 	}
 	defer tx.Rollback()
 
-	_ = clearUnwindStack(tx, context.Background())
 	must(tx.Commit())
 	tx, err = db.BeginRw(ctx)
 	must(err)
