@@ -75,18 +75,14 @@ func FindStorage(c ethdb.CursorDupSort, blockNumber uint64, k []byte) ([]byte, e
 
 // RewindDataPlain generates rewind data for all plain buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, tmpdir string, quit <-chan struct{}) (*etl.Collector, error) {
-	// Collect list of buckets and keys that need to be considered
-
-	changes := etl.NewCollector(tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-
+func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, changes *etl.Collector, quit <-chan struct{}) error {
 	if err := walkAndCollect(
 		changes.Collect,
 		db, dbutils.AccountChangeSetBucket,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := walkAndCollect(
@@ -95,10 +91,10 @@ func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, tmpdir string, q
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
-		return nil, err
+		return err
 	}
 
-	return changes, nil
+	return nil
 }
 
 func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {

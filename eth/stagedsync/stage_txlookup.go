@@ -31,11 +31,12 @@ func StageTxLookupCfg(
 	}
 }
 
-func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) error {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -97,14 +98,15 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) error {
+	quitCh := ctx.Done()
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}

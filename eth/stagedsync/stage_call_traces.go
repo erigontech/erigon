@@ -36,33 +36,34 @@ type CallTracesCfg struct {
 
 func StageCallTracesCfg(
 	db ethdb.RwKV,
-	ToBlock uint64,
-	BatchSize datasize.ByteSize,
+	toBlock uint64,
+	batchSize datasize.ByteSize,
 	tmpdir string,
 	chainConfig *params.ChainConfig,
 	engine consensus.Engine,
 ) CallTracesCfg {
 	return CallTracesCfg{
 		db:          db,
-		ToBlock:     ToBlock,
-		BatchSize:   BatchSize,
+		ToBlock:     toBlock,
+		BatchSize:   batchSize,
 		tmpdir:      tmpdir,
 		chainConfig: chainConfig,
 		engine:      engine,
 	}
 }
 
-func SpawnCallTraces(s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg CallTracesCfg) error {
+func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
+	quit := ctx.Done()
 	endBlock, err := s.ExecutionAt(tx)
 	if cfg.ToBlock > 0 && cfg.ToBlock < endBlock {
 		endBlock = cfg.ToBlock
@@ -265,7 +266,7 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 	return nil
 }
 
-func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, quitCh <-chan struct{}, cfg CallTracesCfg) error {
+func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) error {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
@@ -278,6 +279,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, quitCh <-cha
 		}
 		defer tx.Rollback()
 	}
+	quitCh := ctx.Done()
 
 	logPrefix := s.state.LogPrefix()
 	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quitCh, cfg); err != nil {

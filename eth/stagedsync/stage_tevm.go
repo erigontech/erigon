@@ -46,12 +46,12 @@ func StageTranspileCfg(
 	}
 }
 
-func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-chan struct{}, cfg TranspileCfg) error {
+func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, cfg TranspileCfg, ctx context.Context) error {
 	var prevStageProgress uint64
 	var errStart error
 
 	if tx == nil {
-		errStart = cfg.db.View(context.Background(), func(tx ethdb.Tx) error {
+		errStart = cfg.db.View(ctx, func(tx ethdb.Tx) error {
 			prevStageProgress, errStart = stages.GetStageProgress(tx, stages.Execution)
 			return errStart
 		})
@@ -88,7 +88,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, quit <-ch
 
 	var err error
 	for stageProgress <= toBlock {
-		stageProgress, err = transpileBatch(logPrefix, stageProgress, to, cfg, tx, observedAddresses, observedCodeHashes, quit)
+		stageProgress, err = transpileBatch(logPrefix, stageProgress, to, cfg, tx, observedAddresses, observedCodeHashes, ctx.Done())
 		if err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
@@ -277,11 +277,11 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 	return currentContract, currentTime
 }
 
-func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, _ <-chan struct{}, cfg TranspileCfg) error {
+func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TranspileCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}

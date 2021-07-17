@@ -763,7 +763,7 @@ func scanPage(page []byte, visStream io.Writer, pagePtrs map[uint64][]uint64, ex
 			fmt.Fprintf(visStream, "p_%d:n%d -> p_%d;\n", pageID, i, pagePtr)
 		}
 	} else if flags&OverflowPageFlag != 0 {
-		_, _, overflowNum := readOverflowPageHeader(page[:], 0)
+		_, _, overflowNum := readOverflowPageHeader(page, 0)
 		fmt.Fprintf(visStream, "p_%d [shape=record style=filled fillcolor=\"#D5F5E3\" label=\"Overflow %d pages\"];", pageID, overflowNum)
 		return overflowNum, nil
 	} else {
@@ -1093,8 +1093,8 @@ func readMetaPage(page []byte, pos int) (freeRoot uint64, freeDepth uint16, main
 	pos += 4
 	pos += 8 // Fixed address
 	pos += 8 // Map size
-	pos, freeRoot, freeDepth = readDbRecord(page[:], pos)
-	pos, mainRoot, mainDepth = readDbRecord(page[:], pos)
+	pos, freeRoot, freeDepth = readDbRecord(page, pos)
+	pos, mainRoot, mainDepth = readDbRecord(page, pos)
 	pos += 8 // Last page
 	txnID = binary.LittleEndian.Uint64(page[pos:])
 	return

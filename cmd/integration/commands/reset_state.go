@@ -85,28 +85,28 @@ func resetState(kv ethdb.RwKV, ctx context.Context) error {
 		return err
 	}
 	// don't reset senders here
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetHashState(tx) }); err != nil {
+	if err := kv.Update(ctx, stagedsync.ResetHashState); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return stagedsync.ResetIH(tx) }); err != nil {
+	if err := kv.Update(ctx, stagedsync.ResetIH); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetHistory(tx) }); err != nil {
+	if err := kv.Update(ctx, resetHistory); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetLogIndex(tx) }); err != nil {
+	if err := kv.Update(ctx, resetLogIndex); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetCallTraces(tx) }); err != nil {
+	if err := kv.Update(ctx, resetCallTraces); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetTxLookup(tx) }); err != nil {
+	if err := kv.Update(ctx, resetTxLookup); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetTxPool(tx) }); err != nil {
+	if err := kv.Update(ctx, resetTxPool); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetFinish(tx) }); err != nil {
+	if err := kv.Update(ctx, resetFinish); err != nil {
 		return err
 	}
 

@@ -47,10 +47,10 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
 			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx.Done())
+				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindBlockHashStage(u, s, tx, blockHashCfg)
+				return UnwindBlockHashStage(u, s, tx, blockHashCfg, ctx)
 			},
 		},
 		{
@@ -113,10 +113,10 @@ func DefaultStages(ctx context.Context,
 			Disabled:            !sm.TEVM,
 			DisabledDescription: "Enable by adding `e` to --storage-mode",
 			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnTranspileStage(s, tx, 0, ctx.Done(), trans)
+				return SpawnTranspileStage(s, tx, 0, trans, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindTranspileStage(u, s, tx, ctx.Done(), trans)
+				return UnwindTranspileStage(u, s, tx, trans, ctx)
 			},
 		},
 		{
@@ -158,10 +158,10 @@ func DefaultStages(ctx context.Context,
 			DisabledDescription: "Work In Progress",
 			Disabled:            !sm.CallTraces,
 			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnCallTraces(s, tx, ctx.Done(), callTraces)
+				return SpawnCallTraces(s, tx, callTraces, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindCallTraces(u, s, tx, ctx.Done(), callTraces)
+				return UnwindCallTraces(u, s, tx, callTraces, ctx)
 			},
 		},
 		{
@@ -170,10 +170,10 @@ func DefaultStages(ctx context.Context,
 			Disabled:            !sm.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnAccountHistoryIndex(s, tx, history, ctx.Done())
+				return SpawnAccountHistoryIndex(s, tx, history, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindAccountHistoryIndex(u, s, tx, history, ctx.Done())
+				return UnwindAccountHistoryIndex(u, s, tx, history, ctx)
 			},
 		},
 		{
@@ -182,10 +182,10 @@ func DefaultStages(ctx context.Context,
 			Disabled:            !sm.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnStorageHistoryIndex(s, tx, history, ctx.Done())
+				return SpawnStorageHistoryIndex(s, tx, history, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindStorageHistoryIndex(u, s, tx, history, ctx.Done())
+				return UnwindStorageHistoryIndex(u, s, tx, history, ctx)
 			},
 		},
 		{
@@ -194,10 +194,10 @@ func DefaultStages(ctx context.Context,
 			Disabled:            !sm.Receipts,
 			DisabledDescription: "Enable by adding `r` to --storage-mode",
 			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnLogIndex(s, tx, logIndex, ctx.Done())
+				return SpawnLogIndex(s, tx, logIndex, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindLogIndex(u, s, tx, logIndex, ctx.Done())
+				return UnwindLogIndex(u, s, tx, logIndex, ctx)
 			},
 		},
 		{
@@ -206,20 +206,20 @@ func DefaultStages(ctx context.Context,
 			Disabled:            !sm.TxIndex,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnTxLookup(s, tx, txLookup, ctx.Done())
+				return SpawnTxLookup(s, tx, txLookup, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindTxLookup(u, s, tx, txLookup, ctx.Done())
+				return UnwindTxLookup(u, s, tx, txLookup, ctx)
 			},
 		},
 		{
 			ID:          stages.TxPool,
 			Description: "Update transaction pool",
 			ExecFunc: func(firstCycle bool, s *StageState, _ Unwinder, tx ethdb.RwTx) error {
-				return SpawnTxPool(s, tx, txPool, ctx.Done())
+				return SpawnTxPool(s, tx, txPool, ctx)
 			},
 			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
-				return UnwindTxPool(u, s, tx, txPool, ctx.Done())
+				return UnwindTxPool(u, s, tx, txPool, ctx)
 			},
 		},
 		{
