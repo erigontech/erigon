@@ -47,7 +47,7 @@ func NewStagedSync(
 	txPool stagedsync.TxPoolCfg,
 	finish stagedsync.FinishCfg,
 	test bool,
-) *stagedsync.StagedSync {
+) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, sm, headers, blockHashes, snapshotHeader, bodies, snapshotBodies, senders, exec, trans, snapshotState, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
 		stagedsync.DefaultUnwindOrder(),
@@ -58,7 +58,7 @@ func NewStagedSync(
 func StageLoop(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *stagedsync.Notifications,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
@@ -110,7 +110,7 @@ func StageLoop(
 func StageLoopStep(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
 	notifications *stagedsync.Notifications,
 	initialCycle bool,
@@ -206,7 +206,7 @@ func StageLoopStep(
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
+func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
@@ -233,7 +233,7 @@ func NewStagedSync2(
 	client *snapshotsync.Client,
 	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
-) (*stagedsync.StagedSync, error) {
+) (*stagedsync.Sync, error) {
 	var pruningDistance uint64
 	if !cfg.StorageMode.History {
 		pruningDistance = params.FullImmutabilityThreshold

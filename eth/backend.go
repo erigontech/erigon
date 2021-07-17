@@ -109,7 +109,7 @@ type Ethereum struct {
 	sentryServers   []*download.SentryServerImpl
 	txPoolP2PServer *txpool.P2PServer
 	sentries        []remote.SentryClient
-	stagedSync      *stagedsync.StagedSync
+	stagedSync      *stagedsync.Sync
 
 	notifications *stagedsync.Notifications
 
@@ -537,7 +537,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -705,7 +705,7 @@ func (s *Ethereum) Stop() error {
 //Deprecated - use stages.StageLoop
 func Loop(
 	ctx context.Context,
-	db ethdb.RwKV, sync *stagedsync.StagedSync,
+	db ethdb.RwKV, sync *stagedsync.Sync,
 	controlServer *download.ControlServerImpl,
 	notifications *stagedsync.Notifications,
 	waitForDone chan struct{},
