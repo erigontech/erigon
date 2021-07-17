@@ -13,8 +13,6 @@ import (
 	"math"
 	"os"
 
-	// "reflect"
-
 	"os/exec"
 	"path"
 	"strings"
@@ -87,12 +85,6 @@ func isDupData(flag uint16) bool {
 	return flag&DupDataNodeFlag != 0
 }
 
-// Checks if node flag is valid
-// some node flags has 6
-func isValidFlag(flag uint16) bool {
-	return flag <= 6
-}
-
 // Reads 2 bytes starting from the position, converts them to uint16
 func _16(page []byte, pos int) uint16 {
 	return binary.LittleEndian.Uint16(page[pos:])
@@ -106,18 +98,6 @@ func _32(page []byte, pos int) uint32 {
 // Reads 8 bytes starting from the position, converts them to uint64
 func _64(page []byte, pos int) uint64 {
 	return binary.LittleEndian.Uint64(page[pos:])
-}
-
-// little assertion test function
-// Usage examples:
-// _assert(a > b, "a > b")
-// _assert(len(slice1) == len(slice2), "len(slice1) == len(slice2)")
-// _assert(data[0] < data[4], "data[0] < data[4]")
-func _assert(exp bool, msg string) {
-	if !exp {
-		str := fmt.Sprintf("Assertion: %s is false", msg)
-		panic(str)
-	}
 }
 
 // Converts slice of int into a string
@@ -228,7 +208,7 @@ type mdbx_db struct {
 	branches  uint32 /* number of internal pages */
 	leafs     uint32 /* number of leaf pages */
 	overflows uint32 /* number of overflow pages */
-	seq       uint64 /* table sequence counter */
+	seq       uint64 // nolint:structcheck /* table sequence counter */
 	entries   uint64 /* number of data items */
 	txnID     uint64 /* txnid of last committed modification */
 }
@@ -236,12 +216,12 @@ type mdbx_db struct {
 // database size-related parameters,
 // used as placeholder, doesn't have any meaning in this code
 type mdbx_geo struct {
-	grow_pv   uint16
-	shrink_pv uint16
-	lower     uint32
-	upper     uint32
-	now       uint32
-	next      uint32
+	grow_pv   uint16 // nolint:structcheck
+	shrink_pv uint16 // nolint:structcheck
+	lower     uint32 // nolint:structcheck
+	upper     uint32 // nolint:structcheck
+	now       uint32 // nolint:structcheck
+	next      uint32 // nolint:structcheck
 }
 
 /* used as placeholder, doesn't have any meaning in this code */
@@ -325,7 +305,7 @@ func (h *header) fromBytes(page []byte, isMetaPage bool) {
 			}
 
 			node := new(mdbx_node)
-			node.fromBytes(page[:], int(nodePtr), h.flag, false)
+			node.fromBytes(page, int(nodePtr), h.flag, false)
 
 			// h.ptrs = append(h.ptrs, nodePtr)
 			h.nodes = append(h.nodes, node)
@@ -1240,7 +1220,7 @@ func freeDBPages(f io.ReaderAt, visStream io.Writer, freeRoot uint32) error {
 				out += fmt.Sprintf("txid(%v)=", list.txnID)
 				out += pagesToString(list.pages)
 			} else {
-				txnID := _64(node.data[:], 0)
+				txnID := _64(node.data, 0)
 
 				overflowPages := int(math.Ceil(float64(node.dsize+uint32(HeaderSize)) / float64(PageSize)))
 
