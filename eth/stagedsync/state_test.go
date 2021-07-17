@@ -234,7 +234,8 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					return u.UnwindTo(1500, tx, common.Hash{})
+					u.UnwindTo(1500, common.Hash{})
+					return nil
 				}
 				s.Done()
 				return nil
@@ -331,10 +332,7 @@ func TestStateUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -429,10 +427,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -627,10 +622,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -653,10 +645,11 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	err := state.Run(db, tx, true)
 	assert.Error(t, errInterrupted, err)
 
-	state = NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err = state.LoadUnwindInfo(tx)
-	assert.NoError(t, err)
+	//state = NewState(s)
+	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}
+	//err = state.LoadUnwindInfo(tx)
+	//assert.NoError(t, err)
+	//state.UnwindTo(500, common.Hash{})
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 

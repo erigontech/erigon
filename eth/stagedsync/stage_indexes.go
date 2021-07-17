@@ -359,9 +359,6 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -380,9 +377,6 @@ func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

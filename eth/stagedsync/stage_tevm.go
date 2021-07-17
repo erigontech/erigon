@@ -372,9 +372,6 @@ func PruneTranspileStage(p *PruneState, tx ethdb.RwTx, cfg TranspileCfg, initial
 	}
 
 	logPrefix := p.LogPrefix()
-	if err = p.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)

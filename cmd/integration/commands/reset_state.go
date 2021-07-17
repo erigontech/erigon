@@ -133,6 +133,9 @@ func resetSenders(tx ethdb.RwTx) error {
 	if err := stages.SaveStageUnwind(tx, stages.Senders, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePrune(tx, stages.Senders, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -179,6 +182,12 @@ func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePrune(tx, stages.Execution, 0); err != nil {
+		return err
+	}
 
 	sm, err := ethdb.GetStorageModeFromDB(tx)
 	if err != nil {
@@ -210,6 +219,12 @@ func resetHistory(tx ethdb.RwTx) error {
 	if err := stages.SaveStageUnwind(tx, stages.StorageHistoryIndex, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePrune(tx, stages.AccountHistoryIndex, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePrune(tx, stages.StorageHistoryIndex, 0); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -225,6 +240,9 @@ func resetLogIndex(tx ethdb.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStageUnwind(tx, stages.LogIndex, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePrune(tx, stages.LogIndex, 0); err != nil {
 		return err
 	}
 
@@ -244,6 +262,9 @@ func resetCallTraces(tx ethdb.RwTx) error {
 	if err := stages.SaveStageUnwind(tx, stages.CallTraces, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePrune(tx, stages.CallTraces, 0); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -258,6 +279,9 @@ func resetTxLookup(tx ethdb.RwTx) error {
 	if err := stages.SaveStageUnwind(tx, stages.TxLookup, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePrune(tx, stages.TxLookup, 0); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -269,6 +293,9 @@ func resetTxPool(tx ethdb.RwTx) error {
 	if err := stages.SaveStageUnwind(tx, stages.TxPool, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePrune(tx, stages.TxPool, 0); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -278,6 +305,9 @@ func resetFinish(tx ethdb.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStageUnwind(tx, stages.Finish, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePrune(tx, stages.Finish, 0); err != nil {
 		return err
 	}
 

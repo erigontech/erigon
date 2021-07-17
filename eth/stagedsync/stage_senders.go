@@ -236,9 +236,7 @@ Loop:
 	if minBlockErr != nil {
 		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
 		if to > s.BlockNumber {
-			if err = u.UnwindTo(minBlockNum-1, tx, minBlockHash); err != nil {
-				return err
-			}
+			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
 		s.Done()
 	} else {
@@ -360,9 +358,6 @@ func PruneSendersStage(s *PruneState, tx ethdb.RwTx, cfg SendersCfg, ctx context
 	}
 
 	logPrefix := s.LogPrefix()
-	if err = s.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
