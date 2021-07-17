@@ -231,11 +231,15 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 		}
 		epochSet := list.validators
 		log.Info("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
-		if lastTransition.BlockNumber > DEBUG_LOG_FROM {
-			fmt.Printf("= validators: %x\n", list.validators)
-		}
 		e.finalityChecker = NewRollingFinality(epochSet)
+		if proof.SignalNumber >= DEBUG_LOG_FROM {
+			fmt.Printf("build_finality.epoch_validators: %d\n", proof.SignalNumber)
+			for i := 0; i < len(epochSet); i++ {
+				fmt.Printf("\t%x\n", epochSet[i])
+			}
+		}
 	}
+
 	e.epochTransitionHash = lastTransition.BlockHash
 	e.epochTransitionNumber = lastTransition.BlockNumber
 	return e.finalityChecker, e.epochTransitionNumber, true
@@ -818,7 +822,7 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, chain consensus.ChainHeaderRea
 	// check_and_lock_block -> check_epoch_end_signal
 	epoch, err := e.GetEpoch(header.ParentHash, header.Number.Uint64()-1)
 	if err != nil {
-		log.Warn("aura initialize block: on epoch begin", "err", err)
+		log.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
 	}
 	isEpochBegin := epoch != nil
@@ -827,7 +831,7 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, chain consensus.ChainHeaderRea
 	}
 	err = c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
 	if err != nil {
-		log.Warn("aura initialize block: on epoch begin", "err", err)
+		log.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
 	}
 	// check_and_lock_block -> check_epoch_end_signal END (before enact)
@@ -864,16 +868,14 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 			return err
 		}
 	} else {
-		if header.Number.Uint64() >= DEBUG_LOG_FROM {
-			fmt.Printf("no_pending_transitions: %d\n", header.Number.Uint64())
-		}
+		//if header.Number.Uint64() >= DEBUG_LOG_FROM {
+		//	fmt.Printf("no_pending_transitions: %d\n", header.Number.Uint64())
+		//}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
 
-	finalized, err := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, call)
-	if err != nil {
-		return err
-	}
+	finalized := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, call)
+	c.EpochManager.finalityChecker.print(header.Number.Uint64())
 	epochEndProof, err := isEpochEnd(chain, e, finalized, header)
 	if err != nil {
 		return err
@@ -890,11 +892,11 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	return nil
 }
 
-func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, call consensus.Call) ([]unAssembledHeader, error) {
+func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, call consensus.Call) []unAssembledHeader {
 	// commit_block -> aura.build_finality
 	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, call)
 	if !ok {
-		return []unAssembledHeader{}, nil
+		return []unAssembledHeader{}
 	}
 	if e.finalityChecker.lastPushed == nil || *e.finalityChecker.lastPushed != header.ParentHash {
 		if err := e.finalityChecker.buildAncestrySubChain(func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
@@ -904,12 +906,17 @@ func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consen
 			}
 			return []common.Address{h.Coinbase}, h.Hash(), h.ParentHash, h.Number.Uint64(), true
 		}, header.ParentHash, e.epochTransitionHash); err != nil {
-			log.Warn("buildAncestrySubChain", "err", err)
-			return []unAssembledHeader{}, nil
+			//log.Warn("[aura] buildAncestrySubChain", "err", err)
+			return []unAssembledHeader{}
 		}
 	}
 
-	return e.finalityChecker.push(header.Hash(), header.Number.Uint64(), []common.Address{header.Coinbase})
+	res, err := e.finalityChecker.push(header.Hash(), header.Number.Uint64(), []common.Address{header.Coinbase})
+	if err != nil {
+		//log.Warn("[aura] finalityChecker.push", "err", err)
+		return []unAssembledHeader{}
+	}
+	return res
 }
 
 func isEpochEnd(chain consensus.ChainHeaderReader, e consensus.EpochReader, finalized []unAssembledHeader, header *types.Header) ([]byte, error) {
@@ -1583,6 +1590,17 @@ func NewRollingFinality(signers []common.Address) *RollingFinality {
 }
 
 // Clears the finality status, but keeps the validator set.
+func (f *RollingFinality) print(num uint64) {
+	if num > DEBUG_LOG_FROM {
+		h := f.headers
+		fmt.Printf("finality_heads: %d\n", num)
+		for e := h.l.Front(); e != nil; e = e.Next() {
+			a := e.Value.(*unAssembledHeader)
+			fmt.Printf("\t%d,%x\n", a.number, a.signers[0])
+		}
+	}
+}
+
 func (f *RollingFinality) clear() {
 	f.headers = unAssembledHeaders{l: list.New()}
 	f.signCount = map[common.Address]uint{}
