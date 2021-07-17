@@ -341,6 +341,8 @@ type ReportQueueItem struct {
 	blockNum uint64
 	data     []byte
 }
+
+//nolint
 type ReportQueue struct {
 	sync.RWMutex
 	list *list.List
@@ -354,7 +356,7 @@ func (q *ReportQueue) push(addr common.Address, blockNum uint64, data []byte) {
 }
 
 // Filters reports of validators that have already been reported or are banned.
-
+//nolint
 func (q *ReportQueue) filter(abi aurainterfaces.ValidatorSetABI, client client, ourAddr, contractAddr common.Address) error {
 	q.Lock()
 	defer q.Unlock()
@@ -384,6 +386,7 @@ func (q *ReportQueue) filter(abi aurainterfaces.ValidatorSetABI, client client, 
 }
 
 // Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
+//nolint
 func (q *ReportQueue) truncate() {
 	// The maximum number of reports to keep queued.
 	const MaxQueuedReports = 10
@@ -439,6 +442,7 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 //
 // Returns a list of contract calls to be pushed onto the new block.
 //func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
+//nolint
 func (s *ValidatorSafeContract) epochSet2(num uint64, chain consensus.ChainHeaderReader, call consensus.Call) (SimpleList, common.Hash, error) {
 	l, ok := s.getList(call)
 	if !ok {
@@ -512,6 +516,7 @@ func (s *ValidatorSafeContract) epochSet(first bool, num uint64, setProof []byte
 }
 
 // check a first proof: fetch the validator set at the given block.
+//nolint
 func checkFirstValidatorSetProof(contract_address common.Address, oldHeader *types.Header, dbItems [][]byte) ([]common.Address, error) {
 	/*
 		fn check_first_proof(

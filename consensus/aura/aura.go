@@ -262,6 +262,8 @@ func epochTransitionFor2(chain consensus.ChainHeaderReader, e consensus.EpochRea
 	}
 	return EpochTransition{BlockNumber: num, BlockHash: hash, ProofRlp: transitionProof}, true
 }
+
+//nolint
 func epochTransitionFor(chain consensus.ChainHeaderReader, e consensus.EpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
 	// slow path: loop back block by block
 	for {
@@ -541,15 +543,18 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
+	//nolint
 	step, err := headerStep(header)
 	if err != nil {
 		return err
 	}
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	//nolint
 	parentStep, err := headerStep(parent)
 	if err != nil {
 		return err
 	}
+	//nolint
 	validators, setNumber, err := c.epochSet(chain, e, header, call)
 	if err != nil {
 		return err
@@ -557,6 +562,7 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 	return nil
 
 	// Ensure header is from the step after parent.
+	//nolint
 	if step == parentStep ||
 		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
 		log.Debug("[engine] Multiple blocks proposed for step", "num", parentStep)
@@ -865,6 +871,9 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	// check_and_lock_block -> check_epoch_end_signal END
 
 	finalized, err := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, call)
+	if err != nil {
+		return err
+	}
 	epochEndProof, err := isEpochEnd(chain, e, finalized, header)
 	if err != nil {
 		return err
