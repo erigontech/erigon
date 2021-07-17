@@ -240,8 +240,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) error {
-	var err error
+func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -370,4 +369,26 @@ func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) 
 }
 func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
+}
+
+func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := p.LogPrefix()
+	if err = p.Done(tx); err != nil {
+		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
 }

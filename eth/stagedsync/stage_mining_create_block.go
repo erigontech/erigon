@@ -96,7 +96,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 		return fmt.Errorf("refusing to mine without etherbase")
 	}
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)

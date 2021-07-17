@@ -102,6 +102,11 @@ func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64) erro
 	return db.Put(dbutils.SyncStageUnwind, []byte(stage), marshalData(invalidation))
 }
 
+// SaveStagePrune saves the progress of the given stage pruning in the database
+func SaveStagePrune(db ethdb.Putter, stage SyncStage, invalidation uint64) error {
+	return db.Put(dbutils.SyncStageUnwind, []byte(stage), marshalData(invalidation))
+}
+
 func marshalData(blockNumber uint64) []byte {
 	return encodeBigEndian(blockNumber)
 }
