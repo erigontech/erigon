@@ -29,31 +29,6 @@ var cmdResetState = &cobra.Command{
 			log.Error(err.Error())
 			return err
 		}
-		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
-			return clearUnwindStack(tx, ctx)
-		}); err != nil {
-			log.Error(err.Error())
-			return err
-		}
-
-		return nil
-	},
-}
-
-var cmdClearUnwindStack = &cobra.Command{
-	Use:   "clear_unwind_stack",
-	Short: "Clear unwind stack",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
-		defer db.Close()
-
-		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
-			return clearUnwindStack(tx, ctx)
-		}); err != nil {
-			log.Error(err.Error())
-			return err
-		}
 
 		return nil
 	},
@@ -64,20 +39,6 @@ func init() {
 	withChain(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
-
-	withDatadir(cmdClearUnwindStack)
-	withChain(cmdClearUnwindStack)
-
-	rootCmd.AddCommand(cmdClearUnwindStack)
-}
-
-func clearUnwindStack(db ethdb.RwTx, _ context.Context) error {
-	for _, stage := range stages.AllStages {
-		if err := stages.SaveStageUnwind(db, stage, 0); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func resetState(kv ethdb.RwKV, ctx context.Context) error {
@@ -128,9 +89,6 @@ func resetSenders(tx ethdb.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Senders, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStageUnwind(tx, stages.Senders, 0); err != nil {
 		return err
 	}
 	return nil
@@ -204,12 +162,6 @@ func resetHistory(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.StorageHistoryIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.AccountHistoryIndex, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStageUnwind(tx, stages.StorageHistoryIndex, 0); err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -224,10 +176,6 @@ func resetLogIndex(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.LogIndex, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.LogIndex, 0); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -241,10 +189,6 @@ func resetCallTraces(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.CallTraces, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.CallTraces, 0); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -255,10 +199,6 @@ func resetTxLookup(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.TxLookup, 0); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -266,10 +206,6 @@ func resetTxPool(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.TxPool, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.TxPool, 0); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -277,10 +213,6 @@ func resetFinish(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.Finish, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.Finish, 0); err != nil {
-		return err
-	}
-
 	return nil
 }
 

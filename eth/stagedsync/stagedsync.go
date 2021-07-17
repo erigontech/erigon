@@ -1,11 +1,5 @@
 package stagedsync
 
-import (
-	"context"
-
-	"github.com/ledgerwatch/erigon/ethdb"
-)
-
 type StagedSync struct {
 	stages      []*Stage
 	unwindOrder UnwindOrder
@@ -19,7 +13,7 @@ func New(stages []*Stage, unwindOrder UnwindOrder) *StagedSync {
 	}
 }
 
-func (stagedSync *StagedSync) Prepare(db ethdb.RwKV, tx ethdb.Tx) (*State, error) {
+func (stagedSync *StagedSync) Prepare() (*State, error) {
 	state := NewState(stagedSync.stages)
 
 	state.unwindOrder = make([]*Stage, len(stagedSync.unwindOrder))
@@ -33,16 +27,5 @@ func (stagedSync *StagedSync) Prepare(db ethdb.RwKV, tx ethdb.Tx) (*State, error
 		}
 	}
 
-	if tx != nil {
-		if err := state.LoadUnwindInfo(tx); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-			return state.LoadUnwindInfo(tx)
-		}); err != nil {
-			return nil, err
-		}
-	}
 	return state, nil
 }

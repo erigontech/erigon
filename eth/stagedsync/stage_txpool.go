@@ -290,9 +290,6 @@ func PruneTxPool(s *PruneState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

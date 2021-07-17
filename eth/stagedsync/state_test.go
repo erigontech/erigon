@@ -234,7 +234,8 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					return u.UnwindTo(1500, tx, common.Hash{})
+					u.UnwindTo(1500, common.Hash{})
+					return nil
 				}
 				s.Done()
 				return nil
@@ -331,10 +332,7 @@ func TestStateUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -388,6 +386,20 @@ func TestStateUnwind(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
+	//check that at unwind disabled stage not appear
+	flow = flow[:0]
+	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
+	state.UnwindTo(100, common.Hash{})
+	err = state.Run(db, tx, true)
+	assert.NoError(t, err)
+
+	expectedFlow = []stages.SyncStage{
+		unwindOf(stages.Senders), unwindOf(stages.Bodies), unwindOf(stages.Headers),
+		stages.Headers, stages.Bodies, stages.Senders,
+	}
+
+	assert.Equal(t, expectedFlow, flow)
+
 }
 
 func TestStateUnwindEmptyUnwinder(t *testing.T) {
@@ -429,10 +441,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -627,10 +636,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					err := u.UnwindTo(500, tx, common.Hash{})
-					if err != nil {
-						return err
-					}
+					u.UnwindTo(500, common.Hash{})
 					return s.DoneAndUpdate(tx, 3000)
 				}
 				s.Done()
@@ -653,10 +659,11 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 	err := state.Run(db, tx, true)
 	assert.Error(t, errInterrupted, err)
 
-	state = NewState(s)
-	state.unwindOrder = []*Stage{s[0], s[1], s[2]}
-	err = state.LoadUnwindInfo(tx)
-	assert.NoError(t, err)
+	//state = NewState(s)
+	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}
+	//err = state.LoadUnwindInfo(tx)
+	//assert.NoError(t, err)
+	//state.UnwindTo(500, common.Hash{})
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 

@@ -157,9 +157,7 @@ Loop:
 			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
 			if err != nil {
 				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "error", err)
-				if unwindErr := u.UnwindTo(blockHeight-1, tx, header.Hash()); unwindErr != nil {
-					return unwindErr
-				}
+				u.UnwindTo(blockHeight-1, header.Hash())
 				break Loop
 			}
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
@@ -261,9 +259,6 @@ func PruneBodiesStage(s *PruneState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.C
 	}
 
 	logPrefix := s.LogPrefix()
-	if err = s.Done(tx); err != nil {
-		return fmt.Errorf("[%s]: reset: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
