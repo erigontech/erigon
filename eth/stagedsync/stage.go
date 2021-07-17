@@ -50,22 +50,8 @@ func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
 	return stages.SaveStageProgress(db, s.ID, newBlockNum)
 }
 
-// Done makes sure that the stage execution is complete and proceeds to the next state.
-// If Done() is not called and the stage `Forward` exits, then the same stage will be called again.
-// This side effect is useful for something like block body download.
-func (s *StageState) Done() {
-	s.state.NextStage()
-}
-
 // ExecutionAt gets the current state of the "Execution" stage, which block is currently executed.
 func (s *StageState) ExecutionAt(db ethdb.KVGetter) (uint64, error) {
 	execution, err := stages.GetStageProgress(db, stages.Execution)
 	return execution, err
-}
-
-// DoneAndUpdate a convenience method combining both `Done()` and `Update()` calls together.
-func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
-	err := stages.SaveStageProgress(db, s.ID, newBlockNum)
-	s.state.NextStage()
-	return err
 }

@@ -47,7 +47,6 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 	if s.BlockNumber == to {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-		s.Done()
 		return nil
 	}
 	if s.BlockNumber > to {
@@ -67,7 +66,7 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 		}
 	}
 
-	if err = s.DoneAndUpdate(tx, to); err != nil {
+	if err = s.Update(tx, to); err != nil {
 		return err
 	}
 

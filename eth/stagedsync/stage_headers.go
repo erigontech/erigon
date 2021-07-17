@@ -98,7 +98,6 @@ func HeadersForward(
 				return err
 			}
 		}
-		s.Done()
 		return nil
 	}
 
@@ -191,7 +190,6 @@ func HeadersForward(
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
 	}
-	s.Done()
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -313,7 +311,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
 		}
-		if err = s.DoneAndUpdate(tx, maxNum); err != nil {
+		if err = s.Update(tx, maxNum); err != nil {
 			return err
 		}
 	}

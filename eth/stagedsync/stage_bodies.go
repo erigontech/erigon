@@ -79,7 +79,6 @@ func BodiesForward(
 	}
 	bodyProgress = s.BlockNumber
 	if bodyProgress == headerProgress {
-		s.Done()
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -198,7 +197,7 @@ Loop:
 		d6 += time.Since(start)
 		stageBodiesGauge.Update(int64(bodyProgress))
 	}
-	if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
+	if err := s.Update(tx, bodyProgress); err != nil {
 		return err
 	}
 	if !useExternalTx {

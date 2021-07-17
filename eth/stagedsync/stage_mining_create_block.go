@@ -286,7 +286,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 
 	current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
 	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
-	s.Done()
 	fmt.Printf("aa: %t, %t,%t\n", current == nil, cfg.miner.MiningBlock == nil, current.Header == nil)
 	return nil
 }

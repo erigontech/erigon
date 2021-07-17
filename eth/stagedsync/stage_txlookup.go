@@ -59,7 +59,7 @@ func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(syncHeadNumber), quitCh, cfg); err != nil {
 		return err
 	}
-	if err = s.DoneAndUpdate(tx, syncHeadNumber); err != nil {
+	if err = s.Update(tx, syncHeadNumber); err != nil {
 		return err
 	}
 

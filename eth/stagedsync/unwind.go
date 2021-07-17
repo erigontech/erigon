@@ -30,9 +30,6 @@ func (u *UnwindState) Done(db ethdb.Putter) error {
 	return stages.SaveStageProgress(db, u.ID, u.UnwindPoint)
 }
 
-// Skip ignores the unwind
-func (u *UnwindState) Skip() {}
-
 type PruneState struct {
 	ID         stages.SyncStage
 	PrunePoint uint64 // PrunePoint is the block to prune to.
