@@ -43,10 +43,6 @@ type HasChangeSetWriter interface {
 
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
-type StateReaderBuilder func(ethdb.Database) state.StateReader
-
-type StateWriterBuilder func(db ethdb.Database, changeSetsDB ethdb.RwTx, blockNumber uint64) state.WriterWithChangeSets
-
 type ExecuteBlockCfg struct {
 	db              ethdb.RwKV
 	batchSize       datasize.ByteSize

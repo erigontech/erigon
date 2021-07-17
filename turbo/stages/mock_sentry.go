@@ -275,8 +275,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.StageTranspileCfg(
 			mock.DB,
 			cfg.BatchSize,
-			nil,
-			nil,
 			mock.ChainConfig,
 		),
 		stagedsync.StageSnapshotStateCfg(

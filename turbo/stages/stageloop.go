@@ -300,8 +300,6 @@ func NewStagedSync2(
 		stagedsync.StageTranspileCfg(
 			db,
 			cfg.BatchSize,
-			nil,
-			nil,
 			controlServer.ChainConfig,
 		),
 		stagedsync.StageSnapshotStateCfg(db, cfg.Snapshot, tmpdir, client, snapshotMigrator),
