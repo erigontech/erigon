@@ -68,7 +68,7 @@ func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 	if cfg.ToBlock > 0 && cfg.ToBlock < endBlock {
 		endBlock = cfg.ToBlock
 	}
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
@@ -266,14 +266,13 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 	return nil
 }
 
-func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) error {
+func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -281,7 +280,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTrac
 	}
 	quitCh := ctx.Done()
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err := unwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quitCh, cfg); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
@@ -408,5 +407,26 @@ func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
 	return nil
 }
 func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
+	return nil
+}
+
+func PruneCallTraces(s *PruneState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if err = s.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
 	return nil
 }

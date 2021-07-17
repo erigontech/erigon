@@ -78,7 +78,7 @@ func (s *State) UnwindTo(blockNumber uint64, tx ethdb.RwTx, badBlock common.Hash
 		if stage.Disabled {
 			continue
 		}
-		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, badBlock}, tx); err != nil {
+		if err := s.unwindStack.Add(UnwindState{stage.ID, blockNumber, badBlock, s}, tx); err != nil {
 			return err
 		}
 	}
@@ -124,11 +124,12 @@ func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 }
 
 func NewState(stagesList []*Stage) *State {
-	return &State{
+	st := &State{
 		stages:       stagesList,
 		currentStage: 0,
-		unwindStack:  NewPersistentUnwindStack(),
 	}
+	st.unwindStack = NewPersistentUnwindStack(st)
+	return st
 }
 
 func (s *State) LoadUnwindInfo(db ethdb.KVGetter) error {
@@ -257,7 +258,7 @@ func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle 
 
 	start := time.Now()
 	logPrefix := s.LogPrefix()
-	if err = stage.ExecFunc(firstCycle, stageState, s, tx); err != nil {
+	if err = stage.Forward(firstCycle, stageState, s, tx); err != nil {
 		return err
 	}
 
@@ -284,7 +285,7 @@ func (s *State) unwindStage(firstCycle bool, unwind *UnwindState, db ethdb.RwKV,
 	if err != nil {
 		return err
 	}
-	if stage.UnwindFunc == nil {
+	if stage.Unwind == nil {
 		return nil
 	}
 	var stageState *StageState
@@ -304,7 +305,7 @@ func (s *State) unwindStage(firstCycle bool, unwind *UnwindState, db ethdb.RwKV,
 		tx = nil
 	}
 
-	err = stage.UnwindFunc(firstCycle, unwind, stageState, tx)
+	err = stage.Unwind(firstCycle, unwind, stageState, tx)
 	if err != nil {
 		return err
 	}
@@ -346,7 +347,7 @@ func (s *State) EnableStages(ids ...stages.SyncStage) {
 func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	for i := range s.stages {
 		if s.stages[i].ID == id {
-			s.stages[i].ExecFunc = f
+			s.stages[i].Forward = f
 		}
 	}
 }

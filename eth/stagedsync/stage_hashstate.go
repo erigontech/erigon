@@ -38,7 +38,7 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
@@ -79,26 +79,25 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 	return nil
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) error {
+func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.state.LogPrefix()
-	if err := unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx.Done()); err != nil {
+	logPrefix := s.LogPrefix()
+	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx.Done()); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
-	if err := u.Done(tx); err != nil {
+	if err = u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -519,6 +518,27 @@ func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to u
 	}
 	if err := prom.Promote(logPrefix, s, from, to, true /* storage */, false /* codes */); err != nil {
 		return err
+	}
+	return nil
+}
+
+func PruneHashStateStage(s *PruneState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if err = s.Done(tx); err != nil {
+		return err
+	}
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

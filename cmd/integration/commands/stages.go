@@ -390,7 +390,7 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir)
 	if unwind > 0 {
 		u := &stagedsync.UnwindState{ID: stages.Senders, UnwindPoint: stage3.BlockNumber - unwind}
-		err = stagedsync.UnwindSendersStage(u, stage3, tx, cfg)
+		err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}

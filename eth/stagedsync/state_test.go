@@ -17,7 +17,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -26,7 +26,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return nil
@@ -35,7 +35,7 @@ func TestStateStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -59,7 +59,7 @@ func TestStateDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -68,7 +68,7 @@ func TestStateDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return nil
@@ -78,7 +78,7 @@ func TestStateDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -103,7 +103,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -112,7 +112,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				repeatStageTwo--
 				if repeatStageTwo < 0 {
@@ -124,7 +124,7 @@ func TestStateRepeatedStage(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -149,7 +149,7 @@ func TestStateErroredStage(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -158,7 +158,7 @@ func TestStateErroredStage(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return expectedErr
@@ -167,7 +167,7 @@ func TestStateErroredStage(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -193,7 +193,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -201,7 +201,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(tx)
 			},
@@ -209,7 +209,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 1000)
@@ -217,7 +217,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Bodies))
 				return u.Done(tx)
 			},
@@ -225,7 +225,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				if s.BlockNumber == 0 {
 					if err := s.Update(tx, 1700); err != nil {
 						return err
@@ -239,7 +239,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				return u.Done(tx)
 			},
@@ -247,7 +247,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:       stages.IntermediateHashes,
 			Disabled: true,
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.IntermediateHashes)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -255,7 +255,7 @@ func TestStateUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.IntermediateHashes))
 				return u.Done(tx)
 			},
@@ -295,7 +295,7 @@ func TestStateUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -303,7 +303,7 @@ func TestStateUnwind(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(tx)
 			},
@@ -311,7 +311,7 @@ func TestStateUnwind(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -319,7 +319,7 @@ func TestStateUnwind(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Bodies))
 				return u.Done(tx)
 			},
@@ -327,7 +327,7 @@ func TestStateUnwind(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
@@ -340,7 +340,7 @@ func TestStateUnwind(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				return u.Done(tx)
 			},
@@ -348,7 +348,7 @@ func TestStateUnwind(t *testing.T) {
 		{
 			ID:       stages.IntermediateHashes,
 			Disabled: true,
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.IntermediateHashes)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -356,7 +356,7 @@ func TestStateUnwind(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.IntermediateHashes))
 				return u.Done(tx)
 			},
@@ -397,7 +397,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -405,7 +405,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(tx)
 			},
@@ -413,7 +413,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -425,7 +425,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
@@ -438,7 +438,7 @@ func TestStateUnwindEmptyUnwinder(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				return u.Done(tx)
 			},
@@ -478,7 +478,7 @@ func TestStateSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				return s.DoneAndUpdate(tx, s.BlockNumber+100)
 			},
@@ -486,7 +486,7 @@ func TestStateSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				return s.DoneAndUpdate(tx, s.BlockNumber+200)
 			},
@@ -494,7 +494,7 @@ func TestStateSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				return s.DoneAndUpdate(tx, s.BlockNumber+300)
 			},
@@ -536,7 +536,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				s.Done()
 				return nil
@@ -545,7 +545,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				s.Done()
 				return expectedErr
@@ -554,7 +554,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				s.Done()
 				return nil
@@ -591,7 +591,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -599,7 +599,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Headers))
 				return u.Done(tx)
 			},
@@ -607,7 +607,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
 					return s.DoneAndUpdate(tx, 2000)
@@ -615,7 +615,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Bodies))
 				return u.Done(tx)
 			},
@@ -623,7 +623,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			ExecFunc: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
+			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
@@ -636,7 +636,7 @@ func TestStateSyncInterruptLongUnwind(t *testing.T) {
 				s.Done()
 				return nil
 			},
-			UnwindFunc: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				if !interrupted {
 					interrupted = true
