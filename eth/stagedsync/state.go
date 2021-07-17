@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-type State struct {
+type Sync struct {
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
 	badBlock        common.Hash
@@ -25,14 +25,14 @@ type State struct {
 	currentStage uint
 }
 
-func (s *State) Len() int                 { return len(s.stages) }
-func (s *State) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
+func (s *Sync) Len() int                 { return len(s.stages) }
+func (s *Sync) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
 
-func (s *State) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
+func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
 	return &UnwindState{id, unwindPoint, currentProgress, common.Hash{}, s}
 }
 
-func (s *State) NextStage() {
+func (s *Sync) NextStage() {
 	if s == nil {
 		return
 	}
@@ -40,7 +40,7 @@ func (s *State) NextStage() {
 }
 
 // IsBefore returns true if stage1 goes before stage2 in staged sync
-func (s *State) IsBefore(stage1, stage2 stages.SyncStage) bool {
+func (s *Sync) IsBefore(stage1, stage2 stages.SyncStage) bool {
 	idx1 := -1
 	idx2 := -1
 	for i, stage := range s.stages {
@@ -57,7 +57,7 @@ func (s *State) IsBefore(stage1, stage2 stages.SyncStage) bool {
 }
 
 // IsAfter returns true if stage1 goes after stage2 in staged sync
-func (s *State) IsAfter(stage1, stage2 stages.SyncStage) bool {
+func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	idx1 := -1
 	idx2 := -1
 	for i, stage := range s.stages {
@@ -73,33 +73,33 @@ func (s *State) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
-func (s *State) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
+func (s *Sync) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
 	state, err := s.StageState(stages.Headers, db)
 	return state.BlockNumber, err
 }
 
-func (s *State) UnwindTo(unwindPoint uint64, badBlock common.Hash) {
+func (s *Sync) UnwindTo(unwindPoint uint64, badBlock common.Hash) {
 	log.Info("UnwindTo", "block", unwindPoint, "bad_block_hash", badBlock.String())
 	s.unwindPoint = &unwindPoint
 	s.badBlock = badBlock
 }
 
-func (s *State) IsDone() bool {
+func (s *Sync) IsDone() bool {
 	return s.currentStage >= uint(len(s.stages)) && s.unwindPoint == nil
 }
 
-func (s *State) CurrentStage() (uint, *Stage) {
+func (s *Sync) CurrentStage() (uint, *Stage) {
 	return s.currentStage, s.stages[s.currentStage]
 }
 
-func (s *State) LogPrefix() string {
+func (s *Sync) LogPrefix() string {
 	if s == nil {
 		return ""
 	}
 	return fmt.Sprintf("%d/%d %s", s.currentStage+1, s.Len(), s.stages[s.currentStage].ID)
 }
 
-func (s *State) SetCurrentStage(id stages.SyncStage) error {
+func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	for i, stage := range s.stages {
 		if stage.ID == id {
 			s.currentStage = uint(i)
@@ -109,7 +109,7 @@ func (s *State) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
+func (s *Sync) StageByID(id stages.SyncStage) (*Stage, error) {
 	for _, stage := range s.stages {
 		if stage.ID == id {
 			return stage, nil
@@ -118,16 +118,28 @@ func (s *State) StageByID(id stages.SyncStage) (*Stage, error) {
 	return nil, fmt.Errorf("stage not found with id: %v", id)
 }
 
-func NewState(stagesList []*Stage) *State {
-	st := &State{
+func New(stagesList []*Stage, unwindOrder []stages.SyncStage) *Sync {
+	unwindStages := make([]*Stage, len(stagesList))
+
+	for i, stageIndex := range unwindOrder {
+		for _, s := range stagesList {
+			if s.ID == stageIndex {
+				unwindStages[i] = s
+				break
+			}
+		}
+	}
+
+	st := &Sync{
 		stages:       stagesList,
 		currentStage: 0,
+		unwindOrder:  unwindStages,
 	}
 
 	return st
 }
 
-func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageState, error) {
+func (s *Sync) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageState, error) {
 	blockNum, err := stages.GetStageProgress(db, stage)
 	if err != nil {
 		return nil, err
@@ -135,7 +147,7 @@ func (s *State) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageSta
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
+func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	var timings []interface{}
 	for !s.IsDone() {
 		if s.unwindPoint != nil {
@@ -190,6 +202,7 @@ func (s *State) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	if err := printLogs(tx, timings); err != nil {
 		return err
 	}
+	s.currentStage = 0
 	return nil
 }
 
@@ -227,7 +240,7 @@ func printLogs(tx ethdb.RwTx, timings []interface{}) error {
 	return nil
 }
 
-func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
+func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -260,7 +273,7 @@ func (s *State) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle 
 	return nil
 }
 
-func (s *State) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.RwKV, tx ethdb.RwTx) error {
+func (s *Sync) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.RwKV, tx ethdb.RwTx) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -307,13 +320,13 @@ func (s *State) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.
 	return nil
 }
 
-func (s *State) DisableAllStages() {
+func (s *Sync) DisableAllStages() {
 	for i := range s.stages {
 		s.stages[i].Disabled = true
 	}
 }
 
-func (s *State) DisableStages(ids ...stages.SyncStage) {
+func (s *Sync) DisableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {
 			if s.stages[i].ID != id {
@@ -324,7 +337,7 @@ func (s *State) DisableStages(ids ...stages.SyncStage) {
 	}
 }
 
-func (s *State) EnableStages(ids ...stages.SyncStage) {
+func (s *Sync) EnableStages(ids ...stages.SyncStage) {
 	for i := range s.stages {
 		for _, id := range ids {
 			if s.stages[i].ID != id {
@@ -335,7 +348,7 @@ func (s *State) EnableStages(ids ...stages.SyncStage) {
 	}
 }
 
-func (s *State) MockExecFunc(id stages.SyncStage, f ExecFunc) {
+func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 	for i := range s.stages {
 		if s.stages[i].ID == id {
 			s.stages[i].Forward = f

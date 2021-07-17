@@ -38,7 +38,7 @@ type Stage struct {
 
 // StageState is the state of the stage.
 type StageState struct {
-	state       *State
+	state       *Sync
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
 }

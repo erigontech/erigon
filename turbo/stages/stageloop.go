@@ -47,7 +47,7 @@ func NewStagedSync(
 	txPool stagedsync.TxPoolCfg,
 	finish stagedsync.FinishCfg,
 	test bool,
-) *stagedsync.StagedSync {
+) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, sm, headers, blockHashes, snapshotHeader, bodies, snapshotBodies, senders, exec, trans, snapshotState, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
 		stagedsync.DefaultUnwindOrder(),
@@ -58,7 +58,7 @@ func NewStagedSync(
 func StageLoop(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *stagedsync.Notifications,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
@@ -110,7 +110,7 @@ func StageLoop(
 func StageLoopStep(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
 	notifications *stagedsync.Notifications,
 	initialCycle bool,
@@ -140,10 +140,6 @@ func StageLoopStep(
 	if notifications != nil && notifications.Accumulator != nil {
 		notifications.Accumulator.Reset()
 	}
-	st, err1 := sync.Prepare()
-	if err1 != nil {
-		return fmt.Errorf("prepare staged sync: %w", err1)
-	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
@@ -156,7 +152,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(db, tx, initialCycle)
+	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return err
 	}
@@ -202,7 +198,7 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, st.PrevUnwindPoint(), notifications.Events, db)
+	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, db)
 	if err != nil {
 		return err
 	}
@@ -210,7 +206,7 @@ func StageLoopStep(
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
+func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
@@ -218,11 +214,7 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		return err
 	}
 	defer tx.Rollback()
-	miningState, err := mining.Prepare()
-	if err != nil {
-		return err
-	}
-	if err = miningState.Run(nil, tx, false); err != nil {
+	if err = mining.Run(nil, tx, false); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -241,7 +233,7 @@ func NewStagedSync2(
 	client *snapshotsync.Client,
 	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
-) (*stagedsync.StagedSync, error) {
+) (*stagedsync.Sync, error) {
 	var pruningDistance uint64
 	if !cfg.StorageMode.History {
 		pruningDistance = params.FullImmutabilityThreshold

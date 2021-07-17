@@ -52,8 +52,8 @@ type MockSentry struct {
 	tmpdir          string
 	Engine          consensus.Engine
 	ChainConfig     *params.ChainConfig
-	Sync            *stagedsync.StagedSync
-	MiningSync      *stagedsync.StagedSync
+	Sync            *stagedsync.Sync
+	MiningSync      *stagedsync.Sync
 	PendingBlocks   chan *types.Block
 	MinedBlocks     chan *types.Block
 	downloader      *download.ControlServerImpl

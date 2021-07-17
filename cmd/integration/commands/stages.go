@@ -743,7 +743,7 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	return genesis, chainConfig
 }
 
-func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConfig) (ethdb.StorageMode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.State, *stagedsync.State, stagedsync.MiningState) {
+func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConfig) (ethdb.StorageMode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	snapshotDir = path.Join(datadir, "erigon", "snapshot")
 
@@ -806,7 +806,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 		cfg.Miner = *miningConfig
 	}
 
-	st, err := stages2.NewStagedSync2(context.Background(), db, cfg,
+	sync, err := stages2.NewStagedSync2(context.Background(), db, cfg,
 		downloadServer,
 		tmpdir,
 		txPool,
@@ -818,7 +818,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	}
 	miner := stagedsync.NewMiningState(&cfg.Miner)
 
-	stMining := stagedsync.New(
+	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, txPool, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
@@ -828,22 +828,6 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 		),
 		stagedsync.MiningUnwindOrder(),
 	)
-
-	var sync *stagedsync.State
-	var miningSync *stagedsync.State
-	if err := db.View(context.Background(), func(tx ethdb.Tx) (err error) {
-		sync, err = st.Prepare()
-		if err != nil {
-			return nil
-		}
-		miningSync, err = stMining.Prepare()
-		if err != nil {
-			return nil
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 
 	return sm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
 }
@@ -856,7 +840,7 @@ func progress(tx ethdb.KVGetter, stage stages.SyncStage) uint64 {
 	return res
 }
 
-func stage(st *stagedsync.State, db ethdb.KVGetter, stage stages.SyncStage) *stagedsync.StageState {
+func stage(st *stagedsync.Sync, db ethdb.KVGetter, stage stages.SyncStage) *stagedsync.StageState {
 	res, err := st.StageState(stage, db)
 	if err != nil {
 		panic(err)
