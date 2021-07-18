@@ -22,6 +22,7 @@ docker:
 	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' --build-arg git_tag='${GIT_TAG}' .
 
 docker-compose:
+	# Uses host's PID,UID,GID. It required to open Erigon's DB from another process (RPCDaemon local-mode)
 	UID_GID=$(shell id -u):$(shell id -g) docker-compose up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
