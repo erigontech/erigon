@@ -301,6 +301,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			true, /* test */
 		),
 		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
 	)
 
 	miningConfig := cfg.Miner
@@ -322,6 +323,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,
+		stagedsync.MiningPruneOrder,
 	)
 
 	mock.StreamWg.Add(1)

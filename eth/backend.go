@@ -276,7 +276,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			stagedsync.StageHashStateCfg(backend.chainKV, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainKV, false, true, tmpdir),
 			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder)
+		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {

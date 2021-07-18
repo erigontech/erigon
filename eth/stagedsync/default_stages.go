@@ -306,7 +306,7 @@ var DefaultForwardOrder = UnwindOrder{
 	stages.Finish,
 }
 
-var DefaultPruningOrder = UnwindOrder{
+var DefaultPruneOrder = PruneOrder{
 	stages.Headers,
 	stages.BlockHashes,
 	stages.CreateHeadersSnapshot,
@@ -338,6 +338,7 @@ var DefaultPruningOrder = UnwindOrder{
 // The unwind order is important and not always just stages going backwards.
 // Let's say, there is tx pool can be unwound only after execution.
 type UnwindOrder []stages.SyncStage
+type PruneOrder []stages.SyncStage
 
 var DefaultUnwindOrder = UnwindOrder{
 	stages.Headers,
@@ -368,3 +369,4 @@ var DefaultUnwindOrder = UnwindOrder{
 }
 
 var MiningUnwindOrder = UnwindOrder{} // nothing to unwind in mining - because mining does not commit db changes
+var MiningPruneOrder = PruneOrder{}   // nothing to unwind in mining - because mining does not commit db changes

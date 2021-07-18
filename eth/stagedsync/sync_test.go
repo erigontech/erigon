@@ -39,7 +39,7 @@ func TestStagesSuccess(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -79,7 +79,7 @@ func TestDisabledStages(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -119,7 +119,7 @@ func TestErroredStage(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, expectedErr, err)
@@ -202,7 +202,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID})
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -295,7 +295,7 @@ func TestUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID})
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -384,7 +384,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -440,12 +440,12 @@ func TestSyncDoTwice(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
 
-	state = New(s, nil)
+	state = New(s, nil, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -498,14 +498,14 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, expectedErr, err)
 
 	expectedErr = nil
 
-	state = New(s, nil)
+	state = New(s, nil, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -577,7 +577,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
+	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Error(t, errInterrupted, err)

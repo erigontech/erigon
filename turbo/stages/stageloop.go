@@ -280,5 +280,6 @@ func NewStagedSync2(
 			false, /* test */
 		),
 		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
 	), nil
 }

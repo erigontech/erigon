@@ -106,9 +106,8 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(stagesList []*Stage, unwindOrder []stages.SyncStage) *Sync {
+func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
-
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
 			if s.ID == stageIndex {
@@ -117,14 +116,22 @@ func New(stagesList []*Stage, unwindOrder []stages.SyncStage) *Sync {
 			}
 		}
 	}
+	pruneStages := make([]*Stage, len(stagesList))
+	for i, stageIndex := range pruneOrder {
+		for _, s := range stagesList {
+			if s.ID == stageIndex {
+				pruneStages[i] = s
+				break
+			}
+		}
+	}
 
-	st := &Sync{
+	return &Sync{
 		stages:       stagesList,
 		currentStage: 0,
 		unwindOrder:  unwindStages,
+		//pruningOrder: pruneStages,
 	}
-
-	return st
 }
 
 func (s *Sync) StageState(stage stages.SyncStage, tx ethdb.Tx, db ethdb.RoKV) (*StageState, error) {
