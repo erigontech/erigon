@@ -208,7 +208,7 @@ type mdbx_db struct {
 	branches  uint32 /* number of internal pages */
 	leafs     uint32 /* number of leaf pages */
 	overflows uint32 /* number of overflow pages */
-	seq       uint64 //nolint:structcheck
+	seq       uint64 //nolint
 	entries   uint64 /* number of data items */
 	txnID     uint64 /* txnid of last committed modification */
 }
@@ -216,20 +216,20 @@ type mdbx_db struct {
 // database size-related parameters,
 // used as placeholder, doesn't have any meaning in this code
 type mdbx_geo struct {
-	grow_pv   uint16 //nolint:structcheck
-	shrink_pv uint16 //nolint:structcheck
-	lower     uint32 //nolint:structcheck
-	upper     uint32 //nolint:structcheck
-	now       uint32 //nolint:structcheck
-	next      uint32 //nolint:structcheck
+	grow_pv   uint16 //nolint
+	shrink_pv uint16 //nolint
+	lower     uint32 //nolint
+	upper     uint32 //nolint
+	now       uint32 //nolint
+	next      uint32 //nolint
 }
 
 /* used as placeholder, doesn't have any meaning in this code */
 type mdbx_canary struct {
-	field1 uint64 //nolint:structcheck
-	field2 uint64 //nolint:structcheck
-	field3 uint64 //nolint:structcheck
-	field4 uint64 //nolint:structcheck
+	field1 uint64 //nolint
+	field2 uint64 //nolint
+	field3 uint64 //nolint
+	field4 uint64 //nolint
 }
 
 /* Meta page content.
@@ -242,17 +242,17 @@ type mdbx_meta struct {
 	version      int
 	txnID_a      uint64   /* txnid that committed this page, the first of a two-phase-update pair */
 	flags        uint16   /* extra DB flags, zero (nothing) for now */
-	validataorID uint     //nolint:structcheck
-	extraHeader  uint     //nolint:structcheck
+	validataorID uint     //nolint
+	extraHeader  uint     //nolint
 	geo          mdbx_geo //nolint
 	/* first is free space, 2nd is main db */
 	/* The size of pages used in this DB */
 	dbs          [2]*mdbx_db
 	canary       mdbx_canary
-	dataSyncSign uint64 //nolint:structcheck
+	dataSyncSign uint64 //nolint
 	txnID_b      uint64 /* txnid that committed this page, the second of a two-phase-update pair */
-	pagesRetired uint64 //nolint:structcheck
-	x, y         uint64 //nolint:structcheck
+	pagesRetired uint64 //nolint
+	x, y         uint64 //nolint
 }
 
 // Header for a single key/data pair within a page
@@ -834,49 +834,48 @@ func Defrag() error {
 
 	oneBucketCfg := make(dbutils.BucketsCfg)
 	oneBucketCfg["t"] = dbutils.BucketConfigItem{}
-	fmt.Println("------------- 1 -------------")
+
 	if err := defragSteps("vis2", oneBucketCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 2) }); err != nil {
 		return err
 	}
-	fmt.Println("------------- 2 -------------")
+
 	if err := defragSteps("vis3", emptyBucketCfg, generate3); err != nil {
 		return err
 	}
-	fmt.Println("------------- 3 -------------")
+
 	if err := defragSteps("vis4", oneBucketCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 200) }); err != nil {
 		return err
 	}
-	fmt.Println("------------- 4 -------------")
+
 	if err := defragSteps("vis5", oneBucketCfg, generate4); err != nil {
 		return err
 	}
 	oneDupSortCfg := make(dbutils.BucketsCfg)
 	oneDupSortCfg["t"] = dbutils.BucketConfigItem{Flags: dbutils.DupSort}
-	fmt.Println("------------- 5 -------------")
+
 	if err := defragSteps("vis6", oneDupSortCfg, generate5); err != nil {
 		return err
 	}
-	fmt.Println("------------- 6 -------------")
+
 	if err := defragSteps("vis7", oneDupSortCfg, generate6); err != nil {
 		return err
 	}
-	fmt.Println("------------- 7 -------------")
+
 	if err := defragSteps("vis8", oneDupSortCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) }, dropT); err != nil {
 		return err
 	}
 
-	fmt.Println("------------- 8 -------------")
 	twoBucketCfg := make(dbutils.BucketsCfg)
 	twoBucketCfg["t1"] = dbutils.BucketConfigItem{}
 	twoBucketCfg["t2"] = dbutils.BucketConfigItem{}
 	if err := defragSteps("vis9", twoBucketCfg, generate7); err != nil {
 		return err
 	}
-	fmt.Println("------------- 9 -------------")
+
 	if err := defragSteps("vis10", twoBucketCfg, generate7, dropT1); err != nil {
 		return err
 	}
-	fmt.Println("------------- 10 -------------")
+
 	if err := defragSteps("vis11", twoBucketCfg, generate7, dropT1, dropT2); err != nil {
 		return err
 	}
@@ -885,19 +884,19 @@ func Defrag() error {
 		k := fmt.Sprintf("table_%05d", i)
 		manyBucketCfg[k] = dbutils.BucketConfigItem{IsDeprecated: true}
 	}
-	fmt.Println("------------- 11 -------------")
+
 	if err := defragSteps("vis12", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate9(tx, 1000) }, dropGradually); err != nil {
 		return err
 	}
-	fmt.Println("------------- 12 -------------")
+
 	if err := defragSteps("vis13", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 10000) }, dropAll); err != nil {
 		return err
 	}
-	fmt.Println("------------- 13 -------------")
+
 	if err := defragSteps("vis14", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 300000) }, dropGradually); err != nil {
 		return err
 	}
-	fmt.Println("------------- 14 -------------")
+
 	if err := defragSteps("vis15", oneBucketCfg,
 		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change1(tx) },
@@ -910,7 +909,7 @@ func Defrag() error {
 	); err != nil {
 		return err
 	}
-	fmt.Println("------------- 15 -------------")
+
 	readerStartCh := make(chan struct{})
 	readerErrorCh := make(chan error)
 	if err := defragSteps("vis16", oneBucketCfg,
