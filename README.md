@@ -232,7 +232,7 @@ or
 XDG_DATA_HOME=/preferred/data/folder make docker-compose
 ```
 
-Makefile uses host's PID,UID,GID. It required to open Erigon's DB from another process (RPCDaemon local-mode).
+Makefile uses host's UID,GID. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
 See: https://github.com/ledgerwatch/erigon/pull/2392/files
 
 Windows support for docker-compose is not ready yet. Please help us with .ps1 port
