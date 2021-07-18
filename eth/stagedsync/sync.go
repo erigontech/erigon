@@ -165,14 +165,11 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	for !s.IsDone() {
 		if s.unwindPoint != nil {
 			for i := len(s.unwindOrder) - 1; i >= 0; i-- {
-				if err := s.SetCurrentStage(s.unwindOrder[i].ID); err != nil {
-					return err
-				}
-				if s.unwindOrder[i].Disabled {
+				if s.unwindOrder[i].Disabled || s.unwindOrder[i].Unwind == nil {
 					continue
 				}
 				t := time.Now()
-				if err := s.unwindStage(firstCycle, s.unwindOrder[i].ID, db, tx); err != nil {
+				if err := s.unwindStage(firstCycle, s.unwindOrder[i], db, tx); err != nil {
 					return err
 				}
 				timings = append(timings, "Unwind "+string(s.unwindOrder[i].ID), time.Since(t))
@@ -192,7 +189,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 			os.Exit(1)
 		}
 
-		if stage.Disabled {
+		if stage.Disabled || stage.Forward == nil {
 			logPrefix := s.LogPrefix()
 			message := fmt.Sprintf(
 				"[%s] disabled. %s",
@@ -215,14 +212,11 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	}
 
 	for i := len(s.pruningOrder) - 1; i >= 0; i-- {
-		if err := s.SetCurrentStage(s.pruningOrder[i].ID); err != nil {
-			return err
-		}
-		if s.pruningOrder[i].Disabled {
+		if s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
 		t := time.Now()
-		if err := s.unwindStage(firstCycle, s.pruningOrder[i].ID, db, tx); err != nil {
+		if err := s.pruneStage(firstCycle, s.pruningOrder[i], db, tx); err != nil {
 			return err
 		}
 		timings = append(timings, "Pruning "+string(s.pruningOrder[i].ID), time.Since(t))
@@ -290,27 +284,23 @@ func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle b
 	return nil
 }
 
-func (s *Sync) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.RwKV, tx ethdb.RwTx) error {
+func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
 	start := time.Now()
-	log.Info("Unwind...", "stage", stageID)
-	stage, err := s.StageByID(stageID)
-	if err != nil {
-		return err
-	}
-	if stage.Unwind == nil {
-		return nil
-	}
-
+	log.Info("Unwind...", "stage", stage.ID)
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
 
-	unwind := s.NewUnwindState(stageID, *s.unwindPoint, stageState.BlockNumber)
+	unwind := s.NewUnwindState(stage.ID, *s.unwindPoint, stageState.BlockNumber)
 	unwind.BadBlock = s.badBlock
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
 		return nil
+	}
+
+	if err = s.SetCurrentStage(stage.ID); err != nil {
+		return err
 	}
 
 	err = stage.Unwind(firstCycle, unwind, stageState, tx)
@@ -324,16 +314,9 @@ func (s *Sync) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.R
 	return nil
 }
 
-func (s *Sync) pruneStage(firstCycle bool, stageID stages.SyncStage, db ethdb.RwKV, tx ethdb.RwTx) error {
+func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
 	start := time.Now()
-	log.Info("Prune...", "stage", stageID)
-	stage, err := s.StageByID(stageID)
-	if err != nil {
-		return err
-	}
-	if stage.Prune == nil {
-		return nil
-	}
+	log.Info("Prune...", "stage", stage.ID)
 
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
@@ -341,9 +324,12 @@ func (s *Sync) pruneStage(firstCycle bool, stageID stages.SyncStage, db ethdb.Rw
 	}
 
 	prunePoint := stageState.BlockNumber - params.FullImmutabilityThreshold // TODO: cli-customizable
-	prune := s.NewPruneState(stageID, prunePoint, stageState.BlockNumber)
+	prune := s.NewPruneState(stage.ID, prunePoint, stageState.BlockNumber)
 	if stageState.BlockNumber <= prune.PrunePoint {
 		return nil
+	}
+	if err = s.SetCurrentStage(stage.ID); err != nil {
+		return err
 	}
 
 	err = stage.Prune(firstCycle, prune, tx)

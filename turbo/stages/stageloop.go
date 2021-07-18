@@ -50,7 +50,7 @@ func NewStagedSync(
 ) *stagedsync.Sync {
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, sm, headers, blockHashes, snapshotHeader, bodies, snapshotBodies, senders, exec, trans, snapshotState, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
-		stagedsync.DefaultUnwindOrder(),
+		stagedsync.DefaultUnwindOrder,
 	)
 }
 

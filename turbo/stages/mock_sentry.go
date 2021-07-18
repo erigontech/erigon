@@ -318,7 +318,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
-		stagedsync.MiningUnwindOrder(),
+		stagedsync.MiningUnwindOrder,
 	)
 
 	mock.StreamWg.Add(1)

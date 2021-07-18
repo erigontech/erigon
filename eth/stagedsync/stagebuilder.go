@@ -81,14 +81,3 @@ func MiningStages(
 		},
 	}
 }
-
-// UnwindOrder represents the order in which the stages needs to be unwound.
-// Currently it is using indexes of stages, 0-based.
-// The unwind order is important and not always just stages going backwards.
-// Let's say, there is tx pool (state 10) can be unwound only after execution
-// is fully unwound (stages 9...3).
-type UnwindOrder []stages.SyncStage
-
-func MiningUnwindOrder() UnwindOrder {
-	return []stages.SyncStage{}
-}

@@ -826,7 +826,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 			stagedsync.StageTrieCfg(db, false, true, tmpdir),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
-		stagedsync.MiningUnwindOrder(),
+		stagedsync.MiningUnwindOrder,
 	)
 
 	return sm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
