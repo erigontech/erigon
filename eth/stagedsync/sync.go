@@ -88,10 +88,6 @@ func (s *Sync) IsDone() bool {
 	return s.currentStage >= uint(len(s.stages)) && s.unwindPoint == nil
 }
 
-func (s *Sync) CurrentStage() (uint, *Stage) {
-	return s.currentStage, s.stages[s.currentStage]
-}
-
 func (s *Sync) LogPrefix() string {
 	if s == nil {
 		return ""
@@ -172,7 +168,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 			}
 		}
 
-		_, stage := s.CurrentStage()
+		stage := s.stages[s.currentStage]
 
 		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
 			log.Error("STOP_BEFORE_STAGE env flag forced to stop app")
