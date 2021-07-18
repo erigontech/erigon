@@ -9,6 +9,7 @@ GO_DBG_BUILD = go build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatc
 
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
+ERIGON_HOME = ~/.local/share
 
 all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
 
@@ -22,8 +23,12 @@ docker:
 	docker build -t turbo-geth:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' --build-arg git_tag='${GIT_TAG}' .
 
 docker-compose:
-	# Uses host's PID,UID,GID. It required to open Erigon's DB from another process (RPCDaemon local-mode)
-	UID_GID=$(shell id -u):$(shell id -g) docker-compose up
+	@if test -n "$(XDG_DATA_HOME)"; then \
+		mkdir -p $(XDG_DATA_HOME)/erigon $(XDG_DATA_HOME)/erigon-grafana $(XDG_DATA_HOME)/erigon-prometheus; \
+	else \
+	  mkdir -p $(ERIGON_HOME)/erigon $(ERIGON_HOME)/erigon-grafana $(ERIGON_HOME)/erigon-prometheus; \
+	fi
+	docker-compose up
 
 # debug build allows see C stack traces, run it with GOTRACEBACK=crash. You don't need debug build for C pit for profiling. To profile C code use SETCGOTRCKEBACK=1
 dbg:
