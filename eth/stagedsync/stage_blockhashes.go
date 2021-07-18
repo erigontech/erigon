@@ -49,7 +49,6 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	}
 	headHash := rawdb.ReadHeaderByNumber(tx, headNumber).Hash()
 	if s.BlockNumber == headNumber {
-		s.Done()
 		return nil
 	}
 
@@ -75,7 +74,7 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	); err != nil {
 		return err
 	}
-	if err = s.DoneAndUpdate(tx, headNumber); err != nil {
+	if err = s.Update(tx, headNumber); err != nil {
 		return err
 	}
 	if !useExternalTx {

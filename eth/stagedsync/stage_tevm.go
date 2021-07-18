@@ -63,7 +63,6 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, cfg Trans
 	}
 
 	if to <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -87,8 +86,6 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, cfg Trans
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}
-
-	s.Done()
 
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", toBlock)

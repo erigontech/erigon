@@ -197,6 +197,8 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 			return err
 		}
 		timings = append(timings, string(stage.ID), time.Since(t))
+
+		s.NextStage()
 	}
 
 	if err := printLogs(tx, timings); err != nil {

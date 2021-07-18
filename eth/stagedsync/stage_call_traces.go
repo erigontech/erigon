@@ -63,7 +63,6 @@ func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
 	if endBlock == s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -71,7 +70,7 @@ func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 		return err
 	}
 
-	if err := s.DoneAndUpdate(tx, endBlock); err != nil {
+	if err := s.Update(tx, endBlock); err != nil {
 		return err
 	}
 	if !useExternalTx {

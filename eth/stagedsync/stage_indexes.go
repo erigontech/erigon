@@ -55,7 +55,6 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
 	if executionAt <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -69,7 +68,7 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if err := s.DoneAndUpdate(tx, executionAt); err != nil {
+	if err := s.Update(tx, executionAt); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -99,7 +98,6 @@ func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		return fmt.Errorf("%s: logs index: getting last executed block: %w", logPrefix, err)
 	}
 	if executionAt <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -113,7 +111,7 @@ func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if err := s.DoneAndUpdate(tx, executionAt); err != nil {
+	if err := s.Update(tx, executionAt); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 

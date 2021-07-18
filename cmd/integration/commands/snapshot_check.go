@@ -209,24 +209,24 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 
 	if isNew {
 		stage3 := stage(sync, tx, stages.Senders)
-		err = stage3.DoneAndUpdate(tx, lastBlockHeaderNumber)
+		err = stage3.Update(tx, lastBlockHeaderNumber)
 		if err != nil {
 			return err
 		}
 
 		stage4 := stage(sync, tx, stages.Execution)
-		err = stage4.DoneAndUpdate(tx, snapshotBlock)
+		err = stage4.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
 		stage5 := stage(sync, tx, stages.HashState)
-		err = stage5.DoneAndUpdate(tx, snapshotBlock)
+		err = stage5.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
 
 		stage6 := stage(sync, tx, stages.IntermediateHashes)
-		err = stage6.DoneAndUpdate(tx, snapshotBlock)
+		err = stage6.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}

@@ -45,7 +45,6 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
 		return err
 	}
 	if executionAt <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -63,7 +62,7 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
 		}
 	}
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
-	err = s.DoneAndUpdate(tx, executionAt)
+	err = s.Update(tx, executionAt)
 	if err != nil {
 		return err
 	}
