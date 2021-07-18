@@ -4,8 +4,10 @@ services:
 
   erigon:
     image: thorax/erigon:latest
+    user: ${UID_GID:-1000:1000}
     build: .
     command: erigon --datadir=/var/lib/erigon --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --private.api.addr=0.0.0.0:9090 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
+    pid: host
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/var/lib/erigon
     ports:
@@ -17,6 +19,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v2.28.1
+    user: ${UID_GID:-1000:1000}
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports:
       - "9090:9090"
@@ -27,6 +30,7 @@ services:
 
   grafana:
     image: grafana/grafana:8.0.6
+    user: ${UID_GID:-1000:1000}
     ports:
       - "3000:3000"
     volumes:
@@ -38,7 +42,11 @@ services:
 
   rpcdaemon:
     image: thorax/erigon:latest
-    command: rpcdaemon --private.api.addr=erigon:9090 --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net
+    user: ${UID_GID:-1000:1000}
+    command: rpcdaemon --datadir /var/lib/erigon --private.api.addr=erigon:9090 --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net
+    pid: host
+    volumes:
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon:/var/lib/erigon
     ports:
       - "8545:8545"
     restart: unless-stopped
