@@ -162,15 +162,15 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	var timings []interface{}
 	for !s.IsDone() {
 		if s.unwindPoint != nil {
-			for i := len(s.unwindOrder) - 1; i >= 0; i-- {
-				if s.unwindOrder[i].Disabled || s.unwindOrder[i].Unwind == nil {
+			for j := 0; j < len(s.unwindOrder); j++ {
+				if s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
 				t := time.Now()
-				if err := s.unwindStage(firstCycle, s.unwindOrder[i], db, tx); err != nil {
+				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
 					return err
 				}
-				timings = append(timings, "Unwind "+string(s.unwindOrder[i].ID), time.Since(t))
+				timings = append(timings, "Unwind "+string(s.unwindOrder[j].ID), time.Since(t))
 			}
 			s.prevUnwindPoint = s.unwindPoint
 			s.unwindPoint = nil
@@ -204,7 +204,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 		s.NextStage()
 	}
 
-	for i := len(s.pruningOrder) - 1; i >= 0; i-- {
+	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
