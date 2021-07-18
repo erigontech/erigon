@@ -36,7 +36,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 		defer tx.Rollback()
 	}
 
-	if err = s.DoneAndUpdate(tx, 0); err != nil {
+	if err = s.Update(tx, 0); err != nil {
 		return err
 	}
 	if !useExternalTx {

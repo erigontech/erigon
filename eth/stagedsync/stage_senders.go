@@ -72,7 +72,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 		to = min(prevStageProgress, toBlock)
 	}
 	if to <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -238,7 +237,6 @@ Loop:
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
-		s.Done()
 	} else {
 		if err := collectorSenders.Load(logPrefix, tx,
 			dbutils.Senders,
@@ -252,7 +250,7 @@ Loop:
 		); err != nil {
 			return err
 		}
-		if err = s.DoneAndUpdate(tx, to); err != nil {
+		if err = s.Update(tx, to); err != nil {
 			return err
 		}
 	}

@@ -243,7 +243,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 		to = min(prevStageProgress, toBlock)
 	}
 	if to <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -362,7 +361,6 @@ Loop:
 	}
 
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
-	s.Done()
 	return stoppedErr
 }
 
@@ -436,7 +434,6 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	quit := ctx.Done()
 	if u.UnwindPoint >= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 	useExternalTx := tx != nil

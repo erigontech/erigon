@@ -68,7 +68,6 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit 
 	// sealing in advance without waiting block execution finished.
 	if !noempty {
 		log.Info("Commit an empty block", "number", current.Header.Number)
-		s.Done()
 		return nil
 	}
 
@@ -141,7 +140,6 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit 
 	if err := stages.SaveStageProgress(tx, stages.Execution, current.Header.Number.Uint64()); err != nil {
 		return err
 	}
-	s.Done()
 	return nil
 }
 

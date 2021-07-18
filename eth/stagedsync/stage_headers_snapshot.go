@@ -32,7 +32,6 @@ func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client 
 func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
 	if !initial {
-		s.Done()
 		return nil
 	}
 
@@ -49,7 +48,6 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 
 	//it's too early for snapshot
 	if to < snapshotsync.EpochSize {
-		s.Done()
 		return nil
 	}
 
@@ -63,7 +61,6 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	//So we have to move headers to snapshot right after headers stage.
 	//but we don't want to block not initial sync
 	if snapshotBlock <= currentSnapshotBlock {
-		s.Done()
 		return nil
 	}
 
@@ -88,7 +85,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	if err != nil {
 		return err
 	}
-	err = s.DoneAndUpdate(tx, snapshotBlock)
+	err = s.Update(tx, snapshotBlock)
 	if err != nil {
 		return err
 	}

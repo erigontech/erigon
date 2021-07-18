@@ -57,7 +57,6 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 	if s.BlockNumber == to {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-		s.Done()
 		return trie.EmptyRoot, nil
 	}
 
@@ -96,8 +95,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 				log.Warn("Unwinding due to incorrect root hash", "to", to-1)
 				u.UnwindTo(to-1, headerHash)
 			}
-			s.Done()
-		} else if err = s.DoneAndUpdate(tx, to); err != nil {
+		} else if err = s.Update(tx, to); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
