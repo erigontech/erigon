@@ -106,15 +106,6 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func (s *Sync) StageByID(id stages.SyncStage) (*Stage, error) {
-	for _, stage := range s.stages {
-		if stage.ID == id {
-			return stage, nil
-		}
-	}
-	return nil, fmt.Errorf("stage not found with id: %v", id)
-}
-
 func New(stagesList []*Stage, unwindOrder []stages.SyncStage) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
 
@@ -191,12 +182,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 
 		if stage.Disabled || stage.Forward == nil {
 			logPrefix := s.LogPrefix()
-			message := fmt.Sprintf(
-				"[%s] disabled. %s",
-				logPrefix, stage.DisabledDescription,
-			)
-
-			log.Debug(message)
+			log.Debug(fmt.Sprintf("[%s] disabled. %s", logPrefix, stage.DisabledDescription))
 
 			s.NextStage()
 			continue
