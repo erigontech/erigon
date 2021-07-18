@@ -306,10 +306,10 @@ If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
 Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel non-batched way.
 
-### rpcdaemon "Local-Mode" does not work with Docker Container
+### rpcdaemon "Local-Mode" experimentally working with docker-compose
 
 Running rpcdaemon in "Local-Mode" (including the `--datadir` flag) generally results in better performance for 
-RPC calls, however, this does not work when running erigon and rpcdaemon in separate containers and datadir as volume.
-But it works fine if run erigon and rpcdaemon in same container. 
+RPC calls. By sharing the PID namespace for both containers, it's possible now to run erigon and rpcdaemon in separate containers and datadir as volume.
+You can start up the whole stack with the following command: `make docker-compose`
 For the absolute best performance bare metal is recommended at this time.
 Please, help us configure Docker volume driver to support MMAP files with POSIX file-locks (MDBX).
