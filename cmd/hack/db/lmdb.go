@@ -195,7 +195,7 @@ type header struct {
 	upper        uint16
 	pageID       uint32
 
-	ptrs  []uint16
+	// ptrs  []uint16
 	nodes []*mdbx_node
 }
 
@@ -208,7 +208,7 @@ type mdbx_db struct {
 	branches  uint32 /* number of internal pages */
 	leafs     uint32 /* number of leaf pages */
 	overflows uint32 /* number of overflow pages */
-	seq       uint64 // nolint:structcheck /* table sequence counter */
+	seq       uint64 //nolint:structcheck
 	entries   uint64 /* number of data items */
 	txnID     uint64 /* txnid of last committed modification */
 }
@@ -216,20 +216,20 @@ type mdbx_db struct {
 // database size-related parameters,
 // used as placeholder, doesn't have any meaning in this code
 type mdbx_geo struct {
-	grow_pv   uint16 // nolint:structcheck
-	shrink_pv uint16 // nolint:structcheck
-	lower     uint32 // nolint:structcheck
-	upper     uint32 // nolint:structcheck
-	now       uint32 // nolint:structcheck
-	next      uint32 // nolint:structcheck
+	grow_pv   uint16 //nolint:structcheck
+	shrink_pv uint16 //nolint:structcheck
+	lower     uint32 //nolint:structcheck
+	upper     uint32 //nolint:structcheck
+	now       uint32 //nolint:structcheck
+	next      uint32 //nolint:structcheck
 }
 
 /* used as placeholder, doesn't have any meaning in this code */
 type mdbx_canary struct {
-	field1 uint64
-	field2 uint64
-	field3 uint64
-	field4 uint64
+	field1 uint64 //nolint:structcheck
+	field2 uint64 //nolint:structcheck
+	field3 uint64 //nolint:structcheck
+	field4 uint64 //nolint:structcheck
 }
 
 /* Meta page content.
@@ -240,19 +240,19 @@ type mdbx_meta struct {
 	 * It must be set to MDBX_MAGIC with MDBX_DATA_VERSION. */
 	magic        uint64
 	version      int
-	txnID_a      uint64 /* txnid that committed this page, the first of a two-phase-update pair */
-	flags        uint16 /* extra DB flags, zero (nothing) for now */
-	validataorID uint
-	extraHeader  uint
-	geo          mdbx_geo
+	txnID_a      uint64   /* txnid that committed this page, the first of a two-phase-update pair */
+	flags        uint16   /* extra DB flags, zero (nothing) for now */
+	validataorID uint     //nolint:structcheck
+	extraHeader  uint     //nolint:structcheck
+	geo          mdbx_geo //nolint
 	/* first is free space, 2nd is main db */
 	/* The size of pages used in this DB */
 	dbs          [2]*mdbx_db
 	canary       mdbx_canary
-	dataSyncSign uint64
+	dataSyncSign uint64 //nolint:structcheck
 	txnID_b      uint64 /* txnid that committed this page, the second of a two-phase-update pair */
-	pagesRetired uint64
-	x, y         uint64 // placeholders, not used in this code
+	pagesRetired uint64 //nolint:structcheck
+	x, y         uint64 //nolint:structcheck
 }
 
 // Header for a single key/data pair within a page
@@ -272,9 +272,9 @@ type freeList struct {
 	pages []uint32
 }
 
-func (f *freeList) print() {
-	fmt.Printf("Freelist { txnID: %v, count: %d, freePages: %v } \n", f.txnID, f.count, f.pages)
-}
+// func (f *freeList) print() {
+// 	fmt.Printf("Freelist { txnID: %v, count: %d, freePages: %v } \n", f.txnID, f.count, f.pages)
+// }
 
 // Reads HeaderSize bytes from provided page, constracts a header
 func (h *header) fromBytes(page []byte, isMetaPage bool) {
@@ -314,15 +314,15 @@ func (h *header) fromBytes(page []byte, isMetaPage bool) {
 	}
 }
 
-func (h *header) print() {
-	fmt.Printf("Header { txnID: %v, leaf2keySize: %v, flags: %v, lowerFree: %v, upperFree: %v, pageID: %v, ptrs: %v }\n", h.txnID, h.leaf2keySize, h.flag, h.lower, h.upper, h.pageID, h.ptrs)
-}
+// func (h *header) print() {
+// 	fmt.Printf("Header { txnID: %v, leaf2keySize: %v, flags: %v, lowerFree: %v, upperFree: %v, pageID: %v, ptrs: %v }\n", h.txnID, h.leaf2keySize, h.flag, h.lower, h.upper, h.pageID, h.ptrs)
+// }
 
-func (h *header) print_nodes() {
-	for _, node := range h.nodes {
-		node.print()
-	}
-}
+// func (h *header) print_nodes() {
+// 	for _, node := range h.nodes {
+// 		node.print()
+// 	}
+// }
 
 func (db *mdbx_db) init(page []byte, pos *int) {
 	db.flags = _16(page, *pos)
@@ -346,13 +346,13 @@ func (db *mdbx_db) init(page []byte, pos *int) {
 	*pos += 8
 }
 
-func (db *mdbx_db) toString() string {
-	return fmt.Sprintf("{ flags: %v, depth: %v, xsize: %v, rootID: %v, branches: %v, leafs: %v, overflows: %v, entries: %v, txnID: %v }", db.flags, db.depth, db.xsize, db.rootID, db.branches, db.leafs, db.overflows, db.entries, db.txnID)
-}
+// func (db *mdbx_db) toString() string {
+// 	return fmt.Sprintf("{ flags: %v, depth: %v, xsize: %v, rootID: %v, branches: %v, leafs: %v, overflows: %v, entries: %v, txnID: %v }", db.flags, db.depth, db.xsize, db.rootID, db.branches, db.leafs, db.overflows, db.entries, db.txnID)
+// }
 
-func (db *mdbx_db) print() {
-	fmt.Printf("MDBX_DB { flags: %v, depth: %v, xsize: %v, rootID: %v, branches: %v, leafs: %v, overflows: %v, entries: %v, txnID: %v }\n", db.flags, db.depth, db.xsize, db.rootID, db.branches, db.leafs, db.overflows, db.entries, db.txnID)
-}
+// func (db *mdbx_db) print() {
+// 	fmt.Printf("MDBX_DB { flags: %v, depth: %v, xsize: %v, rootID: %v, branches: %v, leafs: %v, overflows: %v, entries: %v, txnID: %v }\n", db.flags, db.depth, db.xsize, db.rootID, db.branches, db.leafs, db.overflows, db.entries, db.txnID)
+// }
 
 func (m *mdbx_meta) readMeta(page []byte) error {
 	pos := HeaderSize
@@ -391,9 +391,9 @@ func (m *mdbx_meta) readMeta(page []byte) error {
 	return nil
 }
 
-func (m *mdbx_meta) print() {
-	fmt.Printf("Meta { magic: %v, version %v, txnID_a: %v, flags: %v, freeDB: %v, mainDB: %v, txnID_b: %v }\n", m.magic, m.version, m.txnID_a, m.flags, m.dbs[0].toString(), m.dbs[1].toString(), m.txnID_b)
-}
+// func (m *mdbx_meta) print() {
+// 	fmt.Printf("Meta { magic: %v, version %v, txnID_a: %v, flags: %v, freeDB: %v, mainDB: %v, txnID_b: %v }\n", m.magic, m.version, m.txnID_a, m.flags, m.dbs[0].toString(), m.dbs[1].toString(), m.txnID_b)
+// }
 
 func (n *mdbx_node) fromBytes(page []byte, offset int, pageFlag uint16, isSubPage bool) {
 
@@ -423,13 +423,13 @@ func (n *mdbx_node) fromBytes(page []byte, offset int, pageFlag uint16, isSubPag
 	n.data = page[offset+8 : offset+8+int(n.ksize)+int(n.dsize)]
 }
 
-func (n *mdbx_node) print() {
-	if isBigData(n.flag) {
-		fmt.Printf("Node { pgno: %v, dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.pgno, n.dsize, n.flag, n.ksize, n.data)
-	} else {
-		fmt.Printf("Node { dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.dsize, n.flag, n.ksize, n.data)
-	}
-}
+// func (n *mdbx_node) print() {
+// 	if isBigData(n.flag) {
+// 		fmt.Printf("Node { pgno: %v, dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.pgno, n.dsize, n.flag, n.ksize, n.data)
+// 	} else {
+// 		fmt.Printf("Node { dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.dsize, n.flag, n.ksize, n.data)
+// 	}
+// }
 
 func (n *mdbx_node) getFreeList() freeList {
 	pos := 0
@@ -469,13 +469,13 @@ func (n *mdbx_node) getKV() (key string, value string) {
 	return
 }
 
-func (n *mdbx_node) toString() string {
-	if isBigData(n.flag) {
-		return fmt.Sprintf("Node { pgno: %v, dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.pgno, n.dsize, n.flag, n.ksize, n.data)
-	} else {
-		return fmt.Sprintf("Node { dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.dsize, n.flag, n.ksize, n.data)
-	}
-}
+// func (n *mdbx_node) toString() string {
+// 	if isBigData(n.flag) {
+// 		return fmt.Sprintf("Node { pgno: %v, dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.pgno, n.dsize, n.flag, n.ksize, n.data)
+// 	} else {
+// 		return fmt.Sprintf("Node { dsize: %v, flag: %v, ksize: %v, data: %v }\n", n.dsize, n.flag, n.ksize, n.data)
+// 	}
+// }
 
 /* ----------------------- DB generator functions ----------------------- */
 
@@ -493,8 +493,6 @@ func generate2(tx ethdb.RwTx, entries int) error {
 	defer c.Close()
 	for i := 0; i < entries; i++ {
 		k := fmt.Sprintf("%05d", i)
-		// k := randString(3, 5)
-		// "very_short_value"
 		if err := c.Append([]byte(k), []byte("very_short_value")); err != nil {
 			return err
 		}
@@ -600,7 +598,7 @@ func generate7(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) {
 		return false, err
 	}
 	defer c2.Close()
-	for i := 0; i < 1010; i++ {
+	for i := 0; i < 1000; i++ {
 		k := fmt.Sprintf("%05d", i)
 		if err := c1.Append([]byte(k), []byte("very_short_value")); err != nil {
 			return false, err
@@ -1063,7 +1061,7 @@ func _conditions(f io.ReaderAt, visStream io.Writer, node *mdbx_node, _header *h
 				*out += fmt.Sprintf("<p_%d>%s=%d", subDB.rootID, key, subDB.rootID)
 			}
 		} else {
-			*out += fmt.Sprintf("%s", key)
+			*out += key
 		}
 
 		readPages(f, visStream, subDB.rootID, blockID, parentBlock, thisLevel)
