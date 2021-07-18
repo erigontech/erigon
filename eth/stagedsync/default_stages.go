@@ -315,18 +315,25 @@ func DefaultPruningOrder() UnwindOrder {
 		stages.CreateHeadersSnapshot,
 		stages.Bodies,
 		stages.CreateBodiesSnapshot,
+
+		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+		// also tx pool is before senders because senders unwind is inside cycle transaction
+		stages.TxPool,
+
 		stages.Senders,
 		stages.Execution,
 		stages.Translation,
 		stages.CreateStateSnapshot,
-		stages.HashState,
+
+		// Unwinding of IHashes needs to happen after unwinding HashState
 		stages.IntermediateHashes,
+		stages.HashState,
+
 		stages.CallTraces,
 		stages.AccountHistoryIndex,
 		stages.StorageHistoryIndex,
 		stages.LogIndex,
 		stages.TxLookup,
-		stages.TxPool,
 		stages.Finish,
 	}
 }

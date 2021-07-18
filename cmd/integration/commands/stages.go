@@ -840,8 +840,8 @@ func progress(tx ethdb.KVGetter, stage stages.SyncStage) uint64 {
 	return res
 }
 
-func stage(st *stagedsync.Sync, db ethdb.KVGetter, stage stages.SyncStage) *stagedsync.StageState {
-	res, err := st.StageState(stage, db)
+func stage(st *stagedsync.Sync, tx ethdb.Tx, stage stages.SyncStage) *stagedsync.StageState {
+	res, err := st.StageState(stage, tx, nil)
 	if err != nil {
 		panic(err)
 	}
