@@ -213,8 +213,7 @@ type mdbx_db struct {
 	txnID     uint64 /* txnid of last committed modification */
 }
 
-// database size-related parameters,
-// used as placeholder, doesn't have any meaning in this code
+//nolint // database size-related parameters, used as placeholder, doesn't have any meaning in this code
 type mdbx_geo struct {
 	grow_pv   uint16 //nolint
 	shrink_pv uint16 //nolint
@@ -828,39 +827,40 @@ func defragSteps(filename string, bucketsCfg dbutils.BucketsCfg, generateFs ...f
 
 func Defrag() error {
 	emptyBucketCfg := make(dbutils.BucketsCfg)
+	fmt.Println("------------------- 1 -------------------")
 	if err := defragSteps("vis1", emptyBucketCfg, nothing); err != nil {
 		return err
 	}
 
 	oneBucketCfg := make(dbutils.BucketsCfg)
 	oneBucketCfg["t"] = dbutils.BucketConfigItem{}
-
+	fmt.Println("------------------- 2 -------------------")
 	if err := defragSteps("vis2", oneBucketCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 2) }); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 3 -------------------")
 	if err := defragSteps("vis3", emptyBucketCfg, generate3); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 4 -------------------")
 	if err := defragSteps("vis4", oneBucketCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 200) }); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 5 -------------------")
 	if err := defragSteps("vis5", oneBucketCfg, generate4); err != nil {
 		return err
 	}
 	oneDupSortCfg := make(dbutils.BucketsCfg)
 	oneDupSortCfg["t"] = dbutils.BucketConfigItem{Flags: dbutils.DupSort}
-
+	fmt.Println("------------------- 6 -------------------")
 	if err := defragSteps("vis6", oneDupSortCfg, generate5); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 7 -------------------")
 	if err := defragSteps("vis7", oneDupSortCfg, generate6); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 8 -------------------")
 	if err := defragSteps("vis8", oneDupSortCfg, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) }, dropT); err != nil {
 		return err
 	}
@@ -868,14 +868,15 @@ func Defrag() error {
 	twoBucketCfg := make(dbutils.BucketsCfg)
 	twoBucketCfg["t1"] = dbutils.BucketConfigItem{}
 	twoBucketCfg["t2"] = dbutils.BucketConfigItem{}
+	fmt.Println("------------------- 9 -------------------")
 	if err := defragSteps("vis9", twoBucketCfg, generate7); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 10 -------------------")
 	if err := defragSteps("vis10", twoBucketCfg, generate7, dropT1); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 11 -------------------")
 	if err := defragSteps("vis11", twoBucketCfg, generate7, dropT1, dropT2); err != nil {
 		return err
 	}
@@ -884,19 +885,19 @@ func Defrag() error {
 		k := fmt.Sprintf("table_%05d", i)
 		manyBucketCfg[k] = dbutils.BucketConfigItem{IsDeprecated: true}
 	}
-
+	fmt.Println("------------------- 12 -------------------")
 	if err := defragSteps("vis12", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate9(tx, 1000) }, dropGradually); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 13 -------------------")
 	if err := defragSteps("vis13", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 10000) }, dropAll); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 14 -------------------")
 	if err := defragSteps("vis14", manyBucketCfg, generate8, func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return false, generate9(tx, 300000) }, dropGradually); err != nil {
 		return err
 	}
-
+	fmt.Println("------------------- 15 -------------------")
 	if err := defragSteps("vis15", oneBucketCfg,
 		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change1(tx) },
@@ -912,6 +913,8 @@ func Defrag() error {
 
 	readerStartCh := make(chan struct{})
 	readerErrorCh := make(chan error)
+
+	fmt.Println("------------------- 16 -------------------")
 	if err := defragSteps("vis16", oneBucketCfg,
 		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return true, generate2(tx, 1000) },
 		func(_ ethdb.RwKV, tx ethdb.RwTx) (bool, error) { return change1(tx) },
@@ -938,7 +941,7 @@ func Defrag() error {
 
 func TextInfo(chaindata string, visStream io.Writer) error {
 	log.Info("Text Info", "db", chaindata)
-	fmt.Fprintf(visStream, "digraph lmdb {\nrankdir=LR\n")
+	fmt.Fprint(visStream, "digraph lmdb {\nrankdir=LR\n")
 	datafile := path.Join(chaindata, MdbxDataFile)
 
 	f, err := os.Open(datafile)
@@ -1024,10 +1027,10 @@ func TextInfo(chaindata string, visStream io.Writer) error {
 	}
 
 	if freeRoot != 0xffffffff {
-		fmt.Fprintf(visStream, "block_0:free_root -> free_pages\n")
+		fmt.Fprint(visStream, "block_0:free_root -> free_pages\n")
 	}
 
-	fmt.Fprintf(visStream, "}\n")
+	fmt.Fprint(visStream, "}\n")
 	return nil
 }
 
@@ -1182,7 +1185,7 @@ func readPages(f io.ReaderAt, visStream io.Writer, pgno uint32, blockID *int, pa
 
 	out += "\"]\n"
 	if l > 0 {
-		fmt.Fprintf(visStream, out)
+		fmt.Fprint(visStream, out)
 	}
 
 	return nil
@@ -1203,7 +1206,7 @@ func freeDBPages(f io.ReaderAt, visStream io.Writer, freeRoot uint32) error {
 	l := len(_header.nodes)
 
 	if l > 0 {
-		fmt.Fprintf(visStream, out)
+		fmt.Fprint(visStream, out)
 	}
 
 	out = ""
@@ -1238,7 +1241,7 @@ func freeDBPages(f io.ReaderAt, visStream io.Writer, freeRoot uint32) error {
 	}
 
 	out += "\"]\n"
-	fmt.Fprintf(visStream, out)
+	fmt.Fprint(visStream, out)
 
 	return nil
 }
