@@ -10,6 +10,7 @@ GO_DBG_BUILD = go build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatc
 GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
 ERIGON_HOME = ~/.local/share
+ERIGON_UID_GID = 1000:1000
 
 all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
 
@@ -25,8 +26,10 @@ docker:
 docker-compose:
 	@if test -n "$(XDG_DATA_HOME)"; then \
 		mkdir -p $(XDG_DATA_HOME)/erigon $(XDG_DATA_HOME)/erigon-grafana $(XDG_DATA_HOME)/erigon-prometheus; \
+		chown -R $(ERIGON_UID_GID) $(XDG_DATA_HOME)/erigon $(XDG_DATA_HOME)/erigon-grafana $(XDG_DATA_HOME)/erigon-prometheus; \
 	else \
-	  mkdir -p $(ERIGON_HOME)/erigon $(ERIGON_HOME)/erigon-grafana $(ERIGON_HOME)/erigon-prometheus; \
+		mkdir -p $(ERIGON_HOME)/erigon $(ERIGON_HOME)/erigon-grafana $(ERIGON_HOME)/erigon-prometheus; \
+		chown -R $(ERIGON_UID_GID) $(ERIGON_HOME)/erigon $(ERIGON_HOME)/erigon-grafana $(ERIGON_HOME)/erigon-prometheus; \
 	fi
 	docker-compose up
 
