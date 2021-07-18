@@ -4,9 +4,9 @@ services:
 
   erigon:
     image: thorax/erigon:latest
-    user: ${UID_GID:-1000:1000}
     build: .
     command: erigon --datadir=/var/lib/erigon --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --private.api.addr=0.0.0.0:9090 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
+    user: ${UID_GID:-1000:1000} # Uses host's PID,UID,GID. It required to open Erigon's DB from another process (RPCDaemon local-mode)
     pid: host
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/var/lib/erigon
@@ -42,8 +42,8 @@ services:
 
   rpcdaemon:
     image: thorax/erigon:latest
-    user: ${UID_GID:-1000:1000}
     command: rpcdaemon --datadir /var/lib/erigon --private.api.addr=erigon:9090 --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net
+    user: ${UID_GID:-1000:1000} # Uses host's PID,UID,GID. It required to open Erigon's DB from another process (RPCDaemon local-mode)
     pid: host
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/var/lib/erigon
