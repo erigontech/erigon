@@ -227,77 +227,81 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
-
-	mock.Sync = NewStagedSync(mock.Ctx, sm,
-		stagedsync.StageHeadersCfg(
-			mock.DB,
-			mock.downloader.Hd,
-			*mock.ChainConfig,
-			sendHeaderRequest,
-			propagateNewBlockHashes,
-			penalize,
-			cfg.BatchSize,
+	mock.Sync = stagedsync.New(
+		stagedsync.DefaultStages(
+			mock.Ctx, sm,
+			stagedsync.StageHeadersCfg(
+				mock.DB,
+				mock.downloader.Hd,
+				*mock.ChainConfig,
+				sendHeaderRequest,
+				propagateNewBlockHashes,
+				penalize,
+				cfg.BatchSize,
+			),
+			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
+			stagedsync.StageBodiesCfg(
+				mock.DB,
+				mock.downloader.Bd,
+				sendBodyRequest,
+				penalize,
+				blockPropagator,
+				cfg.BodyDownloadTimeoutSeconds,
+				*mock.ChainConfig,
+				cfg.BatchSize,
+			),
+			stagedsync.StageSnapshotBodiesCfg(
+				mock.DB,
+				ethconfig.Snapshot{Enabled: false},
+				nil, nil,
+				"",
+			),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
+			stagedsync.StageExecuteBlocksCfg(
+				mock.DB,
+				sm.Receipts,
+				sm.CallTraces,
+				sm.TEVM,
+				0,
+				cfg.BatchSize,
+				nil,
+				mock.ChainConfig,
+				mock.Engine,
+				&vm.Config{NoReceipts: !sm.Receipts},
+				nil,
+				cfg.StateStream,
+				mock.tmpdir,
+			),
+			stagedsync.StageTranspileCfg(
+				mock.DB,
+				cfg.BatchSize,
+				mock.ChainConfig,
+			),
+			stagedsync.StageSnapshotStateCfg(
+				mock.DB,
+				ethconfig.Snapshot{Enabled: false},
+				"",
+				nil, nil,
+			),
+			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
+			stagedsync.StageHistoryCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageLogIndexCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageCallTracesCfg(mock.DB, 0, mock.tmpdir),
+			stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
+				mock.StreamWg.Add(1)
+				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+				go txpropagate.BroadcastPendingTxsToNetwork(mock.Ctx, txPool, mock.TxPoolP2PServer.RecentPeers, mock.downloader)
+				mock.StreamWg.Wait()
+				mock.TxPoolP2PServer.TxFetcher.Start()
+			}),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
+			true, /* test */
 		),
-		stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
-		stagedsync.StageBodiesCfg(
-			mock.DB,
-			mock.downloader.Bd,
-			sendBodyRequest,
-			penalize,
-			blockPropagator,
-			cfg.BodyDownloadTimeoutSeconds,
-			*mock.ChainConfig,
-			cfg.BatchSize,
-		),
-		stagedsync.StageSnapshotBodiesCfg(
-			mock.DB,
-			ethconfig.Snapshot{Enabled: false},
-			nil, nil,
-			"",
-		),
-		stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
-		stagedsync.StageExecuteBlocksCfg(
-			mock.DB,
-			sm.Receipts,
-			sm.CallTraces,
-			sm.TEVM,
-			0,
-			cfg.BatchSize,
-			nil,
-			mock.ChainConfig,
-			mock.Engine,
-			&vm.Config{NoReceipts: !sm.Receipts},
-			nil,
-			cfg.StateStream,
-			mock.tmpdir,
-		),
-		stagedsync.StageTranspileCfg(
-			mock.DB,
-			cfg.BatchSize,
-			mock.ChainConfig,
-		),
-		stagedsync.StageSnapshotStateCfg(
-			mock.DB,
-			ethconfig.Snapshot{Enabled: false},
-			"",
-			nil, nil,
-		),
-		stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
-		stagedsync.StageHistoryCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageLogIndexCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageCallTracesCfg(mock.DB, 0, mock.tmpdir),
-		stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
-			mock.StreamWg.Add(1)
-			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
-			go txpropagate.BroadcastPendingTxsToNetwork(mock.Ctx, txPool, mock.TxPoolP2PServer.RecentPeers, mock.downloader)
-			mock.StreamWg.Wait()
-			mock.TxPoolP2PServer.TxFetcher.Start()
-		}),
-		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
-		true, /* test */
+		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
 	)
 
 	miningConfig := cfg.Miner
@@ -318,7 +322,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
-		stagedsync.MiningUnwindOrder(),
+		stagedsync.MiningUnwindOrder,
+		stagedsync.MiningPruneOrder,
 	)
 
 	mock.StreamWg.Add(1)

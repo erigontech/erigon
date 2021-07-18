@@ -285,78 +285,88 @@ func DefaultStages(ctx context.Context,
 	}
 }
 
-func DefaultForwardOrder() UnwindOrder {
-	return []stages.SyncStage{
-		stages.Headers,
-		stages.BlockHashes,
-		stages.CreateHeadersSnapshot,
-		stages.Bodies,
-		stages.CreateBodiesSnapshot,
-		stages.Senders,
-		stages.Execution,
-		stages.Translation,
-		stages.CreateStateSnapshot,
-		stages.HashState,
-		stages.IntermediateHashes,
-		stages.CallTraces,
-		stages.AccountHistoryIndex,
-		stages.StorageHistoryIndex,
-		stages.LogIndex,
-		stages.TxLookup,
-		stages.TxPool,
-		stages.Finish,
-	}
+var DefaultForwardOrder = UnwindOrder{
+	stages.Headers,
+	stages.BlockHashes,
+	stages.CreateHeadersSnapshot,
+	stages.Bodies,
+	stages.CreateBodiesSnapshot,
+	stages.Senders,
+	stages.Execution,
+	stages.Translation,
+	stages.CreateStateSnapshot,
+	stages.HashState,
+	stages.IntermediateHashes,
+	stages.CallTraces,
+	stages.AccountHistoryIndex,
+	stages.StorageHistoryIndex,
+	stages.LogIndex,
+	stages.TxLookup,
+	stages.TxPool,
+	stages.Finish,
 }
 
-func DefaultPruningOrder() UnwindOrder {
-	return []stages.SyncStage{
-		stages.Headers,
-		stages.BlockHashes,
-		stages.CreateHeadersSnapshot,
-		stages.Bodies,
-		stages.CreateBodiesSnapshot,
-		stages.Senders,
-		stages.Execution,
-		stages.Translation,
-		stages.CreateStateSnapshot,
-		stages.HashState,
-		stages.IntermediateHashes,
-		stages.CallTraces,
-		stages.AccountHistoryIndex,
-		stages.StorageHistoryIndex,
-		stages.LogIndex,
-		stages.TxLookup,
-		stages.TxPool,
-		stages.Finish,
-	}
+var DefaultPruneOrder = PruneOrder{
+	stages.Headers,
+	stages.BlockHashes,
+	stages.CreateHeadersSnapshot,
+	stages.Bodies,
+	stages.CreateBodiesSnapshot,
+
+	// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+	// also tx pool is before senders because senders unwind is inside cycle transaction
+	stages.TxPool,
+
+	stages.Senders,
+	stages.Execution,
+	stages.Translation,
+	stages.CreateStateSnapshot,
+
+	// Unwinding of IHashes needs to happen after unwinding HashState
+	stages.IntermediateHashes,
+	stages.HashState,
+
+	stages.CallTraces,
+	stages.AccountHistoryIndex,
+	stages.StorageHistoryIndex,
+	stages.LogIndex,
+	stages.TxLookup,
+	stages.Finish,
 }
 
-func DefaultUnwindOrder() UnwindOrder {
-	return []stages.SyncStage{
-		stages.Headers,
-		stages.BlockHashes,
-		stages.CreateHeadersSnapshot,
-		stages.Bodies,
-		stages.CreateBodiesSnapshot,
+// UnwindOrder represents the order in which the stages needs to be unwound.
+// The unwind order is important and not always just stages going backwards.
+// Let's say, there is tx pool can be unwound only after execution.
+type UnwindOrder []stages.SyncStage
+type PruneOrder []stages.SyncStage
 
-		// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
-		// also tx pool is before senders because senders unwind is inside cycle transaction
-		stages.TxPool,
+var DefaultUnwindOrder = UnwindOrder{
+	stages.Headers,
+	stages.BlockHashes,
+	stages.CreateHeadersSnapshot,
+	stages.Bodies,
+	stages.CreateBodiesSnapshot,
 
-		stages.Senders,
-		stages.Execution,
-		stages.Translation,
-		stages.CreateStateSnapshot,
+	// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
+	// also tx pool is before senders because senders unwind is inside cycle transaction
+	stages.TxPool,
 
-		// Unwinding of IHashes needs to happen after unwinding HashState
-		stages.IntermediateHashes,
-		stages.HashState,
+	stages.Senders,
+	stages.Execution,
+	stages.Translation,
+	stages.CreateStateSnapshot,
 
-		stages.CallTraces,
-		stages.AccountHistoryIndex,
-		stages.StorageHistoryIndex,
-		stages.LogIndex,
-		stages.TxLookup,
-		stages.Finish,
-	}
+	// Unwinding of IHashes needs to happen after unwinding HashState
+	stages.IntermediateHashes,
+	stages.HashState,
+
+	stages.CallTraces,
+	stages.AccountHistoryIndex,
+	stages.StorageHistoryIndex,
+	stages.LogIndex,
+	stages.TxLookup,
+	stages.Finish,
 }
+
+var MiningUnwindOrder = UnwindOrder{} // nothing to unwind in mining - because mining does not commit db changes
+var MiningPruneOrder = PruneOrder{}   // nothing to unwind in mining - because mining does not commit db changes
