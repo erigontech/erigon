@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -963,7 +965,14 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
+		w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
+		if werr != nil {
+			return nil, werr
+		}
+		defer w.Close()
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+		tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: tracer})
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		var execResult *core.ExecutionResult
