@@ -971,6 +971,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		}
 		defer w.Close()
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+		defer stream.Flush()
 		tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: tracer})
 
