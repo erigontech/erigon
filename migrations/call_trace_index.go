@@ -15,14 +15,6 @@ import (
 var rebuilCallTraceIndex = Migration{
 	Name: "rebuild_call_trace_index",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		sm, err := ethdb.GetStorageModeFromDB(db)
-		if err != nil {
-			return err
-		}
-		if !sm.CallTraces {
-			// Call traces are not on, nothing to migrate
-			return CommitProgress(db, nil, true)
-		}
 		// Find the lowest key in the TraceCallSet table
 		tx := db.(ethdb.HasTx).Tx().(ethdb.RwTx)
 		c, err := tx.CursorDupSort(dbutils.CallTraceSet)
@@ -45,7 +37,12 @@ var rebuilCallTraceIndex = Migration{
 			return CommitProgress(db, nil, true)
 		}
 		logPrefix := "db migration rebuild_call_trace_index"
-		if err = stagedsync.DoUnwindCallTraces(logPrefix, tx, 999_999_999, blockNum-1, context.Background().Done(), stagedsync.StageCallTracesCfg(nil, 0, tmpdir)); err != nil {
+
+		pm, err := ethdb.GetPruneModeFromDB(tx)
+		if err != nil {
+			return err
+		}
+		if err = stagedsync.DoUnwindCallTraces(logPrefix, tx, 999_999_999, blockNum-1, context.Background(), stagedsync.StageCallTracesCfg(nil, pm, 0, tmpdir)); err != nil {
 			return err
 		}
 

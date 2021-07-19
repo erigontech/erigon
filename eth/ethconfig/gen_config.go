@@ -35,7 +35,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Whitelist = c.Whitelist
-	enc.StorageMode = c.StorageMode.ToString()
+	enc.StorageMode = c.Prune.ToString()
 	enc.Miner = c.Miner
 	enc.Ethash = c.Ethash
 	enc.TxPool = c.TxPool
@@ -87,11 +87,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Whitelist = dec.Whitelist
 	}
 	if dec.Mode != nil {
-		mode, err := ethdb.StorageModeFromString(*dec.Mode)
+		mode, err := ethdb.PruneModeFromString(*dec.Mode)
 		if err != nil {
 			return err
 		}
-		c.StorageMode = mode
+		c.Prune = mode
 	}
 	if dec.Miner != nil {
 		c.Miner = *dec.Miner

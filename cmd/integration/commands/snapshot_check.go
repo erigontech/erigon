@@ -90,7 +90,7 @@ var cmdSnapshotCheck = &cobra.Command{
 
 		if isNew {
 			if err := kv.Update(ctx, func(tx ethdb.RwTx) error {
-				return ethdb.SetStorageModeIfNotExist(tx, ethdb.StorageMode{})
+				return ethdb.SetPruneModeIfNotExist(tx, ethdb.DefaultPruneMode)
 			}); err != nil {
 				return err
 			}
@@ -104,7 +104,7 @@ var cmdSnapshotCheck = &cobra.Command{
 }
 
 func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string) (err error) {
-	_, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	var snapshotBlock uint64 = 11_000_000
 	var lastBlockHeaderNumber, blockNum uint64
@@ -245,7 +245,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
 		err = stagedsync.SpawnExecuteBlocksStage(stage4, sync, tx, blockNumber, ctx,
-			stagedsync.StageExecuteBlocksCfg(db, false, false, false, 0, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDir),
+			stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDir),
 			false)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)

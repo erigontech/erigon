@@ -69,8 +69,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:   1,
-	StorageMode: ethdb.DefaultStorageMode,
+	NetworkID: 1,
+	Prune:     ethdb.DefaultPruneMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -133,8 +133,8 @@ type Config struct {
 
 	P2PEnabled bool
 
-	StorageMode ethdb.StorageMode
-	BatchSize   datasize.ByteSize // Batch size for execution stage
+	Prune     ethdb.Prune
+	BatchSize datasize.ByteSize // Batch size for execution stage
 
 	Snapshot Snapshot
 

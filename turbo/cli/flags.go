@@ -125,11 +125,11 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
+	mode, err := ethdb.PruneModeFromString(ctx.GlobalString(StorageModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	cfg.StorageMode = mode
+	cfg.Prune = mode
 	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -170,11 +170,11 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
-		mode, err := ethdb.StorageModeFromString(*v)
+		mode, err := ethdb.PruneModeFromString(*v)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
-		cfg.StorageMode = mode
+		cfg.Prune = mode
 	}
 	if v := f.String(SnapshotModeFlag.Name, SnapshotModeFlag.Value, SnapshotModeFlag.Usage); v != nil {
 		snMode, err := snapshotsync.SnapshotModeFromString(*v)

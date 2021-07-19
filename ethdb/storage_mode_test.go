@@ -1,51 +1,48 @@
 package ethdb_test
 
 import (
-	"reflect"
 	"testing"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
-	sm, err := ethdb.GetStorageModeFromDB(tx)
+	sm, err := ethdb.GetPruneModeFromDB(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(sm, ethdb.StorageMode{Initialised: true}) {
-		t.Fatal()
-	}
+	assert.Equal(t, sm, ethdb.Prune{Initialised: true, TxIndex: params.FullImmutabilityThreshold,
+		CallTraces: params.FullImmutabilityThreshold, History: params.FullImmutabilityThreshold,
+		Receipts: params.FullImmutabilityThreshold, Experiments: ethdb.Experiments{TEVM: false}})
 
-	err = ethdb.SetStorageModeIfNotExist(tx, ethdb.StorageMode{
+	err = ethdb.SetPruneModeIfNotExist(tx, ethdb.Prune{
 		true,
-		true,
-		true,
-		true,
-		true,
-		false,
+		math.MaxUint64,
+		math.MaxUint64,
+		math.MaxUint64,
+		math.MaxUint64,
+		ethdb.Experiments{TEVM: false},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	sm, err = ethdb.GetStorageModeFromDB(tx)
+	sm, err = ethdb.GetPruneModeFromDB(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if !reflect.DeepEqual(sm, ethdb.StorageMode{
+	assert.Equal(t, sm, ethdb.Prune{
 		true,
-		true,
-		true,
-		true,
-		true,
-		false,
-	}) {
-		spew.Dump(sm)
-		t.Fatal("not equal")
-	}
+		math.MaxUint64,
+		math.MaxUint64,
+		math.MaxUint64,
+		math.MaxUint64,
+		ethdb.Experiments{TEVM: false},
+	})
 }

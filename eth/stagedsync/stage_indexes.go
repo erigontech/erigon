@@ -24,13 +24,15 @@ import (
 type HistoryCfg struct {
 	db         ethdb.RwKV
 	bufLimit   datasize.ByteSize
+	prune      ethdb.Prune
 	flushEvery time.Duration
 	tmpdir     string
 }
 
-func StageHistoryCfg(db ethdb.RwKV, tmpDir string) HistoryCfg {
+func StageHistoryCfg(db ethdb.RwKV, prune ethdb.Prune, tmpDir string) HistoryCfg {
 	return HistoryCfg{
 		db:         db,
+		prune:      prune,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,
@@ -283,15 +285,14 @@ func unwindHistory(logPrefix string, db ethdb.RwTx, csBucket string, to uint64, 
 
 	updates := map[string]struct{}{}
 	if err := changeset.Walk(db, csBucket, dbutils.EncodeBlockNumber(to), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
 		select {
-		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		case <-quitCh:
+			return false, common.ErrStopped
+		default:
 		}
 		k = dbutils.CompositeKeyWithoutIncarnation(k)
 		updates[string(k)] = struct{}{}
@@ -348,6 +349,8 @@ func truncateBitmaps64(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, 
 }
 
 func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -355,6 +358,10 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	if err = pruneHistoryIndex(tx, dbutils.AccountChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+		return err
 	}
 
 	if !useExternalTx {
@@ -366,6 +373,8 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 }
 
 func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -374,11 +383,70 @@ func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		}
 		defer tx.Rollback()
 	}
+	if err = pruneHistoryIndex(tx, dbutils.StorageChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+		return err
+	}
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func pruneHistoryIndex(tx ethdb.RwTx, csTable, logPrefix, tmpDir string, pruneTo uint64, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	collector := etl.NewCollector(tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer collector.Close(logPrefix)
+
+	if err := changeset.Walk(tx, csTable, nil, 0, func(blockNum uint64, k, _ []byte) (bool, error) {
+		if blockNum >= pruneTo {
+			return false, nil
+		}
+		if err := collector.Collect(k, nil); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
+
+	c, err := tx.RwCursor(changeset.Mapper[csTable].IndexBucket)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+	prefixLen := common.AddressLength
+	if csTable == dbutils.StorageChangeSetBucket {
+		prefixLen = common.HashLength
+	}
+	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		for k, _, err := c.Seek(addr); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k[prefixLen:])
+			if !bytes.HasPrefix(k, addr) || blockNum >= pruneTo {
+				break
+			}
+			if err = c.DeleteCurrent(); err != nil {
+				return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+			}
+		}
+		return nil
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+
 	return nil
 }

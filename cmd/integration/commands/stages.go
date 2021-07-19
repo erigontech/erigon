@@ -430,7 +430,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	}
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, sm.Receipts, sm.CallTraces, sm.TEVM, 0, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, sm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -527,7 +527,7 @@ func stageHashState(db ethdb.RwKV, ctx context.Context) error {
 func stageLogIndex(db ethdb.RwKV, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -547,7 +547,7 @@ func stageLogIndex(db ethdb.RwKV, ctx context.Context) error {
 	log.Info("Stage exec", "progress", execAt)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageLogIndexCfg(db, tmpdir)
+	cfg := stagedsync.StageLogIndexCfg(db, pm, tmpdir)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.LogIndex, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ctx)
@@ -565,7 +565,7 @@ func stageLogIndex(db ethdb.RwKV, ctx context.Context) error {
 func stageCallTraces(kv ethdb.RwKV, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, _, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
+	pm, _, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -591,7 +591,7 @@ func stageCallTraces(kv ethdb.RwKV, ctx context.Context) error {
 	}
 	log.Info("ID call traces", "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageCallTracesCfg(kv, block, tmpdir)
+	cfg := stagedsync.StageCallTracesCfg(kv, pm, block, tmpdir)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.CallTraces, s.BlockNumber-unwind, s.BlockNumber)
@@ -609,7 +609,7 @@ func stageCallTraces(kv ethdb.RwKV, ctx context.Context) error {
 
 func stageHistory(db ethdb.RwKV, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -630,7 +630,7 @@ func stageHistory(db ethdb.RwKV, ctx context.Context) error {
 	log.Info("ID acc history", "progress", stageAcc.BlockNumber)
 	log.Info("ID storage history", "progress", stageStorage.BlockNumber)
 
-	cfg := stagedsync.StageHistoryCfg(db, tmpdir)
+	cfg := stagedsync.StageHistoryCfg(db, pm, tmpdir)
 	if unwind > 0 { //nolint:staticcheck
 		u := sync.NewUnwindState(stages.StorageHistoryIndex, stageStorage.BlockNumber-unwind, stageStorage.BlockNumber)
 		if err := stagedsync.UnwindStorageHistoryIndex(u, stageStorage, tx, cfg, ctx); err != nil {
@@ -654,7 +654,7 @@ func stageHistory(db ethdb.RwKV, ctx context.Context) error {
 func stageTxLookup(db ethdb.RwKV, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	_, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -672,7 +672,7 @@ func stageTxLookup(db ethdb.RwKV, ctx context.Context) error {
 	s := stage(sync, tx, stages.TxLookup)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageTxLookupCfg(db, tmpdir)
+	cfg := stagedsync.StageTxLookupCfg(db, pm, tmpdir)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx)
@@ -743,15 +743,15 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	return genesis, chainConfig
 }
 
-func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConfig) (ethdb.StorageMode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
+func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConfig) (ethdb.Prune, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	snapshotDir = path.Join(datadir, "erigon", "snapshot")
 
-	var sm ethdb.StorageMode
+	var sm ethdb.Prune
 
 	var err error
 	if err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		sm, err = ethdb.GetStorageModeFromDB(tx)
+		sm, err = ethdb.GetPruneModeFromDB(tx)
 		if err != nil {
 			return err
 		}
@@ -759,7 +759,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	}); err != nil {
 		panic(err)
 	}
-	vmConfig := &vm.Config{NoReceipts: !sm.Receipts}
+	vmConfig := &vm.Config{}
 
 	genesis, chainConfig := byChain()
 	var engine consensus.Engine
@@ -773,7 +773,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db)
 
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, sm.History)
+	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
@@ -800,7 +800,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 
 	cfg := ethconfig.Defaults
-	cfg.StorageMode = sm
+	cfg.Prune = sm
 	cfg.BatchSize = batchSize
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
@@ -850,15 +850,15 @@ func stage(st *stagedsync.Sync, tx ethdb.Tx, stage stages.SyncStage) *stagedsync
 }
 
 func overrideStorageMode(db ethdb.RwKV) error {
-	sm, err := ethdb.StorageModeFromString(storageMode)
+	sm, err := ethdb.PruneModeFromString(storageMode)
 	if err != nil {
 		return err
 	}
 	return db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err = ethdb.OverrideStorageMode(tx, sm); err != nil {
+		if err = ethdb.OverridePruneMode(tx, sm); err != nil {
 			return err
 		}
-		sm, err = ethdb.GetStorageModeFromDB(tx)
+		sm, err = ethdb.GetPruneModeFromDB(tx)
 		if err != nil {
 			return err
 		}

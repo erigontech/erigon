@@ -116,7 +116,7 @@ func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainContractCodeBucket); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.BlockReceiptsPrefix); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Receipts); err != nil {
 		return err
 	}
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Log); err != nil {
@@ -138,11 +138,7 @@ func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 		return err
 	}
 
-	sm, err := ethdb.GetStorageModeFromDB(tx)
-	if err != nil {
-		return err
-	}
-	_, _, err = core.OverrideGenesisBlock(tx, g, sm.History)
+	_, _, err := core.OverrideGenesisBlock(tx, g)
 	if err != nil {
 		return err
 	}

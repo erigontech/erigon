@@ -83,7 +83,6 @@ func (u *UnwindState) Done(db ethdb.Putter) error {
 
 type PruneState struct {
 	ID                 stages.SyncStage
-	PrunePoint         uint64 // PrunePoint is the block to prune to.
 	CurrentBlockNumber uint64
 	state              *Sync
 }

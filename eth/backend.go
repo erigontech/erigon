@@ -173,7 +173,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -213,7 +213,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err := ethdb.SetStorageModeIfNotExist(tx, config.StorageMode); err != nil {
+		if err := ethdb.SetPruneModeIfNotExist(tx, config.Prune); err != nil {
 			return err
 		}
 
@@ -221,19 +221,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return err
 		}
 
-		sm, err := ethdb.GetStorageModeFromDB(tx)
+		sm, err := ethdb.GetPruneModeFromDB(tx)
 		if err != nil {
 			return err
 		}
-		if config.StorageMode.Initialised {
+		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
-			if !reflect.DeepEqual(sm, config.StorageMode) {
-				return errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+			if !reflect.DeepEqual(sm, config.Prune) {
+				return errors.New("mode is " + config.Prune.ToString() + " original mode is " + sm.ToString())
 			}
 		} else {
-			config.StorageMode = sm
+			config.Prune = sm
 		}
-		log.Info("Effective", "storage mode", config.StorageMode)
+		log.Info("Effective", "storage mode", config.Prune)
 
 		return nil
 	}); err != nil {

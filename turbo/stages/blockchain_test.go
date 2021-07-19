@@ -18,19 +18,22 @@ package stages_test
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -663,8 +666,9 @@ func TestModes(t *testing.T) {
 	)
 }
 
-func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
-	fmt.Printf("h=%v, r=%v, t=%v\n", history, receipts, txlookup)
+func doModesTest(t *testing.T, pm ethdb.Prune) error {
+	fmt.Printf("h=%v, r=%v, t=%v\n", pm.History.Enabled(), pm.Receipts.Enabled(), pm.TxIndex.Enabled())
+	require := require.New(t)
 	// Configure and generate a sample block chain
 	var (
 		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -676,9 +680,10 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := stages.MockWithGenesisStorageMode(t, gspec, key, ethdb.StorageMode{Initialised: true, History: history, Receipts: receipts, TxIndex: txlookup})
+	m := stages.MockWithGenesisStorageMode(t, gspec, key, pm)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
+	head := uint64(4)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *core.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -728,69 +733,129 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 	}
 
 	tx, err := m.DB.BeginRo(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 
-	for bucketName, shouldBeEmpty := range map[string]bool{
-		dbutils.AccountsHistoryBucket: !history,
-		dbutils.BlockReceiptsPrefix:   !receipts,
-		dbutils.TxLookupPrefix:        !txlookup,
-	} {
-		numberOfEntries := 0
-
-		err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
-			// we ignore empty account history
-			//nolint:scopelint
-			if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
-				return nil
-			}
-
-			numberOfEntries++
+	if pm.Receipts.Enabled() {
+		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
+		require.NoError(err)
+		found := uint64(0)
+		err = tx.ForEach(dbutils.Receipts, nil, func(k, v []byte) error {
+			found++
 			return nil
 		})
-		if err != nil {
-			return err
-		}
-
-		if bucketName == dbutils.BlockReceiptsPrefix {
-			// we will always have a receipt for genesis
-			numberOfEntries--
-		}
-
-		if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
-			return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
-		}
+		require.NoError(err)
+		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
+		require.Greater(found, uint64(0))
+	} else {
+		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
+		require.NoError(err)
+		require.Equal(uint64(0), receiptsAvailable)
 	}
 
+	if pm.History.Enabled() {
+		afterPrune := uint64(0)
+		err := tx.ForEach(dbutils.AccountsHistoryBucket, nil, func(k, _ []byte) error {
+			n := binary.BigEndian.Uint64(k[common.AddressLength:])
+			require.Greater(n, pm.History.PruneTo(head))
+			afterPrune++
+			return nil
+		})
+		require.Greater(afterPrune, uint64(0))
+		assert.NoError(t, err)
+	} else {
+		found, err := bitmapdb.Get64(tx, dbutils.AccountsHistoryBucket, address[:], 0, 1024)
+		require.NoError(err)
+		require.Equal(uint64(0), found.Minimum())
+	}
+
+	if pm.TxIndex.Enabled() {
+		b, err := rawdb.ReadBlockByNumber(tx, 1)
+		require.NoError(err)
+		for _, txn := range b.Transactions() {
+			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+			require.NoError(err)
+			require.Nil(found)
+		}
+	} else {
+		b, err := rawdb.ReadBlockByNumber(tx, 1)
+		require.NoError(err)
+		for _, txn := range b.Transactions() {
+			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+			require.NoError(err)
+			if found == nil {
+				require.NotNil(found)
+			}
+			require.Equal(uint64(1), *found)
+		}
+	}
+	/*
+		for bucketName, shouldBeEmpty := range map[string]bool{
+			//dbutils.AccountsHistoryBucket: pm.History.Enabled(),
+			dbutils.Receipts: pm.Receipts.Enabled(),
+			//dbutils.TxLookupPrefix: pm.TxIndex.Enabled(),
+		} {
+			numberOfEntries := 0
+
+			err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
+				// we ignore empty account history
+				//nolint:scopelint
+				if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
+					return nil
+				}
+
+				numberOfEntries++
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+
+			if bucketName == dbutils.Receipts {
+				// we will always have a receipt for genesis
+				numberOfEntries--
+			}
+
+			if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
+				return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
+			}
+			}
+	*/
 	return nil
 }
 
-func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, bool, bool, bool) error) {
-	err := runPermutation(t, testFunc, 0, true, true, true)
+func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, ethdb.Prune) error) {
+	err := runPermutation(t, testFunc, 0, ethdb.DefaultPruneMode)
 	if err != nil {
 		t.Errorf("error while testing stuff: %v", err)
 	}
 }
 
-func runPermutation(t *testing.T, testFunc func(*testing.T, bool, bool, bool) error, current int, history, receipts, txlookup bool) error {
+func runPermutation(t *testing.T, testFunc func(*testing.T, ethdb.Prune) error, current int, pm ethdb.Prune) error {
 	if current == 3 {
-		return testFunc(t, history, receipts, txlookup)
+		return testFunc(t, pm)
 	}
-	if err := runPermutation(t, testFunc, current+1, history, receipts, txlookup); err != nil {
+	if err := runPermutation(t, testFunc, current+1, pm); err != nil {
 		return err
+	}
+	invert := func(a ethdb.PruneDistance) ethdb.PruneDistance {
+		if a.Enabled() {
+			return math.MaxUint64
+		}
+		return 2
 	}
 	switch current {
 	case 0:
-		history = !history
+		pm.History = invert(pm.History)
 	case 1:
-		receipts = !receipts
+		pm.Receipts = invert(pm.Receipts)
 	case 2:
-		txlookup = !txlookup
+		pm.TxIndex = invert(pm.TxIndex)
 	default:
 		panic("unexpected current item")
 	}
 
-	return runPermutation(t, testFunc, current+1, history, receipts, txlookup)
+	return runPermutation(t, testFunc, current+1, pm)
 }
 
 func TestEIP161AccountRemoval(t *testing.T) {

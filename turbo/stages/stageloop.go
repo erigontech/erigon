@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -206,15 +205,10 @@ func NewStagedSync2(
 	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
-	var pruningDistance uint64
-	if !cfg.StorageMode.History {
-		pruningDistance = params.FullImmutabilityThreshold
-	}
-
 	return stagedsync.New(
 		stagedsync.DefaultStages(
 			ctx,
-			cfg.StorageMode,
+			cfg.Prune,
 			stagedsync.StageHeadersCfg(
 				db,
 				controlServer.Hd,
@@ -240,15 +234,12 @@ func NewStagedSync2(
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
-				cfg.StorageMode.Receipts,
-				cfg.StorageMode.CallTraces,
-				cfg.StorageMode.TEVM,
-				pruningDistance,
+				cfg.Prune,
 				cfg.BatchSize,
 				nil,
 				controlServer.ChainConfig,
 				controlServer.Engine,
-				&vm.Config{NoReceipts: !cfg.StorageMode.Receipts, EnableTEMV: cfg.StorageMode.TEVM},
+				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
 				accumulator,
 				cfg.StateStream,
 				tmpdir,
@@ -261,10 +252,10 @@ func NewStagedSync2(
 			stagedsync.StageSnapshotStateCfg(db, cfg.Snapshot, tmpdir, client, snapshotMigrator),
 			stagedsync.StageHashStateCfg(db, tmpdir),
 			stagedsync.StageTrieCfg(db, true, true, tmpdir),
-			stagedsync.StageHistoryCfg(db, tmpdir),
-			stagedsync.StageLogIndexCfg(db, tmpdir),
-			stagedsync.StageCallTracesCfg(db, 0, tmpdir),
-			stagedsync.StageTxLookupCfg(db, tmpdir),
+			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageTxPoolCfg(db, txPool, func() {
 				for i := range txPoolServer.Sentries {
 					go func(i int) {

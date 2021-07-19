@@ -11,22 +11,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
-
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	kv := kv2.NewTestKV(t)
-	cfg := StageHistoryCfg(kv, t.TempDir())
+	cfg := StageHistoryCfg(kv, ethdb.DefaultPruneMode, t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := kv.BeginRw(context.Background())
@@ -42,7 +43,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			addrs, expecedIndexes := generateTestData(t, tx, csBucket, blocksNum)
 			cfgCopy := cfg
 			cfgCopy.bufLimit = 10
-			cfgCopy.flushEvery = time.Millisecond
+			cfgCopy.flushEvery = time.Microsecond
 			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -55,6 +56,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])])
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[1], expecedIndexes[string(addrs[1])])
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[2], expecedIndexes[string(addrs[2])])
+
 		}
 	}
 
@@ -66,8 +68,9 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 func TestIndexGenerator_Truncate(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
+	tmpDir, ctx := t.TempDir(), context.Background()
 	kv := kv2.NewTestKV(t)
-	cfg := StageHistoryCfg(kv, t.TempDir())
+	cfg := StageHistoryCfg(kv, ethdb.DefaultPruneMode, t.TempDir())
 	for i := range buckets {
 		csbucket := buckets[i]
 
@@ -82,7 +85,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		indexBucket := mp.IndexBucket
 		cfgCopy := cfg
 		cfgCopy.bufLimit = 10
-		cfgCopy.flushEvery = time.Millisecond
+		cfgCopy.flushEvery = time.Microsecond
 		err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -180,12 +183,37 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
 		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
 		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+
 		//})
+		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+		assert.NoError(t, err)
+		expectNoHistoryBefore(t, tx, csbucket, 128)
+
+		// double prune is safe
+		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+		assert.NoError(t, err)
+		expectNoHistoryBefore(t, tx, csbucket, 128)
 		tx.Rollback()
 	}
 }
 
-func generateTestData(t *testing.T, db ethdb.RwTx, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
+func expectNoHistoryBefore(t *testing.T, tx ethdb.Tx, csbucket string, prunedTo uint64) {
+	prefixLen := common.AddressLength
+	if csbucket == dbutils.StorageChangeSetBucket {
+		prefixLen = common.HashLength
+	}
+	afterPrune := 0
+	err := tx.ForEach(changeset.Mapper[csbucket].IndexBucket, nil, func(k, _ []byte) error {
+		n := binary.BigEndian.Uint64(k[prefixLen:])
+		require.True(t, n > prunedTo)
+		afterPrune++
+		return nil
+	})
+	require.True(t, afterPrune > 0)
+	assert.NoError(t, err)
+}
+
+func generateTestData(t *testing.T, tx ethdb.RwTx, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
 	csInfo, ok := changeset.Mapper[csBucket]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
@@ -240,7 +268,7 @@ func generateTestData(t *testing.T, db ethdb.RwTx, csBucket string, numOfBlocks 
 			res3 = append(res3, uint64(i))
 		}
 		err = csInfo.Encode(uint64(i), cs, func(k, v []byte) error {
-			return db.Put(csBucket, k, v)
+			return tx.Put(csBucket, k, v)
 		})
 		if err != nil {
 			t.Fatal(err)

@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 type Sync struct {
@@ -34,8 +33,8 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 	return &UnwindState{id, unwindPoint, currentProgress, common.Hash{}, s}
 }
 
-func (s *Sync) NewPruneState(id stages.SyncStage, prunePoint, currentProgress uint64) *PruneState {
-	return &PruneState{id, prunePoint, currentProgress, s}
+func (s *Sync) NewPruneState(id stages.SyncStage, currentProgress uint64) *PruneState {
+	return &PruneState{id, currentProgress, s}
 }
 
 func (s *Sync) NextStage() {
@@ -130,7 +129,7 @@ func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder) *S
 		stages:       stagesList,
 		currentStage: 0,
 		unwindOrder:  unwindStages,
-		//pruningOrder: pruneStages,
+		pruningOrder: pruneStages,
 	}
 }
 
@@ -163,7 +162,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	for !s.IsDone() {
 		if s.unwindPoint != nil {
 			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
+				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
 				t := time.Now()
@@ -205,7 +204,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	}
 
 	for i := 0; i < len(s.pruningOrder); i++ {
-		if s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
+		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
 		t := time.Now()
@@ -316,11 +315,7 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb
 		return err
 	}
 
-	prunePoint := stageState.BlockNumber - params.FullImmutabilityThreshold // TODO: cli-customizable
-	prune := s.NewPruneState(stage.ID, prunePoint, stageState.BlockNumber)
-	if stageState.BlockNumber <= prune.PrunePoint {
-		return nil
-	}
+	prune := s.NewPruneState(stage.ID, stageState.BlockNumber)
 	if err = s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}

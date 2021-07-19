@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -22,6 +23,22 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
+func availableReceiptFrom(tx ethdb.Tx) (uint64, error) {
+	c, err := tx.Cursor(dbutils.Receipts)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return 0, err
+	}
+	if len(k) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(k), nil
+}
+
 var ReceiptRepair = Migration{
 	Name: "receipt_repair",
 	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
@@ -31,17 +48,17 @@ var ReceiptRepair = Migration{
 		} else {
 			return fmt.Errorf("no transaction")
 		}
-		if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
-			return smErr
-		} else {
-			if !sm.History {
-				log.Warn("Could not perform this migration because history is not in storage mode")
-				return CommitProgress(db, nil, true)
-			}
-			if !sm.Receipts {
-				log.Info("Migration is only relevant for storage mode with receipts, skipping")
-				return CommitProgress(db, nil, true)
-			}
+
+		blockNum, err := changeset.AvailableFrom(tx)
+		if err != nil {
+			return err
+		}
+		receiptsFrom, err := availableReceiptFrom(tx)
+		if err != nil {
+			return err
+		}
+		if receiptsFrom > blockNum {
+			blockNum = receiptsFrom
 		}
 
 		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
@@ -60,7 +77,7 @@ var ReceiptRepair = Migration{
 		logEvery := time.NewTicker(logInterval)
 		var key [8]byte
 		var v []byte
-		for blockNum := uint64(1); true; blockNum++ {
+		for ; true; blockNum++ {
 			select {
 			default:
 			case <-logEvery.C:
@@ -74,7 +91,7 @@ var ReceiptRepair = Migration{
 				break
 			}
 			binary.BigEndian.PutUint64(key[:], blockNum)
-			if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+			if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 				return err
 			}
 			var receipts types.Receipts
@@ -118,7 +135,7 @@ var ReceiptRepair = Migration{
 				if err != nil {
 					return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
 				}
-				if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
+				if err = tx.Put(dbutils.Receipts, key[:], buf.Bytes()); err != nil {
 					return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
 				}
 				fixedCount++

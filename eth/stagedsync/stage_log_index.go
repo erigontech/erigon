@@ -29,13 +29,15 @@ const (
 type LogIndexCfg struct {
 	tmpdir     string
 	db         ethdb.RwKV
+	prune      ethdb.Prune
 	bufLimit   datasize.ByteSize
 	flushEvery time.Duration
 }
 
-func StageLogIndexCfg(db ethdb.RwKV, tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db ethdb.RwKV, prune ethdb.Prune, tmpDir string) LogIndexCfg {
 	return LogIndexCfg{
 		db:         db,
+		prune:      prune,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,
@@ -324,6 +326,8 @@ func truncateBitmaps(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to
 }
 
 func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -333,9 +337,131 @@ func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+		return err
+	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint64, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	topics := map[string]struct{}{}
+	addrs := map[string]struct{}{}
+
+	{
+		c, err := tx.Cursor(dbutils.Log)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k)
+			if blockNum >= pruneTo {
+				break
+			}
+			select {
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.Log, "block", blockNum)
+			case <-ctx.Done():
+				return common.ErrStopped
+			default:
+			}
+
+			var logs types.Logs
+			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+				return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
+			}
+
+			for _, l := range logs {
+				for _, topic := range l.Topics {
+					topics[string(topic.Bytes())] = struct{}{}
+				}
+				addrs[string(l.Address.Bytes())] = struct{}{}
+			}
+		}
+	}
+
+	{
+		sorted := make([]string, 0, len(topics))
+		for k := range topics {
+			sorted = append(sorted, k)
+		}
+		sort.Strings(sorted)
+		c, err := tx.RwCursor(dbutils.LogTopicIndex)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for _, topicS := range sorted {
+			topic := []byte(topicS)
+			for k, _, err := c.Seek(topic); k != nil; k, _, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				blockNum := uint64(binary.BigEndian.Uint32(k[common.HashLength:]))
+				if !bytes.HasPrefix(k, topic) || blockNum >= pruneTo {
+					break
+				}
+				select {
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
+				case <-ctx.Done():
+					return common.ErrStopped
+				default:
+				}
+				if err = c.DeleteCurrent(); err != nil {
+					return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
+				}
+			}
+		}
+	}
+	{
+		sorted := make([]string, 0, len(addrs))
+		for k := range addrs {
+			sorted = append(sorted, k)
+		}
+		sort.Strings(sorted)
+		c, err := tx.RwCursor(dbutils.LogAddressIndex)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for _, addrS := range sorted {
+			addr := []byte(addrS)
+
+			for k, _, err := c.Seek(addr); k != nil; k, _, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				blockNum := uint64(binary.BigEndian.Uint32(k[common.AddressLength:]))
+				if !bytes.HasPrefix(k, addr) || blockNum >= pruneTo {
+					break
+				}
+				select {
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
+				case <-ctx.Done():
+					return common.ErrStopped
+				default:
+				}
+				if err = c.DeleteCurrent(); err != nil {
+					return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
+				}
+			}
 		}
 	}
 	return nil

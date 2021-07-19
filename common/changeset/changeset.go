@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
@@ -103,17 +104,43 @@ func (s *ChangeSet) String() string {
 }
 
 // Encoded Method
-
-func Len(b []byte) int {
-	return int(binary.BigEndian.Uint32(b[0:4]))
-}
-
 func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	if len(dbKey) == 8 {
 		return DecodeAccounts(dbKey, dbValue)
 	} else {
 		return DecodeStorage(dbKey, dbValue)
 	}
+}
+
+func AvailableFrom(tx ethdb.Tx) (uint64, error) {
+	c, err := tx.Cursor(dbutils.AccountChangeSetBucket)
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	if len(k) == 0 {
+		return math.MaxUint64, nil
+	}
+	return binary.BigEndian.Uint64(k), nil
+}
+func AvailableStorageFrom(tx ethdb.Tx) (uint64, error) {
+	c, err := tx.Cursor(dbutils.StorageChangeSetBucket)
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	if len(k) == 0 {
+		return math.MaxUint64, nil
+	}
+	return binary.BigEndian.Uint64(k), nil
 }
 
 func Walk(db ethdb.Tx, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {

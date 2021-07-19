@@ -8,7 +8,7 @@ import (
 )
 
 func DefaultStages(ctx context.Context,
-	sm ethdb.StorageMode,
+	sm ethdb.Prune,
 	headers HeadersCfg,
 	blockHashCfg BlockHashesCfg,
 	snapshotHeaders SnapshotHeadersCfg,
@@ -127,7 +127,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.Translation,
 			Description:         "Transpile marked EVM contracts to TEVM",
-			Disabled:            !sm.TEVM,
+			Disabled:            true,
 			DisabledDescription: "Enable by adding `e` to --storage-mode",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnTranspileStage(s, tx, 0, trans, ctx)
@@ -185,7 +185,6 @@ func DefaultStages(ctx context.Context,
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
 			DisabledDescription: "Work In Progress",
-			Disabled:            !sm.CallTraces,
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnCallTraces(s, tx, callTraces, ctx)
 			},
@@ -199,7 +198,6 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.AccountHistoryIndex,
 			Description:         "Generate account history index",
-			Disabled:            !sm.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnAccountHistoryIndex(s, tx, history, ctx)
@@ -214,7 +212,6 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.StorageHistoryIndex,
 			Description:         "Generate storage history index",
-			Disabled:            !sm.History,
 			DisabledDescription: "Enable by adding `h` to --storage-mode",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnStorageHistoryIndex(s, tx, history, ctx)
@@ -229,7 +226,6 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.LogIndex,
 			Description:         "Generate receipt logs index",
-			Disabled:            !sm.Receipts,
 			DisabledDescription: "Enable by adding `r` to --storage-mode",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnLogIndex(s, tx, logIndex, ctx)
@@ -244,7 +240,6 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.TxLookup,
 			Description:         "Generate tx lookup index",
-			Disabled:            !sm.TxIndex,
 			DisabledDescription: "Enable by adding `t` to --storage-mode",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnTxLookup(s, tx, txLookup, ctx)
