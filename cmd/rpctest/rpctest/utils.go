@@ -1,6 +1,7 @@
 package rpctest
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -181,6 +182,48 @@ func compareResults(trace, traceg *fastjson.Value) error {
 	r := trace.Get("result")
 	rg := traceg.Get("result")
 	return compareJsonValues("result", r, rg)
+}
+
+func requestAndCompare(request string, methodName string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer) error {
+	recording := rec != nil
+	res := reqGen.Erigon2(methodName, request)
+	if res.Err != nil {
+		return fmt.Errorf("could not invoke %s (Erigon): %w\n", methodName, res.Err)
+	}
+	if errVal := res.Result.Get("error"); errVal != nil {
+		return fmt.Errorf("error invoking %s (Erigon): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+	}
+	if needCompare {
+		resg := reqGen.Geth2(methodName, request)
+		if resg.Err != nil {
+			return fmt.Errorf("could not invoke %s (Geth/OE): %w\n", methodName, res.Err)
+		}
+		if errVal := resg.Result.Get("error"); errVal != nil {
+			return fmt.Errorf("error invoking %s (Geth/OE): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+		}
+		if resg.Err == nil && resg.Result.Get("error") == nil {
+			recording = false
+			if err := compareResults(res.Result, resg.Result); err != nil {
+				fmt.Printf("different results for method %s: %v\n", methodName, err)
+				if errs != nil {
+					fmt.Fprintf(errs, "Different results for method %s: %v\n", methodName, err)
+					fmt.Fprintf(errs, "\n\nRequest=====================================\n%s\n", request)
+					fmt.Fprintf(errs, "\n\nTG response=================================\n%s\n", res.Response)
+					fmt.Fprintf(errs, "\n\nG/OE response=================================\n%s\n", resg.Response)
+					errs.Flush() // nolint:errcheck
+					// Keep going
+				} else {
+					fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
+					fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
+					return fmt.Errorf("different results for method %s: %v\n", methodName, err)
+				}
+			}
+		}
+	}
+	if recording {
+		fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
+	}
+	return nil
 }
 
 func compareBalances(balance, balanceg *EthBalance) bool {

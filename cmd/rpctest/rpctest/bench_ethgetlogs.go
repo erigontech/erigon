@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -27,6 +27,17 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		defer f.Close()
 		rec = bufio.NewWriter(f)
 		defer rec.Flush()
+	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if ferr != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
 	}
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)

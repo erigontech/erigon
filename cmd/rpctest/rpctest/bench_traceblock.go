@@ -13,7 +13,7 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func BenchTraceBlock(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchTraceBlock(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -28,6 +28,17 @@ func BenchTraceBlock(erigonURL, oeURL string, needCompare bool, blockFrom uint64
 		defer f.Close()
 		rec = bufio.NewWriter(f)
 		defer rec.Flush()
+	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if ferr != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
 	}
 
 	var res CallResult

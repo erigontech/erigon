@@ -72,66 +72,11 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 			return
 		}
 
-		if needCompare {
-			var bg EthBlockByNumber
-			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
-			if res.Err != nil {
-				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-				return
-			}
-			if bg.Error != nil {
-				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-				return
-			}
-			if !compareBlocks(&b, &bg) {
-				fmt.Printf("Block difference for %d\n", bn)
-				return
-			}
-		}
-
 		for _, tx := range b.Result.Transactions {
-			recording := rec != nil // This flag will be set to false if recording is not to be performed
 			reqGen.reqID++
 			request := reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
-			res = reqGen.Erigon2("trace_call", request)
-			if res.Err != nil {
-				fmt.Printf("Could not trace call (Erigon) %s: %v\n", tx.Hash, res.Err)
-				return
-			}
-			if errVal := res.Result.Get("error"); errVal != nil {
-				fmt.Printf("Error tracing call (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-				return
-			}
-			if needCompare {
-				resg := reqGen.Geth2("trace_call", request)
-				if resg.Err != nil {
-					fmt.Printf("Could not trace call (oe) %s: %v\n", tx.Hash, resg.Err)
-					return
-				}
-				if errVal := resg.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing call (oe): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-					return
-				}
-				if resg.Err == nil && resg.Result.Get("error") == nil {
-					recording = false
-					if err := compareResults(res.Result, resg.Result); err != nil {
-						fmt.Printf("Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
-						if errs != nil {
-							fmt.Fprintf(errs, "Different traces block %d, tx %s: %v\n", bn, tx.Hash, err)
-							fmt.Fprintf(errs, "\n\nTG response=================================\n%s\n", res.Response)
-							fmt.Fprintf(errs, "\n\nG response=================================\n%s\n", resg.Response)
-							errs.Flush() // nolint:errcheck
-							// Keep going
-						} else {
-							fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-							fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-							return
-						}
-					}
-				}
-			}
-			if recording {
-				fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
+			if err := requestAndCompare(request, "trace_call", reqGen, needCompare, rec, errs); err != nil {
+				fmt.Printf("Block %d, tx %s: %v\n", err)
 			}
 		}
 	}
