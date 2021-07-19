@@ -122,33 +122,9 @@ var (
 		Name:  "identity",
 		Usage: "Custom node name",
 	}
-	ExitWhenSyncedFlag = cli.BoolFlag{
-		Name:  "exitwhensynced",
-		Usage: "Exits after block synchronisation completes",
-	}
-	IterativeOutputFlag = cli.BoolFlag{
-		Name:  "iterative",
-		Usage: "Print streaming JSON iteratively, delimited by newlines",
-	}
-	ExcludeStorageFlag = cli.BoolFlag{
-		Name:  "nostorage",
-		Usage: "Exclude storage entries (save db lookups)",
-	}
-	ExcludeCodeFlag = cli.BoolFlag{
-		Name:  "nocode",
-		Usage: "Exclude contract code (save db lookups)",
-	}
 	WhitelistFlag = cli.StringFlag{
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
-	}
-	OverrideLondonFlag = cli.Uint64Flag{
-		Name:  "override.london",
-		Usage: "Manually specify London fork-block, overriding the bundled setting",
-	}
-	DebugProtocolFlag = cli.BoolFlag{
-		Name:  "debug-protocol",
-		Usage: "Enable the DBG (debug) protocol",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
@@ -1190,8 +1166,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
-
-	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
 
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.GlobalUint64(RPCGlobalGasCapFlag.Name)

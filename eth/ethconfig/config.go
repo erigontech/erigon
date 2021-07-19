@@ -162,9 +162,6 @@ type Config struct {
 	// Gas Price Oracle options
 	GPO gasprice.Config
 
-	// Enables the dbg protocol
-	EnableDebugProtocol bool
-
 	// RPCGasCap is the global gas cap for eth-call variants.
 	RPCGasCap uint64 `toml:",omitempty"`
 
