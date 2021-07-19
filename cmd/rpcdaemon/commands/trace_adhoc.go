@@ -54,6 +54,7 @@ type TraceCallParam struct {
 	Value                *hexutil.Big      `json:"value"`
 	Data                 hexutil.Bytes     `json:"data"`
 	AccessList           *types.AccessList `json:"accessList"`
+	txHash               *common.Hash
 	traceTypes           []string
 }
 
@@ -862,10 +863,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	if tok != json.Delim(']') {
 		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
 	}
-	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil)
+	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil, true /* gasBailout */)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
+	gasBailout bool) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
@@ -971,9 +973,13 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
 		}
-		ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
+		if args.txHash != nil {
+			ibs.Prepare(*args.txHash, header.Hash(), txIndex)
+		} else {
+			ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
+		}
 		fmt.Printf("tx index: %d\n", txIndex)
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}

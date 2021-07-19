@@ -420,6 +420,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		gas := hexutil.Uint64(tx.GetGas())
 		gasPrice := hexutil.Big(*tx.GetPrice().ToBig())
 		value := hexutil.Big(*tx.GetValue().ToBig())
+		hash := tx.Hash()
 		toExecute = append(toExecute, TraceCallParam{
 			From:       &sender,
 			To:         tx.GetTo(),
@@ -427,6 +428,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 			GasPrice:   &gasPrice,
 			Value:      &value,
 			Data:       tx.GetData(),
+			txHash:     &hash,
 			traceTypes: []string{TraceTypeTrace, TraceTypeStateDiff},
 		})
 	}
@@ -435,7 +437,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header)
+	}, header, false /* gasBailout */)
 
 	if cmErr != nil {
 		return nil, cmErr
