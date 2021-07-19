@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"os"
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -183,7 +181,6 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-	fmt.Printf("GasPrice = %s\n", gasPrice)
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */)
 	return msg, nil
 }
@@ -966,26 +963,28 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
-		w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
-		if werr != nil {
-			return nil, werr
-		}
-		defer w.Close()
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
-		defer stream.Flush()
-		stream.WriteObjectStart()
-		stream.WriteObjectField("jsonrpc")
-		stream.WriteString("2.0")
-		stream.WriteMore()
-		stream.WriteObjectField("id")
-		stream.WriteInt(1)
-		stream.WriteMore()
-		stream.WriteObjectField("result")
-		stream.WriteObjectStart()
-		stream.WriteObjectField("structlogs")
-		stream.WriteArrayStart()
-		tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: tracer})
+		/*
+			w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
+			if werr != nil {
+				return nil, werr
+			}
+			defer w.Close()
+			stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+			defer stream.Flush()
+			stream.WriteObjectStart()
+			stream.WriteObjectField("jsonrpc")
+			stream.WriteString("2.0")
+			stream.WriteMore()
+			stream.WriteObjectField("id")
+			stream.WriteInt(1)
+			stream.WriteMore()
+			stream.WriteObjectField("result")
+			stream.WriteObjectStart()
+			stream.WriteObjectField("structlogs")
+			stream.WriteArrayStart()
+			tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
+		*/
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		var execResult *core.ExecutionResult
@@ -1000,7 +999,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		} else {
 			ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
 		}
-		fmt.Printf("tx index: %d\n", txIndex)
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
@@ -1031,9 +1029,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			return nil, fmt.Errorf("vmTrace not implemented yet")
 		}
 		results = append(results, traceResult)
-		stream.WriteArrayEnd()
-		stream.WriteObjectEnd()
-		stream.WriteObjectEnd()
+		/*
+			stream.WriteArrayEnd()
+			stream.WriteObjectEnd()
+			stream.WriteObjectEnd()
+		*/
 	}
 	return results, nil
 }
