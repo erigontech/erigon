@@ -205,7 +205,7 @@ func expectNoHistoryBefore(t *testing.T, tx ethdb.Tx, csbucket string, prunedTo 
 	afterPrune := 0
 	err := tx.ForEach(changeset.Mapper[csbucket].IndexBucket, nil, func(k, _ []byte) error {
 		n := binary.BigEndian.Uint64(k[prefixLen:])
-		require.True(t, n > prunedTo)
+		require.True(t, n >= prunedTo)
 		afterPrune++
 		return nil
 	})
