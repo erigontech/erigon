@@ -1086,7 +1086,6 @@ func TestPlainStateProxy(t *testing.T) {
 		{K: []byte{4}, V: []byte{4}},
 	}
 
-
 	snapshotDB, err := GenStateData(snapshotData)
 	if err != nil {
 		t.Fatal(err)
@@ -1115,13 +1114,13 @@ func TestPlainStateProxy(t *testing.T) {
 	tmpDB := NewTestKV(t)
 	kv.SetTempDB(tmpDB, []string{dbutils.PlainStateBucket})
 
-	nonStateKey:=[]byte{11}
-	nonStateValue:=[]byte{99}
+	nonStateKey := []byte{11}
+	nonStateValue := []byte{99}
 
 	err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
 		err = tx.Put(dbutils.BlockBodyPrefix, nonStateKey, nonStateValue)
-		if err!=nil {
-		    return err
+		if err != nil {
+			return err
 		}
 
 		c, err := tx.RwCursor(dbutils.PlainStateBucket)
@@ -1141,10 +1140,10 @@ func TestPlainStateProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fullStateResult:=[]KvData{}
+	fullStateResult := []KvData{}
 	err = kv.View(context.Background(), func(tx ethdb.Tx) error {
-		v,err:=tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
-		if err!=nil {
+		v, err := tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
+		if err != nil {
 			t.Error(err)
 		}
 		if !bytes.Equal(v, nonStateValue) {
@@ -1153,33 +1152,33 @@ func TestPlainStateProxy(t *testing.T) {
 
 		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
 			fullStateResult = append(fullStateResult, KvData{
-				K:k,
-				V:v,
+				K: k,
+				V: v,
 			})
-			fmt.Println(k,v)
+			fmt.Println(k, v)
 			return nil
 		})
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fullStateExpected:=append(append(snapshotData, writeDBData...), tmpDBData...)
+	fullStateExpected := append(append(snapshotData, writeDBData...), tmpDBData...)
 	require.Equal(t, fullStateExpected, fullStateResult)
 
-	tmpDBResult:=[]KvData{}
+	tmpDBResult := []KvData{}
 	err = kv.tmpDB.View(context.Background(), func(tx ethdb.Tx) error {
-		v,err:=tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
-		if err!=nil {
+		v, err := tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
+		if err != nil {
 			t.Error(err)
 		}
-		if len(v) != 0  {
+		if len(v) != 0 {
 			t.Error(v)
 		}
 
 		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
 			tmpDBResult = append(tmpDBResult, KvData{
-				K:k,
-				V:v,
+				K: k,
+				V: v,
 			})
 			return nil
 		})
@@ -1189,10 +1188,10 @@ func TestPlainStateProxy(t *testing.T) {
 	}
 	require.Equal(t, tmpDBData, tmpDBData)
 
-	writeDBResult:=[]KvData{}
+	writeDBResult := []KvData{}
 	err = kv.WriteDB().View(context.Background(), func(tx ethdb.Tx) error {
-		v,err:=tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
-		if err!=nil {
+		v, err := tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
+		if err != nil {
 			t.Error(err)
 		}
 		if !bytes.Equal(v, nonStateValue) {
@@ -1201,8 +1200,8 @@ func TestPlainStateProxy(t *testing.T) {
 
 		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
 			writeDBResult = append(writeDBResult, KvData{
-				K:k,
-				V:v,
+				K: k,
+				V: v,
 			})
 
 			return nil
@@ -1268,8 +1267,6 @@ func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
 		t.Fatal("wrong value for key", common.Bytes2Hex(key))
 	}
 }
-
-
 
 type KvData struct {
 	K []byte

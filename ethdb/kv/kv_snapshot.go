@@ -79,8 +79,8 @@ type SnapshotKV struct {
 	stateSnapshot   ethdb.RoKV
 	mtx             sync.RWMutex
 
-	tmpDB           ethdb.RwKV
-	tmpDBBuckets	map[string]struct{}
+	tmpDB        ethdb.RwKV
+	tmpDBBuckets map[string]struct{}
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx ethdb.Tx) error) error {
@@ -157,8 +157,8 @@ func (s *SnapshotKV) TempDB() ethdb.RwKV {
 }
 
 func (s *SnapshotKV) SetTempDB(kv ethdb.RwKV, buckets []string) {
-	bucketsMap:=make(map[string]struct{}, len(buckets))
-	for _, bucket:=range buckets {
+	bucketsMap := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
 		bucketsMap[bucket] = struct{}{}
 	}
 	s.tmpDB = kv
@@ -233,8 +233,8 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 		headersTX: headersTX,
 		bodiesTX:  bodiesTX,
 		stateTX:   stateTX,
-		tmpTX: 	tmpTX,
-		buckets: s.tmpDBBuckets,
+		tmpTX:     tmpTX,
+		buckets:   s.tmpDBBuckets,
 	}, nil
 }
 
@@ -262,8 +262,8 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 		headersTX: headersTX,
 		bodiesTX:  bodiesTX,
 		stateTX:   stateTX,
-		tmpTX: tmpTX,
-		buckets: s.tmpDBBuckets,
+		tmpTX:     tmpTX,
+		buckets:   s.tmpDBBuckets,
 	}, nil
 }
 
@@ -280,7 +280,7 @@ type snTX struct {
 	stateTX   ethdb.Tx
 
 	//just an experiment with temp db for state snapshot migration.
-	tmpTX      ethdb.Tx
+	tmpTX   ethdb.Tx
 	buckets map[string]struct{}
 }
 
@@ -304,20 +304,19 @@ func (s *snTX) RwCursor(bucket string) (ethdb.RwCursor, error) {
 		return s.dbTX.(ethdb.RwTx).RwCursor(bucket)
 	}
 
-
 	snCursor2, err := tx.Cursor(bucket)
 	if err != nil {
 		return nil, err
 	}
 
-	if IsStateSnapshotSnapshotBucket(bucket) && s.tmpTX!=nil {
+	if IsStateSnapshotSnapshotBucket(bucket) && s.tmpTX != nil {
 		mainDBCursor, err := s.dbTX.Cursor(bucket)
 		if err != nil {
 			return nil, err
 		}
-		tmpDBCursor,err:= s.tmpTX.(ethdb.RwTx).RwCursor(bucket)
-		if err!=nil {
-		    return nil, err
+		tmpDBCursor, err := s.tmpTX.(ethdb.RwTx).RwCursor(bucket)
+		if err != nil {
+			return nil, err
 		}
 
 		return &snCursor{
@@ -381,9 +380,9 @@ func (s *snTX) Cursor(bucket string) (ethdb.Cursor, error) {
 	if err != nil {
 		return nil, err
 	}
-	if IsStateSnapshotSnapshotBucket(bucket) && s.tmpTX!=nil {
-		tmpDBCursor,err:= s.tmpTX.Cursor(bucket)
-		if err!=nil {
+	if IsStateSnapshotSnapshotBucket(bucket) && s.tmpTX != nil {
+		tmpDBCursor, err := s.tmpTX.Cursor(bucket)
+		if err != nil {
 			return nil, err
 		}
 
@@ -462,19 +461,19 @@ func (s *snTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 }
 
 func (s *snTX) Put(bucket string, k, v []byte) error {
-	if s.tmpTX!=nil && IsStateSnapshotSnapshotBucket(bucket) {
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
 		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, v)
 	}
 	return s.dbTX.(ethdb.RwTx).Put(bucket, k, v)
 }
 func (s *snTX) Append(bucket string, k, v []byte) error {
-	if s.tmpTX!=nil && IsStateSnapshotSnapshotBucket(bucket) {
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
 		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, v)
 	}
 	return s.dbTX.(ethdb.RwTx).Append(bucket, k, v)
 }
 func (s *snTX) AppendDup(bucket string, k, v []byte) error {
-	if s.tmpTX!=nil && IsStateSnapshotSnapshotBucket(bucket) {
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
 		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, v)
 	}
 	return s.dbTX.(ethdb.RwTx).AppendDup(bucket, k, v)
@@ -484,7 +483,7 @@ func (s *snTX) Delete(bucket string, k, v []byte) error {
 	//if we delete in main database we can find the value in snapshot
 	//so we are just marking that this value is deleted.
 	//this value will be removed on snapshot merging
-	if s.tmpTX!=nil && IsStateSnapshotSnapshotBucket(bucket) {
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
 		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, DeletedValue)
 	}
 
@@ -600,9 +599,9 @@ func (s *snTX) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker
 
 func (s *snTX) Commit() error {
 	defer s.snapshotsRollback()
-	if s.tmpTX!=nil {
+	if s.tmpTX != nil {
 		err := s.tmpTX.Commit()
-		if err!=nil {
+		if err != nil {
 			s.dbTX.Rollback()
 			return err
 		}
@@ -623,7 +622,7 @@ func (s *snTX) snapshotsRollback() {
 func (s *snTX) Rollback() {
 	defer s.snapshotsRollback()
 	defer func() {
-		if s.tmpTX!=nil {
+		if s.tmpTX != nil {
 			s.tmpTX.Rollback()
 		}
 	}()
@@ -699,7 +698,7 @@ func (s *snCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 	for bytes.Equal(dbVal, DeletedValue) {
 		dbKey, dbVal, err = s.dbCursor.Next()
-		if err!=nil {
+		if err != nil {
 			return nil, nil, err
 		}
 	}
@@ -1007,15 +1006,15 @@ func KeyCmpBackward(key1, key2 []byte) (int, bool) {
 	}
 }
 
-func IsSnapshotBucket(bucket string) bool  {
+func IsSnapshotBucket(bucket string) bool {
 	return IsStateSnapshotSnapshotBucket(bucket) || IsHeaderSnapshotSnapshotBucket(bucket) || IsBodiesSnapshotSnapshotBucket(bucket)
 }
-func IsHeaderSnapshotSnapshotBucket(bucket string) bool  {
+func IsHeaderSnapshotSnapshotBucket(bucket string) bool {
 	return bucket == dbutils.HeadersBucket
 }
-func IsBodiesSnapshotSnapshotBucket(bucket string) bool  {
+func IsBodiesSnapshotSnapshotBucket(bucket string) bool {
 	return bucket == dbutils.BlockBodyPrefix || bucket == dbutils.EthTx
 }
-func IsStateSnapshotSnapshotBucket(bucket string) bool  {
-	return bucket == dbutils.PlainStateBucket || bucket == dbutils.PlainContractCodeBucket|| bucket == dbutils.CodeBucket
+func IsStateSnapshotSnapshotBucket(bucket string) bool {
+	return bucket == dbutils.PlainStateBucket || bucket == dbutils.PlainContractCodeBucket || bucket == dbutils.CodeBucket
 }
