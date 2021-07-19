@@ -403,7 +403,7 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 }
 
 func stageExec(db ethdb.RwKV, ctx context.Context) error {
-	sm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	prune, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	if reset {
 		genesis, _ := byChain()
@@ -430,7 +430,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	}
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, sm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, prune, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -751,7 +751,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 
 	var err error
 	if err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		prune, err = ethdb.GetPruneModeFromDB(tx)
+		prune, err = ethdb.PruneMode(tx)
 		if err != nil {
 			return err
 		}
@@ -850,19 +850,19 @@ func stage(st *stagedsync.Sync, tx ethdb.Tx, stage stages.SyncStage) *stagedsync
 }
 
 func overrideStorageMode(db ethdb.RwKV) error {
-	sm, err := ethdb.PruneModeFromString(storageMode)
+	prune, err := ethdb.PruneModeFromString(storageMode)
 	if err != nil {
 		return err
 	}
 	return db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err = ethdb.OverridePruneMode(tx, sm); err != nil {
+		if err = ethdb.OverridePruneMode(tx, prune); err != nil {
 			return err
 		}
-		sm, err = ethdb.GetPruneModeFromDB(tx)
+		prune, err = ethdb.PruneMode(tx)
 		if err != nil {
 			return err
 		}
-		log.Info("Storage mode in DB", "mode", sm.ToString())
+		log.Info("Storage mode in DB", "mode", prune.ToString())
 		return nil
 	})
 }

@@ -221,19 +221,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return err
 		}
 
-		sm, err := ethdb.GetPruneModeFromDB(tx)
+		prune, err := ethdb.PruneMode(tx)
 		if err != nil {
 			return err
 		}
 		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
-			if !reflect.DeepEqual(sm, config.Prune) {
-				return errors.New("mode is " + config.Prune.ToString() + " original mode is " + sm.ToString())
+			if !reflect.DeepEqual(prune, config.Prune) {
+				return errors.New("mode is " + config.Prune.ToString() + " original mode is " + prune.ToString())
 			}
 		} else {
-			config.Prune = sm
+			config.Prune = prune
 		}
-		log.Info("Effective", "storage mode", config.Prune)
+		log.Info("Effective", "pruning", config.Prune)
 
 		return nil
 	}); err != nil {

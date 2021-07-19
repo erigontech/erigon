@@ -83,7 +83,7 @@ func PruneModeFromString(flags string) (Prune, error) {
 	return invert(mode), nil
 }
 
-func GetPruneModeFromDB(db KVGetter) (Prune, error) {
+func PruneMode(db KVGetter) (Prune, error) {
 	var (
 		sm  StorageMode
 		v   []byte

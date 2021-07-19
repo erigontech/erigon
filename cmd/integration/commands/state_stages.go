@@ -139,7 +139,7 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx context.Context) error {
-	sm, engine, chainConfig, vmConfig, txPool, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
+	prune, engine, chainConfig, vmConfig, txPool, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -178,7 +178,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		stages.TxPool, // TODO: enable TxPool stage
 		stages.Finish)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, sm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, prune, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir)
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
 		return func(firstCycle bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
@@ -274,7 +274,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		}
 
 		if integrityFast {
-			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, sm.History.PruneTo(execToBlock)); err != nil {
+			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, prune.History.PruneTo(execToBlock)); err != nil {
 				return err
 			}
 			integrity.Trie(tx, integritySlow, ctx)

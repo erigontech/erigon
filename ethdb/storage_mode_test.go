@@ -12,12 +12,12 @@ import (
 
 func TestSetStorageModeIfNotExist(t *testing.T) {
 	_, tx := kv.NewTestTx(t)
-	sm, err := ethdb.GetPruneModeFromDB(tx)
+	prune, err := ethdb.PruneMode(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assert.Equal(t, sm, ethdb.Prune{Initialised: true, TxIndex: params.FullImmutabilityThreshold,
+	assert.Equal(t, prune, ethdb.Prune{Initialised: true, TxIndex: params.FullImmutabilityThreshold,
 		CallTraces: params.FullImmutabilityThreshold, History: params.FullImmutabilityThreshold,
 		Receipts: params.FullImmutabilityThreshold, Experiments: ethdb.Experiments{TEVM: false}})
 
@@ -33,11 +33,11 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sm, err = ethdb.GetPruneModeFromDB(tx)
+	prune, err = ethdb.PruneMode(tx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, sm, ethdb.Prune{
+	assert.Equal(t, prune, ethdb.Prune{
 		true,
 		math.MaxUint64,
 		math.MaxUint64,

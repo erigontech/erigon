@@ -38,7 +38,7 @@ var rebuilCallTraceIndex = Migration{
 		}
 		logPrefix := "db migration rebuild_call_trace_index"
 
-		pm, err := ethdb.GetPruneModeFromDB(tx)
+		pm, err := ethdb.PruneMode(tx)
 		if err != nil {
 			return err
 		}

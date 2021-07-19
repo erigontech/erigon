@@ -137,8 +137,8 @@ func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.E
 	return MockWithEverything(t, gspec, key, ethdb.DefaultPruneMode, engine)
 }
 
-func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.Prune) *MockSentry {
-	return MockWithEverything(t, gspec, key, sm, ethash.NewFaker())
+func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune ethdb.Prune) *MockSentry {
+	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker())
 }
 
 func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune ethdb.Prune, engine consensus.Engine) *MockSentry {

@@ -35,7 +35,7 @@ func RegenerateTxLookup(chaindata string) error {
 		close(quitCh)
 	}()
 
-	pm, err := ethdb.GetPruneModeFromDB(tx)
+	pm, err := ethdb.PruneMode(tx)
 	if err != nil {
 		return err
 	}
