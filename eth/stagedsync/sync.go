@@ -159,6 +159,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx ethdb.Tx, db ethdb.RoKV) (*
 }
 
 func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
+	s.prevUnwindPoint = nil
 	var timings []interface{}
 	for !s.IsDone() {
 		if s.unwindPoint != nil {
