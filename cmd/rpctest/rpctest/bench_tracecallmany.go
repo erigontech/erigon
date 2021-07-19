@@ -16,7 +16,7 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -31,6 +31,17 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		defer f.Close()
 		rec = bufio.NewWriter(f)
 		defer rec.Flush()
+	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
 	}
 
 	var res CallResult
@@ -58,27 +69,9 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 			fmt.Printf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
 			return
 		}
-
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
 			return
-		}
-
-		if needCompare {
-			var bg EthBlockByNumber
-			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
-			if res.Err != nil {
-				fmt.Printf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-				return
-			}
-			if bg.Error != nil {
-				fmt.Printf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
-				return
-			}
-			if !compareBlocks(&b, &bg) {
-				fmt.Printf("Block difference for %d\n", bn)
-				return
-			}
 		}
 
 		n := len(b.Result.Transactions)
@@ -101,38 +94,10 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		reqGen.reqID++
 
 		request := reqGen.traceCallMany(from, to, gas, gasPrice, value, data, bn-1)
-		recording := rec != nil // This flag will be set to false if recording is not to be performed
-		res = reqGen.Erigon2("trace_callMany", request)
-		if res.Err != nil {
-			fmt.Printf("Could not trace callMany (Erigon) %d: %v\n", bn, res.Err)
+		errCtx := fmt.Sprintf("block %d", bn)
+		if err := requestAndCompare(request, "trace_callMany", errCtx, reqGen, needCompare, rec, errs); err != nil {
+			fmt.Println(err)
 			return
-		}
-		if errVal := res.Result.Get("error"); errVal != nil {
-			fmt.Printf("Error tracing call (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-			return
-		}
-		if needCompare {
-			resg := reqGen.Geth2("trace_callMany", request)
-			if resg.Err != nil {
-				fmt.Printf("Could not trace call (oe) %d: %v\n", bn, resg.Err)
-				return
-			}
-			if errVal := resg.Result.Get("error"); errVal != nil {
-				fmt.Printf("Error tracing call (oe): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-				return
-			}
-			if resg.Err == nil && resg.Result.Get("error") == nil {
-				recording = false
-				if err := compareResults(res.Result, resg.Result); err != nil {
-					fmt.Printf("Different traceManys block %d: %v\n", bn, err)
-					fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-					fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-					return
-				}
-			}
-		}
-		if recording {
-			fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 		}
 	}
 }
