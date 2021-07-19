@@ -184,7 +184,7 @@ func compareResults(trace, traceg *fastjson.Value) error {
 	return compareJsonValues("result", r, rg)
 }
 
-func requestAndCompare(request string, methodName string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer) error {
+func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer) error {
 	recording := rec != nil
 	res := reqGen.Erigon2(methodName, request)
 	if res.Err != nil {
@@ -204,18 +204,18 @@ func requestAndCompare(request string, methodName string, reqGen *RequestGenerat
 		if resg.Err == nil && resg.Result.Get("error") == nil {
 			recording = false
 			if err := compareResults(res.Result, resg.Result); err != nil {
-				fmt.Printf("different results for method %s: %v\n", methodName, err)
 				if errs != nil {
-					fmt.Fprintf(errs, "Different results for method %s: %v\n", methodName, err)
-					fmt.Fprintf(errs, "\n\nRequest=====================================\n%s\n", request)
-					fmt.Fprintf(errs, "\n\nTG response=================================\n%s\n", res.Response)
-					fmt.Fprintf(errs, "\n\nG/OE response=================================\n%s\n", resg.Response)
+					fmt.Printf("different results for method %s, errCtx: %s: %v\n", methodName, errCtx, err)
+					fmt.Fprintf(errs, "\nDifferent results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
+					fmt.Fprintf(errs, "Request=====================================\n%s\n", request)
+					fmt.Fprintf(errs, "TG response=================================\n%s\n", res.Response)
+					fmt.Fprintf(errs, "G/OE response=================================\n%s\n", resg.Response)
 					errs.Flush() // nolint:errcheck
 					// Keep going
 				} else {
-					fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-					fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-					return fmt.Errorf("different results for method %s: %v\n", methodName, err)
+					fmt.Printf("TG response=================================\n%s\n", res.Response)
+					fmt.Printf("G response=================================\n%s\n", resg.Response)
+					return fmt.Errorf("different results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
 				}
 			}
 		}

@@ -32,7 +32,7 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 	var errs *bufio.Writer
 	if errorFile != "" {
 		ferr, err := os.Create(errorFile)
-		if ferr != nil {
+		if err != nil {
 			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
 			return
 		}
@@ -75,8 +75,9 @@ func BenchTraceCall(erigonURL, oeURL string, needCompare bool, blockFrom uint64,
 		for _, tx := range b.Result.Transactions {
 			reqGen.reqID++
 			request := reqGen.traceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
-			if err := requestAndCompare(request, "trace_call", reqGen, needCompare, rec, errs); err != nil {
-				fmt.Printf("Block %d, tx %s: %v\n", err)
+			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
+			if err := requestAndCompare(request, "trace_call", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				return
 			}
 		}
 	}

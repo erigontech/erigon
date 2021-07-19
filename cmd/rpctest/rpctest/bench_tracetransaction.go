@@ -28,7 +28,7 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 	var errs *bufio.Writer
 	if errorFile != "" {
 		ferr, err := os.Create(errorFile)
-		if ferr != nil {
+		if err != nil {
 			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
 			return
 		}
@@ -57,41 +57,11 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 		}
 		for _, tx := range b.Result.Transactions {
 			reqGen.reqID++
-
 			request := reqGen.traceTransaction(tx.Hash)
-			recording := rec != nil // This flag will be set to false if recording is not to be performed
-			res = reqGen.Erigon2("debug_traceTransaction", request)
-
-			if res.Err != nil {
-				fmt.Printf("Could not trace transaction (Erigon) %s: %v\n", tx.Hash, res.Err)
+			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
+			if err := requestAndCompare(request, "debug_traceTransaction", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				fmt.Println(err)
 				return
-			}
-			if errVal := res.Result.Get("error"); errVal != nil {
-				fmt.Printf("Error tracing transaction (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-				return
-			}
-
-			if needCompare {
-				resg := reqGen.Geth2("debug_traceTransaction", request)
-				if resg.Err != nil {
-					fmt.Printf("Could not trace transaction (geth) %s: %v\n", tx.Hash, res.Err)
-					return
-				}
-				if errVal := resg.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing transaction (geth): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-					return
-				}
-				if resg.Err == nil && resg.Result.Get("error") == nil {
-					if err := compareResults(res.Result, resg.Result); err != nil {
-						fmt.Printf("Different traceTransaction block %d, tx %s: %v\n", bn, tx.Hash, err)
-						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-						fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-						return
-					}
-				}
-			}
-			if recording {
-				fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 			}
 		}
 	}

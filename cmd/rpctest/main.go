@@ -42,7 +42,7 @@ func main() {
 		cmd.Flags().StringVar(&recordFile, "recordFile", "", "File where to record requests and responses to")
 	}
 	withErrorFile := func(cmd *cobra.Command) {
-		cmd.Flags().StringVar(&recordFile, "errorFile", "", "File where to record errors (when responses do not match)")
+		cmd.Flags().StringVar(&errorFile, "errorFile", "", "File where to record errors (when responses do not match)")
 	}
 	with := func(cmd *cobra.Command, opts ...func(*cobra.Command)) {
 		for i := range opts {

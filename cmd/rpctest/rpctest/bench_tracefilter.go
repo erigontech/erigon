@@ -32,7 +32,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 	var errs *bufio.Writer
 	if errorFile != "" {
 		ferr, err := os.Create(errorFile)
-		if ferr != nil {
+		if err != nil {
 			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
 			return
 		}
@@ -77,13 +77,17 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 			for account := range accountSet {
 				reqGen.reqID++
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", reqGen, needCompare, rec, errs); err != nil {
-					fmt.Printf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x: %v\n", prevBn, bn, account, err)
+				errCtx := fmt.Sprintf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
+					return
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterTo(prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", reqGen, needCompare, rec, errs); err != nil {
-					fmt.Printf("traceFilterTo fromBlock %d, toBlock %d, fromAddress %x: %v\n", prevBn, bn, account, err)
+				errCtx = fmt.Sprintf("traceFilterTo fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
+					return
 				}
 			}
 		}
