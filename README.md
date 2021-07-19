@@ -40,7 +40,7 @@ The current version is currently based on Go-Ethereum 1.10.1
 System Requirements
 ===================
 
-Recommend 2Tb storage space on a single partition: 1Tb state, 200GB temp files (can symlink or mount
+Recommend 2Tb storage space on a single partition: 1.3Tb state, 200GB temp files (can symlink or mount
 folder `<datadir>/etl-tmp` to another disk).
 
 RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install)
