@@ -104,8 +104,8 @@ type BlockContext struct {
 	Transfer TransferFunc
 	// GetHash returns the hash corresponding to n
 	GetHash GetHashFunc
-	// checkTEVM returns true if the contract has TEVM code
-	CheckTEVM func(codeHash common.Hash) (bool, error)
+	// ContractHasTEVM returns true if the contract has TEVM code
+	ContractHasTEVM func(codeHash common.Hash) (bool, error)
 
 	// Block information
 	Coinbase    common.Address // Provides information for COINBASE
@@ -261,11 +261,11 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			// The depth-check is already done, and precompiles handled above
 			codehash := evm.IntraBlockState.GetCodeHash(addrCopy)
 
-			var isTEVM bool
-			isTEVM, err = evm.Context.CheckTEVM(codehash)
+			var contractHasTEVM bool
+			contractHasTEVM, err = evm.Context.ContractHasTEVM(codehash)
 
 			if err == nil {
-				contract := NewContract(caller, AccountRef(addrCopy), value, gas, evm.Config.SkipAnalysis, isTEVM)
+				contract := NewContract(caller, AccountRef(addrCopy), value, gas, evm.Config.SkipAnalysis, contractHasTEVM)
 				contract.SetCallCode(&addrCopy, codehash, code)
 				ret, err = run(evm, contract, input, false)
 				gas = contract.Gas
@@ -331,7 +331,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		var isTEVM bool
 
 		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
-		isTEVM, err = evm.Context.CheckTEVM(codeHash)
+		isTEVM, err = evm.Context.ContractHasTEVM(codeHash)
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.Config.SkipAnalysis, isTEVM)
@@ -380,7 +380,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		// Initialise a new contract and make initialise the delegate values
 		var isTEVM bool
 		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
-		isTEVM, err = evm.Context.CheckTEVM(codeHash)
+		isTEVM, err = evm.Context.ContractHasTEVM(codeHash)
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.Config.SkipAnalysis, isTEVM).AsDelegate()
@@ -442,7 +442,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		// The contract is a scoped environment for this execution context only.
 		var isTEVM bool
 		codeHash := evm.IntraBlockState.GetCodeHash(addrCopy)
-		isTEVM, err = evm.Context.CheckTEVM(codeHash)
+		isTEVM, err = evm.Context.ContractHasTEVM(codeHash)
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.Config.SkipAnalysis, isTEVM)

@@ -71,8 +71,8 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
+	contractHasTEVM := ethdb.GetHasTEVM(tx)
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -234,8 +234,8 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
+	contractHasTEVM := ethdb.GetHasTEVM(tx)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, blockHash, txIndex)
 	if err != nil {
 		return nil, err
 	}

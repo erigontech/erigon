@@ -106,7 +106,7 @@ func executeBlock(
 	batch ethdb.Database,
 	cfg ExecuteBlockCfg,
 	writeChangesets bool,
-	checkTEVM func(contractHash common.Hash) (bool, error),
+	contractHasTEVM func(contractHash common.Hash) (bool, error),
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
@@ -116,12 +116,12 @@ func executeBlock(
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 	var callTracer *CallTracer
 	if cfg.writeCallTraces {
-		callTracer = NewCallTracer(checkTEVM)
+		callTracer = NewCallTracer(contractHasTEVM)
 		cfg.vmConfig.Debug = true
 		cfg.vmConfig.Tracer = callTracer
 	}
 
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, checkTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, contractHasTEVM)
 	if err != nil {
 		return err
 	}
@@ -289,13 +289,13 @@ Loop:
 			writeChangesets = false
 		}
 
-		var checkTEVMCode func(contractHash common.Hash) (bool, error)
+		var contractHasTEVM func(contractHash common.Hash) (bool, error)
 
 		if cfg.vmConfig.EnableTEMV {
-			checkTEVMCode = ethdb.GetCheckTEVM(tx)
+			contractHasTEVM = ethdb.GetHasTEVM(tx)
 		}
 
-		if err = executeBlock(block, tx, batch, cfg, writeChangesets, checkTEVMCode, initialCycle); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, writeChangesets, contractHasTEVM, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop

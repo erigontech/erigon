@@ -145,16 +145,16 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 		}
 	}
 	return vm.BlockContext{
-			CanTransfer: core.CanTransfer,
-			Transfer:    core.Transfer,
-			GetHash:     getHashGetter(requireCanonical, tx),
-			CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
-			Coinbase:    header.Coinbase,
-			BlockNumber: header.Number.Uint64(),
-			Time:        header.Time,
-			Difficulty:  new(big.Int).Set(header.Difficulty),
-			GasLimit:    header.GasLimit,
-			BaseFee:     &baseFee,
+			CanTransfer:     core.CanTransfer,
+			Transfer:        core.Transfer,
+			GetHash:         getHashGetter(requireCanonical, tx),
+			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
+			Coinbase:        header.Coinbase,
+			BlockNumber:     header.Number.Uint64(),
+			Time:            header.Time,
+			Difficulty:      new(big.Int).Set(header.Difficulty),
+			GasLimit:        header.GasLimit,
+			BaseFee:         &baseFee,
 		},
 		vm.TxContext{
 			Origin:   msg.From(),

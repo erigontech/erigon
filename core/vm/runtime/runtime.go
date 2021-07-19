@@ -47,11 +47,11 @@ type Config struct {
 	EVMConfig   vm.Config
 	BaseFee     *uint256.Int
 
-	State     *state.IntraBlockState
-	r         state.StateReader
-	w         state.StateWriter
-	GetHashFn func(n uint64) common.Hash
-	CheckTEVM func(common.Hash) (bool, error)
+	State           *state.IntraBlockState
+	r               state.StateReader
+	w               state.StateWriter
+	GetHashFn       func(n uint64) common.Hash
+	contractHasTEVM func(common.Hash) (bool, error)
 }
 
 // sets defaults on the config
@@ -99,8 +99,8 @@ func setDefaults(cfg *Config) {
 			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
-	if cfg.CheckTEVM == nil {
-		cfg.CheckTEVM = func(common.Hash) (bool, error) { return false, nil }
+	if cfg.contractHasTEVM == nil {
+		cfg.contractHasTEVM = func(common.Hash) (bool, error) { return false, nil }
 	}
 }
 

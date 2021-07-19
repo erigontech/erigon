@@ -110,8 +110,8 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	checkTEVM := func(_ common.Hash) (bool, error) { return false, nil }
-	receipt, _, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, checkTEVM)
+	contractHasTEVM := func(_ common.Hash) (bool, error) { return false, nil }
+	receipt, _, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, contractHasTEVM)
 	if err != nil {
 		panic(err)
 	}
@@ -124,8 +124,8 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
-	receipt, _, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, checkTEVM)
+	contractHasTEVM := func(common.Hash) (bool, error) { return false, nil }
+	receipt, _, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, contractHasTEVM)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
