@@ -127,7 +127,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.Translation,
 			Description:         "Transpile marked EVM contracts to TEVM",
-			Disabled:            sm.Experiments.TEVM,
+			Disabled:            !sm.Experiments.TEVM,
 			DisabledDescription: "Enable by adding `e` to --storage-mode",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnTranspileStage(s, tx, 0, trans, ctx)
