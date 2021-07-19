@@ -747,11 +747,11 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	snapshotDir = path.Join(datadir, "erigon", "snapshot")
 
-	var sm ethdb.Prune
+	var prune ethdb.Prune
 
 	var err error
 	if err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		sm, err = ethdb.GetPruneModeFromDB(tx)
+		prune, err = ethdb.GetPruneModeFromDB(tx)
 		if err != nil {
 			return err
 		}
@@ -800,7 +800,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 
 	cfg := ethconfig.Defaults
-	cfg.Prune = sm
+	cfg.Prune = prune
 	cfg.BatchSize = batchSize
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
@@ -830,7 +830,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 		stagedsync.MiningPruneOrder,
 	)
 
-	return sm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
+	return prune, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
 }
 
 func progress(tx ethdb.KVGetter, stage stages.SyncStage) uint64 {

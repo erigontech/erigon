@@ -193,8 +193,10 @@ func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, cfg.prune.TxIndex.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
-		return err
+	if cfg.prune.TxIndex.Enabled() {
+		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, cfg.prune.TxIndex.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+			return err
+		}
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

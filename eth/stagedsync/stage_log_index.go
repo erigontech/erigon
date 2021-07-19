@@ -337,8 +337,10 @@ func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
-		return err
+	if cfg.prune.History.Enabled() {
+		if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+			return err
+		}
 	}
 
 	if !useExternalTx {
