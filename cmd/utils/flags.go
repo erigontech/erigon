@@ -122,11 +122,6 @@ var (
 		Name:  "identity",
 		Usage: "Custom node name",
 	}
-	DocRootFlag = DirectoryFlag{
-		Name:  "docroot",
-		Usage: "Document Root for HTTPClient file scheme",
-		Value: DirectoryString(HomeDir()),
-	}
 	ExitWhenSyncedFlag = cli.BoolFlag{
 		Name:  "exitwhensynced",
 		Usage: "Exits after block synchronisation completes",
@@ -1197,10 +1192,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	}
 
 	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
-
-	if ctx.GlobalIsSet(DocRootFlag.Name) {
-		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
-	}
 
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.GlobalUint64(RPCGlobalGasCapFlag.Name)
