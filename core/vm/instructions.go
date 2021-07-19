@@ -684,8 +684,8 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	gas := interpreter.evm.callGasTemp
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
-	fmt.Printf("CALL to %x\n", addr)
 	toAddr := common.Address(addr.Bytes20())
+	fmt.Printf("CALL to %x\n", toAddr)
 	// Get the arguments from the memory.
 	args := callContext.memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
