@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -20,21 +19,17 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	kv := kv2.NewTestKV(t)
 	cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := kv.BeginRw(context.Background())
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer tx.Rollback()
 
 			csInfo, ok := changeset.Mapper[csBucket]
@@ -46,13 +41,9 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			cfgCopy.bufLimit = 10
 			cfgCopy.flushEvery = time.Microsecond
 			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])])
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[1], expecedIndexes[string(addrs[1])])
@@ -67,7 +58,6 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
 	tmpDir, ctx := t.TempDir(), context.Background()
 	kv := kv2.NewTestKV(t)
@@ -76,9 +66,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		csbucket := buckets[i]
 
 		tx, err := kv.BeginRw(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		defer tx.Rollback()
 
 		hashes, expected := generateTestData(t, tx, csbucket, 2100)
@@ -88,9 +76,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		cfgCopy.bufLimit = 10
 		cfgCopy.flushEvery = time.Microsecond
 		err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		reduceSlice := func(arr []uint64, timestamtTo uint64) []uint64 {
 			pos := sort.Search(len(arr), func(i int) bool {
@@ -105,9 +91,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2050)
 
 		err = unwindHistory("logPrefix", tx, csbucket, 2050, cfg, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
 		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
@@ -120,9 +104,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2000)
 
 		err = unwindHistory("logPrefix", tx, csbucket, 2000, cfg, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
 		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
@@ -131,9 +113,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 
 		//t.Run("truncate to 1999 "+csbucket, func(t *testing.T) {
 		err = unwindHistory("logPrefix", tx, csbucket, 1999, cfg, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 1999)
 		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 1999)
 		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 1999)
@@ -142,16 +122,12 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
 		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
 		bm, err := bitmapdb.Get64(tx, indexBucket, hashes[0], 1999, math.MaxUint32)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
 			t.Fatal(bm.Maximum())
 		}
 		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 1999, math.MaxUint32)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
 			t.Fatal()
 		}
@@ -167,16 +143,12 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 			t.Fatal(err)
 		}
 		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[0], 999, math.MaxUint32)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
 			t.Fatal()
 		}
 		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 999, math.MaxUint32)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
 			t.Fatal()
 		}
@@ -224,14 +196,10 @@ func generateTestData(t *testing.T, tx ethdb.RwTx, csBucket string, numOfBlocks 
 		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	if dbutils.StorageChangeSetBucket == csBucket {
 		keys, innerErr := generateAddrs(3, false)
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
+		require.NoError(t, innerErr)
 
 		defaultIncarnation := make([]byte, 8)
 		binary.BigEndian.PutUint64(defaultIncarnation, uint64(1))
@@ -248,32 +216,24 @@ func generateTestData(t *testing.T, tx ethdb.RwTx, csBucket string, numOfBlocks 
 	for i := 0; i < numOfBlocks; i++ {
 		cs := csInfo.New()
 		err = cs.Add(addrs[0], []byte(strconv.Itoa(i)))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		res = append(res, uint64(i))
 
 		if i%2 == 0 {
 			err = cs.Add(addrs[1], []byte(strconv.Itoa(i)))
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			res2 = append(res2, uint64(i))
 		}
 		if i%3 == 0 {
 			err = cs.Add(addrs[2], []byte(strconv.Itoa(i)))
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			res3 = append(res3, uint64(i))
 		}
 		err = csInfo.Encode(uint64(i), cs, func(k, v []byte) error {
 			return tx.Put(csBucket, k, v)
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 	}
 
 	return addrs, map[string][]uint64{
