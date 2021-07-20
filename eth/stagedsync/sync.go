@@ -264,7 +264,9 @@ func printLogs(tx ethdb.RwTx, timings []Timing) error {
 			logCtx = append(logCtx, timings[i].stage, timings[i].took)
 		}
 	}
-	log.Info("Timings (slower than 10ms)", logCtx...)
+	if len(logCtx) > 0 {
+		log.Info("Timings (slower than 10ms)", logCtx...)
+	}
 
 	if tx == nil {
 		return nil
