@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"runtime"
 	"sort"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -44,27 +44,21 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type ExecuteBlockCfg struct {
-	db              ethdb.RwKV
-	batchSize       datasize.ByteSize
-	changeSetHook   ChangeSetHook
-	chainConfig     *params.ChainConfig
-	engine          consensus.Engine
-	vmConfig        *vm.Config
-	tmpdir          string
-	writeReceipts   bool
-	writeCallTraces bool
-	writeTEVM       bool
-	pruningDistance uint64
-	stateStream     bool
-	accumulator     *shards.Accumulator
+	db            ethdb.RwKV
+	batchSize     datasize.ByteSize
+	prune         prune.Mode
+	changeSetHook ChangeSetHook
+	chainConfig   *params.ChainConfig
+	engine        consensus.Engine
+	vmConfig      *vm.Config
+	tmpdir        string
+	stateStream   bool
+	accumulator   *shards.Accumulator
 }
 
 func StageExecuteBlocksCfg(
 	kv ethdb.RwKV,
-	writeReceipts bool,
-	writeCallTraces bool,
-	writeTEVM bool,
-	pruningDistance uint64,
+	prune prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
 	chainConfig *params.ChainConfig,
@@ -75,19 +69,16 @@ func StageExecuteBlocksCfg(
 	tmpdir string,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:              kv,
-		writeReceipts:   writeReceipts,
-		writeCallTraces: writeCallTraces,
-		writeTEVM:       writeTEVM,
-		pruningDistance: pruningDistance,
-		batchSize:       batchSize,
-		changeSetHook:   changeSetHook,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		vmConfig:        vmConfig,
-		tmpdir:          tmpdir,
-		accumulator:     accumulator,
-		stateStream:     stateStream,
+		db:            kv,
+		prune:         prune,
+		batchSize:     batchSize,
+		changeSetHook: changeSetHook,
+		chainConfig:   chainConfig,
+		engine:        engine,
+		vmConfig:      vmConfig,
+		tmpdir:        tmpdir,
+		accumulator:   accumulator,
+		stateStream:   stateStream,
 	}
 }
 
@@ -105,7 +96,10 @@ func executeBlock(
 	tx ethdb.RwTx,
 	batch ethdb.Database,
 	cfg ExecuteBlockCfg,
+	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
+	writeReceipts bool,
+	writeCallTraces bool,
 	checkTEVM func(contractHash common.Hash) (bool, error),
 	initialCycle bool,
 ) error {
@@ -114,19 +108,16 @@ func executeBlock(
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-	var callTracer *CallTracer
-	if cfg.writeCallTraces {
-		callTracer = NewCallTracer(checkTEVM)
-		cfg.vmConfig.Debug = true
-		cfg.vmConfig.Tracer = callTracer
-	}
 
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, checkTEVM)
+	callTracer := NewCallTracer(checkTEVM)
+	vmConfig.Debug = true
+	vmConfig.Tracer = callTracer
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, checkTEVM)
 	if err != nil {
 		return err
 	}
 
-	if cfg.writeReceipts {
+	if writeReceipts {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
@@ -138,7 +129,7 @@ func executeBlock(
 		}
 	}
 
-	if cfg.writeCallTraces {
+	if writeCallTraces {
 		callTracer.tos[block.Coinbase()] = false
 		for _, uncle := range block.Uncles() {
 			callTracer.tos[uncle.Coinbase] = false
@@ -172,7 +163,7 @@ func executeBlock(
 				v[common.AddressLength] |= 2
 			}
 			// TEVM marking still untranslated contracts
-			if cfg.vmConfig.EnableTEMV {
+			if vmConfig.EnableTEMV {
 				if created = callTracer.tos[addr]; created {
 					v[common.AddressLength] |= 4
 				}
@@ -284,19 +275,17 @@ Loop:
 
 		lastLogTx += uint64(block.Transactions().Len())
 
-		writeChangesets := true
-		if cfg.pruningDistance > 0 && to-blockNum > cfg.pruningDistance {
-			writeChangesets = false
-		}
-
 		var checkTEVMCode func(contractHash common.Hash) (bool, error)
 
 		if cfg.vmConfig.EnableTEMV {
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
-		if err = executeBlock(block, tx, batch, cfg, writeChangesets, checkTEVMCode, initialCycle); err != nil {
-			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "number", blockNum, "hash", block.Hash().String(), "error", err)
+		writeReceipts := blockNum > cfg.prune.Receipts.PruneTo(to)
+		writeChangeSets := blockNum > cfg.prune.History.PruneTo(to)
+		writeCallTraces := blockNum > cfg.prune.CallTraces.PruneTo(to)
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
+			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
@@ -344,15 +333,6 @@ Loop:
 	if err = batch.Commit(); err != nil {
 		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
 	}
-	// Prune changesets if needed
-	if cfg.pruningDistance > 0 {
-		if err = pruneDupSortedBucket(tx, logPrefix, "account changesets", dbutils.AccountChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
-			return err
-		}
-		if err = pruneDupSortedBucket(tx, logPrefix, "storage changesets", dbutils.StorageChangeSetBucket, to, cfg.pruningDistance, logEvery.C); err != nil {
-			return err
-		}
-	}
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
@@ -364,46 +344,31 @@ Loop:
 	return stoppedErr
 }
 
-func pruneDupSortedBucket(tx ethdb.RwTx, logPrefix string, name string, tableName string, endBlock uint64, pruningDistance uint64, logChannel <-chan time.Time) error {
-	changeSetCursor, err := tx.RwCursorDupSort(tableName)
+func pruneChangeSets(tx ethdb.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursorDupSort(table)
 	if err != nil {
-		return fmt.Errorf("%s: failed to create cursor for pruning %s: %v", logPrefix, name, err)
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
-	defer changeSetCursor.Close()
+	defer c.Close()
 
-	var prunedMin uint64 = math.MaxUint64
-	var prunedMax uint64 = 0
-	var k []byte
-
-	for k, _, err = changeSetCursor.First(); k != nil && err == nil; k, _, err = changeSetCursor.NextNoDup() {
+	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
+		if err != nil {
+			return fmt.Errorf("failed to move %s cleanup cursor: %w", table, err)
+		}
 		blockNum := binary.BigEndian.Uint64(k)
-		if endBlock-blockNum <= pruningDistance {
+		if blockNum >= pruneTo {
 			break
 		}
 		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", table, "block", blockNum)
+		case <-ctx.Done():
+			return common.ErrStopped
 		default:
-		case <-logChannel:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Pruning", logPrefix), "table", tableName, "number", blockNum,
-				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys))
 		}
-		if err = changeSetCursor.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("%s: failed to remove %s for block %d: %v", logPrefix, name, blockNum, err)
+		if err = c.DeleteCurrentDuplicates(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
-		if blockNum < prunedMin {
-			prunedMin = blockNum
-		}
-		if blockNum > prunedMax {
-			prunedMax = blockNum
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("%s: failed to move %s cleanup cursor: %w", logPrefix, tableName, err)
-	}
-	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		log.Info(fmt.Sprintf("[%s] Pruned", logPrefix), "table", tableName, "from", prunedMin, "to", prunedMax)
 	}
 	return nil
 }
@@ -559,28 +524,24 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if cfg.writeReceipts {
-		if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
-			return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
-		}
+	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 	}
 
-	if cfg.writeCallTraces {
-		// Truncate CallTraceSet
-		keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
-		c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	// Truncate CallTraceSet
+	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+	c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
 		if err != nil {
 			return err
 		}
-		defer c.Close()
-		for k, _, err := c.Seek(keyStart); k != nil; k, _, err = c.NextNoDup() {
-			if err != nil {
-				return err
-			}
-			err = c.DeleteCurrentDuplicates()
-			if err != nil {
-				return err
-			}
+		err = c.DeleteCurrentDuplicates()
+		if err != nil {
+			return err
 		}
 	}
 
@@ -604,7 +565,8 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-func PruneExecutionStage(p *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -614,10 +576,120 @@ func PruneExecutionStage(p *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 		defer tx.Rollback()
 	}
 
-	logPrefix := p.LogPrefix()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	if cfg.prune.History.Enabled() {
+		if err = pruneChangeSets(tx, logPrefix, dbutils.AccountChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+			return err
+		}
+		if err = pruneChangeSets(tx, logPrefix, dbutils.StorageChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+			return err
+		}
+	}
+
+	if cfg.prune.Receipts.Enabled() {
+		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+			return err
+		}
+	}
+	if cfg.prune.CallTraces.Enabled() {
+		if err = pruneCallTracesSet(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+			return err
+		}
+	}
+
+	if err = s.Done(tx); err != nil {
+		return err
+	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
+}
+
+func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursor(dbutils.Receipts)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= pruneTo {
+			break
+		}
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Receipts, "block", blockNum)
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		if err = c.DeleteCurrent(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+		}
+	}
+
+	c, err = tx.RwCursor(dbutils.Log)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= pruneTo {
+			break
+		}
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Log, "block", blockNum)
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		if err = c.DeleteCurrent(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+		}
+	}
+	return nil
+}
+
+func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
+		if err != nil {
+			return err
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= pruneTo {
+			break
+		}
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.CallTraceSet, "block", blockNum)
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		if err = c.DeleteCurrentDuplicates(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
 	}
 	return nil

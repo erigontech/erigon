@@ -1,6 +1,8 @@
-Integration - tool to run Erigon stages in custom way: run/reset single stage, run all stages but reorg every X blocks, etc...
+Integration - tool to run Erigon stages in custom way: run/reset single stage, run all stages but reorg every X blocks,
+etc...
 
-## Examples 
+## Examples
+
 All commands require parameter `--datadir=<datadir>` - I will skip it for readability.
 
 ```
@@ -22,6 +24,14 @@ integration stage_exec --unwind=10
 # Drop data of single stage 
 integration stage_exec --reset     
 integration stage_history --reset
+
+# Unwind single stage N blocks backward
+integration stage_exec --unwind=N 
+integration stage_history --unwind=N
+
+# Run stage prune to block N
+integration stage_exec --prune.to=N     
+integration stage_history --prune.to=N
 ... 
 
 # hack which allows to force clear unwind stack of all stages
@@ -31,6 +41,7 @@ clear_unwind_stack
 ## For testing run all stages in "N blocks forward M blocks re-org" loop
 
 Pre-requirements of `state_stages` command:
+
 - Headers/Bodies must be downloaded
 - TxSenders stage must be executed
 
@@ -41,6 +52,7 @@ integration reset_state # drops all stages after Senders stage (including it's d
 ```
 
 For example:
+
 ```
 --unwind=1 --unwind.every=10  # 10 blocks forward, 1 block back, 10 blocks forward, ...
 --unwind=10 --unwind.every=1  # 1 block forward, 10 blocks back, 1 blocks forward, ...
@@ -50,7 +62,7 @@ For example:
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 ```
 
-## "Wrong trie root" problem - temporary solution  
+## "Wrong trie root" problem - temporary solution
 
 ```
 make all

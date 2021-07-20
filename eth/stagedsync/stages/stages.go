@@ -86,6 +86,19 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 	return db.Put(dbutils.SyncStageProgress, []byte(stage), marshalData(progress))
 }
 
+// GetStagePruneProgress retrieves saved progress of given sync stage from the database
+func GetStagePruneProgress(db ethdb.KVGetter, stage SyncStage) (uint64, error) {
+	v, err := db.GetOne(dbutils.SyncStageProgress, []byte("prune_"+stage))
+	if err != nil {
+		return 0, err
+	}
+	return unmarshalData(v)
+}
+
+func SaveStagePruneProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
+	return db.Put(dbutils.SyncStageProgress, []byte("prune_"+stage), marshalData(progress))
+}
+
 func marshalData(blockNumber uint64) []byte {
 	return encodeBigEndian(blockNumber)
 }

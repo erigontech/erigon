@@ -54,6 +54,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -173,7 +174,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -213,7 +214,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err := ethdb.SetStorageModeIfNotExist(tx, config.StorageMode); err != nil {
+		if err := prune.SetIfNotExist(tx, config.Prune); err != nil {
 			return err
 		}
 
@@ -221,19 +222,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return err
 		}
 
-		sm, err := ethdb.GetStorageModeFromDB(tx)
+		pm, err := prune.Get(tx)
 		if err != nil {
 			return err
 		}
-		if config.StorageMode.Initialised {
+		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
-			if !reflect.DeepEqual(sm, config.StorageMode) {
-				return errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+			if !reflect.DeepEqual(pm, config.Prune) {
+				return errors.New("prune is " + config.Prune.ToString() + " original prune is " + pm.ToString())
 			}
 		} else {
-			config.StorageMode = sm
+			config.Prune = pm
 		}
-		log.Info("Effective", "storage mode", config.StorageMode)
+		log.Info("Effective", "prune", config.Prune.ToString())
 
 		return nil
 	}); err != nil {

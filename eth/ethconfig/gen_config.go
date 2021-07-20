@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -32,7 +32,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Whitelist = c.Whitelist
-	enc.StorageMode = c.StorageMode.ToString()
+	enc.StorageMode = c.Prune.ToString()
 	enc.Miner = c.Miner
 	enc.Ethash = c.Ethash
 	enc.TxPool = c.TxPool
@@ -50,6 +50,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		EthDiscoveryURLs   []string
 		Whitelist          map[uint64]common.Hash `toml:"-"`
 		Mode               *string
+		PruneH             *uint64
+		PruneR             *uint64
+		PruneT             *uint64
+		PruneC             *uint64
+		Experiments        *[]string
 		OnlyAnnounce       *bool
 		SkipBcVersionCheck *bool `toml:"-"`
 		DatabaseHandles    *int  `toml:"-"`
@@ -78,11 +83,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Whitelist = dec.Whitelist
 	}
 	if dec.Mode != nil {
-		mode, err := ethdb.StorageModeFromString(*dec.Mode)
+		mode, err := prune.FromCli(*dec.Mode, *dec.PruneH, *dec.PruneR, *dec.PruneT, *dec.PruneC, *dec.Experiments)
 		if err != nil {
 			return err
 		}
-		c.StorageMode = mode
+		c.Prune = mode
 	}
 	if dec.Miner != nil {
 		c.Miner = *dec.Miner

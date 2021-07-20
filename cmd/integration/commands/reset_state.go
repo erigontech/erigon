@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -116,7 +117,7 @@ func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainContractCodeBucket); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.BlockReceiptsPrefix); err != nil {
+	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Receipts); err != nil {
 		return err
 	}
 	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Log); err != nil {
@@ -138,11 +139,7 @@ func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
 		return err
 	}
 
-	sm, err := ethdb.GetStorageModeFromDB(tx)
-	if err != nil {
-		return err
-	}
-	_, _, err = core.OverrideGenesisBlock(tx, g, sm.History)
+	_, _, err := core.OverrideGenesisBlock(tx, g)
 	if err != nil {
 		return err
 	}
@@ -222,11 +219,22 @@ func printStages(db ethdb.KVGetter) error {
 	w := new(tabwriter.Writer)
 	defer w.Flush()
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+	fmt.Fprintf(w, "Note: prune_at doesn't mean 'all data before were deleted' - it just mean stage.Prune function were run to this block. Because 1 stage may prune multiple data types to different prune distance.\n")
 	for _, stage := range stages.AllStages {
 		if progress, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s \t %d\n", string(stage), progress)
+		prunedTo, err := stages.GetStagePruneProgress(db, stage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s \t %d \t prune_at=%d\n", string(stage), progress, prunedTo)
 	}
+	pm, err := prune.Get(db)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "--\n")
+	fmt.Fprintf(w, "prune distance: %#v\n", pm)
 	return nil
 }
