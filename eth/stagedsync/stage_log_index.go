@@ -254,6 +254,7 @@ func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, cfg LogIndexCfg,
 	topics := map[string]struct{}{}
 	addrs := map[string]struct{}{}
 
+	reader := bytes.NewReader(nil)
 	c, err := db.Cursor(dbutils.Log)
 	if err != nil {
 		return err
@@ -268,7 +269,8 @@ func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, cfg LogIndexCfg,
 			return err
 		}
 		var logs types.Logs
-		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+		reader.Reset(v)
+		if err := cbor.Unmarshal(&logs, reader); err != nil {
 			return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
 		}
 
@@ -330,6 +332,44 @@ func truncateBitmaps(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to
 	return nil
 }
 
+func pruneOldLogChunks(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, pruneTo uint64, logPrefix string, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	keys := make([]string, 0, len(inMem))
+	for k := range inMem {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	c, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for _, kS := range keys {
+		seek := []byte(kS)
+		for k, _, err := c.Seek(seek); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := uint64(binary.BigEndian.Uint32(k[len(seek):]))
+			if !bytes.HasPrefix(k, seek) || blockNum >= pruneTo {
+				break
+			}
+			select {
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
+			case <-ctx.Done():
+				return common.ErrStopped
+			default:
+			}
+			if err = c.DeleteCurrent(); err != nil {
+				return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
+			}
+		}
+	}
+	return nil
+}
+
 func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
 	if !cfg.prune.History.Enabled() {
 		return nil
@@ -368,6 +408,7 @@ func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint6
 	topics := map[string]struct{}{}
 	addrs := map[string]struct{}{}
 
+	reader := bytes.NewReader(nil)
 	{
 		c, err := tx.Cursor(dbutils.Log)
 		if err != nil {
@@ -392,7 +433,8 @@ func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint6
 			}
 
 			var logs types.Logs
-			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+			reader.Reset(v)
+			if err := cbor.Unmarshal(&logs, reader); err != nil {
 				return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
 			}
 
@@ -405,76 +447,11 @@ func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint6
 		}
 	}
 
-	{
-		sorted := make([]string, 0, len(topics))
-		for k := range topics {
-			sorted = append(sorted, k)
-		}
-		sort.Strings(sorted)
-		c, err := tx.RwCursor(dbutils.LogTopicIndex)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		for _, topicS := range sorted {
-			topic := []byte(topicS)
-			for k, _, err := c.Seek(topic); k != nil; k, _, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				blockNum := uint64(binary.BigEndian.Uint32(k[common.HashLength:]))
-				if !bytes.HasPrefix(k, topic) || blockNum >= pruneTo {
-					break
-				}
-				select {
-				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
-				case <-ctx.Done():
-					return common.ErrStopped
-				default:
-				}
-				if err = c.DeleteCurrent(); err != nil {
-					return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
-				}
-			}
-		}
+	if err := pruneOldLogChunks(tx, dbutils.LogTopicIndex, topics, pruneTo, logPrefix, ctx); err != nil {
+		return err
 	}
-	{
-		sorted := make([]string, 0, len(addrs))
-		for k := range addrs {
-			sorted = append(sorted, k)
-		}
-		sort.Strings(sorted)
-		c, err := tx.RwCursor(dbutils.LogAddressIndex)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-
-		for _, addrS := range sorted {
-			addr := []byte(addrS)
-
-			for k, _, err := c.Seek(addr); k != nil; k, _, err = c.Next() {
-				if err != nil {
-					return err
-				}
-				blockNum := uint64(binary.BigEndian.Uint32(k[common.AddressLength:]))
-				if !bytes.HasPrefix(k, addr) || blockNum >= pruneTo {
-					break
-				}
-				select {
-				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
-				case <-ctx.Done():
-					return common.ErrStopped
-				default:
-				}
-				if err = c.DeleteCurrent(); err != nil {
-					return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
-				}
-			}
-		}
+	if err := pruneOldLogChunks(tx, dbutils.LogAddressIndex, addrs, pruneTo, logPrefix, ctx); err != nil {
+		return err
 	}
 	return nil
 }

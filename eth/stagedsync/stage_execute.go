@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"runtime"
 	"sort"
 	"time"
@@ -352,9 +351,6 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, table string, pruneTo uint
 	}
 	defer c.Close()
 
-	var prunedMin uint64 = math.MaxUint64
-	var prunedMax uint64 = 0
-
 	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
 		if err != nil {
 			return fmt.Errorf("failed to move %s cleanup cursor: %w", table, err)
@@ -373,15 +369,6 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, table string, pruneTo uint
 		if err = c.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
-		if blockNum < prunedMin {
-			prunedMin = blockNum
-		}
-		if blockNum > prunedMax {
-			prunedMax = blockNum
-		}
-	}
-	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		log.Info(fmt.Sprintf("[%s] Pruned", logPrefix), "table", table, "from", prunedMin, "to", prunedMax)
 	}
 	return nil
 }
@@ -630,15 +617,12 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 	}
 	defer c.Close()
 
-	var prunedMin uint64 = math.MaxUint64
-	var prunedMax uint64 = 0
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
 
 		blockNum := binary.BigEndian.Uint64(k)
-
 		if blockNum >= pruneTo {
 			break
 		}
@@ -652,15 +636,6 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		if err = c.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
-		if blockNum < prunedMin {
-			prunedMin = blockNum
-		}
-		if blockNum > prunedMax {
-			prunedMax = blockNum
-		}
-	}
-	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		log.Info(fmt.Sprintf("[%s] Pruned", logPrefix), "table", dbutils.Receipts, "from", prunedMin, "to", prunedMax)
 	}
 
 	c, err = tx.RwCursor(dbutils.Log)
@@ -687,30 +662,18 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		if err = c.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
-		if blockNum < prunedMin {
-			prunedMin = blockNum
-		}
-		if blockNum > prunedMax {
-			prunedMax = blockNum
-		}
-	}
-	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		log.Info(fmt.Sprintf("[%s] Pruned", logPrefix), "table", dbutils.Log, "from", prunedMin, "to", prunedMax)
 	}
 	return nil
 }
 
 func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursor(dbutils.CallTraceSet)
+	c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
 	defer c.Close()
 
-	var prunedMin uint64 = math.MaxUint64
-	var prunedMax uint64 = 0
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
 		if err != nil {
 			return err
 		}
@@ -725,18 +688,9 @@ func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEver
 			return common.ErrStopped
 		default:
 		}
-		if err = c.DeleteCurrent(); err != nil {
+		if err = c.DeleteCurrentDuplicates(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
-		if blockNum < prunedMin {
-			prunedMin = blockNum
-		}
-		if blockNum > prunedMax {
-			prunedMax = blockNum
-		}
-	}
-	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		log.Info(fmt.Sprintf("[%s] Pruned", logPrefix), "table", dbutils.CallTraceSet, "from", prunedMin, "to", prunedMax)
 	}
 	return nil
 }

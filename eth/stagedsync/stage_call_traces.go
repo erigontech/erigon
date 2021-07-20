@@ -418,12 +418,13 @@ func PruneCallTraces(s *PruneState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 		defer tx.Rollback()
 	}
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTraces(tx, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneCallTraces(tx, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
 			return err
 		}
+	}
+	if err := s.Done(tx); err != nil {
+		return err
 	}
 
 	if !useExternalTx {
@@ -434,7 +435,10 @@ func PruneCallTraces(s *PruneState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 	return nil
 }
 
-func pruneCallTraces(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+func pruneCallTraces(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
 	froms := map[string]struct{}{}
 	tos := map[string]struct{}{}
 

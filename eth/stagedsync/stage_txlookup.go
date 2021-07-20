@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -15,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -87,9 +85,8 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
 
-		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 		for _, tx := range body.Transactions {
-			if err := next(k, tx.Hash().Bytes(), blockNumBytes); err != nil {
+			if err := next(k, tx.Hash().Bytes(), bigNum.SetUint64(blocknum).Bytes()); err != nil {
 				return err
 			}
 		}
@@ -133,53 +130,33 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 }
 
 func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
-	collector := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collector.Close("TxLookup")
-
+	reader := bytes.NewReader(nil)
 	logPrefix := s.LogPrefix()
-	c, err := tx.Cursor(dbutils.BlockBodyPrefix)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	// Remove lookup entries for blocks between unwindPoint+1 and stage.BlockNumber
-	if err := ethdb.Walk(c, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
-
-		blockNumber := binary.BigEndian.Uint64(k[:8])
-		if blockNumber > s.BlockNumber {
-			return false, nil
-		}
-
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
-
+	return etl.Transform(logPrefix, tx, dbutils.BlockBodyPrefix, dbutils.TxLookupPrefix, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
-		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
-			return false, fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
+		reader.Reset(v)
+		if err := rlp.Decode(reader, body); err != nil {
+			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
 		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
 		if err != nil {
-			return false, err
+			return err
 		}
 		for _, txn := range txs {
-			if err := collector.Collect(txn.Hash().Bytes(), nil); err != nil {
-				return false, err
+			if err = next(k, txn.Hash().Bytes(), nil); err != nil {
+				return err
 			}
 		}
-
-		return true, nil
-	}); err != nil {
-		return err
-	}
-	if err := collector.Load(logPrefix, tx, dbutils.TxLookupPrefix, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
-		return err
-	}
-	return nil
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            quitCh,
+		ExtractStartKey: dbutils.EncodeBlockNumber(u.UnwindPoint + 1),
+		//ExtractEndKey:   dbutils.EncodeBlockNumber(s.BlockNumber - 1),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	})
 }
 
 func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
@@ -200,7 +177,7 @@ func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 	// Forward stage doesn't write anything before PruneTo point
 	// TODO: maybe need do binary search of values in db in this case
 	if s.PruneProgress != 0 {
-		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s.PruneProgress, to, ctx); err != nil {
+		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s, to, ctx); err != nil {
 			return err
 		}
 	}
@@ -216,38 +193,12 @@ func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 	return nil
 }
 
-func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, from, pruneTo uint64, ctx context.Context) error {
-	collector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collector.Close("TxLookup")
-
-	c, err := tx.Cursor(dbutils.BlockBodyPrefix)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	for k, v, err := c.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		blockNumber := binary.BigEndian.Uint64(k[:8])
-		if blockNumber >= pruneTo {
-			break
-		}
-
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode collect", logPrefix), "table", dbutils.BlockBodyPrefix, "key", fmt.Sprintf("%x", k))
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-
+func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context) error {
+	reader := bytes.NewReader(nil)
+	return etl.Transform(logPrefix, tx, dbutils.BlockBodyPrefix, dbutils.TxLookupPrefix, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
-		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
+		reader.Reset(v)
+		if err := rlp.Decode(reader, body); err != nil {
 			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
@@ -256,14 +207,17 @@ func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, from, pruneTo uint64
 			return err
 		}
 		for _, txn := range txs {
-			if err := collector.Collect(txn.Hash().Bytes(), nil); err != nil {
+			if err := next(k, txn.Hash().Bytes(), nil); err != nil {
 				return err
 			}
 		}
-	}
-	if err := collector.Load(logPrefix, tx, dbutils.TxLookupPrefix, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-
-	return nil
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            ctx.Done(),
+		ExtractStartKey: dbutils.EncodeBlockNumber(s.ForwardProgress),
+		ExtractEndKey:   dbutils.EncodeBlockNumber(pruneTo),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	})
 }
