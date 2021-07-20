@@ -60,12 +60,31 @@ var (
 
 	PruneFlag = cli.StringFlag{
 		Name: "prune",
-		Usage: `Delete ancient data from DB. By default - delete if older than 90K block:
-* h - prune history (ChangeSets, HistoryIndices - used by historical state access)
-* r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
-* t - prune tx lookup (used to get transaction by hash)
-* c - prune call traces (used by trace_* methods)`,
-		Value: "default",
+		Usage: `Choose which ancient data delete from DB: 
+	h - prune history (ChangeSets, HistoryIndices - used by historical state access)
+	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
+	t - prune transaction by it's hash index
+	c - prune call traces (used by trace_* methods)
+	Does delete data older than 90K block (can set another value by '--prune.*.older' flags). 
+	If item is NOT in the list - means NO pruning for this data.s
+	Example: --prune=hrtc`,
+		Value: "disabled",
+	}
+	PruneHistoryFlag = cli.Uint64Flag{
+		Name:  "prune.history.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 'h', then default is 90K)`,
+	}
+	PruneReceiptFlag = cli.Uint64Flag{
+		Name:  "prune.receipt.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 'r', then default is 90K)`,
+	}
+	PruneTxIndexFlag = cli.Uint64Flag{
+		Name:  "prune.txindex.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 't', then default is 90K)`,
+	}
+	PruneCallTracesFlag = cli.Uint64Flag{
+		Name:  "prune.calltrace.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 'c', then default is 90K)`,
 	}
 	ExperimentsFlag = cli.StringFlag{
 		Name: "experiments",
@@ -133,11 +152,19 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	mode, err := prune.FromString(ctx.GlobalString(PruneFlag.Name), strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","))
+	mode, err := prune.FromCli(
+		ctx.GlobalString(PruneFlag.Name),
+		ctx.GlobalUint64(PruneHistoryFlag.Name),
+		ctx.GlobalUint64(PruneReceiptFlag.Name),
+		ctx.GlobalUint64(PruneTxIndexFlag.Name),
+		ctx.GlobalUint64(PruneCallTracesFlag.Name),
+		strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","),
+	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.Prune = mode
+
 	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -182,7 +209,20 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if exp := f.StringSlice(ExperimentsFlag.Name, nil, ExperimentsFlag.Usage); exp != nil {
 			experiments = *exp
 		}
-		mode, err := prune.FromString(*v, experiments)
+		var exactH, exactR, exactT, exactC uint64
+		if v := f.Uint64(PruneHistoryFlag.Name, PruneHistoryFlag.Value, PruneHistoryFlag.Usage); v != nil {
+			exactH = *v
+		}
+		if v := f.Uint64(PruneReceiptFlag.Name, PruneReceiptFlag.Value, PruneReceiptFlag.Usage); v != nil {
+			exactR = *v
+		}
+		if v := f.Uint64(PruneTxIndexFlag.Name, PruneTxIndexFlag.Value, PruneTxIndexFlag.Usage); v != nil {
+			exactT = *v
+		}
+		if v := f.Uint64(PruneCallTracesFlag.Name, PruneCallTracesFlag.Value, PruneCallTracesFlag.Usage); v != nil {
+			exactC = *v
+		}
+		mode, err := prune.FromCli(*v, exactH, exactR, exactT, exactC, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}

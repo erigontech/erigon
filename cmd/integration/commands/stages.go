@@ -344,6 +344,10 @@ func init() {
 	withDatadir(cmdSetPrune)
 	withChain(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
+	cmdSetPrune.Flags().Uint64Var(&pruneH, "--prune.history.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneR, "--prune.receipt.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneT, "--prune.txindex.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneC, "--prune.calltrace.older", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
 }
@@ -967,7 +971,7 @@ func stage(st *stagedsync.Sync, tx ethdb.Tx, db ethdb.RoKV, stage stages.SyncSta
 }
 
 func overrideStorageMode(db ethdb.RwKV) error {
-	pm, err := prune.FromString(pruneFlag, experiments)
+	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC, experiments)
 	if err != nil {
 		return err
 	}

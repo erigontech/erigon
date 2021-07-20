@@ -23,9 +23,9 @@ type Experiments struct {
 	TEVM bool
 }
 
-func FromString(flags string, experiments []string) (Mode, error) {
+func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
-	if flags == "default" {
+	if flags == "default" || flags == "disabled" {
 		return DefaultMode, nil
 	}
 	mode.Initialised = true
@@ -42,6 +42,19 @@ func FromString(flags string, experiments []string) (Mode, error) {
 		default:
 			return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
+	}
+
+	if exactHistory > 0 {
+		mode.History = Distance(exactHistory)
+	}
+	if exactReceipts > 0 {
+		mode.Receipts = Distance(exactReceipts)
+	}
+	if exactTxIndex > 0 {
+		mode.TxIndex = Distance(exactTxIndex)
+	}
+	if exactCallTraces > 0 {
+		mode.CallTraces = Distance(exactCallTraces)
 	}
 
 	for _, ex := range experiments {
