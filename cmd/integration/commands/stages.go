@@ -496,7 +496,6 @@ func stageTrie(db ethdb.RwKV, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 	fmt.Printf("distance: %d\n", pm.History)
-	panic(1)
 
 	log.Info("Stage4", "progress", execStage.BlockNumber)
 	log.Info("Stage5", "progress", s.BlockNumber)

@@ -205,35 +205,35 @@ func Override(db ethdb.RwTx, sm Mode) error {
 	return nil
 }
 
-func SetIfNotExist(db ethdb.GetPut, sm Mode) error {
+func SetIfNotExist(db ethdb.GetPut, pm Mode) error {
 	var (
 		err error
 	)
-	if !sm.Initialised {
-		sm = DefaultMode
+	if !pm.Initialised {
+		pm = DefaultMode
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceHistory, sm.History)
+	err = setDistanceOnEmpty(db, dbutils.PruneDistanceHistory, pm.History)
 	if err != nil {
 		return err
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceReceipts, sm.Receipts)
+	err = setDistanceOnEmpty(db, dbutils.PruneDistanceReceipts, pm.Receipts)
 	if err != nil {
 		return err
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceTxIndex, sm.TxIndex)
+	err = setDistanceOnEmpty(db, dbutils.PruneDistanceTxIndex, pm.TxIndex)
 	if err != nil {
 		return err
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceCallTraces, sm.CallTraces)
+	err = setDistanceOnEmpty(db, dbutils.PruneDistanceCallTraces, pm.CallTraces)
 	if err != nil {
 		return err
 	}
 
-	err = setModeOnEmpty(db, dbutils.StorageModeTEVM, sm.Experiments.TEVM)
+	err = setModeOnEmpty(db, dbutils.StorageModeTEVM, pm.Experiments.TEVM)
 	if err != nil {
 		return err
 	}
@@ -255,7 +255,7 @@ func setDistanceOnEmpty(db ethdb.GetPut, key []byte, distance Distance) error {
 	if err != nil {
 		return err
 	}
-	if len(mode) == 0 {
+	if len(mode) == 0 || binary.BigEndian.Uint64(mode) == math.MaxUint64 {
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, uint64(distance))
 		if err = db.Put(dbutils.DatabaseInfoBucket, key, v); err != nil {
