@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -218,6 +219,7 @@ func printStages(db ethdb.KVGetter) error {
 	w := new(tabwriter.Writer)
 	defer w.Flush()
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+	fmt.Fprintf(w, "Note: prune_at doesn't mean 'all data before were deleted' - it just mean stage.Prune function were run to this block. Because 1 stage may prune multiple data types to different prune distance.\n")
 	for _, stage := range stages.AllStages {
 		if progress, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
@@ -226,7 +228,13 @@ func printStages(db ethdb.KVGetter) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s \t %d \t pruned_to=%d\n", string(stage), progress, prunedTo)
+		fmt.Fprintf(w, "%s \t %d \t prune_at=%d\n", string(stage), progress, prunedTo)
 	}
+	pm, err := prune.Get(db)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "--\n")
+	fmt.Fprintf(w, "prune distance: %#v\n", pm)
 	return nil
 }

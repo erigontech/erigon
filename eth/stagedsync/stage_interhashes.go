@@ -551,6 +551,7 @@ func PruneIntermediateHashesStage(s *PruneState, tx ethdb.RwTx, cfg TrieCfg, ctx
 		}
 		defer tx.Rollback()
 	}
+	s.Done(tx)
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

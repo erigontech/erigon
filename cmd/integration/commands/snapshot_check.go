@@ -209,24 +209,24 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 	)
 
 	if isNew {
-		stage3 := stage(sync, tx, stages.Senders)
+		stage3 := stage(sync, tx, nil, stages.Senders)
 		err = stage3.Update(tx, lastBlockHeaderNumber)
 		if err != nil {
 			return err
 		}
 
-		stage4 := stage(sync, tx, stages.Execution)
+		stage4 := stage(sync, tx, nil, stages.Execution)
 		err = stage4.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
-		stage5 := stage(sync, tx, stages.HashState)
+		stage5 := stage(sync, tx, nil, stages.HashState)
 		err = stage5.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
 
-		stage6 := stage(sync, tx, stages.IntermediateHashes)
+		stage6 := stage(sync, tx, nil, stages.IntermediateHashes)
 		err = stage6.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
@@ -241,7 +241,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 		if err != nil {
 			return err
 		}
-		stage4 := stage(sync, tx, stages.Execution)
+		stage4 := stage(sync, tx, nil, stages.Execution)
 		stage4.BlockNumber = blockNumber - 1
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
@@ -252,7 +252,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 			return fmt.Errorf("execution err %w", err)
 		}
 
-		stage5 := stage(sync, tx, stages.HashState)
+		stage5 := stage(sync, tx, nil, stages.HashState)
 		stage5.BlockNumber = blockNumber - 1
 		log.Info("Stage5", "progress", stage5.BlockNumber)
 		err = stagedsync.SpawnHashStateStage(stage5, tx, stagedsync.StageHashStateCfg(db, tmpDir), ctx)
@@ -260,7 +260,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 			return fmt.Errorf("spawnHashStateStage err %w", err)
 		}
 
-		stage6 := stage(sync, tx, stages.IntermediateHashes)
+		stage6 := stage(sync, tx, nil, stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
 		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx, stagedsync.StageTrieCfg(db, true, true, tmpDir), ctx); err != nil {
