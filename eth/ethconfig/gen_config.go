@@ -24,11 +24,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Ethash           ethash.Config
 		TxPool           core.TxPoolConfig
 		GPO              gasprice.Config
-		DocRoot          string                         `toml:"-"`
-		RPCGasCap        uint64                         `toml:",omitempty"`
-		RPCTxFeeCap      float64                        `toml:",omitempty"`
-		Checkpoint       *params.TrustedCheckpoint      `toml:",omitempty"`
-		CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
+		RPCGasCap        uint64  `toml:",omitempty"`
+		RPCTxFeeCap      float64 `toml:",omitempty"`
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -40,11 +37,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Ethash = c.Ethash
 	enc.TxPool = c.TxPool
 	enc.GPO = c.GPO
-	enc.DocRoot = c.DocRoot
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
-	enc.Checkpoint = c.Checkpoint
-	enc.CheckpointOracle = c.CheckpointOracle
 	return &enc, nil
 }
 
@@ -65,11 +59,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Ethash             *ethash.Config
 		TxPool             *core.TxPoolConfig
 		GPO                *gasprice.Config
-		DocRoot            *string                        `toml:"-"`
-		RPCGasCap          *uint64                        `toml:",omitempty"`
-		RPCTxFeeCap        *float64                       `toml:",omitempty"`
-		Checkpoint         *params.TrustedCheckpoint      `toml:",omitempty"`
-		CheckpointOracle   *params.CheckpointOracleConfig `toml:",omitempty"`
+		RPCGasCap          *uint64  `toml:",omitempty"`
+		RPCTxFeeCap        *float64 `toml:",omitempty"`
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -106,20 +97,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.GPO != nil {
 		c.GPO = *dec.GPO
 	}
-	if dec.DocRoot != nil {
-		c.DocRoot = *dec.DocRoot
-	}
 	if dec.RPCGasCap != nil {
 		c.RPCGasCap = *dec.RPCGasCap
 	}
 	if dec.RPCTxFeeCap != nil {
 		c.RPCTxFeeCap = *dec.RPCTxFeeCap
-	}
-	if dec.Checkpoint != nil {
-		c.Checkpoint = dec.Checkpoint
-	}
-	if dec.CheckpointOracle != nil {
-		c.CheckpointOracle = dec.CheckpointOracle
 	}
 	return nil
 }
