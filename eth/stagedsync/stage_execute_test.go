@@ -85,7 +85,7 @@ func TestPruneExecution(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(uint64(1), available)
 
-	s := &PruneState{ID: stages.Execution, CurrentBlockNumber: 50}
+	s := &PruneState{ID: stages.Execution, ForwardProgress: 50}
 	// check pruning distance > than current stage progress
 	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: ethdb.Prune{History: 100, Receipts: 101, CallTraces: 200}}, ctx, false)
 	assert.NoError(err)

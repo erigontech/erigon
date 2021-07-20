@@ -592,21 +592,21 @@ func PruneExecutionStage(p *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
-		if err = pruneChangeSets(tx, logPrefix, dbutils.AccountChangeSetBucket, cfg.prune.History.PruneTo(p.CurrentBlockNumber), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, dbutils.AccountChangeSetBucket, cfg.prune.History.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
-		if err = pruneChangeSets(tx, logPrefix, dbutils.StorageChangeSetBucket, cfg.prune.History.PruneTo(p.CurrentBlockNumber), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, dbutils.StorageChangeSetBucket, cfg.prune.History.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(p.CurrentBlockNumber), logEvery, ctx); err != nil {
+		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTracesSet(tx, logPrefix, cfg.prune.CallTraces.PruneTo(p.CurrentBlockNumber), logEvery, ctx); err != nil {
+		if err = pruneCallTracesSet(tx, logPrefix, cfg.prune.CallTraces.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}

@@ -420,7 +420,7 @@ func PruneCallTraces(s *PruneState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTraces(tx, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), logEvery, ctx); err != nil {
+		if err = pruneCallTraces(tx, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}

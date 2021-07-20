@@ -51,26 +51,31 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	}
 	quitCh := ctx.Done()
 
-	executionAt, err := s.ExecutionAt(tx)
+	endBlock, err := s.ExecutionAt(tx)
 	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
-	if executionAt <= s.BlockNumber {
+	if endBlock <= s.BlockNumber {
 		return nil
 	}
 
-	var startChangeSetsLookupAt uint64
+	var startBlock uint64
 	if s.BlockNumber > 0 {
-		startChangeSetsLookupAt = s.BlockNumber + 1
+		startBlock = s.BlockNumber + 1
 	}
-	stopChangeSetsLookupAt := executionAt + 1
+	stopChangeSetsLookupAt := endBlock + 1
 
-	if err := promoteHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+	pruneTo := cfg.prune.History.PruneTo(endBlock)
+	if startBlock < pruneTo {
+		startBlock = pruneTo
+	}
+
+	if err := promoteHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, startBlock, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if err := s.Update(tx, executionAt); err != nil {
+	if err := s.Update(tx, endBlock); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -360,7 +365,7 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		defer tx.Rollback()
 	}
 
-	if err = pruneHistoryIndex(tx, dbutils.AccountChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+	if err = pruneHistoryIndex(tx, dbutils.AccountChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
 		return err
 	}
 
@@ -383,7 +388,7 @@ func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		}
 		defer tx.Rollback()
 	}
-	if err = pruneHistoryIndex(tx, dbutils.StorageChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+	if err = pruneHistoryIndex(tx, dbutils.StorageChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
 		return err
 	}
 

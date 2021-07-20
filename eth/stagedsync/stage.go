@@ -82,9 +82,13 @@ func (u *UnwindState) Done(db ethdb.Putter) error {
 }
 
 type PruneState struct {
-	ID                 stages.SyncStage
-	CurrentBlockNumber uint64
-	state              *Sync
+	ID              stages.SyncStage
+	ForwardProgress uint64 // progress of stage forward move
+	PruneProgress   uint64 // progress of stage prune
+	state           *Sync
 }
 
-func (u *PruneState) LogPrefix() string { return u.state.LogPrefix() }
+func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() }
+func (s *PruneState) Update(db ethdb.Putter, newBlockNum uint64) error {
+	return stages.SaveStagePruneProgress(db, s.ID, newBlockNum)
+}

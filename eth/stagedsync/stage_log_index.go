@@ -64,12 +64,16 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 		return nil
 	}
 
-	start := s.BlockNumber
-	if start > 0 {
-		start++
+	startBlock := s.BlockNumber
+	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)
+	if startBlock < pruneTo {
+		startBlock = pruneTo
+	}
+	if startBlock > 0 {
+		startBlock++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, cfg, ctx); err != nil {
+	if err := promoteLogIndex(logPrefix, tx, startBlock, cfg, ctx); err != nil {
 		return err
 	}
 
@@ -326,6 +330,9 @@ func truncateBitmaps(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to
 }
 
 func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
 	logPrefix := s.LogPrefix()
 
 	useExternalTx := tx != nil
@@ -337,10 +344,8 @@ func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if cfg.prune.History.Enabled() {
-		if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, cfg.prune.History.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
-			return err
-		}
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
+		return err
 	}
 
 	if !useExternalTx {

@@ -47,25 +47,24 @@ func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 	logPrefix := s.LogPrefix()
-	to, err := s.ExecutionAt(tx)
+	endBlock, err := s.ExecutionAt(tx)
 	if err != nil {
 		return err
 	}
 
-	var from uint64
-	if s.BlockNumber > 0 {
-		from = s.BlockNumber + 1
+	startBlock := s.BlockNumber
+	pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
+	if startBlock < pruneTo {
+		startBlock = pruneTo
 	}
-
-	pruneTo := cfg.prune.TxIndex.PruneTo(to)
-	if from < pruneTo {
-		from = pruneTo
+	if startBlock > 0 {
+		startBlock++
 	}
-	startKey := dbutils.EncodeBlockNumber(from)
-	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(to), quitCh, cfg); err != nil {
+	startKey := dbutils.EncodeBlockNumber(startBlock)
+	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(endBlock), quitCh, cfg); err != nil {
 		return err
 	}
-	if err = s.Update(tx, to); err != nil {
+	if err = s.Update(tx, endBlock); err != nil {
 		return err
 	}
 
@@ -183,6 +182,9 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 }
 
 func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+	if !cfg.prune.TxIndex.Enabled() {
+		return nil
+	}
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -193,11 +195,16 @@ func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if cfg.prune.TxIndex.Enabled() {
-		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, cfg.prune.TxIndex.PruneTo(s.CurrentBlockNumber), ctx); err != nil {
+	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+	if s.PruneProgress != 0 { // Forward stage doesn't write anything before PruneTo point
+		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s.PruneProgress, to, ctx); err != nil {
 			return err
 		}
 	}
+	if err := s.Update(tx, to); err != nil {
+		return err
+	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -206,7 +213,7 @@ func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 	return nil
 }
 
-func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, ctx context.Context) error {
+func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, from, pruneTo uint64, ctx context.Context) error {
 	collector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close("TxLookup")
 
@@ -219,7 +226,7 @@ func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, ctx 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	for k, v, err := c.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}

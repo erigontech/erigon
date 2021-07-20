@@ -33,8 +33,28 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 	return &UnwindState{id, unwindPoint, currentProgress, common.Hash{}, s}
 }
 
-func (s *Sync) NewPruneState(id stages.SyncStage, currentProgress uint64) *PruneState {
-	return &PruneState{id, currentProgress, s}
+func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx ethdb.Tx, db ethdb.RwKV) (*PruneState, error) {
+	var pruneProgress uint64
+	var err error
+	useExternalTx := tx != nil
+	if useExternalTx {
+		pruneProgress, err = stages.GetStagePruneProgress(tx, id)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if err = db.View(context.Background(), func(tx ethdb.Tx) error {
+			pruneProgress, err = stages.GetStagePruneProgress(tx, id)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	return &PruneState{id, forwardProgress, pruneProgress, s}, nil
 }
 
 func (s *Sync) NextStage() {
@@ -316,7 +336,10 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb
 		return err
 	}
 
-	prune := s.NewPruneState(stage.ID, stageState.BlockNumber)
+	prune, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, db)
+	if err != nil {
+		return err
+	}
 	if err = s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}
