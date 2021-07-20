@@ -430,13 +430,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	var s *stagedsync.StageState
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		s = stage(sync, tx, nil, stages.Execution)
-		return nil
-	}); err != nil {
-		return err
-	}
+	s := stage(sync, nil, db, stages.Execution)
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 	if pruneTo > 0 {
