@@ -249,7 +249,7 @@ func printLogs(tx ethdb.RwTx, timings []Timing) error {
 	var logCtx []interface{}
 	count := 0
 	for i := range timings {
-		if timings[i].took < time.Millisecond {
+		if timings[i].took < 10*time.Millisecond {
 			continue
 		}
 		count++
@@ -264,7 +264,7 @@ func printLogs(tx ethdb.RwTx, timings []Timing) error {
 			logCtx = append(logCtx, timings[i].stage, timings[i].took)
 		}
 	}
-	log.Info("Timings", logCtx...)
+	log.Info("Timings (slower than 10ms)", logCtx...)
 
 	if tx == nil {
 		return nil
