@@ -826,7 +826,8 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 			stagedsync.StageTrieCfg(db, false, true, tmpdir),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
-		stagedsync.MiningUnwindOrder(),
+		stagedsync.MiningUnwindOrder,
+		stagedsync.MiningPruneOrder,
 	)
 
 	return sm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
@@ -840,8 +841,8 @@ func progress(tx ethdb.KVGetter, stage stages.SyncStage) uint64 {
 	return res
 }
 
-func stage(st *stagedsync.Sync, db ethdb.KVGetter, stage stages.SyncStage) *stagedsync.StageState {
-	res, err := st.StageState(stage, db)
+func stage(st *stagedsync.Sync, tx ethdb.Tx, stage stages.SyncStage) *stagedsync.StageState {
+	res, err := st.StageState(stage, tx, nil)
 	if err != nil {
 		panic(err)
 	}

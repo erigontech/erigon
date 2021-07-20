@@ -17,4 +17,8 @@ COPY --from=builder /app/build/bin/* /usr/local/bin/
 
 WORKDIR /var/lib/erigon
 
+RUN adduser -H -u 1000 -g 1000 -D erigon
+RUN chown -R erigon:erigon /var/lib/erigon
+USER erigon
+
 EXPOSE 8545 8546 30303 30303/udp 30304 30304/udp 8080 9090 6060

@@ -39,7 +39,7 @@ func TestStagesSuccess(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -79,7 +79,7 @@ func TestDisabledStages(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -119,7 +119,7 @@ func TestErroredStage(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
+	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, expectedErr, err)
@@ -202,7 +202,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID})
+	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -215,15 +215,15 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 	}
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, tx)
+	stageState, err := state.StageState(stages.Headers, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 1500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, tx)
+	stageState, err = state.StageState(stages.Bodies, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 1000, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, tx)
+	stageState, err = state.StageState(stages.Senders, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 1500, int(stageState.BlockNumber))
 }
@@ -295,7 +295,7 @@ func TestUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID, s[3].ID})
+	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -308,21 +308,21 @@ func TestUnwind(t *testing.T) {
 
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, tx)
+	stageState, err := state.StageState(stages.Headers, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, tx)
+	stageState, err = state.StageState(stages.Bodies, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, tx)
+	stageState, err = state.StageState(stages.Senders, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
 	//check that at unwind disabled stage not appear
 	flow = flow[:0]
-	state.unwindOrder = []*Stage{s[0], s[1], s[2], s[3]}
+	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
 	state.UnwindTo(100, common.Hash{})
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -384,7 +384,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
+	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -397,15 +397,15 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, tx)
+	stageState, err := state.StageState(stages.Headers, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, tx)
+	stageState, err = state.StageState(stages.Bodies, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 2000, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, tx)
+	stageState, err = state.StageState(stages.Senders, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 }
@@ -440,12 +440,12 @@ func TestSyncDoTwice(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
 
-	state = New(s, nil)
+	state = New(s, nil, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -455,15 +455,15 @@ func TestSyncDoTwice(t *testing.T) {
 	}
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, tx)
+	stageState, err := state.StageState(stages.Headers, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 200, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, tx)
+	stageState, err = state.StageState(stages.Bodies, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 400, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, tx)
+	stageState, err = state.StageState(stages.Senders, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 600, int(stageState.BlockNumber))
 }
@@ -498,14 +498,14 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil)
+	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, expectedErr, err)
 
 	expectedErr = nil
 
-	state = New(s, nil)
+	state = New(s, nil, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -577,7 +577,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[0].ID, s[1].ID, s[2].ID})
+	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Error(t, errInterrupted, err)
@@ -599,15 +599,15 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 
 	assert.Equal(t, expectedFlow, flow)
 
-	stageState, err := state.StageState(stages.Headers, tx)
+	stageState, err := state.StageState(stages.Headers, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Bodies, tx)
+	stageState, err = state.StageState(stages.Bodies, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	stageState, err = state.StageState(stages.Senders, tx)
+	stageState, err = state.StageState(stages.Senders, tx, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 }

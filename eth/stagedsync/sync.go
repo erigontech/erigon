@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 type Sync struct {
@@ -22,6 +23,7 @@ type Sync struct {
 
 	stages       []*Stage
 	unwindOrder  []*Stage
+	pruningOrder []*Stage
 	currentStage uint
 }
 
@@ -30,6 +32,10 @@ func (s *Sync) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
 
 func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
 	return &UnwindState{id, unwindPoint, currentProgress, common.Hash{}, s}
+}
+
+func (s *Sync) NewPruneState(id stages.SyncStage, prunePoint, currentProgress uint64) *PruneState {
+	return &PruneState{id, prunePoint, currentProgress, s}
 }
 
 func (s *Sync) NextStage() {
@@ -73,11 +79,6 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
-func (s *Sync) GetLocalHeight(db ethdb.KVGetter) (uint64, error) {
-	state, err := s.StageState(stages.Headers, db)
-	return state.BlockNumber, err
-}
-
 func (s *Sync) UnwindTo(unwindPoint uint64, badBlock common.Hash) {
 	log.Info("UnwindTo", "block", unwindPoint, "bad_block_hash", badBlock.String())
 	s.unwindPoint = &unwindPoint
@@ -86,10 +87,6 @@ func (s *Sync) UnwindTo(unwindPoint uint64, badBlock common.Hash) {
 
 func (s *Sync) IsDone() bool {
 	return s.currentStage >= uint(len(s.stages)) && s.unwindPoint == nil
-}
-
-func (s *Sync) CurrentStage() (uint, *Stage) {
-	return s.currentStage, s.stages[s.currentStage]
 }
 
 func (s *Sync) LogPrefix() string {
@@ -109,18 +106,8 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func (s *Sync) StageByID(id stages.SyncStage) (*Stage, error) {
-	for _, stage := range s.stages {
-		if stage.ID == id {
-			return stage, nil
-		}
-	}
-	return nil, fmt.Errorf("stage not found with id: %v", id)
-}
-
-func New(stagesList []*Stage, unwindOrder []stages.SyncStage) *Sync {
+func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
-
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
 			if s.ID == stageIndex {
@@ -129,40 +116,62 @@ func New(stagesList []*Stage, unwindOrder []stages.SyncStage) *Sync {
 			}
 		}
 	}
+	pruneStages := make([]*Stage, len(stagesList))
+	for i, stageIndex := range pruneOrder {
+		for _, s := range stagesList {
+			if s.ID == stageIndex {
+				pruneStages[i] = s
+				break
+			}
+		}
+	}
 
-	st := &Sync{
+	return &Sync{
 		stages:       stagesList,
 		currentStage: 0,
 		unwindOrder:  unwindStages,
+		//pruningOrder: pruneStages,
 	}
-
-	return st
 }
 
-func (s *Sync) StageState(stage stages.SyncStage, db ethdb.KVGetter) (*StageState, error) {
-	blockNum, err := stages.GetStageProgress(db, stage)
-	if err != nil {
-		return nil, err
+func (s *Sync) StageState(stage stages.SyncStage, tx ethdb.Tx, db ethdb.RoKV) (*StageState, error) {
+	var blockNum uint64
+	var err error
+	useExternalTx := tx != nil
+	if useExternalTx {
+		blockNum, err = stages.GetStageProgress(tx, stage)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if err = db.View(context.Background(), func(tx ethdb.Tx) error {
+			blockNum, err = stages.GetStageProgress(tx, stage)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 	}
+
 	return &StageState{s, stage, blockNum}, nil
 }
 
 func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
+	s.prevUnwindPoint = nil
 	var timings []interface{}
 	for !s.IsDone() {
 		if s.unwindPoint != nil {
-			for i := len(s.unwindOrder) - 1; i >= 0; i-- {
-				if err := s.SetCurrentStage(s.unwindOrder[i].ID); err != nil {
-					return err
-				}
-				if s.unwindOrder[i].Disabled {
+			for j := 0; j < len(s.unwindOrder); j++ {
+				if s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
 				t := time.Now()
-				if err := s.unwindStage(firstCycle, s.unwindOrder[i].ID, db, tx); err != nil {
+				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
 					return err
 				}
-				timings = append(timings, "Unwind "+string(s.unwindOrder[i].ID), time.Since(t))
+				timings = append(timings, "Unwind "+string(s.unwindOrder[j].ID), time.Since(t))
 			}
 			s.prevUnwindPoint = s.unwindPoint
 			s.unwindPoint = nil
@@ -172,21 +181,16 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 			}
 		}
 
-		_, stage := s.CurrentStage()
+		stage := s.stages[s.currentStage]
 
 		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
 			log.Error("STOP_BEFORE_STAGE env flag forced to stop app")
 			os.Exit(1)
 		}
 
-		if stage.Disabled {
+		if stage.Disabled || stage.Forward == nil {
 			logPrefix := s.LogPrefix()
-			message := fmt.Sprintf(
-				"[%s] disabled. %s",
-				logPrefix, stage.DisabledDescription,
-			)
-
-			log.Debug(message)
+			log.Debug(fmt.Sprintf("[%s] disabled. %s", logPrefix, stage.DisabledDescription))
 
 			s.NextStage()
 			continue
@@ -199,6 +203,20 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 		timings = append(timings, string(stage.ID), time.Since(t))
 
 		s.NextStage()
+	}
+
+	for i := 0; i < len(s.pruningOrder); i++ {
+		if s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
+			continue
+		}
+		t := time.Now()
+		if err := s.pruneStage(firstCycle, s.pruningOrder[i], db, tx); err != nil {
+			return err
+		}
+		timings = append(timings, "Pruning "+string(s.pruningOrder[i].ID), time.Since(t))
+	}
+	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+		return err
 	}
 
 	if err := printLogs(tx, timings); err != nil {
@@ -242,25 +260,10 @@ func printLogs(tx ethdb.RwTx, timings []interface{}) error {
 	return nil
 }
 
-func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	stageState, err := s.StageState(stage.ID, tx)
+func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) (err error) {
+	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
-	}
-
-	if !useExternalTx {
-		tx.Rollback()
-		tx = nil
 	}
 
 	start := time.Now()
@@ -275,40 +278,23 @@ func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle b
 	return nil
 }
 
-func (s *Sync) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.RwKV, tx ethdb.RwTx) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
+func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
+	start := time.Now()
+	log.Info("Unwind...", "stage", stage.ID)
+	stageState, err := s.StageState(stage.ID, tx, db)
+	if err != nil {
+		return err
 	}
 
-	start := time.Now()
-	log.Info("Unwinding...", "stage", stageID)
-	stage, err := s.StageByID(stageID)
-	if err != nil {
-		return err
-	}
-	if stage.Unwind == nil {
-		return nil
-	}
-	var stageState *StageState
-	stageState, err = s.StageState(stageID, tx)
-	if err != nil {
-		return err
-	}
-	unwind := s.NewUnwindState(stageID, *s.unwindPoint, stageState.BlockNumber)
+	unwind := s.NewUnwindState(stage.ID, *s.unwindPoint, stageState.BlockNumber)
 	unwind.BadBlock = s.badBlock
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
 		return nil
 	}
-	if !useExternalTx {
-		tx.Rollback()
-		tx = nil
+
+	if err = s.SetCurrentStage(stage.ID); err != nil {
+		return err
 	}
 
 	err = stage.Unwind(firstCycle, unwind, stageState, tx)
@@ -317,7 +303,36 @@ func (s *Sync) unwindStage(firstCycle bool, stageID stages.SyncStage, db ethdb.R
 	}
 
 	if time.Since(start) > 30*time.Second {
-		log.Info("Unwinding... DONE!", "stage", string(unwind.ID))
+		log.Info("Unwind... DONE!", "stage", string(unwind.ID))
+	}
+	return nil
+}
+
+func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
+	start := time.Now()
+	log.Info("Prune...", "stage", stage.ID)
+
+	stageState, err := s.StageState(stage.ID, tx, db)
+	if err != nil {
+		return err
+	}
+
+	prunePoint := stageState.BlockNumber - params.FullImmutabilityThreshold // TODO: cli-customizable
+	prune := s.NewPruneState(stage.ID, prunePoint, stageState.BlockNumber)
+	if stageState.BlockNumber <= prune.PrunePoint {
+		return nil
+	}
+	if err = s.SetCurrentStage(stage.ID); err != nil {
+		return err
+	}
+
+	err = stage.Prune(firstCycle, prune, tx)
+	if err != nil {
+		return err
+	}
+
+	if time.Since(start) > 30*time.Second {
+		log.Info("Prune... DONE!", "stage", string(prune.ID))
 	}
 	return nil
 }
