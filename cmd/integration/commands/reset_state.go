@@ -222,7 +222,11 @@ func printStages(db ethdb.KVGetter) error {
 		if progress, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s \t %d\n", string(stage), progress)
+		prunedTo, err := stages.GetStagePruneProgress(db, stage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s \t %d \t pruned_to=%d\n", string(stage), progress, prunedTo)
 	}
 	return nil
 }

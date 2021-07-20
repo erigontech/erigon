@@ -55,6 +55,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	type S struct {
 		StageName   string         `json:"stage_name"`
 		BlockNumber hexutil.Uint64 `json:"block_number"`
+		PrunedTo    hexutil.Uint64 `json:"pruned_to"`
 	}
 	stagesMap := make([]S, len(stages.AllStages))
 	for i, stage := range stages.AllStages {
@@ -62,8 +63,13 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
+		prunedTo, err := stages.GetStagePruneProgress(tx, stage)
+		if err != nil {
+			return nil, err
+		}
 		stagesMap[i].StageName = string(stage)
 		stagesMap[i].BlockNumber = hexutil.Uint64(progress)
+		stagesMap[i].PrunedTo = hexutil.Uint64(prunedTo)
 	}
 
 	return map[string]interface{}{
