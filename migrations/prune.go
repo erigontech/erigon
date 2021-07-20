@@ -22,10 +22,10 @@ var storageMode = Migration{
 			//StorageModeCallTraces - does not build index of call traces
 			StorageModeCallTraces = []byte("smCallTraces")
 		)
-		prune := prune.Mode{Initialised: true}
-		castToPruneDistance := func(v []byte) prune.PruneDistance {
+		pm := prune.Mode{Initialised: true}
+		castToPruneDistance := func(v []byte) prune.Distance {
 			if len(v) == 1 && v[0] == 1 {
-				return math.MaxUint64 // means, don't prune
+				return math.MaxUint64 // means, don't pm
 			}
 			return params.FullImmutabilityThreshold
 		}
@@ -34,38 +34,38 @@ var storageMode = Migration{
 			if err != nil {
 				return err
 			}
-			prune.History = castToPruneDistance(v)
+			pm.History = castToPruneDistance(v)
 		}
 		{
 			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeReceipts)
 			if err != nil {
 				return err
 			}
-			prune.Receipts = castToPruneDistance(v)
+			pm.Receipts = castToPruneDistance(v)
 		}
 		{
 			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeTxIndex)
 			if err != nil {
 				return err
 			}
-			prune.TxIndex = castToPruneDistance(v)
+			pm.TxIndex = castToPruneDistance(v)
 		}
 		{
 			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeCallTraces)
 			if err != nil {
 				return err
 			}
-			prune.CallTraces = castToPruneDistance(v)
+			pm.CallTraces = castToPruneDistance(v)
 		}
 		{
 			v, err := db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeTEVM)
 			if err != nil {
 				return err
 			}
-			prune.Experiments.TEVM = len(v) == 1 && v[0] == 1
+			pm.Experiments.TEVM = len(v) == 1 && v[0] == 1
 		}
 
-		err = prune.SetPruneModeIfNotExist(db, prune)
+		err = prune.SetIfNotExist(db, pm)
 		if err != nil {
 			return err
 		}
