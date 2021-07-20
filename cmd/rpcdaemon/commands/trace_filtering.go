@@ -419,15 +419,27 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		sender, _ := tx.GetSender()
 		gas := hexutil.Uint64(tx.GetGas())
 		gasPrice := hexutil.Big(*tx.GetPrice().ToBig())
+		var feeCap *hexutil.Big
+		if tx.GetFeeCap() != nil {
+			feeCap = (*hexutil.Big)(tx.GetFeeCap().ToBig())
+		}
+		var tip *hexutil.Big
+		if tx.GetTip() != nil {
+			tip = (*hexutil.Big)(tx.GetTip().ToBig())
+		}
 		value := hexutil.Big(*tx.GetValue().ToBig())
+		hash := tx.Hash()
 		toExecute = append(toExecute, TraceCallParam{
-			From:       &sender,
-			To:         tx.GetTo(),
-			Gas:        &gas,
-			GasPrice:   &gasPrice,
-			Value:      &value,
-			Data:       tx.GetData(),
-			traceTypes: []string{TraceTypeTrace, TraceTypeStateDiff},
+			From:                 &sender,
+			To:                   tx.GetTo(),
+			Gas:                  &gas,
+			GasPrice:             &gasPrice,
+			MaxFeePerGas:         feeCap,
+			MaxPriorityFeePerGas: tip,
+			Value:                &value,
+			Data:                 tx.GetData(),
+			txHash:               &hash,
+			traceTypes:           []string{TraceTypeTrace, TraceTypeStateDiff},
 		})
 	}
 
@@ -435,7 +447,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header)
+	}, header, false /* gasBailout */)
 
 	if cmErr != nil {
 		return nil, cmErr
