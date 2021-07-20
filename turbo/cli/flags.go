@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -56,16 +57,22 @@ var (
 		Value: node.DefaultConfig.P2P.MaxPeers,
 	}
 
-	StorageModeFlag = cli.StringFlag{
-		Name: "storage-mode",
-		Usage: `Configures the storage mode of the app:
-* h - write history to the DB
-* r - write receipts to the DB
-* t - write tx lookup index to the DB
-* c - write call traces index to the DB,
-* e - write TEVM translated code to the DB`,
+	PruneFlag = cli.StringFlag{
+		Name: "prune",
+		Usage: `Delete ancient data from DB. By default - delete if older than 90K block:
+* h - prune history (ChangeSets, HistoryIndices - used by historical state access)
+* r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
+* t - prune tx lookup (used to get transaction by hash)
+* c - prune call traces (used by trace_* methods)`,
 		Value: "default",
 	}
+	ExperimentsFlag = cli.StringFlag{
+		Name: "experiments",
+		Usage: `Enable some experimental stages:
+* tevm - write TEVM translated code to the DB`,
+		Value: "default",
+	}
+
 	SnapshotModeFlag = cli.StringFlag{
 		Name: "snapshot.mode",
 		Usage: `Configures the snapshot mode of the app:
@@ -125,7 +132,7 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	mode, err := ethdb.PruneModeFromString(ctx.GlobalString(StorageModeFlag.Name))
+	mode, err := ethdb.PruneFromString(ctx.GlobalString(PruneFlag.Name), strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -169,8 +176,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
-	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
-		mode, err := ethdb.PruneModeFromString(*v)
+	if v := f.String(PruneFlag.Name, PruneFlag.Value, PruneFlag.Usage); v != nil {
+		var experiments []string
+		if exp := f.StringSlice(ExperimentsFlag.Name, nil, ExperimentsFlag.Usage); exp != nil {
+			experiments = *exp
+		}
+		mode, err := ethdb.PruneFromString(*v, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}

@@ -56,6 +56,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		EthDiscoveryURLs   []string
 		Whitelist          map[uint64]common.Hash `toml:"-"`
 		Mode               *string
+		Experiments        *[]string
 		OnlyAnnounce       *bool
 		SkipBcVersionCheck *bool `toml:"-"`
 		DatabaseHandles    *int  `toml:"-"`
@@ -87,7 +88,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Whitelist = dec.Whitelist
 	}
 	if dec.Mode != nil {
-		mode, err := ethdb.PruneModeFromString(*dec.Mode)
+		mode, err := ethdb.PruneFromString(*dec.Mode, *dec.Experiments)
 		if err != nil {
 			return err
 		}

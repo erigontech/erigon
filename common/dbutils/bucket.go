@@ -284,7 +284,7 @@ const (
 // Keys
 var (
 	//StorageModeHistory - does node save history.
-	StorageModeHistory = []byte("smHistory")
+	//StorageModeHistory = []byte("smHistory")
 	//StorageModeReceipts - does node save receipts.
 	StorageModeReceipts = []byte("smReceipts")
 	//StorageModeTxIndex - does node save transactions index.
@@ -293,6 +293,11 @@ var (
 	StorageModeCallTraces = []byte("smCallTraces")
 	//StorageModeTEVM - does not translate EVM to TEVM
 	StorageModeTEVM = []byte("smTEVM")
+
+	PruneDistanceHistory    = []byte("pruneHistory")
+	PruneDistanceReceipts   = []byte("pruneReceipts")
+	PruneDistanceTxIndex    = []byte("pruneTxIndex")
+	PruneDistanceCallTraces = []byte("pruneCallTraces")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 

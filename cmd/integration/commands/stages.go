@@ -232,9 +232,9 @@ var cmdRunMigrations = &cobra.Command{
 	},
 }
 
-var cmdSetStorageMode = &cobra.Command{
-	Use:   "set_storage_mode",
-	Short: "Override storage mode (if you know what you are doing)",
+var cmdSetPrune = &cobra.Command{
+	Use:   "set_prune",
+	Short: "Override existing --prune flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		db := openDB(chaindata, true)
 		defer db.Close()
@@ -333,10 +333,11 @@ func init() {
 	withChain(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 
-	withDatadir(cmdSetStorageMode)
-	withChain(cmdSetStorageMode)
-	cmdSetStorageMode.Flags().StringVar(&storageMode, "storage-mode", "htre", "Storage mode to override database")
-	rootCmd.AddCommand(cmdSetStorageMode)
+	withDatadir(cmdSetPrune)
+	withChain(cmdSetPrune)
+	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
+	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
+	rootCmd.AddCommand(cmdSetPrune)
 }
 
 func stageBodies(db ethdb.RwKV, ctx context.Context) error {
@@ -850,7 +851,7 @@ func stage(st *stagedsync.Sync, tx ethdb.Tx, stage stages.SyncStage) *stagedsync
 }
 
 func overrideStorageMode(db ethdb.RwKV) error {
-	prune, err := ethdb.PruneModeFromString(storageMode)
+	prune, err := ethdb.PruneFromString(pruneFlag, experiments)
 	if err != nil {
 		return err
 	}

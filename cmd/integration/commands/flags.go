@@ -28,7 +28,8 @@ var (
 	integrityFast      bool
 	file               string
 	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
-	storageMode        string
+	pruneFlag          string
+	experiments        []string
 	chain              string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
 
