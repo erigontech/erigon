@@ -139,7 +139,7 @@ func init() {
 }
 
 func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx context.Context) error {
-	prune, engine, chainConfig, vmConfig, txPool, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
+	pm, engine, chainConfig, vmConfig, txPool, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -178,7 +178,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		stages.TxPool, // TODO: enable TxPool stage
 		stages.Finish)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, prune, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir)
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
 		return func(firstCycle bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {
@@ -274,7 +274,7 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 		}
 
 		if integrityFast {
-			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, prune.History.PruneTo(execToBlock)); err != nil {
+			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, pm.History.PruneTo(execToBlock)); err != nil {
 				return err
 			}
 			integrity.Trie(tx, integritySlow, ctx)
@@ -473,7 +473,7 @@ func loopIh(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 }
 
 func loopExec(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
-	mode, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -492,7 +492,7 @@ func loopExec(db ethdb.RwKV, ctx context.Context, unwind uint64) error {
 
 	from := progress(tx, stages.Execution)
 	to := from + unwind
-	cfg := stagedsync.StageExecuteBlocksCfg(db, mode, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx ethdb.RwTx) error {

@@ -14,19 +14,20 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type TxLookupCfg struct {
 	db     ethdb.RwKV
-	prune  ethdb.Prune
+	prune  prune.Mode
 	tmpdir string
 }
 
 func StageTxLookupCfg(
 	db ethdb.RwKV,
-	prune ethdb.Prune,
+	prune prune.Mode,
 	tmpdir string,
 ) TxLookupCfg {
 	return TxLookupCfg{
@@ -196,12 +197,14 @@ func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 	}
 
 	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-	if s.PruneProgress != 0 { // Forward stage doesn't write anything before PruneTo point
+	// Forward stage doesn't write anything before PruneTo point
+	// TODO: maybe need do binary search of values in db in this case
+	if s.PruneProgress != 0 {
 		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s.PruneProgress, to, ctx); err != nil {
 			return err
 		}
 	}
-	if err := s.Update(tx, to); err != nil {
+	if err = s.Done(tx); err != nil {
 		return err
 	}
 
@@ -237,7 +240,7 @@ func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, from, pruneTo uint64
 
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Prune collect", logPrefix), "table", dbutils.BlockBodyPrefix, "key", fmt.Sprintf("%x", k))
+			log.Info(fmt.Sprintf("[%s] Mode collect", logPrefix), "table", dbutils.BlockBodyPrefix, "key", fmt.Sprintf("%x", k))
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:

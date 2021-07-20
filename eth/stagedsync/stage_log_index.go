@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -29,12 +30,12 @@ const (
 type LogIndexCfg struct {
 	tmpdir     string
 	db         ethdb.RwKV
-	prune      ethdb.Prune
+	prune      prune.Mode
 	bufLimit   datasize.ByteSize
 	flushEvery time.Duration
 }
 
-func StageLogIndexCfg(db ethdb.RwKV, prune ethdb.Prune, tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db ethdb.RwKV, prune prune.Mode, tmpDir string) LogIndexCfg {
 	return LogIndexCfg{
 		db:         db,
 		prune:      prune,
@@ -73,15 +74,15 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 		startBlock++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, startBlock, cfg, ctx); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, cfg, ctx); err != nil {
+		return err
+	}
+	if err = s.Update(tx, endBlock); err != nil {
 		return err
 	}
 
-	if err := s.Update(tx, endBlock); err != nil {
-		return err
-	}
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -344,7 +345,11 @@ func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
+	if err = s.Done(tx); err != nil {
 		return err
 	}
 
@@ -380,7 +385,7 @@ func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint6
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.Log, "block", blockNum)
+				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Log, "block", blockNum)
 			case <-ctx.Done():
 				return common.ErrStopped
 			default:
@@ -424,7 +429,7 @@ func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint6
 				}
 				select {
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
+					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
 				case <-ctx.Done():
 					return common.ErrStopped
 				default:
@@ -460,7 +465,7 @@ func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint6
 				}
 				select {
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
+					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
 				case <-ctx.Done():
 					return common.ErrStopped
 				default:

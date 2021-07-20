@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
@@ -404,7 +405,7 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 }
 
 func stageExec(db ethdb.RwKV, ctx context.Context) error {
-	prune, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	if reset {
 		genesis, _ := byChain()
@@ -431,7 +432,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	}
 
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, prune, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -744,15 +745,14 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	return genesis, chainConfig
 }
 
-func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConfig) (ethdb.Prune, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
+func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	snapshotDir = path.Join(datadir, "erigon", "snapshot")
 
-	var prune ethdb.Prune
-
+	var pm prune.Mode
 	var err error
 	if err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		prune, err = ethdb.PruneMode(tx)
+		pm, err = prune.Get(tx)
 		if err != nil {
 			return err
 		}
@@ -801,7 +801,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 
 	cfg := ethconfig.Defaults
-	cfg.Prune = prune
+	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
@@ -831,7 +831,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 		stagedsync.MiningPruneOrder,
 	)
 
-	return prune, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
+	return pm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
 }
 
 func progress(tx ethdb.KVGetter, stage stages.SyncStage) uint64 {
@@ -851,19 +851,19 @@ func stage(st *stagedsync.Sync, tx ethdb.Tx, stage stages.SyncStage) *stagedsync
 }
 
 func overrideStorageMode(db ethdb.RwKV) error {
-	prune, err := ethdb.PruneFromString(pruneFlag, experiments)
+	pm, err := prune.FromString(pruneFlag, experiments)
 	if err != nil {
 		return err
 	}
 	return db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err = ethdb.OverridePruneMode(tx, prune); err != nil {
+		if err = prune.Override(tx, pm); err != nil {
 			return err
 		}
-		prune, err = ethdb.PruneMode(tx)
+		pm, err = prune.Get(tx)
 		if err != nil {
 			return err
 		}
-		log.Info("Storage mode in DB", "mode", prune.ToString())
+		log.Info("Storage mode in DB", "mode", pm.ToString())
 		return nil
 	})
 }

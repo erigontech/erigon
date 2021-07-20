@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/stretchr/testify/require"
 )
@@ -95,7 +96,7 @@ func TestLogIndex(t *testing.T) {
 
 	expectAddrs, expectTopics := genReceipts(t, tx, 10000)
 
-	cfg := StageLogIndexCfg(nil, ethdb.DefaultPruneMode, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
@@ -114,7 +115,7 @@ func TestLogIndex(t *testing.T) {
 		require.Equal(expect, m.GetCardinality())
 	}
 
-	// Prune test
+	// Mode test
 	err = pruneLogIndex("", tx, tmpDir, 500, ctx)
 	require.NoError(err)
 

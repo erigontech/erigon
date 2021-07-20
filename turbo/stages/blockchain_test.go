@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -666,7 +667,7 @@ func TestModes(t *testing.T) {
 	)
 }
 
-func doModesTest(t *testing.T, pm ethdb.Prune) error {
+func doModesTest(t *testing.T, pm prune.Mode) error {
 	fmt.Printf("h=%v, r=%v, t=%v\n", pm.History.Enabled(), pm.Receipts.Enabled(), pm.TxIndex.Enabled())
 	require := require.New(t)
 	// Configure and generate a sample block chain
@@ -824,21 +825,21 @@ func doModesTest(t *testing.T, pm ethdb.Prune) error {
 	return nil
 }
 
-func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, ethdb.Prune) error) {
-	err := runPermutation(t, testFunc, 0, ethdb.DefaultPruneMode)
+func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, prune.Mode) error) {
+	err := runPermutation(t, testFunc, 0, prune.DefaultMode)
 	if err != nil {
 		t.Errorf("error while testing stuff: %v", err)
 	}
 }
 
-func runPermutation(t *testing.T, testFunc func(*testing.T, ethdb.Prune) error, current int, pm ethdb.Prune) error {
+func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, current int, pm prune.Mode) error {
 	if current == 3 {
 		return testFunc(t, pm)
 	}
 	if err := runPermutation(t, testFunc, current+1, pm); err != nil {
 		return err
 	}
-	invert := func(a ethdb.PruneDistance) ethdb.PruneDistance {
+	invert := func(a prune.Distance) prune.Distance {
 		if a.Enabled() {
 			return math.MaxUint64
 		}

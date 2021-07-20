@@ -54,6 +54,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -213,7 +214,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err := ethdb.SetPruneModeIfNotExist(tx, config.Prune); err != nil {
+		if err := prune.SetIfNotExist(tx, config.Prune); err != nil {
 			return err
 		}
 
@@ -221,7 +222,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return err
 		}
 
-		prune, err := ethdb.PruneMode(tx)
+		prune, err := prune.Get(tx)
 		if err != nil {
 			return err
 		}

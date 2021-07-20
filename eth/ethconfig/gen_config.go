@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -88,7 +88,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Whitelist = dec.Whitelist
 	}
 	if dec.Mode != nil {
-		mode, err := ethdb.PruneFromString(*dec.Mode, *dec.Experiments)
+		mode, err := prune.FromString(*dec.Mode, *dec.Experiments)
 		if err != nil {
 			return err
 		}

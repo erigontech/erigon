@@ -21,20 +21,21 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 type CallTracesCfg struct {
 	db      ethdb.RwKV
-	prune   ethdb.Prune
+	prune   prune.Mode
 	ToBlock uint64 // not setting this params means no limit
 	tmpdir  string
 }
 
 func StageCallTracesCfg(
 	db ethdb.RwKV,
-	prune ethdb.Prune,
+	prune prune.Mode,
 	toBlock uint64,
 	tmpdir string,
 ) CallTracesCfg {
@@ -500,7 +501,7 @@ func pruneCallTraces(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, lo
 				}
 				select {
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.CallFromIndex, "block", blockNum)
+					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.CallFromIndex, "block", blockNum)
 				case <-ctx.Done():
 					return common.ErrStopped
 				default:
@@ -535,7 +536,7 @@ func pruneCallTraces(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, lo
 				}
 				select {
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.CallToIndex, "block", blockNum)
+					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.CallToIndex, "block", blockNum)
 				case <-ctx.Done():
 					return common.ErrStopped
 				default:

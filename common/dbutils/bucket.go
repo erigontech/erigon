@@ -283,14 +283,6 @@ const (
 
 // Keys
 var (
-	//StorageModeHistory - does node save history.
-	//StorageModeHistory = []byte("smHistory")
-	//StorageModeReceipts - does node save receipts.
-	StorageModeReceipts = []byte("smReceipts")
-	//StorageModeTxIndex - does node save transactions index.
-	StorageModeTxIndex = []byte("smTxIndex")
-	//StorageModeCallTraces - does not build index of call traces
-	StorageModeCallTraces = []byte("smCallTraces")
 	//StorageModeTEVM - does not translate EVM to TEVM
 	StorageModeTEVM = []byte("smTEVM")
 

@@ -5,10 +5,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
 func DefaultStages(ctx context.Context,
-	sm ethdb.Prune,
+	sm prune.Mode,
 	headers HeadersCfg,
 	blockHashCfg BlockHashesCfg,
 	snapshotHeaders SnapshotHeadersCfg,

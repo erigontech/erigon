@@ -11,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -46,7 +47,7 @@ type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 type ExecuteBlockCfg struct {
 	db            ethdb.RwKV
 	batchSize     datasize.ByteSize
-	prune         ethdb.Prune
+	prune         prune.Mode
 	changeSetHook ChangeSetHook
 	chainConfig   *params.ChainConfig
 	engine        consensus.Engine
@@ -58,7 +59,7 @@ type ExecuteBlockCfg struct {
 
 func StageExecuteBlocksCfg(
 	kv ethdb.RwKV,
-	prune ethdb.Prune,
+	prune prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
 	chainConfig *params.ChainConfig,
@@ -364,7 +365,7 @@ func pruneChangeSets(tx ethdb.RwTx, logPrefix string, table string, pruneTo uint
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", table, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", table, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -577,8 +578,8 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-func PruneExecutionStage(p *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
-	logPrefix := p.LogPrefix()
+func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -592,25 +593,28 @@ func PruneExecutionStage(p *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
-		if err = pruneChangeSets(tx, logPrefix, dbutils.AccountChangeSetBucket, cfg.prune.History.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, dbutils.AccountChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
-		if err = pruneChangeSets(tx, logPrefix, dbutils.StorageChangeSetBucket, cfg.prune.History.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, dbutils.StorageChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTracesSet(tx, logPrefix, cfg.prune.CallTraces.PruneTo(p.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneCallTracesSet(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 
+	if err = s.Done(tx); err != nil {
+		return err
+	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
@@ -640,7 +644,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.Receipts, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Receipts, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -675,7 +679,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.Log, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Log, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -716,7 +720,7 @@ func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEver
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", dbutils.CallTraceSet, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.CallTraceSet, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:

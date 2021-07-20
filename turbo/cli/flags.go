@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -132,7 +133,7 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	mode, err := ethdb.PruneFromString(ctx.GlobalString(PruneFlag.Name), strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","))
+	mode, err := prune.FromString(ctx.GlobalString(PruneFlag.Name), strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
@@ -181,7 +182,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if exp := f.StringSlice(ExperimentsFlag.Name, nil, ExperimentsFlag.Usage); exp != nil {
 			experiments = *exp
 		}
-		mode, err := ethdb.PruneFromString(*v, experiments)
+		mode, err := prune.FromString(*v, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}

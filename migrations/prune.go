@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -21,8 +22,8 @@ var storageMode = Migration{
 			//StorageModeCallTraces - does not build index of call traces
 			StorageModeCallTraces = []byte("smCallTraces")
 		)
-		prune := ethdb.Prune{Initialised: true}
-		castToPruneDistance := func(v []byte) ethdb.PruneDistance {
+		prune := prune.Mode{Initialised: true}
+		castToPruneDistance := func(v []byte) prune.PruneDistance {
 			if len(v) == 1 && v[0] == 1 {
 				return math.MaxUint64 // means, don't prune
 			}
@@ -64,7 +65,7 @@ var storageMode = Migration{
 			prune.Experiments.TEVM = len(v) == 1 && v[0] == 1
 		}
 
-		err = ethdb.SetPruneModeIfNotExist(db, prune)
+		err = prune.SetPruneModeIfNotExist(db, prune)
 		if err != nil {
 			return err
 		}

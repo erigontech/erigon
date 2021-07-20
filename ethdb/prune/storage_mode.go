@@ -1,4 +1,4 @@
-package ethdb
+package prune
 
 import (
 	"encoding/binary"
@@ -6,10 +6,11 @@ import (
 	"math"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
-var DefaultPruneMode = Prune{
+var DefaultMode = Mode{
 	Initialised: true,
 	History:     math.MaxUint64, // all off
 	Receipts:    math.MaxUint64,
@@ -18,10 +19,14 @@ var DefaultPruneMode = Prune{
 	Experiments: Experiments{}, // all off
 }
 
-func PruneFromString(flags string, experiments []string) (Prune, error) {
-	mode := DefaultPruneMode
+type Experiments struct {
+	TEVM bool
+}
+
+func FromString(flags string, experiments []string) (Mode, error) {
+	mode := DefaultMode
 	if flags == "default" {
-		return DefaultPruneMode, nil
+		return DefaultMode, nil
 	}
 	mode.Initialised = true
 	for _, flag := range flags {
@@ -35,7 +40,7 @@ func PruneFromString(flags string, experiments []string) (Prune, error) {
 		case 'c':
 			mode.CallTraces = params.FullImmutabilityThreshold
 		default:
-			return DefaultPruneMode, fmt.Errorf("unexpected flag found: %c", flag)
+			return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
 	}
 
@@ -46,15 +51,15 @@ func PruneFromString(flags string, experiments []string) (Prune, error) {
 		case "":
 			// skip
 		default:
-			return DefaultPruneMode, fmt.Errorf("unexpected experiment found: %s", ex)
+			return DefaultMode, fmt.Errorf("unexpected experiment found: %s", ex)
 		}
 	}
 
 	return mode, nil
 }
 
-func PruneMode(db KVGetter) (Prune, error) {
-	prune := DefaultPruneMode
+func Get(db ethdb.KVGetter) (Mode, error) {
+	prune := DefaultMode
 	prune.Initialised = true
 
 	v, err := db.GetOne(dbutils.DatabaseInfoBucket, dbutils.PruneDistanceHistory)
@@ -62,7 +67,7 @@ func PruneMode(db KVGetter) (Prune, error) {
 		return prune, err
 	}
 	if v != nil {
-		prune.History = PruneDistance(binary.BigEndian.Uint64(v))
+		prune.History = Distance(binary.BigEndian.Uint64(v))
 	} else {
 		prune.History = math.MaxUint64
 	}
@@ -71,7 +76,7 @@ func PruneMode(db KVGetter) (Prune, error) {
 		return prune, err
 	}
 	if v != nil {
-		prune.Receipts = PruneDistance(binary.BigEndian.Uint64(v))
+		prune.Receipts = Distance(binary.BigEndian.Uint64(v))
 	} else {
 		prune.Receipts = math.MaxUint64
 	}
@@ -80,7 +85,7 @@ func PruneMode(db KVGetter) (Prune, error) {
 		return prune, err
 	}
 	if v != nil {
-		prune.TxIndex = PruneDistance(binary.BigEndian.Uint64(v))
+		prune.TxIndex = Distance(binary.BigEndian.Uint64(v))
 	} else {
 		prune.TxIndex = math.MaxUint64
 	}
@@ -90,7 +95,7 @@ func PruneMode(db KVGetter) (Prune, error) {
 		return prune, err
 	}
 	if v != nil {
-		prune.CallTraces = PruneDistance(binary.BigEndian.Uint64(v))
+		prune.CallTraces = Distance(binary.BigEndian.Uint64(v))
 	} else {
 		prune.CallTraces = math.MaxUint64
 	}
@@ -103,24 +108,25 @@ func PruneMode(db KVGetter) (Prune, error) {
 	return prune, nil
 }
 
-type Prune struct {
+type Mode struct {
 	Initialised bool // Set when the values are initialised (not default)
-	History     PruneDistance
-	Receipts    PruneDistance
-	TxIndex     PruneDistance
-	CallTraces  PruneDistance
+	History     Distance
+	Receipts    Distance
+	TxIndex     Distance
+	CallTraces  Distance
 	Experiments Experiments
 }
 
-// PruneDistance amount of blocks to keep in DB
+// Distance amount of blocks to keep in DB
 // but manual manipulation with such distance is very unsafe
 // for example:
 //    deleteUntil := currentStageProgress - pruningDistance
 // may delete whole db - because of uint64 underflow when pruningDistance > currentStageProgress
-type PruneDistance uint64
+type Distance uint64
 
-func (p PruneDistance) Enabled() bool { return p != math.MaxUint64 }
-func (p PruneDistance) PruneTo(stageHead uint64) uint64 {
+func (p Distance) Enabled() bool { return p != math.MaxUint64 }
+
+func (p Distance) PruneTo(stageHead uint64) uint64 {
 	if p == 0 {
 		panic("pruning distance were not set")
 	}
@@ -130,7 +136,7 @@ func (p PruneDistance) PruneTo(stageHead uint64) uint64 {
 	return stageHead - uint64(p)
 }
 
-func (m Prune) ToString() string {
+func (m Mode) ToString() string {
 	if !m.Initialised {
 		return "default"
 	}
@@ -153,7 +159,7 @@ func (m Prune) ToString() string {
 	return modeString
 }
 
-func OverridePruneMode(db RwTx, sm Prune) error {
+func Override(db ethdb.RwTx, sm Mode) error {
 	var (
 		err error
 	)
@@ -186,12 +192,12 @@ func OverridePruneMode(db RwTx, sm Prune) error {
 	return nil
 }
 
-func SetPruneModeIfNotExist(db GetPut, sm Prune) error {
+func SetIfNotExist(db ethdb.GetPut, sm Mode) error {
 	var (
 		err error
 	)
 	if !sm.Initialised {
-		sm = DefaultPruneMode
+		sm = DefaultMode
 	}
 
 	err = setDistanceOnEmpty(db, dbutils.PruneDistanceHistory, sm.History)
@@ -222,7 +228,7 @@ func SetPruneModeIfNotExist(db GetPut, sm Prune) error {
 	return nil
 }
 
-func setDistance(db Putter, key []byte, distance PruneDistance) error {
+func setDistance(db ethdb.Putter, key []byte, distance Distance) error {
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, uint64(distance))
 	if err := db.Put(dbutils.DatabaseInfoBucket, key, v); err != nil {
@@ -231,7 +237,7 @@ func setDistance(db Putter, key []byte, distance PruneDistance) error {
 	return nil
 }
 
-func setDistanceOnEmpty(db GetPut, key []byte, distance PruneDistance) error {
+func setDistanceOnEmpty(db ethdb.GetPut, key []byte, distance Distance) error {
 	mode, err := db.GetOne(dbutils.DatabaseInfoBucket, key)
 	if err != nil {
 		return err
@@ -247,7 +253,7 @@ func setDistanceOnEmpty(db GetPut, key []byte, distance PruneDistance) error {
 	return nil
 }
 
-func setMode(db RwTx, key []byte, currentValue bool) error {
+func setMode(db ethdb.RwTx, key []byte, currentValue bool) error {
 	val := []byte{2}
 	if currentValue {
 		val = []byte{1}
@@ -258,7 +264,7 @@ func setMode(db RwTx, key []byte, currentValue bool) error {
 	return nil
 }
 
-func setModeOnEmpty(db GetPut, key []byte, currentValue bool) error {
+func setModeOnEmpty(db ethdb.GetPut, key []byte, currentValue bool) error {
 	mode, err := db.GetOne(dbutils.DatabaseInfoBucket, key)
 	if err != nil {
 		return err
@@ -274,8 +280,4 @@ func setModeOnEmpty(db GetPut, key []byte, currentValue bool) error {
 	}
 
 	return nil
-}
-
-type Experiments struct {
-	TEVM bool
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
@@ -129,19 +130,19 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 }
 
 func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
-	return MockWithGenesisStorageMode(t, gspec, key, ethdb.DefaultPruneMode)
+	return MockWithGenesisStorageMode(t, gspec, key, prune.DefaultMode)
 }
 
 func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(t, gspec, key, ethdb.DefaultPruneMode, engine)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine)
 }
 
-func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune ethdb.Prune) *MockSentry {
+func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode) *MockSentry {
 	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker())
 }
 
-func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune ethdb.Prune, engine consensus.Engine) *MockSentry {
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine) *MockSentry {
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()

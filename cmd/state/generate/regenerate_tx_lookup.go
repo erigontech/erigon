@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -35,7 +35,7 @@ func RegenerateTxLookup(chaindata string) error {
 		close(quitCh)
 	}()
 
-	pm, err := ethdb.PruneMode(tx)
+	pm, err := prune.Get(tx)
 	if err != nil {
 		return err
 	}

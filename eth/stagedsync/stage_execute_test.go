@@ -7,8 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -87,7 +87,7 @@ func TestPruneExecution(t *testing.T) {
 
 	s := &PruneState{ID: stages.Execution, ForwardProgress: 50}
 	// check pruning distance > than current stage progress
-	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: ethdb.Prune{History: 100, Receipts: 101, CallTraces: 200}}, ctx, false)
+	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: 100, Receipts: 101, CallTraces: 200}}, ctx, false)
 	assert.NoError(err)
 
 	available, err = changeset.AvailableFrom(tx)
@@ -98,7 +98,7 @@ func TestPruneExecution(t *testing.T) {
 	assert.Equal(uint64(1), available)
 
 	// pruning distance, first run
-	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: ethdb.Prune{History: 5, Receipts: 15, CallTraces: 25}}, ctx, false)
+	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: 5, Receipts: 15, CallTraces: 25}}, ctx, false)
 	assert.NoError(err)
 
 	available, err = changeset.AvailableFrom(tx)
@@ -109,7 +109,7 @@ func TestPruneExecution(t *testing.T) {
 	assert.Equal(uint64(45), available)
 
 	// pruning distance, second run
-	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: ethdb.Prune{History: 5, Receipts: 15, CallTraces: 25}}, ctx, false)
+	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: 5, Receipts: 15, CallTraces: 25}}, ctx, false)
 	assert.NoError(err)
 
 	available, err = changeset.AvailableFrom(tx)

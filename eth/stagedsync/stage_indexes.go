@@ -18,18 +18,19 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 type HistoryCfg struct {
 	db         ethdb.RwKV
 	bufLimit   datasize.ByteSize
-	prune      ethdb.Prune
+	prune      prune.Mode
 	flushEvery time.Duration
 	tmpdir     string
 }
 
-func StageHistoryCfg(db ethdb.RwKV, prune ethdb.Prune, tmpDir string) HistoryCfg {
+func StageHistoryCfg(db ethdb.RwKV, prune prune.Mode, tmpDir string) HistoryCfg {
 	return HistoryCfg{
 		db:         db,
 		prune:      prune,
@@ -121,7 +122,6 @@ func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	if err := s.Update(tx, executionAt); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
-
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -354,6 +354,9 @@ func truncateBitmaps64(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, 
 }
 
 func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
 	logPrefix := s.LogPrefix()
 
 	useExternalTx := tx != nil
@@ -365,7 +368,11 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		defer tx.Rollback()
 	}
 
-	if err = pruneHistoryIndex(tx, dbutils.AccountChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneHistoryIndex(tx, dbutils.AccountChangeSetBucket, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
+	if err = s.Done(tx); err != nil {
 		return err
 	}
 
@@ -378,6 +385,9 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 }
 
 func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
 	logPrefix := s.LogPrefix()
 
 	useExternalTx := tx != nil
@@ -388,7 +398,11 @@ func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		}
 		defer tx.Rollback()
 	}
-	if err = pruneHistoryIndex(tx, dbutils.StorageChangeSetBucket, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneHistoryIndex(tx, dbutils.StorageChangeSetBucket, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
+	if err = s.Done(tx); err != nil {
 		return err
 	}
 
@@ -431,7 +445,7 @@ func pruneHistoryIndex(tx ethdb.RwTx, csTable, logPrefix, tmpDir string, pruneTo
 	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Prune", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:

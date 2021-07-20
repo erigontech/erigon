@@ -29,6 +29,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -70,7 +70,7 @@ var Defaults = Config{
 		DatasetsLockMmap: false,
 	},
 	NetworkID: 1,
-	Prune:     ethdb.DefaultPruneMode,
+	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -133,7 +133,7 @@ type Config struct {
 
 	P2PEnabled bool
 
-	Prune     ethdb.Prune
+	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
 
 	Snapshot Snapshot

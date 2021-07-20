@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
@@ -90,7 +91,7 @@ var cmdSnapshotCheck = &cobra.Command{
 
 		if isNew {
 			if err := kv.Update(ctx, func(tx ethdb.RwTx) error {
-				return ethdb.SetPruneModeIfNotExist(tx, ethdb.DefaultPruneMode)
+				return prune.SetIfNotExist(tx, prune.DefaultMode)
 			}); err != nil {
 				return err
 			}
