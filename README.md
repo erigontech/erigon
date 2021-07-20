@@ -40,7 +40,7 @@ The current version is currently based on Go-Ethereum 1.10.1
 System Requirements
 ===================
 
-Recommend 2Tb storage space on a single partition: 1Tb state, 200GB temp files (can symlink or mount
+Recommend 2Tb storage space on a single partition: 1.3Tb state, 200GB temp files (can symlink or mount
 folder `<datadir>/etl-tmp` to another disk).
 
 RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install)
@@ -232,7 +232,7 @@ or
 XDG_DATA_HOME=/preferred/data/folder make docker-compose
 ```
 
-Makefile uses host's PID,UID,GID. It required to open Erigon's DB from another process (RPCDaemon local-mode).
+Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
 See: https://github.com/ledgerwatch/erigon/pull/2392/files
 
 Windows support for docker-compose is not ready yet. Please help us with .ps1 port

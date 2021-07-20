@@ -7,11 +7,9 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/ledgerwatch/erigon/log"
 )
 
-func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -27,6 +25,17 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		defer f.Close()
 		rec = bufio.NewWriter(f)
 		defer rec.Flush()
+	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
 	}
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)
@@ -70,85 +79,22 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 			accountSet := extractAccountMap(&mag)
 			for account := range accountSet {
 				reqGen.reqID++
-				startErigon := time.Now()
 				request := reqGen.getLogs(prevBn, bn, account)
-				recording := rec != nil // This flag will be set to false if recording is not to be performed
-				res = reqGen.Erigon2("eth_getLogs", request)
-				durationErigon := time.Since(startErigon).Seconds()
-				if res.Err != nil {
-					fmt.Printf("Could not get logs for account (Erigon) %x: %v\n", account, res.Err)
+				errCtx := fmt.Sprintf("account %x blocks %d-%d", account, prevBn, bn)
+				if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
 					return
-				}
-				if errVal := res.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error getting logs for account (Erigon) %x: %d %s\n", account, errVal.GetInt("code"), errVal.GetStringBytes("message"))
-					return
-				}
-				var durationG float64
-				if needCompare {
-					startG := time.Now()
-					resg := reqGen.Geth2("eth_getLogs", request)
-					durationG = time.Since(startG).Seconds()
-					resultsCh <- res
-					if resg.Err != nil {
-						fmt.Printf("Could not get logs for account (geth) %x: %v\n", account, resg.Err)
-						recording = false
-					} else if errValg := resg.Result.Get("error"); errValg != nil {
-						fmt.Printf("Error getting logs for account (geth) %x: %d %s\n", account, errValg.GetInt("code"), errValg.GetStringBytes("message"))
-						recording = false
-					} else {
-						if err := compareResults(res.Result, resg.Result); err != nil {
-							fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
-							fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-							fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-							return
-						}
-					}
-				}
-				log.Info("Results", "count", len(res.Result.GetArray("result")), "durationErigon", durationErigon, "durationG", durationG)
-				if recording {
-					fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 				}
 				topics := getTopics(res.Result)
 				// All combination of account and one topic
 				for _, topic := range topics {
 					reqGen.reqID++
-					startErigon := time.Now()
 					request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
-					recording = rec != nil
-					res = reqGen.Erigon2("eth_getLogs", request)
-					durationErigon := time.Since(startErigon).Seconds()
-					if res.Err != nil {
-						fmt.Printf("Could not get logs for account (Erigon) %x %x: %v\n", account, topic, res.Err)
+					errCtx := fmt.Sprintf("account %x topic %x blocks %d-%d", account, topic, prevBn, bn)
+					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs); err != nil {
+						fmt.Println(err)
 						return
 					}
-					if errVal := res.Result.Get("error"); errVal != nil {
-						fmt.Printf("Error getting logs for account (Erigon) %x %x: %d %s\n", account, topic, errVal.GetInt("code"), errVal.GetStringBytes("message"))
-						return
-					}
-					if needCompare {
-						startG := time.Now()
-						resg := reqGen.Geth2("eth_getLogs", request)
-						durationG = time.Since(startG).Seconds()
-						resultsCh <- res
-						if resg.Err != nil {
-							fmt.Printf("Could not get logs for account (geth) %x %x: %v\n", account, topic, resg.Err)
-							recording = false
-						} else if errValg := resg.Result.Get("error"); errValg != nil {
-							fmt.Printf("Error getting logs for account (geth) %x %x: %d %s\n", account, topic, errValg.GetInt("code"), errValg.GetStringBytes("message"))
-							recording = false
-						} else {
-							if err := compareResults(res.Result, resg.Result); err != nil {
-								fmt.Printf("Different logs for account %x %x and block %d-%d\n", account, topic, prevBn, bn)
-								fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-								fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-								return
-							}
-						}
-					}
-					if recording {
-						fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
-					}
-					log.Info("Results", "count", len(res.Result.GetArray("result")), "durationErigon", durationErigon, "durationG", durationG)
 				}
 				// Random combinations of two topics
 				if len(topics) >= 2 {
@@ -159,38 +105,11 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 					}
 					reqGen.reqID++
 					request = reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2])
-					recording = rec != nil
-					res = reqGen.Erigon2("eth_getLogs", request)
-					if res.Err != nil {
-						fmt.Printf("Could not get logs for account (Erigon) %x %x %x: %v\n", account, topics[idx1], topics[idx2], res.Err)
+					errCtx := fmt.Sprintf("account %x topic1 %x topic2 %x blocks %d-%d", account, topics[idx1], topics[idx2], prevBn, bn)
+					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs); err != nil {
+						fmt.Println(err)
 						return
 					}
-					if errVal := res.Result.Get("error"); errVal != nil {
-						fmt.Printf("Error getting logs for account (Erigon) %x %x %x: %d %s\n", account, topics[idx1], topics[idx2], errVal.GetInt("code"), errVal.GetStringBytes("message"))
-						return
-					}
-					if needCompare {
-						resg := reqGen.Geth2("eth_getLogs", request)
-						resultsCh <- res
-						if resg.Err != nil {
-							fmt.Printf("Could not get logs for account (geth) %x %x %x: %v\n", account, topics[idx1], topics[idx2], res.Err)
-							recording = false
-						} else if errValg := resg.Result.Get("error"); errValg != nil {
-							fmt.Printf("Error getting logs for account (geth) %x %x %x: %d %s\n", account, topics[idx1], topics[idx2], errValg.GetInt("code"), errValg.GetStringBytes("message"))
-							recording = false
-						} else {
-							if err := compareResults(res.Result, resg.Result); err != nil {
-								fmt.Printf("Different logs for account %x %x %x and block %d-%d\n", account, topics[idx1], topics[idx2], prevBn, bn)
-								fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-								fmt.Printf("\n\nG response=================================\n%s\n", resg.Response)
-								return
-							}
-						}
-					}
-					if recording {
-						fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
-					}
-					log.Info("Results", "count", len(res.Result.GetArray("result")))
 				}
 			}
 		}
