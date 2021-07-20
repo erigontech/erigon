@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -24,6 +23,13 @@ type Sync struct {
 	unwindOrder  []*Stage
 	pruningOrder []*Stage
 	currentStage uint
+	timings      []Timing
+}
+type Timing struct {
+	isUnwind bool
+	isPrune  bool
+	stage    stages.SyncStage
+	took     time.Duration
 }
 
 func (s *Sync) Len() int                 { return len(s.stages) }
@@ -179,18 +185,16 @@ func (s *Sync) StageState(stage stages.SyncStage, tx ethdb.Tx, db ethdb.RoKV) (*
 
 func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 	s.prevUnwindPoint = nil
-	var timings []interface{}
+	s.timings = s.timings[:0]
 	for !s.IsDone() {
 		if s.unwindPoint != nil {
 			for j := 0; j < len(s.unwindOrder); j++ {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				t := time.Now()
 				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
 					return err
 				}
-				timings = append(timings, "Unwind "+string(s.unwindOrder[j].ID), time.Since(t))
 			}
 			s.prevUnwindPoint = s.unwindPoint
 			s.unwindPoint = nil
@@ -215,11 +219,9 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 			continue
 		}
 
-		t := time.Now()
 		if err := s.runStage(stage, db, tx, firstCycle); err != nil {
 			return err
 		}
-		timings = append(timings, string(stage.ID), time.Since(t))
 
 		s.NextStage()
 	}
@@ -228,32 +230,41 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		t := time.Now()
 		if err := s.pruneStage(firstCycle, s.pruningOrder[i], db, tx); err != nil {
 			return err
 		}
-		timings = append(timings, "Pruning "+string(s.pruningOrder[i].ID), time.Since(t))
 	}
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 		return err
 	}
 
-	if err := printLogs(tx, timings); err != nil {
+	if err := printLogs(tx, s.timings); err != nil {
 		return err
 	}
 	s.currentStage = 0
 	return nil
 }
 
-func printLogs(tx ethdb.RwTx, timings []interface{}) error {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Memory", "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-	if len(timings) > 50 {
-		log.Info("Timings (first 50)", timings[:50]...)
-	} else {
-		log.Info("Timings", timings...)
+func printLogs(tx ethdb.RwTx, timings []Timing) error {
+	var logCtx []interface{}
+	count := 0
+	for i := range timings {
+		if timings[i].took < time.Millisecond {
+			continue
+		}
+		count++
+		if count == 50 {
+			break
+		}
+		if timings[i].isUnwind {
+			logCtx = append(logCtx, "Unwind "+timings[i].stage, timings[i].took)
+		} else if timings[i].isPrune {
+			logCtx = append(logCtx, "Prune "+timings[i].stage, timings[i].took)
+		} else {
+			logCtx = append(logCtx, timings[i].stage, timings[i].took)
+		}
 	}
+	log.Info("Timings", logCtx...)
 
 	if tx == nil {
 		return nil
@@ -280,26 +291,27 @@ func printLogs(tx ethdb.RwTx, timings []interface{}) error {
 }
 
 func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) (err error) {
+	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
 
-	start := time.Now()
 	logPrefix := s.LogPrefix()
 	if err = stage.Forward(firstCycle, stageState, s, tx); err != nil {
 		return err
 	}
 
-	if time.Since(start) > 30*time.Second {
-		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", time.Since(start))
+	t := time.Since(start)
+	if t > 60*time.Second {
+		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", t)
 	}
 	return nil
 }
 
 func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
-	start := time.Now()
-	log.Info("Unwind...", "stage", stage.ID)
+	t := time.Now()
+	log.Debug("Unwind...", "stage", stage.ID)
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
@@ -321,15 +333,17 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethd
 		return err
 	}
 
-	if time.Since(start) > 30*time.Second {
-		log.Info("Unwind... DONE!", "stage", string(unwind.ID))
+	took := time.Since(t)
+	if took > 60*time.Second {
+		log.Info("Unwind... DONE!", "stage", string(unwind.ID), "in", took)
 	}
+	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: time.Since(t)})
 	return nil
 }
 
 func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb.RwTx) error {
-	start := time.Now()
-	log.Info("Prune...", "stage", stage.ID)
+	t := time.Now()
+	log.Debug("Prune...", "stage", stage.ID)
 
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
@@ -349,9 +363,11 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb
 		return err
 	}
 
-	if time.Since(start) > 30*time.Second {
-		log.Info("Prune... DONE!", "stage", string(prune.ID))
+	took := time.Since(t)
+	if took > 60*time.Second {
+		log.Info("Prune... DONE!", "stage", string(prune.ID), "in", took)
 	}
+	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: time.Since(t)})
 	return nil
 }
 

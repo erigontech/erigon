@@ -7,7 +7,6 @@ import (
 	"math/bits"
 	"os"
 	"sort"
-	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -129,7 +128,6 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	if err := loader.Reset(trie.NewRetainList(0), accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
 	}
-	calcStart := time.Now()
 	hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 	if err != nil {
 		return trie.EmptyRoot, err
@@ -138,8 +136,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	if cfg.checkRoot && hash != expectedRootHash {
 		return hash, nil
 	}
-	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(),
-		"in", time.Since(calcStart))
+	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 
 	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
@@ -365,7 +362,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
 	}
-	calcStart := time.Now()
 	hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 	if err != nil {
 		return trie.EmptyRoot, err
@@ -375,8 +371,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 		return hash, nil
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix),
-		" hash", hash.Hex(),
-		"in", time.Since(calcStart))
+		" hash", hash.Hex())
 
 	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
@@ -454,7 +449,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return err
 	}
-	calcStart := time.Now()
 	hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 	if err != nil {
 		return err
@@ -462,7 +456,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	if hash != expectedRootHash {
 		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
-	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
+	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
