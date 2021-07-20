@@ -963,27 +963,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
-		/*
-			w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
-			if werr != nil {
-				return nil, werr
-			}
-			defer w.Close()
-			stream := jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
-			defer stream.Flush()
-			stream.WriteObjectStart()
-			stream.WriteObjectField("jsonrpc")
-			stream.WriteString("2.0")
-			stream.WriteMore()
-			stream.WriteObjectField("id")
-			stream.WriteInt(1)
-			stream.WriteMore()
-			stream.WriteObjectField("result")
-			stream.WriteObjectStart()
-			stream.WriteObjectField("structlogs")
-			stream.WriteArrayStart()
-			tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
-		*/
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
@@ -1029,11 +1008,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			return nil, fmt.Errorf("vmTrace not implemented yet")
 		}
 		results = append(results, traceResult)
-		/*
-			stream.WriteArrayEnd()
-			stream.WriteObjectEnd()
-			stream.WriteObjectEnd()
-		*/
 	}
 	return results, nil
 }
