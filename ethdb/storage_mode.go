@@ -43,6 +43,8 @@ func PruneFromString(flags string, experiments []string) (Prune, error) {
 		switch ex {
 		case "tevm":
 			mode.Experiments.TEVM = true
+		case "":
+			// skip
 		default:
 			return DefaultPruneMode, fmt.Errorf("unexpected experiment found: %s", ex)
 		}
