@@ -234,7 +234,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		} else {
 			config.Prune = pm
 		}
-		log.Info("Effective", "pruning", config.Prune)
+		log.Info("Effective", "prune", config.Prune.ToString())
 
 		return nil
 	}); err != nil {

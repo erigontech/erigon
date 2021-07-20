@@ -155,19 +155,29 @@ func (m Mode) ToString() string {
 	}
 	modeString := ""
 	if m.History.Enabled() {
-		modeString += "h"
+		modeString += fmt.Sprintf("history=%d,", m.History)
+	} else {
+		modeString += fmt.Sprintf("history=no,")
 	}
 	if m.Receipts.Enabled() {
-		modeString += "r"
+		modeString += fmt.Sprintf("receipt=%d,", m.Receipts)
+	} else {
+		modeString += fmt.Sprintf("receipt=no,")
 	}
 	if m.TxIndex.Enabled() {
-		modeString += "t"
+		modeString += fmt.Sprintf("txindex=%d,", m.TxIndex)
+	} else {
+		modeString += fmt.Sprintf("txindex=no,", m.TxIndex)
 	}
 	if m.CallTraces.Enabled() {
-		modeString += "c"
+		modeString += fmt.Sprintf("calltrace=%d,", m.CallTraces)
+	} else {
+		modeString += fmt.Sprintf("calltrace=no,", m.TxIndex)
 	}
 	if m.Experiments.TEVM {
-		modeString += "e"
+		modeString += "experiments.tevm=enabled"
+	} else {
+		modeString += "experiments.tevm=disabled"
 	}
 	return modeString
 }

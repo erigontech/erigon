@@ -25,9 +25,9 @@ var storageMode = Migration{
 		pm := prune.Mode{Initialised: true}
 		castToPruneDistance := func(v []byte) prune.Distance {
 			if len(v) == 1 && v[0] == 2 {
-				return params.FullImmutabilityThreshold
+				return params.FullImmutabilityThreshold // means, prune enabled
 			}
-			return math.MaxUint64 // means, don't pm
+			return math.MaxUint64 // means, prune disabled
 		}
 		{
 			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeHistory)
