@@ -54,6 +54,7 @@ type TraceCallParam struct {
 	Value                *hexutil.Big      `json:"value"`
 	Data                 hexutil.Bytes     `json:"data"`
 	AccessList           *types.AccessList `json:"accessList"`
+	txHash               *common.Hash
 	traceTypes           []string
 }
 
@@ -135,8 +136,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	} else {
 		// A basefee is provided, necessitating 1559-type execution
 		if args.GasPrice != nil {
+			var overflow bool
 			// User specified the legacy gas field, convert to 1559 gas typing
-			gasPrice, overflow := uint256.FromBig(args.GasPrice.ToInt())
+			gasPrice, overflow = uint256.FromBig(args.GasPrice.ToInt())
 			if overflow {
 				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
 			}
@@ -179,7 +181,6 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
-
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */)
 	return msg, nil
 }
@@ -862,10 +863,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	if tok != json.Delim(']') {
 		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
 	}
-	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil)
+	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil, true /* gasBailout */)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
+	gasBailout bool) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
@@ -971,7 +973,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
 		}
-		ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
+		if args.txHash != nil {
+			ibs.Prepare(*args.txHash, header.Hash(), txIndex)
+		} else {
+			ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
+		}
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
