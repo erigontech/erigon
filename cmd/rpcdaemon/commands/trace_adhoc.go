@@ -583,12 +583,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 	defer tx.Rollback()
 
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	blockNumber, blockHash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -629,9 +624,23 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, fmt.Errorf("vmTrace not implemented yet")
 	}
 
-	var result []*TraceCallResult
+	result := make([]*TraceCallResult, len(traces))
+	for i, trace := range traces {
+		tr := &TraceCallResult{}
+		tr.Output = trace.Output
+		if traceTypeTrace {
+			tr.Trace = trace.Trace
+		}
+		if traceTypeStateDiff {
+			tr.StateDiff = trace.StateDiff
+		}
+		if traceTypeVmTrace {
+			tr.VmTrace = trace.VmTrace
+		}
+		result[i] = tr
+	}
 
-	return traceResults, nil
+	return result, nil
 }
 
 // Call implements trace_call.
