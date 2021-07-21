@@ -135,12 +135,14 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
+		if err = common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
+
 		blockNToMatch := uint64(iter.Next())
-		prefix := make([]byte, 8)
-		binary.BigEndian.PutUint64(prefix, blockNToMatch)
 		var logIndex uint
 		var blockLogs types.Logs
-		if err := tx.ForPrefix(dbutils.Log, prefix, func(k, v []byte) error {
+		if err := tx.ForPrefix(dbutils.Log, dbutils.EncodeBlockNumber(blockNToMatch), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
@@ -161,6 +163,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}); err != nil {
 			return returnLogs(logs), err
 		}
+
 		if len(blockLogs) > 0 {
 			b, err := rawdb.ReadBlockByNumber(tx, blockNToMatch)
 			if err != nil {
