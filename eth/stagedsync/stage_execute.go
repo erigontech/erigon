@@ -233,6 +233,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	if err != nil {
 		return err
 	}
+	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+
 	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
@@ -286,9 +288,9 @@ Loop:
 		}
 
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
-		writeChangeSets := nextStageProgress > 0 || blockNum > cfg.prune.History.PruneTo(to)
-		writeReceipts := nextStageProgress > 0 || blockNum > cfg.prune.Receipts.PruneTo(to)
-		writeCallTraces := nextStageProgress > 0 || blockNum > cfg.prune.CallTraces.PruneTo(to)
+		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
+		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
+		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
