@@ -46,7 +46,7 @@ import (
 	"go.uber.org/atomic"
 )
 
-const DEBUG_LOG_FROM = 362_300
+const DEBUG_LOG_FROM = 999_999_999
 
 /*
 Not implemented features from OS:
@@ -188,7 +188,7 @@ func (e *EpochManager) noteNewEpoch() { e.force = true }
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
 //nolint
-func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, hash common.Hash, call consensus.Call) (*RollingFinality, uint64, bool) {
+func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, hash common.Hash, call consensus.SystemCall) (*RollingFinality, uint64, bool) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
 		lastWasParent = *e.finalityChecker.lastPushed == hash
@@ -225,15 +225,15 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 		}
 
 		// use signal number so multi-set first calculation is correct.
-		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof)
+		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof, call)
 		if err != nil {
 			panic(fmt.Errorf("proof produced by this engine is invalid: %w", err))
 		}
 		epochSet := list.validators
-		log.Info("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
+		log.Debug("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
 		e.finalityChecker = NewRollingFinality(epochSet)
 		if proof.SignalNumber >= DEBUG_LOG_FROM {
-			fmt.Printf("build_finality.epoch_validators: %d\n", proof.SignalNumber)
+			fmt.Printf("new rolling finality: %d\n", proof.SignalNumber)
 			for i := 0; i < len(epochSet); i++ {
 				fmt.Printf("\t%x\n", epochSet[i])
 			}
@@ -544,7 +544,7 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 }
 
 //nolit
-func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call) error {
+func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
 	//nolint
@@ -559,7 +559,7 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 		return err
 	}
 	//nolint
-	validators, setNumber, err := c.epochSet(chain, e, header, call)
+	validators, setNumber, err := c.epochSet(chain, e, header, syscall)
 	if err != nil {
 		return err
 	}
@@ -815,7 +815,7 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, chain consensus.ChainHeaderRea
 		}
 	}
 
-	if err := c.verifyFamily(chain, e, header, call); err != nil { //TODO: OE has it as a separate engine call? why?
+	if err := c.verifyFamily(chain, e, header, call, syscall); err != nil { //TODO: OE has it as a separate engine call? why?
 		panic(err)
 	}
 
@@ -862,7 +862,7 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
-			fmt.Printf("insert_pending_trancition: %d\n", header.Number.Uint64())
+			fmt.Printf("insert_pending_trancition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(r), len(pendingTransitionProof))
 		}
 		if err = e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return err
@@ -874,7 +874,7 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
 
-	finalized := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, call)
+	finalized := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, call, syscall)
 	c.EpochManager.finalityChecker.print(header.Number.Uint64())
 	epochEndProof, err := isEpochEnd(chain, e, finalized, header)
 	if err != nil {
@@ -888,13 +888,12 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		}
 	}
 
-	//os.Exit(1)
 	return nil
 }
 
-func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, call consensus.Call) []unAssembledHeader {
+func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, call consensus.Call, syscall consensus.SystemCall) []unAssembledHeader {
 	// commit_block -> aura.build_finality
-	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, call)
+	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, syscall)
 	if !ok {
 		return []unAssembledHeader{}
 	}
@@ -928,6 +927,9 @@ func isEpochEnd(chain consensus.ChainHeaderReader, e consensus.EpochReader, fina
 		}
 		if pendingTransitionProof == nil {
 			continue
+		}
+		if header.Number.Uint64() >= DEBUG_LOG_FROM {
+			fmt.Printf("pending transition: %d,%x,len=%d,%x\n", finalized[i].number, finalized[i].hash, len(pendingTransitionProof), finalized)
 		}
 
 		finalityProof := allHeadersUntil(chain, header, finalized[i].hash)
@@ -1127,7 +1129,7 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 		return nil
 	}
 
-	validators, setNumber, err := c.epochSet(chain, nil, current, call)
+	validators, setNumber, err := c.epochSet(chain, nil, current, nil)
 	if err != nil {
 		log.Warn("[engine] Unable to generate seal", "err", err)
 		return nil
@@ -1192,7 +1194,7 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 
 // epochSet fetch correct validator set for epoch at header, taking into account
 // finality of previous transitions.
-func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e consensus.EpochReader, h *types.Header, call consensus.Call) (ValidatorSet, uint64, error) {
+func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e consensus.EpochReader, h *types.Header, call consensus.SystemCall) (ValidatorSet, uint64, error) {
 	if c.cfg.ImmediateTransitions {
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
@@ -1594,9 +1596,14 @@ func (f *RollingFinality) print(num uint64) {
 	if num > DEBUG_LOG_FROM {
 		h := f.headers
 		fmt.Printf("finality_heads: %d\n", num)
+		i := 0
 		for e := h.l.Front(); e != nil; e = e.Next() {
+			i++
 			a := e.Value.(*unAssembledHeader)
 			fmt.Printf("\t%d,%x\n", a.number, a.signers[0])
+		}
+		if i == 0 {
+			fmt.Printf("\tempty\n")
 		}
 	}
 }
@@ -1618,7 +1625,6 @@ func (f *RollingFinality) push(head common.Hash, num uint64, signers []common.Ad
 		}
 	}
 
-	//fmt.Printf("add2:%x\n", signers)
 	f.addSigners(signers)
 	f.headers.PushBack(&unAssembledHeader{hash: head, number: num, signers: signers})
 
@@ -1627,7 +1633,6 @@ func (f *RollingFinality) push(head common.Hash, num uint64, signers []common.Ad
 		if e == nil {
 			panic("headers length always greater than sign count length")
 		}
-		//fmt.Printf("remove2:%x\n", e.signers)
 		f.removeSigners(e.signers)
 		newlyFinalized = append(newlyFinalized, *e)
 	}
@@ -1697,7 +1702,6 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 			copyHash := parentHash
 			f.lastPushed = &copyHash
 		}
-		//fmt.Printf("add1:%d,%x\n", blockNum, signers)
 		f.addSigners(signers)
 		f.headers.PushFront(&unAssembledHeader{hash: blockHash, number: blockNum, signers: signers})
 		// break when we've got our first finalized block.
@@ -1706,9 +1710,8 @@ func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]co
 			if e == nil {
 				panic("we just pushed a block")
 			}
-			//fmt.Printf("remove:%x\n", e.signers)
 			f.removeSigners(e.signers)
-			log.Info("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
+			//log.Info("[aura] finality encountered already finalized block", "hash", e.hash.String(), "number", e.number)
 			break
 		}
 

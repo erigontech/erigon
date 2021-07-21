@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"go.uber.org/atomic"
 )
@@ -55,7 +54,7 @@ type ValidatorSet interface {
 	// but with the same parameters.
 	//
 	// Returns a list of contract calls to be pushed onto the new block.
-	//func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
+	//func generateEngineTransactions(_firstInEpoch bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
 
 	// Signalling that a new epoch has begun.
 	//
@@ -64,7 +63,7 @@ type ValidatorSet interface {
 	// The caller provided here may not generate proofs.
 	//
 	// `first` is true if this is the first block in the set.
-	onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error
+	onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error
 
 	// Called on the close of every block.
 	onCloseBlock(_header *types.Header, _address common.Address) error
@@ -82,8 +81,7 @@ type ValidatorSet interface {
 	//
 	// Returns the set, along with a flag indicating whether finality of a specific
 	// hash should be proven.
-
-	epochSet(first bool, num uint64, setProof []byte) (SimpleList, common.Hash, error)
+	epochSet(firstInEpoch bool, num uint64, setProof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error)
 
 	// Extract genesis epoch data from the genesis state and header.
 	genesisEpochData(header *types.Header, call consensus.Call) ([]byte, error)
@@ -122,7 +120,7 @@ type ValidatorSet interface {
 	// that doesn't require finality.
 	//
 	// `first` is true if this is the first block in the set.
-	signalEpochEnd(first bool, header *types.Header, receipts types.Receipts) ([]byte, error)
+	signalEpochEnd(firstInEpoch bool, header *types.Header, receipts types.Receipts) ([]byte, error)
 	/*
 	   // Whether the given block signals the end of an epoch, but change won't take effect
 	   // until finality.
@@ -264,10 +262,10 @@ func (s *Multi) correctSetByNumber(parentNumber uint64) (uint64, ValidatorSet) {
 	panic("constructor validation ensures that there is at least one validator set for block 0; block 0 is less than any uint; qed")
 }
 
-func (s *Multi) get(num uint64) (first bool, set ValidatorSet) {
+func (s *Multi) get(num uint64) (firstInEpoch bool, set ValidatorSet) {
 	block, set := s.correctSetByNumber(num)
-	first = block == num
-	return first, set
+	firstInEpoch = block == num
+	return firstInEpoch, set
 }
 
 func (s *Multi) onCloseBlock(header *types.Header, address common.Address) error {
@@ -277,10 +275,10 @@ func (s *Multi) onCloseBlock(header *types.Header, address common.Address) error
 
 // TODO: do we need add `proof` argument?
 //nolint
-func (s *Multi) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
+func (s *Multi) epochSet(firstInEpoch bool, num uint64, proof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error) {
 	setBlock, set := s.correctSetByNumber(num)
-	first = setBlock == num
-	return set.epochSet(first, num, proof)
+	firstInEpoch = setBlock == num
+	return set.epochSet(firstInEpoch, num, proof, call)
 }
 func (s *Multi) genesisEpochData(header *types.Header, call consensus.Call) ([]byte, error) {
 	_, set := s.correctSetByNumber(0)
@@ -302,10 +300,10 @@ type SimpleList struct {
 	validators []common.Address
 }
 
-func (s *SimpleList) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
+func (s *SimpleList) epochSet(firstInEpoch bool, num uint64, proof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error) {
 	return *s, common.Hash{}, nil
 }
-func (s *SimpleList) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
+func (s *SimpleList) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
 	return nil
 }
 func (s *SimpleList) onCloseBlock(_header *types.Header, _address common.Address) error { return nil }
@@ -441,33 +439,31 @@ func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *
 // but with the same parameters.
 //
 // Returns a list of contract calls to be pushed onto the new block.
-//func generateEngineTransactions(_first bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
-//nolint
-func (s *ValidatorSafeContract) epochSet2(num uint64, chain consensus.ChainHeaderReader, call consensus.Call) (SimpleList, common.Hash, error) {
-	l, ok := s.getList(call)
-	if !ok {
-		panic(1)
-	}
-	return *l, common.Hash{}, nil
-}
-
-func (s *ValidatorSafeContract) epochSet(first bool, num uint64, setProof []byte) (SimpleList, common.Hash, error) {
-	if first {
+//func generateEngineTransactions(_firstInEpoch bool, _header *types.Header, _call SystemCall) -> Result<Vec<(Address, Bytes)>, EthcoreError>
+func (s *ValidatorSafeContract) epochSet(firstInEpoch bool, num uint64, setProof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error) {
+	if firstInEpoch {
 		var proof FirstValidatorSetProof
 		if err := rlp.DecodeBytes(setProof, &proof); err != nil {
 			return SimpleList{}, common.Hash{}, fmt.Errorf("[ValidatorSafeContract.epochSet] %w", err)
 		}
-		/*
-			addresses, err := checkFirstValidatorSetProof(s.contractAddress, oldHeader, state_items)
-			if err != nil {
-				panic(err)
-				return SimpleList{}, common.Hash{}, fmt.Errorf("insufitient proof: block=%d,%x: %w", oldHeader.Number.Uint64(), oldHeader.Hash(), err)
-			}
-			return *NewSimpleList(addresses), oldHeader.Hash(), nil
 
-		*/
+		if num == 0 {
+			return *NewSimpleList([]common.Address{proof.Header.Coinbase}), proof.Header.ParentHash, nil
+		}
+		l, ok := s.getListSyscall(call)
+		if !ok {
+			panic(1)
+		}
 
-		return *NewSimpleList([]common.Address{common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca")}), params.SokolGenesisHash, nil
+		//addresses, err := checkFirstValidatorSetProof(s.contractAddress, oldHeader, state_items)
+		//if err != nil {
+		//	panic(err)
+		//	return SimpleList{}, common.Hash{}, fmt.Errorf("insufitient proof: block=%d,%x: %w", oldHeader.Number.Uint64(), oldHeader.Hash(), err)
+		//}
+
+		//fmt.Printf("aaaa: %x,%x\n", common.HexToAddress("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"), params.SokolGenesisHash)
+		//fmt.Printf("bbbbb: %x,%x\n", proof.ContractAddress, proof.Header.Hash())
+		return *l, proof.Header.ParentHash, nil
 	}
 	var proof ValidatorSetProof
 	if err := rlp.DecodeBytes(setProof, &proof); err != nil {
@@ -632,11 +628,28 @@ func (s *ValidatorSafeContract) getList(caller consensus.Call) (*SimpleList, boo
 	return NewSimpleList(out0), true
 }
 
+func (s *ValidatorSafeContract) getListSyscall(caller consensus.SystemCall) (*SimpleList, bool) {
+	packed, err := s.abi.Pack("getValidators")
+	if err != nil {
+		panic(err)
+	}
+	out, err := caller(s.contractAddress, packed)
+	if err != nil {
+		panic(err)
+	}
+	res, err := s.abi.Unpack("getValidators", out)
+	if err != nil {
+		panic(err)
+	}
+	out0 := *abi.ConvertType(res[0], new([]common.Address)).(*[]common.Address)
+	return NewSimpleList(out0), true
+}
+
 func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call consensus.Call) ([]byte, error) {
 	return proveInitial(s, s.contractAddress, header, call)
 }
 
-func (s *ValidatorSafeContract) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
+func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
 	data := common.FromHex("75286211")
 	_, err := caller(s.contractAddress, data)
 	if err != nil {
@@ -653,12 +666,12 @@ func (s *ValidatorSafeContract) onEpochBegin(first bool, header *types.Header, c
 	return nil
 }
 
-func (s *ValidatorSafeContract) signalEpochEnd(first bool, header *types.Header, r types.Receipts) ([]byte, error) {
+func (s *ValidatorSafeContract) signalEpochEnd(firstInEpoch bool, header *types.Header, r types.Receipts) ([]byte, error) {
 	if header.Number.Uint64() >= DEBUG_LOG_FROM {
-		fmt.Printf("signalEpochEnd: %d,%d\n", header.Number.Uint64(), len(r))
+		fmt.Printf("signalEpochEnd: %d,%t\n", header.Number.Uint64(), firstInEpoch)
 	}
 	// transition to the first block of a contract requires finality but has no log event.
-	if first {
+	if firstInEpoch {
 		/*
 		   let state_proof = Arc::new(FirstValidatorSetProof {
 		       contract_address: self.contract_address,
@@ -678,9 +691,19 @@ func (s *ValidatorSafeContract) signalEpochEnd(first bool, header *types.Header,
 
 	_, ok := s.extractFromEvent(header, r)
 	if !ok {
+		if header.Number.Uint64() >= DEBUG_LOG_FROM {
+			fmt.Printf("signalEpochEnd: no-no-no %d,%d\n", header.Number.Uint64(), len(r))
+		}
 		return nil, nil
 	}
-	return rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
+	proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})
+	if err != nil {
+		return nil, err
+	}
+	if header.Number.Uint64() >= DEBUG_LOG_FROM {
+		fmt.Printf("signalEpochEnd: %d,%d, proofLen=%d\n", header.Number.Uint64(), len(r), len(proof))
+	}
+	return proof, nil
 }
 
 func (s *ValidatorSafeContract) extractFromEvent(header *types.Header, receipts types.Receipts) (*SimpleList, bool) {
@@ -841,8 +864,8 @@ type ValidatorContract struct {
 	posdaoTransition *uint64
 }
 
-func (s *ValidatorContract) epochSet(first bool, num uint64, proof []byte) (SimpleList, common.Hash, error) {
-	return s.validators.epochSet(first, num, proof)
+func (s *ValidatorContract) epochSet(firstInEpoch bool, num uint64, proof []byte, call consensus.SystemCall) (SimpleList, common.Hash, error) {
+	return s.validators.epochSet(firstInEpoch, num, proof, call)
 }
 func (s *ValidatorContract) defaultCaller(blockHash common.Hash) (Call, error) {
 	return s.validators.defaultCaller(blockHash)
@@ -853,8 +876,8 @@ func (s *ValidatorContract) getWithCaller(parentHash common.Hash, nonce uint, ca
 func (s *ValidatorContract) countWithCaller(parentHash common.Hash, caller consensus.Call) (uint64, error) {
 	return s.validators.countWithCaller(parentHash, caller)
 }
-func (s *ValidatorContract) onEpochBegin(first bool, header *types.Header, caller consensus.SystemCall) error {
-	return s.validators.onEpochBegin(first, header, caller)
+func (s *ValidatorContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
+	return s.validators.onEpochBegin(firstInEpoch, header, caller)
 }
 func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Address) error {
 	return s.validators.onCloseBlock(header, address)
@@ -862,11 +885,12 @@ func (s *ValidatorContract) onCloseBlock(header *types.Header, address common.Ad
 func (s *ValidatorContract) genesisEpochData(header *types.Header, call consensus.Call) ([]byte, error) {
 	return s.validators.genesisEpochData(header, call)
 }
-func (s *ValidatorContract) signalEpochEnd(first bool, header *types.Header, r types.Receipts) ([]byte, error) {
-	return s.validators.signalEpochEnd(first, header, r)
+func (s *ValidatorContract) signalEpochEnd(firstInEpoch bool, header *types.Header, r types.Receipts) ([]byte, error) {
+	return s.validators.signalEpochEnd(firstInEpoch, header, r)
 }
 
 func proveInitial(s *ValidatorSafeContract, contractAddr common.Address, header *types.Header, caller consensus.Call) ([]byte, error) {
+	fmt.Printf("prove initial: %d, %x\n", header.Number.Uint64(), contractAddr)
 	return rlp.EncodeToBytes(FirstValidatorSetProof{Header: header, ContractAddress: s.contractAddress})
 	//list, err := s.getList(caller)
 	//fmt.Printf("aaa: %x,%t\n", list, err)
