@@ -741,14 +741,6 @@ func (s *ValidatorSafeContract) extractFromEvent(header *types.Header, receipts 
 		_ = event.NewSet
 
 		//auraabi.NewValidatorSetFilterer()
-		fmt.Printf("#ddd: %x\n", event.NewSet)
-		fmt.Printf("#aa: %x,%x\n", receipts[0].Logs[0].Topics[0], EVENT_NAME_HASH)
-		fmt.Printf("#bb: %x,%x\n", receipts[0].Logs[1].Topics[0], EVENT_NAME_HASH)
-		//if header.Number.Uint64() == 672 {
-		if header.Number.Uint64() == 205821 {
-			panic(1)
-		}
-
 		/*
 			validator_set::events::initiate_change::parse_log(
 					(log.topics.clone(), log.data.clone()).into(),
