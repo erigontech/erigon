@@ -1155,7 +1155,6 @@ func TestPlainStateProxy(t *testing.T) {
 				K: k,
 				V: v,
 			})
-			fmt.Println(k, v)
 			return nil
 		})
 	})

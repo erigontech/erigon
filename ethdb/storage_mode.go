@@ -13,7 +13,6 @@ type StorageMode struct {
 	TxIndex     bool
 	CallTraces  bool
 	TEVM        bool
-	SnapshotLayout        bool
 }
 
 var DefaultStorageMode = StorageMode{
@@ -23,7 +22,6 @@ var DefaultStorageMode = StorageMode{
 	TxIndex:     true,
 	CallTraces:  true,
 	TEVM:        false,
-	SnapshotLayout:        false,
 }
 
 func (m StorageMode) ToString() string {
