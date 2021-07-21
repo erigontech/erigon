@@ -561,6 +561,14 @@ func (s *snCursor) First() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
+	for bytes.Equal(lastDBVal, DeletedValue) {
+		lastDBKey, lastDBVal, err = s.dbCursor.Next()
+		if err != nil {
+			return nil, nil, err
+		}
+
+	}
+
 	lastSNDBKey, lastSNDBVal, err := s.snCursor.First()
 	if err != nil {
 		return nil, nil, err
@@ -583,6 +591,14 @@ func (s *snCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, nil, err
 	}
+
+	for bytes.Equal(dbVal, DeletedValue) {
+		dbKey, dbVal, err = s.dbCursor.Next()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	sndbKey, sndbVal, err := s.snCursor.Seek(seek)
 	if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, nil, err
@@ -754,6 +770,14 @@ func (s *snCursor) Last() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
+	for bytes.Equal(lastDBVal, DeletedValue) {
+		lastDBKey, lastDBVal, err = s.dbCursor.Prev()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	cmp, br := KeyCmpBackward(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil
