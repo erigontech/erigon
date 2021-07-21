@@ -419,7 +419,7 @@ func MoveTransactionToNonCanonical(db ethdb.RwTx, number uint64) error {
 	}
 	k := make([]byte, 8)
 	//transactions before and after the block
-	for i := baseTxId; i < baseTxId+uint64(len(body.Transactions))+2; i++ {
+	for i := baseTxId; i < baseTxId+uint64(len(body.Transactions)); i++ {
 		binary.BigEndian.PutUint64(k, i)
 		err := db.Delete(dbutils.EthTx, k, nil)
 		if err != nil {
@@ -461,7 +461,7 @@ func ReadSenders(db ethdb.KVGetter, hash common.Hash, number uint64) ([]common.A
 
 func WriteRawBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	//add transaction before and after the block at the end
-	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions))+2)
+	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
 	}
@@ -485,7 +485,7 @@ func WriteBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.Body)
 	// Pre-processing
 	body.SendersFromTxs()
 	//add transaction before and after the block at the end
-	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions))+2)
+	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
 	}
