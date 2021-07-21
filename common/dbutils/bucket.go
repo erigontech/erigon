@@ -111,6 +111,27 @@ It allows:
 
 see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
+
+addr+max(shard)
+
+addr+123
+addr+234
+addr+999
+
+prune(150):
+cs.Walk(0-150,k,v {
+	etl.Collect(k)
+})
+
+elt.Load(k {
+	c.Seek(k:150)
+    for c.Prev() { c.Del() }
+})
+
+elt.Load(k {
+    for addr,n=c.Seek(k); addr==k && n<150 ;c.Next() { c.Del() }
+})
+
 AccountsHistoryBucket:
 	key - address + shard_id_u64
 	value - roaring bitmap  - list of block where it changed
@@ -199,10 +220,10 @@ const (
 	HeadersBucket         = "Header"                 // block_num_u64 + hash -> header (RLP)
 	HeaderTDBucket        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
-	BlockBodyPrefix     = "BlockBody"        // block_num_u64 + hash -> block body
-	EthTx               = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
-	BlockReceiptsPrefix = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log                 = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
+	BlockBodyPrefix = "BlockBody"        // block_num_u64 + hash -> block body
+	EthTx           = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
+	Receipts        = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log             = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -263,16 +284,13 @@ const (
 
 // Keys
 var (
-	//StorageModeHistory - does node save history.
-	StorageModeHistory = []byte("smHistory")
-	//StorageModeReceipts - does node save receipts.
-	StorageModeReceipts = []byte("smReceipts")
-	//StorageModeTxIndex - does node save transactions index.
-	StorageModeTxIndex = []byte("smTxIndex")
-	//StorageModeCallTraces - does not build index of call traces
-	StorageModeCallTraces = []byte("smCallTraces")
 	//StorageModeTEVM - does not translate EVM to TEVM
 	StorageModeTEVM = []byte("smTEVM")
+
+	PruneDistanceHistory    = []byte("pruneHistory")
+	PruneDistanceReceipts   = []byte("pruneReceipts")
+	PruneDistanceTxIndex    = []byte("pruneTxIndex")
+	PruneDistanceCallTraces = []byte("pruneCallTraces")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
@@ -293,7 +311,7 @@ var Buckets = []string{
 	ContractCodeBucket,
 	HeaderNumberBucket,
 	BlockBodyPrefix,
-	BlockReceiptsPrefix,
+	Receipts,
 	TxLookupPrefix,
 	BloomBitsPrefix,
 	ConfigPrefix,

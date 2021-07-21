@@ -29,7 +29,7 @@ import (
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
-	"github.com/ledgerwatch/erigon/cmd/hack/db"
+	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
@@ -1689,15 +1689,15 @@ func readCallTraces(chaindata string, block uint64) error {
 	var k []byte
 	var v []byte
 	count := 0
-	for k, v, err = traceCursor.First(); k != nil && err == nil; k, v, err = traceCursor.Next() {
+	for k, v, err = traceCursor.First(); k != nil; k, v, err = traceCursor.Next() {
+		if err != nil {
+			return err
+		}
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum == block {
 			fmt.Printf("%x\n", v)
 		}
 		count++
-	}
-	if err != nil {
-		return err
 	}
 	fmt.Printf("Found %d records\n", count)
 	idxCursor, err2 := tx.Cursor(dbutils.CallToIndex)
@@ -2019,7 +2019,7 @@ func scanReceipts3(chaindata string, block uint64) error {
 	var key [8]byte
 	var v []byte
 	binary.BigEndian.PutUint64(key[:], block)
-	if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+	if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 		return err
 	}
 	fmt.Printf("%x\n", v)
@@ -2041,20 +2041,16 @@ func scanReceipts2(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
-		return smErr
-	} else {
-		if !sm.History {
-			log.Warn("Could not perform this migration because history is not in storage mode")
-			return nil
-		}
+	blockNum, err := changeset.AvailableFrom(tx)
+	if err != nil {
+		return err
 	}
 	fixedCount := 0
 	logInterval := 30 * time.Second
 	logEvery := time.NewTicker(logInterval)
 	var key [8]byte
 	var v []byte
-	for blockNum := uint64(1); true; blockNum++ {
+	for ; true; blockNum++ {
 		select {
 		default:
 		case <-logEvery.C:
@@ -2068,7 +2064,7 @@ func scanReceipts2(chaindata string) error {
 			break
 		}
 		binary.BigEndian.PutUint64(key[:], blockNum)
-		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+		if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 			return err
 		}
 		var receipts types.Receipts
@@ -2103,21 +2099,21 @@ func scanReceipts(chaindata string, block uint64) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	dbdb := kv2.MustOpen(chaindata)
-	defer dbdb.Close()
-	tx, err := dbdb.BeginRw(context.Background())
+	db := kv2.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
-		return smErr
-	} else {
-		if !sm.History {
-			log.Warn("Could not perform this migration because history is not in storage mode")
-			return nil
-		}
+	blockNum, err := changeset.AvailableFrom(tx)
+	if err != nil {
+		return err
 	}
+	if block > blockNum {
+		blockNum = block
+	}
+
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return err
@@ -2134,13 +2130,13 @@ func scanReceipts(chaindata string, block uint64) error {
 	logEvery := time.NewTicker(logInterval)
 	var key [8]byte
 	var v []byte
-	for blockNum := block; true; blockNum++ {
+	for ; true; blockNum++ {
 		select {
 		default:
 		case <-logEvery.C:
 			log.Info("Commit", "block", blockNum, "fixed", fixedCount)
 			tx.Commit()
-			if tx, err = dbdb.BeginRw(context.Background()); err != nil {
+			if tx, err = db.BeginRw(context.Background()); err != nil {
 				return err
 			}
 		}
@@ -2152,7 +2148,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			break
 		}
 		binary.BigEndian.PutUint64(key[:], blockNum)
-		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+		if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 			return err
 		}
 		var receipts types.Receipts
@@ -2191,7 +2187,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+			if err = tx.Put(dbutils.Receipts, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 			fixedCount++
@@ -2225,7 +2221,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			if err != nil {
 				return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
 			}
-			if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
+			if err = tx.Put(dbutils.Receipts, key[:], buf.Bytes()); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
 			}
 			if _, err = w.Write([]byte(fmt.Sprintf("%d\n", blockNum))); err != nil {
@@ -2368,10 +2364,10 @@ func main() {
 		err = extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name)
 
 	case "defrag":
-		err = db.Defrag()
+		err = hackdb.Defrag()
 
 	case "textInfo":
-		err = db.TextInfo(*chaindata, &strings.Builder{})
+		err = hackdb.TextInfo(*chaindata, &strings.Builder{})
 
 	case "extractBodies":
 		err = extractBodies(*chaindata, uint64(*block))

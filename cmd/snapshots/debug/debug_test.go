@@ -57,7 +57,7 @@ func TestMatreshkaStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	chainConfig, _, genesisErr := core.CommitGenesisBlock(kv, core.DefaultGenesisBlock(), true)
+	chainConfig, _, genesisErr := core.CommitGenesisBlock(kv, core.DefaultGenesisBlock())
 	if genesisErr != nil {
 		t.Fatal(err)
 	}

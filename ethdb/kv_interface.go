@@ -89,7 +89,10 @@ type Has interface {
 	// Has indicates whether a key exists in the database.
 	Has(bucket string, key []byte) (bool, error)
 }
-
+type GetPut interface {
+	KVGetter
+	Putter
+}
 type KVGetter interface {
 	Has
 

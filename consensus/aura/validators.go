@@ -344,22 +344,22 @@ type ReportQueueItem struct {
 
 //nolint
 type ReportQueue struct {
-	sync.RWMutex
+	mu   sync.RWMutex
 	list *list.List
 }
 
 //nolint
 func (q *ReportQueue) push(addr common.Address, blockNum uint64, data []byte) {
-	q.Lock()
-	defer q.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.list.PushBack(&ReportQueueItem{addr: addr, blockNum: blockNum, data: data})
 }
 
 // Filters reports of validators that have already been reported or are banned.
 //nolint
 func (q *ReportQueue) filter(abi aurainterfaces.ValidatorSetABI, client client, ourAddr, contractAddr common.Address) error {
-	q.Lock()
-	defer q.Unlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	for e := q.list.Front(); e != nil; e = e.Next() {
 		el := e.Value.(*ReportQueueItem)
 		// Check if the validator should be reported.
@@ -391,8 +391,8 @@ func (q *ReportQueue) truncate() {
 	// The maximum number of reports to keep queued.
 	const MaxQueuedReports = 10
 
-	q.RLock()
-	defer q.RUnlock()
+	q.mu.RLock()
+	defer q.mu.RUnlock()
 	// Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
 	if q.list.Len() > MaxQueuedReports {
 		log.Warn("Removing reports from report cache, even though it has not been finalized", "amount", q.list.Len()-MaxQueuedReports)

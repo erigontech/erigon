@@ -69,7 +69,7 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	dbutils.BlockReceiptsPrefix:    "Receipts",
+	dbutils.Receipts:               "Receipts",
 	dbutils.Log:                    "Event Logs",
 	dbutils.AccountsHistoryBucket:  "History Of Accounts",
 	dbutils.StorageHistoryBucket:   "History Of Storage",

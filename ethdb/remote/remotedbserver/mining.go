@@ -145,12 +145,12 @@ func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
 type MinedBlockStreams struct {
 	chans map[uint]proto_txpool.Mining_OnMinedBlockServer
 	id    uint
-	sync.Mutex
+	mu    sync.Mutex
 }
 
 func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.chans == nil {
 		s.chans = make(map[uint]proto_txpool.Mining_OnMinedBlockServer)
 	}
@@ -161,8 +161,8 @@ func (s *MinedBlockStreams) Add(stream proto_txpool.Mining_OnMinedBlockServer) (
 }
 
 func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
@@ -177,8 +177,8 @@ func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
 }
 
 func (s *MinedBlockStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.chans[id]
 	if !ok { // double-unsubscribe support
 		return
@@ -189,13 +189,13 @@ func (s *MinedBlockStreams) remove(id uint) {
 // PendingBlockStreams - it's safe to use this class as non-pointer
 type PendingBlockStreams struct {
 	chans map[uint]proto_txpool.Mining_OnPendingBlockServer
-	sync.Mutex
-	id uint
+	mu    sync.Mutex
+	id    uint
 }
 
 func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.chans == nil {
 		s.chans = make(map[uint]proto_txpool.Mining_OnPendingBlockServer)
 	}
@@ -206,8 +206,8 @@ func (s *PendingBlockStreams) Add(stream proto_txpool.Mining_OnPendingBlockServe
 }
 
 func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
@@ -222,8 +222,8 @@ func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply)
 }
 
 func (s *PendingBlockStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.chans[id]
 	if !ok { // double-unsubscribe support
 		return
@@ -234,13 +234,13 @@ func (s *PendingBlockStreams) remove(id uint) {
 // PendingLogsStreams - it's safe to use this class as non-pointer
 type PendingLogsStreams struct {
 	chans map[uint]proto_txpool.Mining_OnPendingLogsServer
-	sync.Mutex
-	id uint
+	mu    sync.Mutex
+	id    uint
 }
 
 func (s *PendingLogsStreams) Add(stream proto_txpool.Mining_OnPendingLogsServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.chans == nil {
 		s.chans = make(map[uint]proto_txpool.Mining_OnPendingLogsServer)
 	}
@@ -251,8 +251,8 @@ func (s *PendingLogsStreams) Add(stream proto_txpool.Mining_OnPendingLogsServer)
 }
 
 func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
@@ -267,8 +267,8 @@ func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply) {
 }
 
 func (s *PendingLogsStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.chans[id]
 	if !ok { // double-unsubscribe support
 		return

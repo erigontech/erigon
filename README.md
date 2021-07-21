@@ -232,7 +232,8 @@ or
 XDG_DATA_HOME=/preferred/data/folder make docker-compose
 ```
 
-Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
+Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
+and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
 See: https://github.com/ledgerwatch/erigon/pull/2392/files
 
 Windows support for docker-compose is not ready yet. Please help us with .ps1 port
@@ -240,6 +241,10 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 ### Grafana dashboard
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
+
+### Prune old data
+
+Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
 
 FAQ
 ================

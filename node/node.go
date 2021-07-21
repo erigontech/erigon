@@ -51,7 +51,6 @@ type Node struct {
 	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
 	http          *httpServer //
 	ws            *httpServer //
-	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
 
 	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
@@ -120,7 +119,6 @@ func New(conf *Config) (*Node, error) {
 	// Configure RPC servers.
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
 	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
-	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
 	// Check for uncaught crashes from the previous boot and notify the user if
 	// there are any
 	//debug.CheckForCrashes(conf.DataDir)
@@ -311,13 +309,6 @@ func (n *Node) startRPC() error {
 		return err
 	}
 
-	// Configure IPC.
-	if n.ipc.endpoint != "" {
-		if err := n.ipc.start(n.rpcAPIs); err != nil {
-			return err
-		}
-	}
-
 	// Configure HTTP.
 	if n.config.HTTPHost != "" {
 		config := httpConfig{
@@ -366,7 +357,6 @@ func (n *Node) wsServerForPort(port int) *httpServer {
 func (n *Node) stopRPC() {
 	n.http.stop()
 	n.ws.stop()
-	n.ipc.stop() //nolint:errcheck
 	n.stopInProc()
 }
 
@@ -481,11 +471,6 @@ func (n *Node) DataDir() string {
 // InstanceDir retrieves the instance directory used by the protocol stack.
 func (n *Node) InstanceDir() string {
 	return n.config.instanceDir()
-}
-
-// IPCEndpoint retrieves the current IPC endpoint used by the protocol stack.
-func (n *Node) IPCEndpoint() string {
-	return n.ipc.endpoint
 }
 
 // HTTPEndpoint returns the URL of the HTTP server. Note that this URL does not

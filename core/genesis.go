@@ -170,13 +170,13 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, history)
+	c, b, err := WriteGenesisBlock(tx, genesis)
 	if err != nil {
 		return c, b, err
 	}
@@ -187,15 +187,15 @@ func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.
 	return c, b, nil
 }
 
-func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block) {
-	c, b, err := CommitGenesisBlock(db, genesis, history)
+func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis) (*params.ChainConfig, *types.Block) {
+	c, b, err := CommitGenesisBlock(db, genesis)
 	if err != nil {
 		panic(err)
 	}
 	return c, b
 }
 
-func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	stored, err := rawdb.ReadCanonicalHash(db, 0)
 	if err != nil {
 		return nil, nil, err
@@ -208,10 +208,10 @@ func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*param
 	if err != nil {
 		return nil, nil, err
 	}
-	return WriteGenesisBlock(db, genesis, history)
+	return WriteGenesisBlock(db, genesis)
 }
 
-func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -227,7 +227,7 @@ func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis, history bool) (*params.C
 			genesis = DefaultGenesisBlock()
 			custom = false
 		}
-		block, _, err1 := genesis.Write(db, history)
+		block, _, err1 := genesis.Write(db)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -405,7 +405,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
 
-func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) WriteGenesisState(tx ethdb.RwTx) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := g.ToBlock()
 	if err != nil {
 		return nil, nil, err
@@ -433,17 +433,14 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx, history bool) (*types.Block, 
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
 	}
-	// Optionally write history
-	if history {
-		if err := blockWriter.WriteHistory(); err != nil {
-			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
-		}
+	if err := blockWriter.WriteHistory(); err != nil {
+		return nil, statedb, fmt.Errorf("cannot write history: %v", err)
 	}
 	return block, statedb, nil
 }
 
 func (g *Genesis) MustWrite(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState) {
-	b, s, err := g.Write(tx, history)
+	b, s, err := g.Write(tx)
 	if err != nil {
 		panic(err)
 	}
@@ -452,8 +449,8 @@ func (g *Genesis) MustWrite(tx ethdb.RwTx, history bool) (*types.Block, *state.I
 
 // Commit writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func (g *Genesis) Write(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err2 := g.WriteGenesisState(tx, history)
+func (g *Genesis) Write(tx ethdb.RwTx) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err2 := g.WriteGenesisState(tx)
 	if err2 != nil {
 		return block, statedb, err2
 	}
@@ -494,7 +491,7 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, error) 
 		return nil, err
 	}
 	defer tx.Rollback()
-	block, _, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx), history)
+	block, _, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx))
 	if err != nil {
 		return block, err
 	}
