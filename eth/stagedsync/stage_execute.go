@@ -247,7 +247,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 		if hashStateStageProgress > 0 {
 			maxForwardMove := cfg.prune.MaxForwardMove(s.BlockNumber)
 			if to > maxForwardMove {
-				log.Info(fmt.Sprintf("[%s] Pruned node jump limit", logPrefix), "old", to, "new", maxForwardMove)
+				log.Info(fmt.Sprintf("[%s] Pruned node jump limit", logPrefix), "old_target", to, "new", maxForwardMove)
 				to = maxForwardMove
 			}
 		}
