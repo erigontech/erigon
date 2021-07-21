@@ -63,11 +63,6 @@ func TestHeaderStorage(t *testing.T) {
 			t.Fatalf("Retrieved RLP header mismatch: have %v, want %v", entry, header)
 		}
 	}
-	// Delete the header and verify the execution
-	DeleteHeader(tx, header.Hash(), header.Number.Uint64())
-	if entry := ReadHeader(tx, header.Hash(), header.Number.Uint64()); entry != nil {
-		t.Fatalf("Deleted header returned: %v", entry)
-	}
 }
 
 // Tests block body storage and retrieval operations.
@@ -119,11 +114,6 @@ func TestBodyStorage(t *testing.T) {
 			t.Fatalf("Retrieved RLP body mismatch: have %v, want %v", entry, body)
 		}
 	}
-	// Delete the body and verify the execution
-	DeleteBody(tx, hash, 0)
-	if entry := ReadBody(tx, hash, 0); entry != nil {
-		t.Fatalf("Deleted body returned: %v", entry)
-	}
 }
 
 // Tests block storage and retrieval operations.
@@ -165,19 +155,6 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(block.Transactions()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
-	}
-	// Delete the block and verify the execution
-	if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
-		t.Fatalf("Could not delete block: %v", err)
-	}
-	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
-		t.Fatalf("Deleted block returned: %v", entry)
-	}
-	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry != nil {
-		t.Fatalf("Deleted header returned: %v", entry)
-	}
-	if entry := ReadBody(tx, block.Hash(), block.NumberU64()); entry != nil {
-		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }
 
@@ -469,6 +446,10 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 
 	WriteHeader(tx, header)
+	err = WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Insert the body that corresponds to the receipts
 	require.NoError(WriteBody(tx, hash, 0, body))
 	require.NoError(WriteSenders(tx, hash, 0, body.SendersFromTxs()))

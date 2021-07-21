@@ -287,7 +287,6 @@ func ReadTransactions(db ethdb.KVGetter, bucket string, baseTxId uint64, amount 
 }
 
 func WriteTransactions(db ethdb.RwTx, bucket string, txs []types.Transaction, baseTxId uint64) error {
-	txId := baseTxId + 1 //skip transaction before block
 	buf := bytes.NewBuffer(nil)
 	c, err := db.RwCursor(bucket)
 	if err != nil {
@@ -297,8 +296,8 @@ func WriteTransactions(db ethdb.RwTx, bucket string, txs []types.Transaction, ba
 
 	for _, tx := range txs {
 		txIdKey := make([]byte, 8)
-		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
+		binary.BigEndian.PutUint64(txIdKey, baseTxId)
+		baseTxId++
 
 		buf.Reset()
 		if err := rlp.Encode(buf, tx); err != nil {
@@ -314,7 +313,6 @@ func WriteTransactions(db ethdb.RwTx, bucket string, txs []types.Transaction, ba
 }
 
 func WriteRawTransactions(db ethdb.RwTx, txs [][]byte, baseTxId uint64) error {
-	txId := baseTxId + 1 //skip transaction before block
 	c, err := db.RwCursor(dbutils.EthTx)
 	if err != nil {
 		return err
@@ -323,23 +321,10 @@ func WriteRawTransactions(db ethdb.RwTx, txs [][]byte, baseTxId uint64) error {
 
 	for _, tx := range txs {
 		txIdKey := make([]byte, 8)
-		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
+		binary.BigEndian.PutUint64(txIdKey, baseTxId)
+		baseTxId++
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := c.Append(txIdKey, tx); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func DeleteTransactions(db ethdb.RwTx, bucket string, baseTxId uint64, amount uint32) error {
-	k := make([]byte, 8)
-	//transactions before and after the block
-	for i := baseTxId; i < baseTxId+uint64(amount)+2; i++ {
-		binary.BigEndian.PutUint64(k, i)
-		err := db.Delete(bucket, k, nil)
-		if err != nil {
 			return err
 		}
 	}
@@ -415,7 +400,7 @@ func MoveTransactionToNonCanonical(db ethdb.RwTx, number uint64) error {
 		return nil
 	}
 
-	baseTxId, err := db.IncrementSequence(dbutils.NonCanonicalTXBucket, uint64(len(body.Transactions)+2))
+	baseTxId, err := db.IncrementSequence(dbutils.NonCanonicalTXBucket, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
 	}
@@ -432,9 +417,14 @@ func MoveTransactionToNonCanonical(db ethdb.RwTx, number uint64) error {
 	if err != nil {
 		return fmt.Errorf("failed to Write non canonical transactions: %w", err)
 	}
-	err = DeleteTransactions(db, dbutils.EthTx, baseTxIdOrig, txAmount)
-	if err != nil {
-		return err
+	k := make([]byte, 8)
+	//transactions before and after the block
+	for i := baseTxId; i < baseTxId+uint64(len(body.Transactions))+2; i++ {
+		binary.BigEndian.PutUint64(k, i)
+		err := db.Delete(dbutils.EthTx, k, nil)
+		if err != nil {
+			return err
+		}
 	}
 	val := make([]byte, 8)
 	binary.BigEndian.PutUint64(val, baseTxIdOrig)
@@ -470,7 +460,7 @@ func ReadSenders(db ethdb.KVGetter, hash common.Hash, number uint64) ([]common.A
 }
 
 func WriteRawBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
-	//add transaction before and after the block
+	//add transaction before and after the block at the end
 	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions))+2)
 	if err != nil {
 		return err
@@ -494,8 +484,8 @@ func WriteRawBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.Ra
 func WriteBody(db ethdb.RwTx, hash common.Hash, number uint64, body *types.Body) error {
 	// Pre-processing
 	body.SendersFromTxs()
-	//transaction before and after the block
-	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions)+2))
+	//add transaction before and after the block at the end
+	baseTxId, err := db.IncrementSequence(dbutils.EthTx, uint64(len(body.Transactions))+2)
 	if err != nil {
 		return err
 	}
