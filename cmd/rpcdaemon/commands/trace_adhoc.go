@@ -569,6 +569,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 			if traceTypeVmTrace {
 				result.VmTrace = trace.VmTrace
 			}
+
 			return trace, nil
 		}
 	}
@@ -638,6 +639,12 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 			tr.VmTrace = trace.VmTrace
 		}
 		result[i] = tr
+		for _, pt := range tr.Trace {
+			txpos := uint64(i)
+			txhash := block.Transactions()[i].Hash()
+			pt.TransactionHash = &txhash
+			pt.TransactionPosition = &txpos
+		}
 	}
 
 	return result, nil
