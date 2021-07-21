@@ -479,6 +479,9 @@ func ResetHashState(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePruneProgress(tx, stages.HashState, 0); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -491,6 +494,9 @@ func ResetIH(tx ethdb.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
 	return nil

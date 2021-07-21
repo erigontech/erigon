@@ -379,6 +379,9 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, tx eth
 		checkHistoryFrom = prunedTo
 	}
 	for blockN := range expectedAccountChanges {
+		if blockN <= checkHistoryFrom {
+			continue
+		}
 		if err := checkChangeSet(tx, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 			return err
 		}

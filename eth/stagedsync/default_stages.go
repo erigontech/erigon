@@ -57,9 +57,10 @@ func DefaultStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          stages.CreateHeadersSnapshot,
-			Description: "Create headers snapshot",
-			Disabled:    true,
+			ID:                  stages.CreateHeadersSnapshot,
+			Description:         "Create headers snapshot",
+			Disabled:            true,
+			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, firstCycle, ctx)
 			},
@@ -84,9 +85,10 @@ func DefaultStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          stages.CreateBodiesSnapshot,
-			Description: "Create bodies snapshot",
-			Disabled:    true,
+			ID:                  stages.CreateBodiesSnapshot,
+			Description:         "Create bodies snapshot",
+			Disabled:            true,
+			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, ctx)
 			},
