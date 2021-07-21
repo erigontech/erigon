@@ -130,31 +130,6 @@ type Mode struct {
 	Experiments Experiments
 }
 
-func (m Mode) MaxForwardMove(from uint64) uint64 {
-	minDistance := m.MinDistance()
-	if minDistance.Enabled() {
-		return from + uint64(minDistance) - 100 // - 100 to make it +-1 bugs resistant
-	}
-	return math.MaxUint64
-}
-
-func (m Mode) MinDistance() Distance {
-	min := Distance(math.MaxUint64)
-	if min > m.History {
-		min = m.History
-	}
-	if min > m.Receipts {
-		min = m.Receipts
-	}
-	if min > m.TxIndex {
-		min = m.TxIndex
-	}
-	if min > m.CallTraces {
-		min = m.CallTraces
-	}
-	return min
-}
-
 // Distance amount of blocks to keep in DB
 // but manual manipulation with such distance is very unsafe
 // for example:
