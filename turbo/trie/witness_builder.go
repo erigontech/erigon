@@ -43,10 +43,10 @@ func (b *WitnessBuilder) addLeafOp(key []byte, value []byte) error {
 	var op OperatorLeafValue
 
 	op.Key = make([]byte, len(key))
-	copy(op.Key[:], key)
+	copy(op.Key, key)
 	if value != nil {
 		op.Value = make([]byte, len(value))
-		copy(op.Value[:], value)
+		copy(op.Value, value)
 	}
 
 	b.operands = append(b.operands, &op)
@@ -60,7 +60,7 @@ func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode, 
 
 	var op OperatorLeafAccount
 	op.Key = make([]byte, len(key))
-	copy(op.Key[:], key)
+	copy(op.Key, key)
 
 	op.Nonce = accountNode.Nonce
 	op.Balance = big.NewInt(0)
@@ -85,7 +85,7 @@ func (b *WitnessBuilder) addExtensionOp(key []byte) error {
 
 	var op OperatorExtension
 	op.Key = make([]byte, len(key))
-	copy(op.Key[:], key)
+	copy(op.Key, key)
 
 	b.operands = append(b.operands, &op)
 	return nil

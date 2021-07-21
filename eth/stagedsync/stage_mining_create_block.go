@@ -96,7 +96,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 		return fmt.Errorf("refusing to mine without etherbase")
 	}
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
@@ -286,7 +286,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 
 	current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
 	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
-	s.Done()
 	fmt.Printf("aa: %t, %t,%t\n", current == nil, cfg.miner.MiningBlock == nil, current.Header == nil)
 	return nil
 }

@@ -29,7 +29,7 @@ import (
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
-	"github.com/ledgerwatch/erigon/cmd/hack/db"
+	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
@@ -1689,15 +1689,15 @@ func readCallTraces(chaindata string, block uint64) error {
 	var k []byte
 	var v []byte
 	count := 0
-	for k, v, err = traceCursor.First(); k != nil && err == nil; k, v, err = traceCursor.Next() {
+	for k, v, err = traceCursor.First(); k != nil; k, v, err = traceCursor.Next() {
+		if err != nil {
+			return err
+		}
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum == block {
 			fmt.Printf("%x\n", v)
 		}
 		count++
-	}
-	if err != nil {
-		return err
 	}
 	fmt.Printf("Found %d records\n", count)
 	idxCursor, err2 := tx.Cursor(dbutils.CallToIndex)
@@ -1788,7 +1788,7 @@ func advanceExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "progress", stageExec)
+	log.Info("ID exec", "progress", stageExec)
 	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec+1); err != nil {
 		return err
 	}
@@ -1796,10 +1796,7 @@ func advanceExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "changed to", stageExec)
-	if err = stages.SaveStageUnwind(tx, stages.Execution, 0); err != nil {
-		return err
-	}
+	log.Info("ID exec", "changed to", stageExec)
 	if err = tx.Commit(); err != nil {
 		return err
 	}
@@ -1819,7 +1816,7 @@ func backExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "progress", stageExec)
+	log.Info("ID exec", "progress", stageExec)
 	if err = stages.SaveStageProgress(tx, stages.Execution, stageExec-1); err != nil {
 		return err
 	}
@@ -1827,64 +1824,7 @@ func backExec(chaindata string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Stage exec", "changed to", stageExec)
-	if err = tx.Commit(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func unwind(chaindata string, block uint64) error {
-	db := kv2.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	log.Info("Unwinding to", "block", block)
-	if err = stages.SaveStageUnwind(tx, stages.Headers, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.BlockHashes, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.Bodies, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.Senders, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.Execution, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.HashState, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.IntermediateHashes, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.CallTraces, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.AccountHistoryIndex, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.StorageHistoryIndex, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.LogIndex, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.TxLookup, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.Finish, block); err != nil {
-		return err
-	}
-	if err = stages.SaveStageUnwind(tx, stages.TxPool, block); err != nil {
-		return err
-	}
+	log.Info("ID exec", "changed to", stageExec)
 	if err = tx.Commit(); err != nil {
 		return err
 	}
@@ -2079,7 +2019,7 @@ func scanReceipts3(chaindata string, block uint64) error {
 	var key [8]byte
 	var v []byte
 	binary.BigEndian.PutUint64(key[:], block)
-	if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+	if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 		return err
 	}
 	fmt.Printf("%x\n", v)
@@ -2101,20 +2041,16 @@ func scanReceipts2(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
-		return smErr
-	} else {
-		if !sm.History {
-			log.Warn("Could not perform this migration because history is not in storage mode")
-			return nil
-		}
+	blockNum, err := changeset.AvailableFrom(tx)
+	if err != nil {
+		return err
 	}
 	fixedCount := 0
 	logInterval := 30 * time.Second
 	logEvery := time.NewTicker(logInterval)
 	var key [8]byte
 	var v []byte
-	for blockNum := uint64(1); true; blockNum++ {
+	for ; true; blockNum++ {
 		select {
 		default:
 		case <-logEvery.C:
@@ -2128,7 +2064,7 @@ func scanReceipts2(chaindata string) error {
 			break
 		}
 		binary.BigEndian.PutUint64(key[:], blockNum)
-		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+		if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 			return err
 		}
 		var receipts types.Receipts
@@ -2163,21 +2099,21 @@ func scanReceipts(chaindata string, block uint64) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	dbdb := kv2.MustOpen(chaindata)
-	defer dbdb.Close()
-	tx, err := dbdb.BeginRw(context.Background())
+	db := kv2.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
-		return smErr
-	} else {
-		if !sm.History {
-			log.Warn("Could not perform this migration because history is not in storage mode")
-			return nil
-		}
+	blockNum, err := changeset.AvailableFrom(tx)
+	if err != nil {
+		return err
 	}
+	if block > blockNum {
+		blockNum = block
+	}
+
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return err
@@ -2194,13 +2130,13 @@ func scanReceipts(chaindata string, block uint64) error {
 	logEvery := time.NewTicker(logInterval)
 	var key [8]byte
 	var v []byte
-	for blockNum := block; true; blockNum++ {
+	for ; true; blockNum++ {
 		select {
 		default:
 		case <-logEvery.C:
 			log.Info("Commit", "block", blockNum, "fixed", fixedCount)
 			tx.Commit()
-			if tx, err = dbdb.BeginRw(context.Background()); err != nil {
+			if tx, err = db.BeginRw(context.Background()); err != nil {
 				return err
 			}
 		}
@@ -2212,7 +2148,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			break
 		}
 		binary.BigEndian.PutUint64(key[:], blockNum)
-		if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+		if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 			return err
 		}
 		var receipts types.Receipts
@@ -2251,7 +2187,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+			if err = tx.Put(dbutils.Receipts, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 			fixedCount++
@@ -2285,7 +2221,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			if err != nil {
 				return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
 			}
-			if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
+			if err = tx.Put(dbutils.Receipts, key[:], buf.Bytes()); err != nil {
 				return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
 			}
 			if _, err = w.Write([]byte(fmt.Sprintf("%d\n", blockNum))); err != nil {
@@ -2321,7 +2257,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil); err != nil {
+		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 
@@ -2428,10 +2364,10 @@ func main() {
 		err = extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name)
 
 	case "defrag":
-		err = db.Defrag()
+		err = hackdb.Defrag()
 
 	case "textInfo":
-		err = db.TextInfo(*chaindata, &strings.Builder{})
+		err = hackdb.TextInfo(*chaindata, &strings.Builder{})
 
 	case "extractBodies":
 		err = extractBodies(*chaindata, uint64(*block))
@@ -2477,9 +2413,6 @@ func main() {
 
 	case "fixState":
 		err = fixState(*chaindata)
-
-	case "unwind":
-		err = unwind(*chaindata, uint64(*block))
 
 	case "trimTxs":
 		err = trimTxs(*chaindata)

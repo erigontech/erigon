@@ -198,7 +198,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 			if ok {
 				// Extract value from the changeSet
 				csKey := make([]byte, 8+common.AddressLength+common.IncarnationLength)
-				copy(csKey[:], dbutils.EncodeBlockNumber(changeSetBlock))
+				copy(csKey, dbutils.EncodeBlockNumber(changeSetBlock))
 				copy(csKey[8:], address[:]) // address + incarnation
 				binary.BigEndian.PutUint64(csKey[8+common.AddressLength:], incarnation)
 				kData := csKey

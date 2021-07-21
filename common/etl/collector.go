@@ -22,7 +22,7 @@ import (
 const TmpDirName = "etl-temp"
 
 type LoadNextFunc func(originalK, k, v []byte) error
-type LoadFunc func(k []byte, value []byte, table CurrentTableReader, next LoadNextFunc) error
+type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
@@ -131,7 +131,7 @@ func (c *Collector) Close(logPrefix string) {
 		totalSize += p.Dispose()
 	}
 	if totalSize > 0 {
-		log.Info(fmt.Sprintf("[%s] etl: temp files removed successfully", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
+		log.Info(fmt.Sprintf("[%s] etl: temp files removed", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
 	}
 }
 

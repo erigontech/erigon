@@ -13,53 +13,57 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type TxLookupCfg struct {
 	db     ethdb.RwKV
+	prune  prune.Mode
 	tmpdir string
 }
 
 func StageTxLookupCfg(
 	db ethdb.RwKV,
+	prune prune.Mode,
 	tmpdir string,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:     db,
+		prune:  prune,
 		tmpdir: tmpdir,
 	}
 }
 
-func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
-
-	var blockNum uint64
-	var startKey []byte
-
-	lastProcessedBlockNumber := s.BlockNumber
-	if lastProcessedBlockNumber > 0 {
-		blockNum = lastProcessedBlockNumber + 1
-	}
-	syncHeadNumber, err := s.ExecutionAt(tx)
+	logPrefix := s.LogPrefix()
+	endBlock, err := s.ExecutionAt(tx)
 	if err != nil {
 		return err
 	}
 
-	logPrefix := s.state.LogPrefix()
-	startKey = dbutils.EncodeBlockNumber(blockNum)
-	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(syncHeadNumber), quitCh, cfg); err != nil {
+	startBlock := s.BlockNumber
+	pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
+	if startBlock < pruneTo {
+		startBlock = pruneTo
+	}
+	if startBlock > 0 {
+		startBlock++
+	}
+	startKey := dbutils.EncodeBlockNumber(startBlock)
+	if err = TxLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(endBlock), quitCh, cfg); err != nil {
 		return err
 	}
-	if err = s.DoneAndUpdate(tx, syncHeadNumber); err != nil {
+	if err = s.Update(tx, endBlock); err != nil {
 		return err
 	}
 
@@ -72,6 +76,7 @@ func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan 
 }
 
 func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, cfg TxLookupCfg) error {
+	bigNum := new(big.Int)
 	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
@@ -80,9 +85,8 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
 
-		blockNumBytes := new(big.Int).SetUint64(blocknum).Bytes()
-		for _, tx := range body.Transactions {
-			if err := next(k, tx.Hash().Bytes(), blockNumBytes); err != nil {
+		for _, txn := range body.Transactions {
+			if err := next(k, txn.Hash().Bytes(), bigNum.SetUint64(blocknum).Bytes()); err != nil {
 				return err
 			}
 		}
@@ -97,14 +101,14 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+	quitCh := ctx.Done()
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -117,7 +121,6 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 	if err := u.Done(tx); err != nil {
 		return err
 	}
-
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -127,48 +130,94 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 }
 
 func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
-	collector := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collector.Close("TxLookup")
-
-	logPrefix := s.state.LogPrefix()
-	c, err := tx.Cursor(dbutils.BlockBodyPrefix)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	// Remove lookup entries for blocks between unwindPoint+1 and stage.BlockNumber
-	if err := ethdb.Walk(c, dbutils.EncodeBlockNumber(u.UnwindPoint+1), 0, func(k, v []byte) (b bool, e error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
-
-		blockNumber := binary.BigEndian.Uint64(k[:8])
-		if blockNumber > s.BlockNumber {
-			return false, nil
-		}
-
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
-
+	reader := bytes.NewReader(nil)
+	logPrefix := s.LogPrefix()
+	return etl.Transform(logPrefix, tx, dbutils.BlockBodyPrefix, dbutils.TxLookupPrefix, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
-		if err := rlp.Decode(bytes.NewReader(v), body); err != nil {
-			return false, fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
+		reader.Reset(v)
+		if err := rlp.Decode(reader, body); err != nil {
+			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
-		txs, _ := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		if err != nil {
+			return err
+		}
 		for _, txn := range txs {
-			if err := collector.Collect(txn.Hash().Bytes(), nil); err != nil {
-				return false, err
+			if err = next(k, txn.Hash().Bytes(), nil); err != nil {
+				return err
 			}
 		}
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            quitCh,
+		ExtractStartKey: dbutils.EncodeBlockNumber(u.UnwindPoint + 1),
+		//ExtractEndKey:   dbutils.EncodeBlockNumber(s.BlockNumber - 1),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	})
+}
 
-		return true, nil
-	}); err != nil {
+func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+	if !cfg.prune.TxIndex.Enabled() {
+		return nil
+	}
+	logPrefix := s.LogPrefix()
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+	// Forward stage doesn't write anything before PruneTo point
+	// TODO: maybe need do binary search of values in db in this case
+	if s.PruneProgress != 0 {
+		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s, to, ctx); err != nil {
+			return err
+		}
+	}
+	if err = s.Done(tx); err != nil {
 		return err
 	}
-	if err := collector.Load(logPrefix, tx, dbutils.TxLookupPrefix, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quitCh}); err != nil {
-		return err
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context) error {
+	reader := bytes.NewReader(nil)
+	return etl.Transform(logPrefix, tx, dbutils.BlockBodyPrefix, dbutils.TxLookupPrefix, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
+		body := new(types.BodyForStorage)
+		reader.Reset(v)
+		if err := rlp.Decode(reader, body); err != nil {
+			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
+		}
+
+		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		if err != nil {
+			return err
+		}
+		for _, txn := range txs {
+			if err := next(k, txn.Hash().Bytes(), nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, etl.IdentityLoadFunc, etl.TransformArgs{
+		Quit:            ctx.Done(),
+		ExtractStartKey: dbutils.EncodeBlockNumber(s.ForwardProgress),
+		ExtractEndKey:   dbutils.EncodeBlockNumber(pruneTo),
+		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	})
 }

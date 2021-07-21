@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
@@ -52,8 +53,8 @@ type MockSentry struct {
 	tmpdir          string
 	Engine          consensus.Engine
 	ChainConfig     *params.ChainConfig
-	Sync            *stagedsync.StagedSync
-	MiningSync      *stagedsync.StagedSync
+	Sync            *stagedsync.Sync
+	MiningSync      *stagedsync.Sync
 	PendingBlocks   chan *types.Block
 	MinedBlocks     chan *types.Block
 	downloader      *download.ControlServerImpl
@@ -129,19 +130,19 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 }
 
 func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
-	return MockWithGenesisStorageMode(t, gspec, key, ethdb.DefaultStorageMode)
+	return MockWithGenesisStorageMode(t, gspec, key, prune.DefaultMode)
 }
 
 func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(t, gspec, key, ethdb.DefaultStorageMode, engine)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine)
 }
 
-func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode) *MockSentry {
-	return MockWithEverything(t, gspec, key, sm, ethash.NewFaker())
+func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode) *MockSentry {
+	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker())
 }
 
-func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode, engine consensus.Engine) *MockSentry {
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine) *MockSentry {
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -150,7 +151,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	mock := &MockSentry{
 		t:           t,
-		DB:          kv.NewTestKV(t),
 		tmpdir:      tmpdir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
@@ -162,6 +162,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
 		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
+	}
+	if t != nil {
+		mock.DB = kv.NewTestKV(t)
+	} else {
+		mock.DB = kv.NewMemKV()
 	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -202,7 +207,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.TxPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, sm.History)
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec)
 	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
 		if t != nil {
 			t.Fatal(err)
@@ -223,79 +228,78 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
-
-	mock.Sync = NewStagedSync(mock.Ctx, sm,
-		stagedsync.StageHeadersCfg(
-			mock.DB,
-			mock.downloader.Hd,
-			*mock.ChainConfig,
-			sendHeaderRequest,
-			propagateNewBlockHashes,
-			penalize,
-			cfg.BatchSize,
+	mock.Sync = stagedsync.New(
+		stagedsync.DefaultStages(
+			mock.Ctx, prune,
+			stagedsync.StageHeadersCfg(
+				mock.DB,
+				mock.downloader.Hd,
+				*mock.ChainConfig,
+				sendHeaderRequest,
+				propagateNewBlockHashes,
+				penalize,
+				cfg.BatchSize,
+			),
+			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
+			stagedsync.StageBodiesCfg(
+				mock.DB,
+				mock.downloader.Bd,
+				sendBodyRequest,
+				penalize,
+				blockPropagator,
+				cfg.BodyDownloadTimeoutSeconds,
+				*mock.ChainConfig,
+				cfg.BatchSize,
+			),
+			stagedsync.StageSnapshotBodiesCfg(
+				mock.DB,
+				ethconfig.Snapshot{Enabled: false},
+				nil, nil,
+				"",
+			),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
+			stagedsync.StageExecuteBlocksCfg(
+				mock.DB,
+				prune,
+				cfg.BatchSize,
+				nil,
+				mock.ChainConfig,
+				mock.Engine,
+				&vm.Config{},
+				nil,
+				cfg.StateStream,
+				mock.tmpdir,
+			),
+			stagedsync.StageTranspileCfg(
+				mock.DB,
+				cfg.BatchSize,
+				mock.ChainConfig,
+			),
+			stagedsync.StageSnapshotStateCfg(
+				mock.DB,
+				ethconfig.Snapshot{Enabled: false},
+				"",
+				nil, nil,
+			),
+			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
+			stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
+				mock.StreamWg.Add(1)
+				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+				go txpropagate.BroadcastPendingTxsToNetwork(mock.Ctx, txPool, mock.TxPoolP2PServer.RecentPeers, mock.downloader)
+				mock.StreamWg.Wait()
+				mock.TxPoolP2PServer.TxFetcher.Start()
+			}),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
+			true, /* test */
 		),
-		stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
-		stagedsync.StageBodiesCfg(
-			mock.DB,
-			mock.downloader.Bd,
-			sendBodyRequest,
-			penalize,
-			blockPropagator,
-			cfg.BodyDownloadTimeoutSeconds,
-			*mock.ChainConfig,
-			cfg.BatchSize,
-		),
-		stagedsync.StageSnapshotBodiesCfg(
-			mock.DB,
-			ethconfig.Snapshot{Enabled: false},
-			nil, nil,
-			"",
-		),
-		stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
-		stagedsync.StageExecuteBlocksCfg(
-			mock.DB,
-			sm.Receipts,
-			sm.CallTraces,
-			sm.TEVM,
-			0,
-			cfg.BatchSize,
-			nil,
-			mock.ChainConfig,
-			mock.Engine,
-			&vm.Config{NoReceipts: !sm.Receipts},
-			nil,
-			cfg.StateStream,
-			mock.tmpdir,
-		),
-		stagedsync.StageTranspileCfg(
-			mock.DB,
-			cfg.BatchSize,
-			nil,
-			nil,
-			mock.ChainConfig,
-		),
-		stagedsync.StageSnapshotStateCfg(
-			mock.DB,
-			ethconfig.Snapshot{Enabled: false},
-			"",
-			nil, nil,
-		),
-		stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
-		stagedsync.StageHistoryCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageLogIndexCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageCallTracesCfg(mock.DB, 0, cfg.BatchSize, mock.tmpdir, mock.ChainConfig, mock.Engine),
-		stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
-		stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
-			mock.StreamWg.Add(1)
-			go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
-			go txpropagate.BroadcastPendingTxsToNetwork(mock.Ctx, txPool, mock.TxPoolP2PServer.RecentPeers, mock.downloader)
-			mock.StreamWg.Wait()
-			mock.TxPoolP2PServer.TxFetcher.Start()
-		}),
-		stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
-		true, /* test */
+		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
 	)
 
 	miningConfig := cfg.Miner
@@ -309,15 +313,15 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.MinedBlocks = miner.MiningResultCh
 
 	mock.MiningSync = stagedsync.New(
-		stagedsync.MiningStages(
+		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, txPool, mock.tmpdir),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
 			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
-		stagedsync.MiningUnwindOrder(),
-		stagedsync.OptionalParameters{},
+		stagedsync.MiningUnwindOrder,
+		stagedsync.MiningPruneOrder,
 	)
 
 	mock.StreamWg.Add(1)
@@ -407,7 +411,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
-	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
+	highestSeenHeader := chain.TopBlock.NumberU64()
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}

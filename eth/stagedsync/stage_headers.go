@@ -98,7 +98,6 @@ func HeadersForward(
 				return err
 			}
 		}
-		s.Done()
 		return nil
 	}
 
@@ -185,15 +184,12 @@ func HeadersForward(
 		timer.Stop()
 	}
 	if headerInserter.Unwind() {
-		if err := u.UnwindTo(headerInserter.UnwindPoint(), tx, common.Hash{}); err != nil {
-			return fmt.Errorf("%s: failed to unwind to %d: %w", logPrefix, headerInserter.UnwindPoint(), err)
-		}
+		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
 	} else if headerInserter.GetHighest() != 0 {
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
 			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
 		}
 	}
-	s.Done()
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -240,8 +236,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) error {
-	var err error
+func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -316,11 +311,9 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
 		}
-		if err = s.DoneAndUpdate(tx, maxNum); err != nil {
+		if err = s.Update(tx, maxNum); err != nil {
 			return err
 		}
-	} else if err = u.Skip(tx); err != nil {
-		return err
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -370,4 +363,32 @@ func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) 
 }
 func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
+}
+func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
+}
+func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
+}
+func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
+}
+
+func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := p.LogPrefix()
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
 }

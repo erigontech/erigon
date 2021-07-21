@@ -239,7 +239,7 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 }
 
 func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
-	dbTx, err := s.db.BeginRw(ctx)
+	dbTx, err := s.db.BeginRw(ctx) //nolint
 	if err != nil {
 		return nil, err
 	}
@@ -673,6 +673,14 @@ func (s *snCursor) First() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
+	for bytes.Equal(lastDBVal, DeletedValue) {
+		lastDBKey, lastDBVal, err = s.dbCursor.Next()
+		if err != nil {
+			return nil, nil, err
+		}
+
+	}
+
 	lastSNDBKey, lastSNDBVal, err := s.snCursor.First()
 	if err != nil {
 		return nil, nil, err
@@ -874,6 +882,14 @@ func (s *snCursor) Last() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
+	for bytes.Equal(lastDBVal, DeletedValue) {
+		lastDBKey, lastDBVal, err = s.dbCursor.Prev()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	cmp, br := KeyCmpBackward(lastDBKey, lastSNDBKey)
 	if br {
 		return nil, nil, nil

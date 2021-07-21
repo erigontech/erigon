@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
@@ -90,7 +91,7 @@ var cmdSnapshotCheck = &cobra.Command{
 
 		if isNew {
 			if err := kv.Update(ctx, func(tx ethdb.RwTx) error {
-				return ethdb.SetStorageModeIfNotExist(tx, ethdb.StorageMode{})
+				return prune.SetIfNotExist(tx, prune.DefaultMode)
 			}); err != nil {
 				return err
 			}
@@ -104,7 +105,7 @@ var cmdSnapshotCheck = &cobra.Command{
 }
 
 func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string) (err error) {
-	_, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	var snapshotBlock uint64 = 11_000_000
 	var lastBlockHeaderNumber, blockNum uint64
@@ -208,31 +209,29 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 	)
 
 	if isNew {
-		stage3 := stage(sync, tx, stages.Senders)
-		err = stage3.DoneAndUpdate(tx, lastBlockHeaderNumber)
+		stage3 := stage(sync, tx, nil, stages.Senders)
+		err = stage3.Update(tx, lastBlockHeaderNumber)
 		if err != nil {
 			return err
 		}
 
-		stage4 := stage(sync, tx, stages.Execution)
-		err = stage4.DoneAndUpdate(tx, snapshotBlock)
+		stage4 := stage(sync, tx, nil, stages.Execution)
+		err = stage4.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
-		stage5 := stage(sync, tx, stages.HashState)
-		err = stage5.DoneAndUpdate(tx, snapshotBlock)
+		stage5 := stage(sync, tx, nil, stages.HashState)
+		err = stage5.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
 
-		stage6 := stage(sync, tx, stages.IntermediateHashes)
-		err = stage6.DoneAndUpdate(tx, snapshotBlock)
+		stage6 := stage(sync, tx, nil, stages.IntermediateHashes)
+		err = stage6.Update(tx, snapshotBlock)
 		if err != nil {
 			return err
 		}
 	}
-
-	ch := ctx.Done()
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -242,29 +241,29 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 		if err != nil {
 			return err
 		}
-		stage4 := stage(sync, tx, stages.Execution)
+		stage4 := stage(sync, tx, nil, stages.Execution)
 		stage4.BlockNumber = blockNumber - 1
 		log.Info("Stage4", "progress", stage4.BlockNumber)
 
-		err = stagedsync.SpawnExecuteBlocksStage(stage4, sync, tx, blockNumber, ch,
-			stagedsync.StageExecuteBlocksCfg(db, false, false, false, 0, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDir),
+		err = stagedsync.SpawnExecuteBlocksStage(stage4, sync, tx, blockNumber, ctx,
+			stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDir),
 			false)
 		if err != nil {
 			return fmt.Errorf("execution err %w", err)
 		}
 
-		stage5 := stage(sync, tx, stages.HashState)
+		stage5 := stage(sync, tx, nil, stages.HashState)
 		stage5.BlockNumber = blockNumber - 1
 		log.Info("Stage5", "progress", stage5.BlockNumber)
-		err = stagedsync.SpawnHashStateStage(stage5, tx, stagedsync.StageHashStateCfg(db, tmpDir), ch)
+		err = stagedsync.SpawnHashStateStage(stage5, tx, stagedsync.StageHashStateCfg(db, tmpDir), ctx)
 		if err != nil {
 			return fmt.Errorf("spawnHashStateStage err %w", err)
 		}
 
-		stage6 := stage(sync, tx, stages.IntermediateHashes)
+		stage6 := stage(sync, tx, nil, stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx, stagedsync.StageTrieCfg(db, true, true, tmpDir), ch); err != nil {
+		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx, stagedsync.StageTrieCfg(db, true, true, tmpDir), ctx); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}

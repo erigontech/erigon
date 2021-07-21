@@ -36,7 +36,7 @@ func StageMiningFinishCfg(
 }
 
 func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, cfg MiningFinishCfg, quit <-chan struct{}) error {
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
@@ -58,7 +58,6 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, cfg MiningFinishCfg, q
 	// Tests may set pre-calculated nonce
 	if block.Header().Nonce.Uint64() != 0 {
 		cfg.miningState.MiningResultCh <- block
-		s.Done()
 		return nil
 	}
 
@@ -77,6 +76,5 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, cfg MiningFinishCfg, q
 		log.Warn("Block sealing failed", "err", err)
 	}
 
-	s.Done()
 	return nil
 }

@@ -93,7 +93,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 	backoffCfg.MaxDelay = 10 * time.Second
 	dialOpts = []grpc.DialOption{
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(5 * datasize.MB))),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(15 * datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
 	}
 	if certFile == "" {

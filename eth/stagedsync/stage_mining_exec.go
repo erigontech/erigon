@@ -52,7 +52,7 @@ func StageMiningExecCfg(
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
 	cfg.vmConfig.NoReceipts = false
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 	localTxs := current.LocalTxs
 	remoteTxs := current.RemoteTxs
@@ -68,7 +68,6 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit 
 	// sealing in advance without waiting block execution finished.
 	if !noempty {
 		log.Info("Commit an empty block", "number", current.Header.Number)
-		s.Done()
 		return nil
 	}
 
@@ -105,7 +104,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit 
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(cfg.engine, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil); err != nil {
+	if err := core.FinalizeBlockExecution(cfg.engine, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil, nil); err != nil {
 		return err
 	}
 
@@ -141,7 +140,6 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit 
 	if err := stages.SaveStageProgress(tx, stages.Execution, current.Header.Number.Uint64()); err != nil {
 		return err
 	}
-	s.Done()
 	return nil
 }
 

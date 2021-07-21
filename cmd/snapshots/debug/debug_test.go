@@ -57,7 +57,7 @@ func TestMatreshkaStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	chainConfig, _, genesisErr := core.CommitGenesisBlock(kv, core.DefaultGenesisBlock(), true)
+	chainConfig, _, genesisErr := core.CommitGenesisBlock(kv, core.DefaultGenesisBlock())
 	if genesisErr != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestMatreshkaStream(t *testing.T) {
 
 		checkTEVM := ethdb.GetCheckTEVM(tx)
 
-		_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{NoReceipts: true}, getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter, nil, checkTEVM)
+		_, err = core.ExecuteBlockEphemerally(chainConfig, &vm.Config{NoReceipts: true}, getHeader, ethash.NewFaker(), block, stateReaderWriter, stateReaderWriter, nil, nil, checkTEVM)
 		if err != nil {
 			t.Fatal(err, currentBlock)
 		}
@@ -168,6 +168,7 @@ func TestMatreshkaStream(t *testing.T) {
 			if err != nil {
 				t.Fatal(err, currentBlock)
 			}
+			defer tx.Rollback()
 
 			dr := time.Since(ttt)
 			fmt.Println(currentBlock, "finished", "acc-", accDiffLen, "st-", stDiffLen, "codes - ", codesDiffLen, "all -", time.Since(tt), "chunk - ", dr, "blocks/s", 10000/dr.Seconds())

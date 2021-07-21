@@ -62,6 +62,9 @@ type ChainReader interface {
 type EpochReader interface {
 	GetEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
 	PutEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
+	GetPendingEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
+	PutPendingEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
+	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error)
 }
 
 type SystemCall func(contract common.Address, data []byte) ([]byte, error)
@@ -94,14 +97,14 @@ type Engine interface {
 	Prepare(chain ChainHeaderReader, header *types.Header) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
-	Initialize(config *params.ChainConfig, e EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
+	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall SystemCall, call Call)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, syscall SystemCall)
+	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call) error
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
@@ -109,7 +112,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction,
-		uncles []*types.Header, receipts types.Receipts, e EpochReader, syscall SystemCall) (*types.Block, error)
+		uncles []*types.Header, receipts types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -125,7 +128,7 @@ type Engine interface {
 	// that a new block should have.
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int
 
-	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header) []rlp.RawValue
+	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []rlp.RawValue
 
 	// VerifyFamily only used by Aura now - later may be merged into VerifyHeaders
 	VerifyFamily(chain ChainHeaderReader, header *types.Header) error

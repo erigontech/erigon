@@ -86,20 +86,17 @@ func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error 
 	return db.Put(dbutils.SyncStageProgress, []byte(stage), marshalData(progress))
 }
 
-// GetStageUnwind retrieves the invalidation for the given stage
-// Invalidation means that that stage needs to rollback to the invalidation
-// point and be redone
-func GetStageUnwind(db ethdb.KVGetter, stage SyncStage) (uint64, error) {
-	v, err := db.GetOne(dbutils.SyncStageUnwind, []byte(stage))
+// GetStagePruneProgress retrieves saved progress of given sync stage from the database
+func GetStagePruneProgress(db ethdb.KVGetter, stage SyncStage) (uint64, error) {
+	v, err := db.GetOne(dbutils.SyncStageProgress, []byte("prune_"+stage))
 	if err != nil {
 		return 0, err
 	}
 	return unmarshalData(v)
 }
 
-// SaveStageUnwind saves the progress of the given stage in the database
-func SaveStageUnwind(db ethdb.Putter, stage SyncStage, invalidation uint64) error {
-	return db.Put(dbutils.SyncStageUnwind, []byte(stage), marshalData(invalidation))
+func SaveStagePruneProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
+	return db.Put(dbutils.SyncStageProgress, []byte("prune_"+stage), marshalData(progress))
 }
 
 func marshalData(blockNumber uint64) []byte {

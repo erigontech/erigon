@@ -724,7 +724,7 @@ func (srv *Server) run() {
 		}
 	}
 	if len(srv.Config.Protocols) > 0 {
-		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnode.Node().URLv4())
+		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnode.Node().URLv4(), "name", srv.Name)
 	}
 	defer srv.loopWG.Done()
 	defer srv.nodedb.Close()

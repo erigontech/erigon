@@ -827,6 +827,10 @@ func (pool *TxPool) AddLocals(txs []types.Transaction) []error {
 	return pool.addTxs(txs, !pool.config.NoLocals, true)
 }
 
+func (pool *TxPool) IsLocalTx(txHash common.Hash) bool {
+	return pool.all.GetLocal(txHash) != nil
+}
+
 // AddLocal enqueues a single local transaction into the pool if it is valid. This is
 // a convenience wrapper aroundd AddLocals.
 func (pool *TxPool) AddLocal(tx types.Transaction) error {

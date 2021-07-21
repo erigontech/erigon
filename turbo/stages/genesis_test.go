@@ -144,7 +144,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "genesis without ChainConfig",
 			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
-				return core.CommitGenesisBlock(db, new(core.Genesis), true)
+				return core.CommitGenesisBlock(db, new(core.Genesis))
 			},
 			wantErr:    core.ErrGenesisNoConfig,
 			wantConfig: params.AllEthashProtocolChanges,
@@ -152,7 +152,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "no block in DB, genesis == nil",
 			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
-				return core.CommitGenesisBlock(db, nil, true)
+				return core.CommitGenesisBlock(db, nil)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -160,7 +160,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
-				return core.CommitGenesisBlock(db, nil, true)
+				return core.CommitGenesisBlock(db, nil)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -169,7 +169,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == nil",
 			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
-				return core.CommitGenesisBlock(db, nil, true)
+				return core.CommitGenesisBlock(db, nil)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -178,7 +178,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == ropsten",
 			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
-				return core.CommitGenesisBlock(db, core.DefaultRopstenGenesisBlock(), true)
+				return core.CommitGenesisBlock(db, core.DefaultRopstenGenesisBlock())
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.RopstenGenesisHash},
 			wantHash:   params.RopstenGenesisHash,
@@ -188,7 +188,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "compatible config in DB",
 			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
 				oldcustomg.MustCommit(db)
-				return core.CommitGenesisBlock(db, &customg, true)
+				return core.CommitGenesisBlock(db, &customg)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -209,7 +209,7 @@ func TestSetupGenesis(t *testing.T) {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
-				return core.CommitGenesisBlock(m.DB, &customg, true)
+				return core.CommitGenesisBlock(m.DB, &customg)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,

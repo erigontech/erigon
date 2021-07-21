@@ -54,20 +54,20 @@ type SNDownloaderServer struct {
 	db ethdb.Database
 }
 
-func (S *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnapshotRequest) (*empty.Empty, error) {
-	err := S.t.AddSnapshotsTorrents(ctx, S.db, request.NetworkId, FromSnapshotTypes(request.Type))
+func (s *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnapshotRequest) (*empty.Empty, error) {
+	err := s.t.AddSnapshotsTorrents(ctx, s.db, request.NetworkId, FromSnapshotTypes(request.Type))
 	if err != nil {
 		return nil, err
 	}
 	return &empty.Empty{}, nil
 }
-func (S *SNDownloaderServer) Load() error {
-	return S.t.Load(S.db)
+func (s *SNDownloaderServer) Load() error {
+	return s.t.Load(s.db)
 }
 
-func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *SnapshotsRequest) (*SnapshotsInfoReply, error) {
+func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *SnapshotsRequest) (*SnapshotsInfoReply, error) {
 	reply := SnapshotsInfoReply{}
-	resp, err := S.t.GetSnapshots(S.db, request.NetworkId)
+	resp, err := s.t.GetSnapshots(s.db, request.NetworkId)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +77,9 @@ func (S *SNDownloaderServer) Snapshots(ctx context.Context, request *SnapshotsRe
 	return &reply, nil
 }
 
-func (S *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.TorrentStats {
+func (s *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.TorrentStats {
 	stats := map[string]torrent.TorrentStats{}
-	torrents := S.t.Cli.Torrents()
+	torrents := s.t.Cli.Torrents()
 	for _, t := range torrents {
 		stats[t.Name()] = t.Stats()
 	}

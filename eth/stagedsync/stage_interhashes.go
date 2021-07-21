@@ -7,7 +7,6 @@ import (
 	"math/bits"
 	"os"
 	"sort"
-	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -22,20 +21,23 @@ import (
 )
 
 type TrieCfg struct {
-	db        ethdb.RwKV
-	checkRoot bool
-	tmpDir    string
+	db                ethdb.RwKV
+	checkRoot         bool
+	tmpDir            string
+	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 }
 
 func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	return TrieCfg{
-		db:        db,
-		checkRoot: checkRoot,
-		tmpDir:    tmpDir,
+		db:                db,
+		checkRoot:         checkRoot,
+		tmpDir:            tmpDir,
+		saveNewHashesToDB: saveNewHashesToDB,
 	}
 }
 
-func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg TrieCfg, quit <-chan struct{}) (common.Hash, error) {
+func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) (common.Hash, error) {
+	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -54,7 +56,6 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 	if s.BlockNumber == to {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-		s.Done()
 		return trie.EmptyRoot, nil
 	}
 
@@ -71,7 +72,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 		headerHash = syncHeadHeader.Hash()
 	}
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	}
@@ -91,12 +92,9 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 			log.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", logPrefix, to, root, expectedRootHash, headerHash))
 			if to > s.BlockNumber {
 				log.Warn("Unwinding due to incorrect root hash", "to", to-1)
-				if err = u.UnwindTo(to-1, tx, headerHash); err != nil {
-					return trie.EmptyRoot, err
-				}
+				u.UnwindTo(to-1, headerHash)
 			}
-			s.Done()
-		} else if err = s.DoneAndUpdate(tx, to); err != nil {
+		} else if err = s.Update(tx, to); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
@@ -117,15 +115,19 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfAccountsBucket)
 	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfStorageBucket)
-	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+
+	accTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accTrieCollector.Close(logPrefix)
-	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	accTrieCollectorFunc := accountTrieCollector(accTrieCollector)
+
+	stTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer stTrieCollector.Close(logPrefix)
+	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
+
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(trie.NewRetainList(0), accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
 	}
-	calcStart := time.Now()
 	hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 	if err != nil {
 		return trie.EmptyRoot, err
@@ -134,8 +136,7 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	if cfg.checkRoot && hash != expectedRootHash {
 		return hash, nil
 	}
-	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(),
-		"in", time.Since(calcStart))
+	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 
 	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
@@ -349,15 +350,18 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 		return trie.EmptyRoot, err
 	}
 
-	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	accTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accTrieCollector.Close(logPrefix)
-	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	accTrieCollectorFunc := accountTrieCollector(accTrieCollector)
+
+	stTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer stTrieCollector.Close(logPrefix)
+	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
+
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
 	}
-	calcStart := time.Now()
 	hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 	if err != nil {
 		return trie.EmptyRoot, err
@@ -367,8 +371,7 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 		return hash, nil
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix),
-		" hash", hash.Hex(),
-		"in", time.Since(calcStart))
+		" hash", hash.Hex())
 
 	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
@@ -379,11 +382,11 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	return hash, nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TrieCfg, quit <-chan struct{}) error {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) (err error) {
+	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -404,7 +407,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx,
 	// 	}
 	// }
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cfg, expectedRootHash, quit); err != nil {
 		return err
 	}
@@ -434,15 +437,18 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return err
 	}
 
-	accTrieCollector, accTrieCollectorFunc := accountTrieCollector(cfg.tmpDir)
+	accTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accTrieCollector.Close(logPrefix)
-	stTrieCollector, stTrieCollectorFunc := storageTrieCollector(cfg.tmpDir)
+	accTrieCollectorFunc := accountTrieCollector(accTrieCollector)
+
+	stTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer stTrieCollector.Close(logPrefix)
+	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
+
 	loader := trie.NewFlatDBTrieLoader(logPrefix)
 	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return err
 	}
-	calcStart := time.Now()
 	hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
 	if err != nil {
 		return err
@@ -450,7 +456,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	if hash != expectedRootHash {
 		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
 	}
-	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex(), "in", time.Since(calcStart))
+	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
@@ -473,7 +479,7 @@ func ResetHashState(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.HashState, 0); err != nil {
+	if err := stages.SaveStagePruneProgress(tx, stages.HashState, 0); err != nil {
 		return err
 	}
 
@@ -490,7 +496,7 @@ func ResetIH(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
-	if err := stages.SaveStageUnwind(tx, stages.IntermediateHashes, 0); err != nil {
+	if err := stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
 	return nil
@@ -502,10 +508,9 @@ func assertSubset(a, b uint16) {
 	}
 }
 
-func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
-	collector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+func accountTrieCollector(collector *etl.Collector) trie.HashCollector2 {
 	newV := make([]byte, 0, 1024)
-	return collector, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, _ []byte) error {
+	return func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, _ []byte) error {
 		if len(keyHex) == 0 {
 			return nil
 		}
@@ -522,14 +527,13 @@ func accountTrieCollector(tmpdir string) (*etl.Collector, trie.HashCollector2) {
 	}
 }
 
-func storageTrieCollector(tmpdir string) (*etl.Collector, trie.StorageHashCollector2) {
-	storageIHCollector := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+func storageTrieCollector(collector *etl.Collector) trie.StorageHashCollector2 {
 	newK := make([]byte, 0, 128)
 	newV := make([]byte, 0, 1024)
-	return storageIHCollector, func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+	return func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		newK = append(append(newK[:0], accWithInc...), keyHex...)
 		if hasState == 0 {
-			return storageIHCollector.Collect(newK, nil)
+			return collector.Collect(newK, nil)
 		}
 		if len(keyHex) > 0 && hasHash == 0 && hasTree == 0 {
 			return nil
@@ -540,6 +544,25 @@ func storageTrieCollector(tmpdir string) (*etl.Collector, trie.StorageHashCollec
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
 		newV = trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, rootHash, newV)
-		return storageIHCollector.Collect(newK, newV)
+		return collector.Collect(newK, newV)
 	}
+}
+
+func PruneIntermediateHashesStage(s *PruneState, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	s.Done(tx)
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

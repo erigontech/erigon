@@ -74,6 +74,9 @@ func RecvUploadMessageLoop(ctx context.Context,
 			continue
 		}
 		if err := RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
+			if isPeerNotFoundErr(err) {
+				continue
+			}
 			log.Error("[RecvUploadMessage]", "err", err)
 		}
 	}
@@ -153,6 +156,9 @@ func RecvMessageLoop(ctx context.Context,
 			continue
 		}
 		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
+			if isPeerNotFoundErr(err) {
+				continue
+			}
 			log.Error("[RecvMessage]", "err", err)
 		}
 	}

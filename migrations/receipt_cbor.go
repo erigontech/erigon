@@ -69,7 +69,7 @@ var ReceiptCbor = Migration{
 		}
 		for blockNum := uint64(1); blockNum <= to; blockNum++ {
 			binary.BigEndian.PutUint64(key[:], blockNum)
-			if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+			if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
 				return err
 			}
 			if v == nil {
@@ -108,7 +108,7 @@ var ReceiptCbor = Migration{
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+			if err = tx.Put(dbutils.Receipts, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 		}

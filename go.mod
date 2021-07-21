@@ -36,7 +36,6 @@ require (
 	github.com/holiman/uint256 v1.2.0
 	github.com/huin/goupnp v1.0.1-0.20210626160114-33cdcbb30dda
 	github.com/jackpal/go-nat-pmp v1.0.2
-	github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e
 	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
@@ -49,18 +48,19 @@ require (
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/prometheus/client_golang v1.9.0
 	github.com/prometheus/tsdb v0.10.0
+	github.com/quasilyte/go-ruleguard/dsl v0.3.6
 	github.com/rs/cors v1.8.0
 	github.com/shirou/gopsutil/v3 v3.21.6
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.0
-	github.com/torquem-ch/mdbx-go v0.15.0
+	github.com/torquem-ch/mdbx-go v0.16.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.5
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
-	go.uber.org/atomic v1.8.0
+	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
 	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
@@ -70,7 +70,6 @@ require (
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
-	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
 	pgregory.net/rapid v0.4.6
 )

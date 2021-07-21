@@ -324,9 +324,9 @@ func (bd *BodyDownload) GetDeliveries() ([]*types.Header, []*types.RawBody, erro
 		rawBodies = make([]*types.RawBody, i)
 		copy(headers, bd.deliveriesH[:i])
 		copy(rawBodies, bd.deliveriesB[:i])
-		copy(bd.deliveriesH[:], bd.deliveriesH[i:])
-		copy(bd.deliveriesB[:], bd.deliveriesB[i:])
-		copy(bd.requests[:], bd.requests[i:])
+		copy(bd.deliveriesH, bd.deliveriesH[i:])
+		copy(bd.deliveriesB, bd.deliveriesB[i:])
+		copy(bd.requests, bd.requests[i:])
 		for j := len(bd.deliveriesH) - int(i); j < len(bd.deliveriesH); j++ {
 			bd.deliveriesH[j] = nil
 			bd.deliveriesB[j] = nil

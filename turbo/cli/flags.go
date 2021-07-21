@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -9,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -56,16 +58,41 @@ var (
 		Value: node.DefaultConfig.P2P.MaxPeers,
 	}
 
-	StorageModeFlag = cli.StringFlag{
-		Name: "storage-mode",
-		Usage: `Configures the storage mode of the app:
-* h - write history to the DB
-* r - write receipts to the DB
-* t - write tx lookup index to the DB
-* c - write call traces index to the DB,
-* e - write TEVM translated code to the DB`,
+	PruneFlag = cli.StringFlag{
+		Name: "prune",
+		Usage: `Choose which ancient data delete from DB: 
+	h - prune history (ChangeSets, HistoryIndices - used by historical state access)
+	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
+	t - prune transaction by it's hash index
+	c - prune call traces (used by trace_* methods)
+	Does delete data older than 90K block (can set another value by '--prune.*.older' flags). 
+	If item is NOT in the list - means NO pruning for this data.s
+	Example: --prune=hrtc`,
+		Value: "disabled",
+	}
+	PruneHistoryFlag = cli.Uint64Flag{
+		Name:  "prune.history.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 'h', then default is 90K)`,
+	}
+	PruneReceiptFlag = cli.Uint64Flag{
+		Name:  "prune.receipt.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 'r', then default is 90K)`,
+	}
+	PruneTxIndexFlag = cli.Uint64Flag{
+		Name:  "prune.txindex.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 't', then default is 90K)`,
+	}
+	PruneCallTracesFlag = cli.Uint64Flag{
+		Name:  "prune.calltrace.older",
+		Usage: `Prune data after this amount of blocks (if --prune flag has 'c', then default is 90K)`,
+	}
+	ExperimentsFlag = cli.StringFlag{
+		Name: "experiments",
+		Usage: `Enable some experimental stages:
+* tevm - write TEVM translated code to the DB`,
 		Value: "default",
 	}
+
 	SnapshotModeFlag = cli.StringFlag{
 		Name: "snapshot.mode",
 		Usage: `Configures the snapshot mode of the app:
@@ -125,11 +152,19 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
-	mode, err := ethdb.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
+	mode, err := prune.FromCli(
+		ctx.GlobalString(PruneFlag.Name),
+		ctx.GlobalUint64(PruneHistoryFlag.Name),
+		ctx.GlobalUint64(PruneReceiptFlag.Name),
+		ctx.GlobalUint64(PruneTxIndexFlag.Name),
+		ctx.GlobalUint64(PruneCallTracesFlag.Name),
+		strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","),
+	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
-	cfg.StorageMode = mode
+	cfg.Prune = mode
+
 	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
@@ -169,12 +204,29 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
-	if v := f.String(StorageModeFlag.Name, StorageModeFlag.Value, StorageModeFlag.Usage); v != nil {
-		mode, err := ethdb.StorageModeFromString(*v)
+	if v := f.String(PruneFlag.Name, PruneFlag.Value, PruneFlag.Usage); v != nil {
+		var experiments []string
+		if exp := f.StringSlice(ExperimentsFlag.Name, nil, ExperimentsFlag.Usage); exp != nil {
+			experiments = *exp
+		}
+		var exactH, exactR, exactT, exactC uint64
+		if v := f.Uint64(PruneHistoryFlag.Name, PruneHistoryFlag.Value, PruneHistoryFlag.Usage); v != nil {
+			exactH = *v
+		}
+		if v := f.Uint64(PruneReceiptFlag.Name, PruneReceiptFlag.Value, PruneReceiptFlag.Usage); v != nil {
+			exactR = *v
+		}
+		if v := f.Uint64(PruneTxIndexFlag.Name, PruneTxIndexFlag.Value, PruneTxIndexFlag.Usage); v != nil {
+			exactT = *v
+		}
+		if v := f.Uint64(PruneCallTracesFlag.Name, PruneCallTracesFlag.Value, PruneCallTracesFlag.Usage); v != nil {
+			exactC = *v
+		}
+		mode, err := prune.FromCli(*v, exactH, exactR, exactT, exactC, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
-		cfg.StorageMode = mode
+		cfg.Prune = mode
 	}
 	if v := f.String(SnapshotModeFlag.Name, SnapshotModeFlag.Value, SnapshotModeFlag.Usage); v != nil {
 		snMode, err := snapshotsync.SnapshotModeFromString(*v)
@@ -220,7 +272,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))
-	maxRateLimit := uint32(ethdb.ReadersLimit - 16)
+	maxRateLimit := uint32(ethdb.ReadersLimit - 128) // leave some readers for P2P
 	if cfg.PrivateApiRateLimit > maxRateLimit {
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
 		cfg.PrivateApiRateLimit = maxRateLimit

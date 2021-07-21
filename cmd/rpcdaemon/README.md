@@ -4,6 +4,7 @@
     * [Running remotely](#running-remotely)
     * [Testing](#testing)
 - [FAQ](#faq)
+    * [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
     * [RPC Implementation Status](#rpc-implementation-status)
     * [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
     * [Ethstats](#ethstats)
@@ -88,6 +89,21 @@ are [extensive instructions for using Postman](https://github.com/ledgerwatch/er
 to test the RPC.
 
 ## FAQ
+
+### Relations between prune options and RPC methods
+
+Next options available (by `--prune` flag):
+
+```
+* h - prune history (ChangeSets, HistoryIndices - used to access historical state)
+* r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
+* t - prune tx lookup (used to get transaction by hash)
+* c - prune call traces (used by trace_* methods)
+```
+
+By default data pruned after 90K blocks, can change it by flags like `--prune.history.after=100_000`
+
+Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it require `h`.
 
 ### RPC Implementation Status
 

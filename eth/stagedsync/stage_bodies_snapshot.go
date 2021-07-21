@@ -26,25 +26,41 @@ func StageSnapshotBodiesCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *
 	}
 }
 
-func SpawnBodiesSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, quit <-chan struct{}) error {
-	s.Done()
+func SpawnBodiesSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) error {
 	return nil
 }
 
-func UnwindBodiesSnapshotGenerationStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, quit <-chan struct{}) error {
+func UnwindBodiesSnapshotGenerationStage(s *UnwindState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	if err := u.Done(tx); err != nil {
+	if err := s.Done(tx); err != nil {
 		return err
 	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func PruneBodiesSnapshotGenerationStage(s *PruneState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err

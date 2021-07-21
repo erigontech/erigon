@@ -27,7 +27,7 @@ func StageHashStateCfg(db ethdb.RwKV, tmpDir string) HashStateCfg {
 	}
 }
 
-func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -38,7 +38,7 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
@@ -47,7 +47,6 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-
 	if s.BlockNumber == to {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-		s.Done()
 		return nil
 	}
 	if s.BlockNumber > to {
@@ -58,16 +57,16 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-
 		log.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
-		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, quit); err != nil {
+		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx.Done()); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx, cfg, quit); err != nil {
+		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx, cfg, ctx.Done()); err != nil {
 			return fmt.Errorf("[%s] %w", logPrefix, err)
 		}
 	}
 
-	if err = s.DoneAndUpdate(tx, to); err != nil {
+	if err = s.Update(tx, to); err != nil {
 		return err
 	}
 
@@ -79,26 +78,25 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-
 	return nil
 }
 
-func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
+func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.state.LogPrefix()
-	if err := unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, quit); err != nil {
+	logPrefix := u.LogPrefix()
+	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx.Done()); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
-	if err := u.Done(tx); err != nil {
+	if err = u.Done(tx); err != nil {
 		return fmt.Errorf("%s: reset: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -519,6 +517,24 @@ func promoteHashedStateIncrementally(logPrefix string, s *StageState, from, to u
 	}
 	if err := prom.Promote(logPrefix, s, from, to, true /* storage */, false /* codes */); err != nil {
 		return err
+	}
+	return nil
+}
+
+func PruneHashStateStage(s *PruneState, tx ethdb.RwTx, cfg HashStateCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
