@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/rlp"
 	"runtime"
 	"sort"
 	"time"
@@ -87,6 +88,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println(blockHash.String())
 	b, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
 	return b, err
 }
@@ -114,6 +116,33 @@ func executeBlock(
 	vmConfig.Tracer = callTracer
 	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, checkTEVM)
 	if err != nil {
+		fmt.Println("non canonical")
+		tx.ForEach(dbutils.NonCanonicalTXBucket,[]byte{}, func(k, v []byte) error {
+			fmt.Println(k)
+			return nil
+		})
+		fmt.Println("tx")
+		tx.ForEach(dbutils.EthTx,[]byte{}, func(k, v []byte) error {
+			fmt.Println(k)
+			return nil
+		})
+
+		fmt.Println("blocks","--")
+		tx.ForEach(dbutils.BlockBodyPrefix,[]byte{}, func(k, v []byte) error {
+			cHash,err:=rawdb.ReadCanonicalHash(tx, binary.BigEndian.Uint64(k[:8]))
+			if err!=nil {
+				return err
+			}
+			bodyForStorage := new(types.BodyForStorage)
+			err = rlp.DecodeBytes(v, bodyForStorage)
+			if err != nil {
+				return err
+			}
+			fmt.Println(binary.BigEndian.Uint64(k[:8]), common.BytesToHash(k[8:]), cHash==common.BytesToHash(k[8:]), bodyForStorage)
+
+			return nil
+		})
+
 		return err
 	}
 

@@ -414,7 +414,7 @@ func MoveTransactionToNonCanonical(db ethdb.RwTx, number uint64) error {
 
 	k := make([]byte, 8)
 	//transactions before and after the block
-	for i := baseTxIdOrig; i < baseTxIdOrig+uint64(len(body.Transactions)); i++ {
+	for i := baseTxIdOrig; i < baseTxIdOrig+uint64(txAmount); i++ {
 		binary.BigEndian.PutUint64(k, i)
 		err = db.Delete(dbutils.EthTx, k, nil)
 		if err != nil {

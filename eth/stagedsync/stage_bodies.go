@@ -2,7 +2,11 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"runtime"
 	"time"
 
@@ -239,12 +243,75 @@ func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context
 		return err
 	}
 
-	for blockHeight := bodiesProgress; blockHeight > u.UnwindPoint; blockHeight-- {
+	fmt.Println("before", bodiesProgress, u.UnwindPoint)
+	fmt.Println("non canonical")
+	tx.ForEach(dbutils.NonCanonicalTXBucket,[]byte{}, func(k, v []byte) error {
+		fmt.Println(k)
+		return nil
+	})
+	fmt.Println("tx")
+	tx.ForEach(dbutils.EthTx,[]byte{}, func(k, v []byte) error {
+		fmt.Println(k)
+		return nil
+	})
+	fmt.Println("canonical")
+	tx.ForEach(dbutils.HeaderCanonicalBucket, []byte{}, func(k, v []byte) error {
+		fmt.Println(common.BytesToHash(v).String())
+		return nil
+	})
+
+	fmt.Println("blocks")
+	tx.ForEach(dbutils.BlockBodyPrefix,[]byte{}, func(k, v []byte) error {
+		cHash,err:=rawdb.ReadCanonicalHash(tx, binary.BigEndian.Uint64(k[:8]))
+		if err!=nil {
+			return err
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		err = rlp.DecodeBytes(v, bodyForStorage)
+		if err != nil {
+			return err
+		}
+		fmt.Println(binary.BigEndian.Uint64(k[:8]), common.BytesToHash(k[8:]), cHash==common.BytesToHash(k[8:]), bodyForStorage)
+		return nil
+	})
+
+		for blockHeight := bodiesProgress; blockHeight > u.UnwindPoint; blockHeight-- {
 		err = rawdb.MoveTransactionToNonCanonical(tx, blockHeight)
 		if err != nil {
 			return err
 		}
 	}
+	fmt.Println("after")
+	fmt.Println("non canonical")
+	tx.ForEach(dbutils.NonCanonicalTXBucket,[]byte{}, func(k, v []byte) error {
+		fmt.Println(k)
+		return nil
+	})
+	fmt.Println("tx")
+	tx.ForEach(dbutils.EthTx,[]byte{}, func(k, v []byte) error {
+		fmt.Println(k)
+		return nil
+	})
+	fmt.Println("canonical")
+	tx.ForEach(dbutils.HeaderCanonicalBucket, []byte{}, func(k, v []byte) error {
+		fmt.Println(common.BytesToHash(v).String())
+		return nil
+	})
+
+	fmt.Println("blocks")
+	tx.ForEach(dbutils.BlockBodyPrefix,[]byte{}, func(k, v []byte) error {
+		cHash,err:=rawdb.ReadCanonicalHash(tx, binary.BigEndian.Uint64(k[:8]))
+		if err!=nil {
+			return err
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		err = rlp.DecodeBytes(v, bodyForStorage)
+		if err != nil {
+			return err
+		}
+		fmt.Println(binary.BigEndian.Uint64(k[:8]), common.BytesToHash(k[8:]), cHash==common.BytesToHash(k[8:]), bodyForStorage)
+		return nil
+	})
 
 	logPrefix := u.LogPrefix()
 	if err = u.Done(tx); err != nil {

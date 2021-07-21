@@ -17,6 +17,8 @@
 package tests
 
 import (
+	"github.com/ledgerwatch/erigon/log"
+	"os"
 	"runtime"
 	"testing"
 )
@@ -56,6 +58,29 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Frontier`, "No receipt validation before Byzantium")
 	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Homestead`, "No receipt validation before Byzantium")
 
+	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
+		// import pre accounts & construct test genesis block & state root
+		if err := bt.checkFailure(t, test.Run(t, false)); err != nil {
+			t.Error(err)
+		}
+	})
+
+	// There is also a LegacyTests folder, containing blockchain tests generated
+	// prior to Istanbul. However, they are all derived from GeneralStateTests,
+	// which run natively, so there's no reason to run them here.
+}
+//
+
+
+func TestBlockchain2(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
+	}
+
+	bt := new(testMatcher)
+	bt.whitelist("TestBlockchain2/ValidBlocks/bcMultiChainTest/ChainAtoChainBtoChainA.json")
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.checkFailure(t, test.Run(t, false)); err != nil {
