@@ -131,7 +131,11 @@ type Mode struct {
 }
 
 func (m Mode) MaxForwardMove(from uint64) uint64 {
-	return from + uint64(m.MinDistance()) - 100 // - 100 to make it +-1 bugs resistant
+	minDistance := m.MinDistance()
+	if minDistance.Enabled() {
+		return from + uint64(minDistance) - 100 // - 100 to make it +-1 bugs resistant
+	}
+	return math.MaxUint64
 }
 
 func (m Mode) MinDistance() Distance {
