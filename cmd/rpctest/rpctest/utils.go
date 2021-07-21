@@ -202,8 +202,8 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 			return fmt.Errorf("error invoking %s (Geth/OE): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
 		if resg.Err == nil && resg.Result.Get("error") == nil {
-			recording = false
 			if err := compareResults(res.Result, resg.Result); err != nil {
+				recording = false
 				if errs != nil {
 					fmt.Printf("different results for method %s, errCtx: %s: %v\n", methodName, errCtx, err)
 					fmt.Fprintf(errs, "\nDifferent results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
