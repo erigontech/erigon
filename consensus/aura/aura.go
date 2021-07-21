@@ -867,10 +867,6 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 		if err = e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return err
 		}
-	} else {
-		//if header.Number.Uint64() >= DEBUG_LOG_FROM {
-		//	fmt.Printf("no_pending_transitions: %d\n", header.Number.Uint64())
-		//}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
 
@@ -929,7 +925,7 @@ func isEpochEnd(chain consensus.ChainHeaderReader, e consensus.EpochReader, fina
 			continue
 		}
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
-			fmt.Printf("pending transition: %d,%x,len=%d,%x\n", finalized[i].number, finalized[i].hash, len(pendingTransitionProof), finalized)
+			fmt.Printf("pending transition: %d,%x,len=%d\n", finalized[i].number, finalized[i].hash, len(pendingTransitionProof))
 		}
 
 		finalityProof := allHeadersUntil(chain, header, finalized[i].hash)
