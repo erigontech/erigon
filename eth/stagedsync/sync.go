@@ -212,8 +212,7 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 		}
 
 		if stage.Disabled || stage.Forward == nil {
-			logPrefix := s.LogPrefix()
-			log.Debug(fmt.Sprintf("[%s] disabled. %s", logPrefix, stage.DisabledDescription))
+			log.Debug(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
 
 			s.NextStage()
 			continue
@@ -271,23 +270,26 @@ func printLogs(tx ethdb.RwTx, timings []Timing) error {
 	if tx == nil {
 		return nil
 	}
-	buckets := []string{
-		"freelist",
-		dbutils.PlainStateBucket,
-		dbutils.AccountChangeSetBucket,
-		dbutils.StorageChangeSetBucket,
-		dbutils.EthTx,
-		dbutils.Log,
-	}
-	bucketSizes := make([]interface{}, 0, 2*len(buckets))
-	for _, bucket := range buckets {
-		sz, err1 := tx.BucketSize(bucket)
-		if err1 != nil {
-			return err1
+
+	if len(logCtx) > 0 { // also don't print this logs if everything is fast
+		buckets := []string{
+			"freelist",
+			dbutils.PlainStateBucket,
+			dbutils.AccountChangeSetBucket,
+			dbutils.StorageChangeSetBucket,
+			dbutils.EthTx,
+			dbutils.Log,
 		}
-		bucketSizes = append(bucketSizes, bucket, common.StorageSize(sz))
+		bucketSizes := make([]interface{}, 0, 2*len(buckets))
+		for _, bucket := range buckets {
+			sz, err1 := tx.BucketSize(bucket)
+			if err1 != nil {
+				return err1
+			}
+			bucketSizes = append(bucketSizes, bucket, common.StorageSize(sz))
+		}
+		log.Info("Tables", bucketSizes...)
 	}
-	log.Info("Tables", bucketSizes...)
 	tx.CollectMetrics()
 	return nil
 }
@@ -299,13 +301,13 @@ func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle b
 		return err
 	}
 
-	logPrefix := s.LogPrefix()
 	if err = stage.Forward(firstCycle, stageState, s, tx); err != nil {
 		return err
 	}
 
 	t := time.Since(start)
 	if t > 60*time.Second {
+		logPrefix := s.LogPrefix()
 		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", t)
 	}
 	return nil
@@ -337,7 +339,8 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethd
 
 	took := time.Since(t)
 	if took > 60*time.Second {
-		log.Info("Unwind... DONE!", "stage", string(unwind.ID), "in", took)
+		logPrefix := s.LogPrefix()
+		log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", t)
 	}
 	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: time.Since(t)})
 	return nil
@@ -367,7 +370,8 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb
 
 	took := time.Since(t)
 	if took > 60*time.Second {
-		log.Info("Prune... DONE!", "stage", string(prune.ID), "in", took)
+		logPrefix := s.LogPrefix()
+		log.Info(fmt.Sprintf("[%s] Prune done", logPrefix), "in", t)
 	}
 	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: time.Since(t)})
 	return nil
