@@ -229,28 +229,14 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	if errStart != nil {
 		return errStart
 	}
+	nextStageProgress, err := stages.GetStageProgress(tx, stages.HashState)
+	if err != nil {
+		return err
+	}
 	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
-	}
-	{
-		// Important hack for Pruned Nodes. Prohibit huge jumps if HashStateProgress > 0
-		// because HashState stage does require ChangeSets
-		// but this stage doesn't write ChangeSets for block older than `cfg.prune.Receipts.PruneTo(to)`
-		//
-		// HashStateProgress == 0 means no jump limits - because this case doesn't use ChangeSets at all
-		hashStateStageProgress, err := stages.GetStageProgress(tx, stages.HashState)
-		if err != nil {
-			return err
-		}
-		if hashStateStageProgress > 0 {
-			maxForwardMove := cfg.prune.MaxForwardMove(s.BlockNumber)
-			if to > maxForwardMove {
-				log.Info(fmt.Sprintf("[%s] Pruned node jump limit", logPrefix), "old_target", to, "new", maxForwardMove)
-				to = maxForwardMove
-			}
-		}
 	}
 	if to <= s.BlockNumber {
 		return nil
@@ -299,9 +285,10 @@ Loop:
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
-		writeReceipts := blockNum > cfg.prune.Receipts.PruneTo(to)
-		writeChangeSets := blockNum > cfg.prune.History.PruneTo(to)
-		writeCallTraces := blockNum > cfg.prune.CallTraces.PruneTo(to)
+		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+		writeChangeSets := nextStageProgress > 0 || blockNum > cfg.prune.History.PruneTo(to)
+		writeReceipts := nextStageProgress > 0 || blockNum > cfg.prune.Receipts.PruneTo(to)
+		writeCallTraces := nextStageProgress > 0 || blockNum > cfg.prune.CallTraces.PruneTo(to)
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
