@@ -417,9 +417,10 @@ func MoveTransactionToNonCanonical(db ethdb.RwTx, number uint64) error {
 	if err != nil {
 		return fmt.Errorf("failed to Write non canonical transactions: %w", err)
 	}
+
 	k := make([]byte, 8)
 	//transactions before and after the block
-	for i := baseTxId; i < baseTxId+uint64(len(body.Transactions)); i++ {
+	for i := baseTxIdOrig; i < baseTxIdOrig+uint64(len(body.Transactions)); i++ {
 		binary.BigEndian.PutUint64(k, i)
 		err := db.Delete(dbutils.EthTx, k, nil)
 		if err != nil {
