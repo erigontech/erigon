@@ -284,7 +284,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if num == nil {
 		return nil, nil
 	}
-	body, _, txAmount, _ := rawdb.ReadBodyWithoutTransactions(tx, blockHash, *num)
+	body, _, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, *num)
 	if body == nil {
 		return nil, nil
 	}

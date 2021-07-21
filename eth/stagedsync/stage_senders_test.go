@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -136,13 +137,13 @@ func TestSenders(t *testing.T) {
 		assert.Equal(t, 0, len(senders))
 	}
 	{
-		txs, err := rawdb.ReadTransactions(tx, 0, 2, true)
+		txs, err := rawdb.ReadTransactions(tx, dbutils.EthTx, 0, 2)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(txs))
-		txs, err = rawdb.ReadTransactions(tx, 2, 3, true)
+		txs, err = rawdb.ReadTransactions(tx, dbutils.EthTx, 2, 3)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(txs))
-		txs, err = rawdb.ReadTransactions(tx, 0, 1024, true)
+		txs, err = rawdb.ReadTransactions(tx, dbutils.EthTx, 0, 1024)
 		assert.NoError(t, err)
 		assert.Equal(t, 5, len(txs))
 	}

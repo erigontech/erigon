@@ -877,7 +877,7 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint
 		if err != nil {
 			t.Fatal(err, v)
 		}
-		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount, true)
+		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, dbutils.EthTx, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -952,7 +952,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 			t.Fatal(err, v)
 		}
 
-		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, bfs.BaseTxId, bfs.TxAmount, true)
+		transactions, err := rawdb.ReadTransactions(bodySnapshotTX, dbutils.EthTx, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1020,7 +1020,7 @@ func verifyPrunedBlocksData(t *testing.T, tx ethdb.Tx, dataFrom, dataTo, snapsho
 		if bfs.BaseTxId <= snapshotTxTo {
 			t.Fatal("txid must be after last snapshot txid")
 		}
-		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount, true)
+		transactions, err := rawdb.ReadTransactions(tx, dbutils.EthTx, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1303,7 +1303,7 @@ func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) { //nolint: deadcode
 		}
 		fmt.Println(binary.BigEndian.Uint64(k), k[8:], bfs.BaseTxId, bfs.TxAmount)
 
-		transactions, err := rawdb.ReadTransactions(tx, bfs.BaseTxId, bfs.TxAmount, true)
+		transactions, err := rawdb.ReadTransactions(tx, dbutils.EthTx, bfs.BaseTxId, bfs.TxAmount)
 		if err != nil {
 			t.Fatal(err)
 		}

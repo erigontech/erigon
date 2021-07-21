@@ -139,7 +139,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
-		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, err := rawdb.ReadTransactions(tx, dbutils.EthTx, body.BaseTxId, body.TxAmount)
 		if err != nil {
 			return err
 		}
@@ -202,7 +202,7 @@ func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, s *PruneState, prune
 			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
 		}
 
-		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, err := rawdb.ReadTransactions(tx, dbutils.EthTx, body.BaseTxId, body.TxAmount)
 		if err != nil {
 			return err
 		}

@@ -224,8 +224,8 @@ const (
 	EthTx           = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx). There are two additional
 	// transactions before and after the block
 	NonCanonicalTXBucket = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx) for transactions from none canonical bodies
-	Receipts        = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log             = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
+	Receipts             = "Receipt"                 // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log                  = "TransactionLog"          // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
