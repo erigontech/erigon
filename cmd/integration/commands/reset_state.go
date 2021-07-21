@@ -238,6 +238,6 @@ func printStages(db ethdb.KVGetter) error {
 		return err
 	}
 	fmt.Fprintf(w, "--\n")
-	fmt.Fprintf(w, "prune distance: %#v\n", pm)
+	fmt.Fprintf(w, "prune distance: %s\n", pm.ToString())
 	return nil
 }
