@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -9,104 +10,148 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/stretchr/testify/require"
 )
 
+func genReceipts(t *testing.T, tx ethdb.RwTx, blocks uint64) (map[common.Address]uint64, map[common.Hash]uint64) {
+	addrs := []common.Address{{1}, {2}, {3}}
+	topics := []common.Hash{{1}, {2}, {3}}
+
+	expectAddrs := map[common.Address]uint64{}
+	expectTopics := map[common.Hash]uint64{}
+	for i := range addrs {
+		expectAddrs[addrs[i]] = 0
+	}
+	for i := range topics {
+		expectTopics[topics[i]] = 0
+	}
+
+	var receipts types.Receipts
+	for i := uint64(0); i < blocks; i++ {
+		switch i % 3 {
+		case 0:
+			a, t1, t2 := addrs[i%3], topics[i%3], topics[(i+1)%3]
+			receipts = types.Receipts{{
+				Logs: []*types.Log{
+					{
+						Address: a,
+						Topics:  []common.Hash{t1, t2},
+					},
+					{
+						Address: a,
+						Topics:  []common.Hash{t2},
+					},
+					{
+						Address: a,
+						Topics:  []common.Hash{},
+					},
+				},
+			}}
+			expectAddrs[a]++
+			expectTopics[t1]++
+			expectTopics[t2]++
+
+		case 1:
+			a1, a2, t1, t2 := addrs[i%3], addrs[(i+1)%3], topics[i%3], topics[(i+1)%3]
+			receipts = types.Receipts{{
+				Logs: []*types.Log{
+					{
+						Address: a1,
+						Topics:  []common.Hash{t1, t2, t1, t2},
+					},
+				},
+			}, {
+				Logs: []*types.Log{
+					{
+						Address: a2,
+						Topics:  []common.Hash{t1, t2, t1, t2},
+					},
+					{
+						Address: a1,
+						Topics:  []common.Hash{t1},
+					},
+				},
+			}}
+			expectAddrs[a1]++
+			expectAddrs[a2]++
+			expectTopics[t1]++
+			expectTopics[t2]++
+		case 2:
+			receipts = types.Receipts{{}, {}, {}}
+		}
+		err := rawdb.AppendReceipts(tx, i, receipts)
+		require.NoError(t, err)
+	}
+	return expectAddrs, expectTopics
+}
+
 func TestLogIndex(t *testing.T) {
-	require, ctx := require.New(t), context.Background()
-	db, tx := kv.NewTestTx(t)
+	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
+	_, tx := kv.NewTestTx(t)
 
-	addr1, addr2 := common.HexToAddress("0x0"), common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2")
-	topic1, topic2 := common.HexToHash("0x0"), common.HexToHash("0x1234")
-	receipts1 := types.Receipts{{
-		Logs: []*types.Log{
-			{
-				Address: addr1,
-				Topics:  []common.Hash{topic1},
-			},
-			{
-				Address: addr1,
-				Topics:  []common.Hash{topic2},
-			},
-		},
-	}}
-	receipts2 := types.Receipts{{
-		Logs: []*types.Log{
-			{
-				Address: addr2,
-				Topics:  []common.Hash{topic2},
-			},
-		},
-	}}
-	err := rawdb.AppendReceipts(tx, 1, receipts1)
-	require.NoError(err)
+	expectAddrs, expectTopics := genReceipts(t, tx, 10000)
 
-	err = rawdb.AppendReceipts(tx, 2, receipts2)
-	require.NoError(err)
-	cfg := StageLogIndexCfg(db, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
-	cfgCopy.flushEvery = time.Millisecond
-	err = promoteLogIndex("logPrefix", tx, 0, cfgCopy, ctx)
+	cfgCopy.flushEvery = time.Nanosecond
+	err := promoteLogIndex("logPrefix", tx, 0, cfgCopy, ctx)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
-	m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(1, int(m.GetCardinality()))
+	for addr, expect := range expectAddrs {
+		m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr[:], 0, 10_000_000)
+		require.NoError(err)
+		require.Equal(expect, m.GetCardinality())
+	}
+	for topic, expect := range expectTopics {
+		m, err := bitmapdb.Get(tx, dbutils.LogTopicIndex, topic[:], 0, 10_000_000)
+		require.NoError(err)
+		require.Equal(expect, m.GetCardinality())
+	}
 
-	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr2[:], 0, 10_000_000)
+	// Mode test
+	err = pruneLogIndex("", tx, tmpDir, 500, ctx)
 	require.NoError(err)
-	require.Equal(1, int(m.GetCardinality()))
 
-	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic1[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(1, int(m.GetCardinality()), 0, 10_000_000)
-
-	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic2[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(2, int(m.GetCardinality()))
+	{
+		total := 0
+		err = tx.ForEach(dbutils.LogAddressIndex, nil, func(k, v []byte) error {
+			require.True(binary.BigEndian.Uint32(k[common.AddressLength:]) >= 500)
+			total++
+			return nil
+		})
+		require.NoError(err)
+		require.True(total > 0)
+	}
+	{
+		total := 0
+		err = tx.ForEach(dbutils.LogTopicIndex, nil, func(k, v []byte) error {
+			require.True(binary.BigEndian.Uint32(k[common.HashLength:]) >= 500)
+			total++
+			return nil
+		})
+		require.NoError(err)
+		require.True(total > 0)
+	}
 
 	// Unwind test
-	err = unwindLogIndex("logPrefix", tx, 1, cfg, nil)
+	err = unwindLogIndex("logPrefix", tx, 700, cfg, nil)
 	require.NoError(err)
 
-	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(1, int(m.GetCardinality()))
-
-	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr2[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(0, int(m.GetCardinality()))
-
-	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic1[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(1, int(m.GetCardinality()))
-
-	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic2[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(1, int(m.GetCardinality()))
-
-	// Unwind test
-	err = unwindLogIndex("logPrefix", tx, 0, cfg, nil)
-	require.NoError(err)
-
-	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr1[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(0, int(m.GetCardinality()))
-
-	m, err = bitmapdb.Get(tx, dbutils.LogAddressIndex, addr2[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(0, int(m.GetCardinality()))
-
-	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic1[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(0, int(m.GetCardinality()))
-
-	m, err = bitmapdb.Get(tx, dbutils.LogTopicIndex, topic2[:], 0, 10_000_000)
-	require.NoError(err)
-	require.Equal(0, int(m.GetCardinality()))
+	for addr := range expectAddrs {
+		m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr[:], 0, 10_000_000)
+		require.NoError(err)
+		require.True(m.Maximum() <= 700)
+	}
+	for topic := range expectTopics {
+		m, err := bitmapdb.Get(tx, dbutils.LogTopicIndex, topic[:], 0, 10_000_000)
+		require.NoError(err)
+		require.True(m.Maximum() <= 700)
+	}
 }

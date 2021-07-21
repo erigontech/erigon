@@ -36,7 +36,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 		defer tx.Rollback()
 	}
 
-	if err = s.DoneAndUpdate(tx, 0); err != nil {
+	if err = s.Update(tx, 0); err != nil {
 		return err
 	}
 	if !useExternalTx {
@@ -78,9 +78,6 @@ func PruneStateSnapshotGenerationStage(s *PruneState, tx ethdb.RwTx, cfg Snapsho
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

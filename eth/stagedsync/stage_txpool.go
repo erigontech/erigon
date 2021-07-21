@@ -44,7 +44,6 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 		return err
 	}
 	if to == s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -73,7 +72,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 		pending, queued := cfg.pool.Stats()
 		log.Info(fmt.Sprintf("[%s] Transaction stats", logPrefix), "pending", pending, "queued", queued)
 	}
-	if err := s.DoneAndUpdate(tx, to); err != nil {
+	if err := s.Update(tx, to); err != nil {
 		return err
 	}
 	if !useExternalTx {
@@ -151,7 +150,6 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 
 func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Context) (err error) {
 	if u.UnwindPoint >= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 	useExternalTx := tx != nil
@@ -290,9 +288,6 @@ func PruneTxPool(s *PruneState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

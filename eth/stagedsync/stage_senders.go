@@ -72,7 +72,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 		to = min(prevStageProgress, toBlock)
 	}
 	if to <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -236,11 +235,8 @@ Loop:
 	if minBlockErr != nil {
 		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
 		if to > s.BlockNumber {
-			if err = u.UnwindTo(minBlockNum-1, tx, minBlockHash); err != nil {
-				return err
-			}
+			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
-		s.Done()
 	} else {
 		if err := collectorSenders.Load(logPrefix, tx,
 			dbutils.Senders,
@@ -254,7 +250,7 @@ Loop:
 		); err != nil {
 			return err
 		}
-		if err = s.DoneAndUpdate(tx, to); err != nil {
+		if err = s.Update(tx, to); err != nil {
 			return err
 		}
 	}
@@ -360,9 +356,6 @@ func PruneSendersStage(s *PruneState, tx ethdb.RwTx, cfg SendersCfg, ctx context
 	}
 
 	logPrefix := s.LogPrefix()
-	if err = s.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)

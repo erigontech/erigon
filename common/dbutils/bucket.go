@@ -111,6 +111,27 @@ It allows:
 
 see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
+
+addr+max(shard)
+
+addr+123
+addr+234
+addr+999
+
+prune(150):
+cs.Walk(0-150,k,v {
+	etl.Collect(k)
+})
+
+elt.Load(k {
+	c.Seek(k:150)
+    for c.Prev() { c.Del() }
+})
+
+elt.Load(k {
+    for addr,n=c.Seek(k); addr==k && n<150 ;c.Next() { c.Del() }
+})
+
 AccountsHistoryBucket:
 	key - address + shard_id_u64
 	value - roaring bitmap  - list of block where it changed
@@ -203,8 +224,8 @@ const (
 	EthTx           = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx). There are two additional
 	// transactions before and after the block
 	NonCanonicalTXBucket = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx) for transactions from none canonical bodies
-	BlockReceiptsPrefix  = "Receipt"                 // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log                  = "TransactionLog"          // block_num_u64 + txId -> logs of transaction
+	Receipts        = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log             = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -236,10 +257,6 @@ const (
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
-	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind = "SyncStageUnwind"
-	// Position to where to prune sync stages: stageName -> stageData
-	SyncStagePrune = "SyncStagePrune"
 
 	CliqueBucket             = "Clique"
 	CliqueSeparateBucket     = "CliqueSeparate"
@@ -263,21 +280,19 @@ const (
 	Sequence      = "Sequence" // tbl_name -> seq_u64
 	HeadHeaderKey = "LastHeader"
 
-	Epoch = "DevEpoch" // block_num_u64+block_hash->transition_proof
+	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
+	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 )
 
 // Keys
 var (
-	//StorageModeHistory - does node save history.
-	StorageModeHistory = []byte("smHistory")
-	//StorageModeReceipts - does node save receipts.
-	StorageModeReceipts = []byte("smReceipts")
-	//StorageModeTxIndex - does node save transactions index.
-	StorageModeTxIndex = []byte("smTxIndex")
-	//StorageModeCallTraces - does not build index of call traces
-	StorageModeCallTraces = []byte("smCallTraces")
 	//StorageModeTEVM - does not translate EVM to TEVM
 	StorageModeTEVM = []byte("smTEVM")
+
+	PruneDistanceHistory    = []byte("pruneHistory")
+	PruneDistanceReceipts   = []byte("pruneReceipts")
+	PruneDistanceTxIndex    = []byte("pruneTxIndex")
+	PruneDistanceCallTraces = []byte("pruneCallTraces")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
@@ -298,7 +313,7 @@ var Buckets = []string{
 	ContractCodeBucket,
 	HeaderNumberBucket,
 	BlockBodyPrefix,
-	BlockReceiptsPrefix,
+	Receipts,
 	TxLookupPrefix,
 	BloomBitsPrefix,
 	ConfigPrefix,
@@ -310,7 +325,6 @@ var Buckets = []string{
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,
 	SyncStageProgress,
-	SyncStageUnwind,
 	PlainStateBucket,
 	PlainContractCodeBucket,
 	AccountChangeSetBucket,
@@ -337,6 +351,7 @@ var Buckets = []string{
 	HeadersBucket,
 	HeaderTDBucket,
 	Epoch,
+	PendingEpoch,
 	NonCanonicalTXBucket,
 }
 

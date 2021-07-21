@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
@@ -38,7 +39,7 @@ type Stage struct {
 
 // StageState is the state of the stage.
 type StageState struct {
-	state       *State
+	state       *Sync
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
 }
@@ -50,22 +51,44 @@ func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
 	return stages.SaveStageProgress(db, s.ID, newBlockNum)
 }
 
-// Done makes sure that the stage execution is complete and proceeds to the next state.
-// If Done() is not called and the stage `Forward` exits, then the same stage will be called again.
-// This side effect is useful for something like block body download.
-func (s *StageState) Done() {
-	s.state.NextStage()
-}
-
 // ExecutionAt gets the current state of the "Execution" stage, which block is currently executed.
 func (s *StageState) ExecutionAt(db ethdb.KVGetter) (uint64, error) {
 	execution, err := stages.GetStageProgress(db, stages.Execution)
 	return execution, err
 }
 
-// DoneAndUpdate a convenience method combining both `Done()` and `Update()` calls together.
-func (s *StageState) DoneAndUpdate(db ethdb.Putter, newBlockNum uint64) error {
-	err := stages.SaveStageProgress(db, s.ID, newBlockNum)
-	s.state.NextStage()
-	return err
+// Unwinder allows the stage to cause an unwind.
+type Unwinder interface {
+	// UnwindTo begins staged sync unwind to the specified block.
+	UnwindTo(unwindPoint uint64, badBlock common.Hash)
+}
+
+// UnwindState contains the information about unwind.
+type UnwindState struct {
+	ID stages.SyncStage
+	// UnwindPoint is the block to unwind to.
+	UnwindPoint        uint64
+	CurrentBlockNumber uint64
+	// If unwind is caused by a bad block, this hash is not empty
+	BadBlock common.Hash
+	state    *Sync
+}
+
+func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }
+
+// Done updates the DB state of the stage.
+func (u *UnwindState) Done(db ethdb.Putter) error {
+	return stages.SaveStageProgress(db, u.ID, u.UnwindPoint)
+}
+
+type PruneState struct {
+	ID              stages.SyncStage
+	ForwardProgress uint64 // progress of stage forward move
+	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
+	state           *Sync
+}
+
+func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() }
+func (s *PruneState) Done(db ethdb.Putter) error {
+	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
 }

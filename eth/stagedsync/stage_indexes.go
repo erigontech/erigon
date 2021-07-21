@@ -18,19 +18,22 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 type HistoryCfg struct {
 	db         ethdb.RwKV
 	bufLimit   datasize.ByteSize
+	prune      prune.Mode
 	flushEvery time.Duration
 	tmpdir     string
 }
 
-func StageHistoryCfg(db ethdb.RwKV, tmpDir string) HistoryCfg {
+func StageHistoryCfg(db ethdb.RwKV, prune prune.Mode, tmpDir string) HistoryCfg {
 	return HistoryCfg{
 		db:         db,
+		prune:      prune,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,
@@ -49,27 +52,31 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	}
 	quitCh := ctx.Done()
 
-	executionAt, err := s.ExecutionAt(tx)
+	endBlock, err := s.ExecutionAt(tx)
 	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
-	if executionAt <= s.BlockNumber {
-		s.Done()
+	if endBlock <= s.BlockNumber {
 		return nil
 	}
 
-	var startChangeSetsLookupAt uint64
+	var startBlock uint64
 	if s.BlockNumber > 0 {
-		startChangeSetsLookupAt = s.BlockNumber + 1
+		startBlock = s.BlockNumber + 1
 	}
-	stopChangeSetsLookupAt := executionAt + 1
+	stopChangeSetsLookupAt := endBlock + 1
 
-	if err := promoteHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+	pruneTo := cfg.prune.History.PruneTo(endBlock)
+	if startBlock < pruneTo {
+		startBlock = pruneTo
+	}
+
+	if err := promoteHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, startBlock, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if err := s.DoneAndUpdate(tx, executionAt); err != nil {
+	if err := s.Update(tx, endBlock); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
@@ -99,7 +106,6 @@ func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		return fmt.Errorf("%s: logs index: getting last executed block: %w", logPrefix, err)
 	}
 	if executionAt <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -113,10 +119,9 @@ func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
 
-	if err := s.DoneAndUpdate(tx, executionAt); err != nil {
+	if err := s.Update(tx, executionAt); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
-
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -285,15 +290,14 @@ func unwindHistory(logPrefix string, db ethdb.RwTx, csBucket string, to uint64, 
 
 	updates := map[string]struct{}{}
 	if err := changeset.Walk(db, csBucket, dbutils.EncodeBlockNumber(to), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
 		select {
-		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		case <-quitCh:
+			return false, common.ErrStopped
+		default:
 		}
 		k = dbutils.CompositeKeyWithoutIncarnation(k)
 		updates[string(k)] = struct{}{}
@@ -350,6 +354,11 @@ func truncateBitmaps64(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, 
 }
 
 func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -359,9 +368,14 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		defer tx.Rollback()
 	}
 
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneHistoryIndex(tx, dbutils.AccountChangeSetBucket, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
 	if err = s.Done(tx); err != nil {
 		return err
 	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -371,6 +385,11 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 }
 
 func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -379,14 +398,74 @@ func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		}
 		defer tx.Rollback()
 	}
-
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneHistoryIndex(tx, dbutils.StorageChangeSetBucket, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
 	if err = s.Done(tx); err != nil {
 		return err
 	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func pruneHistoryIndex(tx ethdb.RwTx, csTable, logPrefix, tmpDir string, pruneTo uint64, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	collector := etl.NewCollector(tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer collector.Close(logPrefix)
+
+	if err := changeset.Walk(tx, csTable, nil, 0, func(blockNum uint64, k, _ []byte) (bool, error) {
+		if blockNum >= pruneTo {
+			return false, nil
+		}
+		if err := collector.Collect(k, nil); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
+
+	c, err := tx.RwCursor(changeset.Mapper[csTable].IndexBucket)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+	prefixLen := common.AddressLength
+	if csTable == dbutils.StorageChangeSetBucket {
+		prefixLen = common.HashLength
+	}
+	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		for k, _, err := c.Seek(addr); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k[prefixLen:])
+			if !bytes.HasPrefix(k, addr) || blockNum >= pruneTo {
+				break
+			}
+			if err = c.DeleteCurrent(); err != nil {
+				return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+			}
+		}
+		return nil
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+
 	return nil
 }

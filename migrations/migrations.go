@@ -62,7 +62,7 @@ var migrations = map[ethdb.Label][]Migration{
 		dbSchemaVersion,
 		rebuilCallTraceIndex,
 		fixSequences,
-		splitCanonicalAndNonCanonicalTransactionsBuckets,
+		storageMode,
 	},
 	ethdb.TxPool: {},
 	ethdb.Sentry: {},
@@ -262,14 +262,6 @@ func MarshalMigrationPayload(db ethdb.KVGetter) ([]byte, error) {
 		}
 		if len(v) > 0 {
 			s[string(stage)] = common.CopyBytes(v)
-		}
-
-		v, err = db.GetOne(dbutils.SyncStageUnwind, []byte(stage))
-		if err != nil {
-			return nil, err
-		}
-		if len(v) > 0 {
-			s["unwind_"+string(stage)] = common.CopyBytes(v)
 		}
 	}
 

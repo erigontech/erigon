@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
@@ -212,11 +211,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 		return
 	}
 
-	b.size += len(k)
-	b.size += len(v)
-	if v != nil {
-		v = common.CopyBytes(v)
-	}
+	b.size += len(k) + len(v)
 	b.entries[ks] = v
 }
 

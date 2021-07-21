@@ -54,6 +54,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -109,7 +110,7 @@ type Ethereum struct {
 	sentryServers   []*download.SentryServerImpl
 	txPoolP2PServer *txpool.P2PServer
 	sentries        []remote.SentryClient
-	stagedSync      *stagedsync.StagedSync
+	stagedSync      *stagedsync.Sync
 
 	notifications *stagedsync.Notifications
 
@@ -173,7 +174,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -213,7 +214,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err := ethdb.SetStorageModeIfNotExist(tx, config.StorageMode); err != nil {
+		if err := prune.SetIfNotExist(tx, config.Prune); err != nil {
 			return err
 		}
 
@@ -221,19 +222,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return err
 		}
 
-		sm, err := ethdb.GetStorageModeFromDB(tx)
+		pm, err := prune.Get(tx)
 		if err != nil {
 			return err
 		}
-		if config.StorageMode.Initialised {
+		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
-			if !reflect.DeepEqual(sm, config.StorageMode) {
-				return errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+			if !reflect.DeepEqual(pm, config.Prune) {
+				return errors.New("prune is " + config.Prune.ToString() + " original prune is " + pm.ToString())
 			}
 		} else {
-			config.StorageMode = sm
+			config.Prune = pm
 		}
-		log.Info("Effective", "storage mode", config.StorageMode)
+		log.Info("Effective", "prune", config.Prune.ToString())
 
 		return nil
 	}); err != nil {
@@ -276,7 +277,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			stagedsync.StageHashStateCfg(backend.chainKV, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainKV, false, true, tmpdir),
 			stagedsync.StageMiningFinishCfg(backend.chainKV, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder())
+		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -537,7 +538,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -705,7 +706,7 @@ func (s *Ethereum) Stop() error {
 //Deprecated - use stages.StageLoop
 func Loop(
 	ctx context.Context,
-	db ethdb.RwKV, sync *stagedsync.StagedSync,
+	db ethdb.RwKV, sync *stagedsync.Sync,
 	controlServer *download.ControlServerImpl,
 	notifications *stagedsync.Notifications,
 	waitForDone chan struct{},

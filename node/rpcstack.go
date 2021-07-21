@@ -478,51 +478,6 @@ func newGzipHandler(next http.Handler) http.Handler {
 	})
 }
 
-type ipcServer struct {
-	log      log.Logger
-	endpoint string
-
-	mu       sync.Mutex
-	listener net.Listener
-	srv      *rpc.Server
-}
-
-func newIPCServer(log log.Logger, endpoint string) *ipcServer {
-	return &ipcServer{log: log, endpoint: endpoint}
-}
-
-// Start starts the httpServer's http.Server
-func (is *ipcServer) start(apis []rpc.API) error {
-	is.mu.Lock()
-	defer is.mu.Unlock()
-
-	if is.listener != nil {
-		return nil // already running
-	}
-	listener, srv, err := rpc.StartIPCEndpoint(is.endpoint, apis)
-	if err != nil {
-		is.log.Warn("IPC opening failed", "url", is.endpoint, "error", err)
-		return err
-	}
-	is.log.Info("IPC endpoint opened", "url", is.endpoint)
-	is.listener, is.srv = listener, srv
-	return nil
-}
-
-func (is *ipcServer) stop() error {
-	is.mu.Lock()
-	defer is.mu.Unlock()
-
-	if is.listener == nil {
-		return nil // not running
-	}
-	err := is.listener.Close()
-	is.srv.Stop()
-	is.listener, is.srv = nil, nil
-	is.log.Info("IPC endpoint closed", "url", is.endpoint)
-	return err
-}
-
 // RegisterApisFromWhitelist checks the given modules' availability, generates a whitelist based on the allowed modules,
 // and then registers all of the APIs exposed by the services.
 func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server, exposeAll bool) error {

@@ -622,6 +622,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 			t.Error(err)
 		}
+		defer rotx.Rollback()
 		//just start snapshot transaction
 		// it can't be empty slice but shouldn't be in main db
 		_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{1})

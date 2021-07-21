@@ -45,7 +45,6 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
 		return err
 	}
 	if executionAt <= s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
@@ -63,7 +62,7 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
 		}
 	}
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
-	err = s.DoneAndUpdate(tx, executionAt)
+	err = s.Update(tx, executionAt)
 	if err != nil {
 		return err
 	}
@@ -106,9 +105,6 @@ func PruneFinish(u *PruneState, tx ethdb.RwTx, cfg FinishCfg, ctx context.Contex
 		defer tx.Rollback()
 	}
 
-	if err = u.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -117,7 +113,7 @@ func PruneFinish(u *PruneState, tx ethdb.RwTx, cfg FinishCfg, ctx context.Contex
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync, unwindTo uint64, notifier ChainEventNotifier, db ethdb.RwKV) error {
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db ethdb.RwKV) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -128,8 +124,8 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync, unwindTo uint6
 		return err
 	}
 	notifyFrom := finishStageBeforeSync + 1
-	if unwindTo != 0 && unwindTo < finishStageBeforeSync {
-		notifyFrom = unwindTo + 1
+	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
+		notifyFrom = *unwindTo + 1
 	}
 	if notifier == nil {
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")

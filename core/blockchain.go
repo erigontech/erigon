@@ -55,6 +55,7 @@ func ExecuteBlockEphemerally(
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
+	chainReader consensus.ChainHeaderReader,
 	checkTEVM func(codeHash common.Hash) (bool, error),
 ) (types.Receipts, error) {
 	defer blockExecutionTimer.UpdateSince(time.Now())
@@ -67,7 +68,7 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit())
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -126,7 +127,7 @@ func ExecuteBlockEphemerally(
 		}
 	}
 	if !vmConfig.ReadOnly {
-		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader); err != nil {
+		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader); err != nil {
 			return nil, err
 		}
 	}
@@ -223,14 +224,19 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 
 func FinalizeBlockExecution(engine consensus.Engine, header *types.Header,
 	txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig,
-	ibs *state.IntraBlockState, receipts types.Receipts, e consensus.EpochReader,
+	ibs *state.IntraBlockState, receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader,
 ) error {
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====tx processing end====\n")
 
-	engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, func(contract common.Address, data []byte) ([]byte, error) {
+	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
+		return SysCallContract(contract, data, *cc, ibs, header, engine)
+	}, func(contract common.Address, data []byte) ([]byte, error) {
 		return CallContract(contract, data, *cc, ibs, header, engine)
-	})
+	}); err != nil {
+		return err
+	}
+
 	//fmt.Printf("====finalize start====\n")
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====finalize end====\n")
@@ -252,10 +258,12 @@ func FinalizeBlockExecution(engine consensus.Engine, header *types.Header,
 	return nil
 }
 
-func InitializeBlockExecution(engine consensus.Engine, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
+func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	engine.Initialize(cc, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
+	}, func(contract common.Address, data []byte) ([]byte, error) {
+		return CallContract(contract, data, *cc, ibs, header, engine)
 	})
 	//fmt.Printf("====InitializeBlockExecution start %d====\n", header.Number.Uint64())
 	//ibs.Print(cc.Rules(header.Number.Uint64()))

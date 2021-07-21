@@ -49,7 +49,6 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	}
 	headHash := rawdb.ReadHeaderByNumber(tx, headNumber).Hash()
 	if s.BlockNumber == headNumber {
-		s.Done()
 		return nil
 	}
 
@@ -75,7 +74,7 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	); err != nil {
 		return err
 	}
-	if err = s.DoneAndUpdate(tx, headNumber); err != nil {
+	if err = s.Update(tx, headNumber); err != nil {
 		return err
 	}
 	if !useExternalTx {
@@ -120,9 +119,6 @@ func PruneBlockHashStage(p *PruneState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	}
 
 	logPrefix := p.LogPrefix()
-	if err = p.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)

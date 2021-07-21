@@ -47,7 +47,6 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 	if s.BlockNumber == to {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
-		s.Done()
 		return nil
 	}
 	if s.BlockNumber > to {
@@ -67,7 +66,7 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 		}
 	}
 
-	if err = s.DoneAndUpdate(tx, to); err != nil {
+	if err = s.Update(tx, to); err != nil {
 		return err
 	}
 
@@ -89,7 +88,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Hash
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
+	logPrefix := u.LogPrefix()
 	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx.Done()); err != nil {
 		return fmt.Errorf("[%s] %w", logPrefix, err)
 	}
@@ -532,9 +531,6 @@ func PruneHashStateStage(s *PruneState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 		defer tx.Rollback()
 	}
 
-	if err = s.Done(tx); err != nil {
-		return err
-	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

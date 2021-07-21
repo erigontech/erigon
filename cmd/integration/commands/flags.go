@@ -9,27 +9,24 @@ import (
 )
 
 var (
-	chaindata string
-	//database           string
-	databaseVerbosity  int
-	snapshotMode       string
-	snapshotDir        string
-	toChaindata        string
-	referenceChaindata string
-	block              uint64
-	unwind             uint64
-	unwindEvery        uint64
-	batchSizeStr       string
-	reset              bool
-	bucket             string
-	datadir            string
-	migration          string
-	integritySlow      bool
-	integrityFast      bool
-	file               string
-	txtrace            bool // Whether to trace the execution (should only be used together eith `block`)
-	storageMode        string
-	chain              string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+	chaindata                      string
+	databaseVerbosity              int
+	snapshotMode, snapshotDir      string
+	referenceChaindata             string
+	block, pruneTo, unwind         uint64
+	unwindEvery                    uint64
+	batchSizeStr                   string
+	reset                          bool
+	bucket                         string
+	datadir, toChaindata           string
+	migration                      string
+	integrityFast, integritySlow   bool
+	file                           string
+	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
+	pruneFlag                      string
+	pruneH, pruneR, pruneT, pruneC uint64
+	experiments                    []string
+	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
 
 func must(err error) {
@@ -72,6 +69,10 @@ func withBlock(cmd *cobra.Command) {
 
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
+}
+
+func withPruneTo(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
 }
 
 func withUnwindEvery(cmd *cobra.Command) {

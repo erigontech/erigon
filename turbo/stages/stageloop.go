@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -11,7 +10,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -21,46 +19,17 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 )
 
-func NewStagedSync(
-	ctx context.Context,
-	sm ethdb.StorageMode,
-	headers stagedsync.HeadersCfg,
-	blockHashes stagedsync.BlockHashesCfg,
-	snapshotHeader stagedsync.SnapshotHeadersCfg,
-	bodies stagedsync.BodiesCfg,
-	snapshotBodies stagedsync.SnapshotBodiesCfg,
-	senders stagedsync.SendersCfg,
-	exec stagedsync.ExecuteBlockCfg,
-	trans stagedsync.TranspileCfg,
-	snapshotState stagedsync.SnapshotStateCfg,
-	hashState stagedsync.HashStateCfg,
-	trieCfg stagedsync.TrieCfg,
-	history stagedsync.HistoryCfg,
-	logIndex stagedsync.LogIndexCfg,
-	callTraces stagedsync.CallTracesCfg,
-	txLookup stagedsync.TxLookupCfg,
-	txPool stagedsync.TxPoolCfg,
-	finish stagedsync.FinishCfg,
-	test bool,
-) *stagedsync.StagedSync {
-	return stagedsync.New(
-		stagedsync.DefaultStages(ctx, sm, headers, blockHashes, snapshotHeader, bodies, snapshotBodies, senders, exec, trans, snapshotState, hashState, trieCfg, history, logIndex, callTraces, txLookup, txPool, finish, test),
-		stagedsync.DefaultUnwindOrder(),
-	)
-}
-
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *stagedsync.Notifications,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
@@ -112,7 +81,7 @@ func StageLoop(
 func StageLoopStep(
 	ctx context.Context,
 	db ethdb.RwKV,
-	sync *stagedsync.StagedSync,
+	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
 	notifications *stagedsync.Notifications,
 	initialCycle bool,
@@ -120,7 +89,7 @@ func StageLoopStep(
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
-	var origin, hashStateStageProgress, finishProgressBefore, unwindTo uint64
+	var origin, hashStateStageProgress, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
@@ -134,15 +103,6 @@ func StageLoopStep(
 		if err != nil {
 			return err
 		}
-		var v []byte
-		v, err = tx.GetOne(dbutils.SyncStageUnwind, []byte(stages.Finish))
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			unwindTo = binary.BigEndian.Uint64(v)
-		}
-
 		return nil
 	}); err != nil {
 		return err
@@ -150,10 +110,6 @@ func StageLoopStep(
 
 	if notifications != nil && notifications.Accumulator != nil {
 		notifications.Accumulator.Reset()
-	}
-	st, err1 := sync.Prepare(db, nil)
-	if err1 != nil {
-		return fmt.Errorf("prepare staged sync: %w", err1)
 	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
@@ -167,7 +123,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	err = st.Run(db, tx, initialCycle)
+	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
 		return err
 	}
@@ -213,7 +169,7 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, unwindTo, notifications.Events, db)
+	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, db)
 	if err != nil {
 		return err
 	}
@@ -221,7 +177,7 @@ func StageLoopStep(
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSync) (err error) {
+func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
@@ -229,11 +185,7 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.StagedSyn
 		return err
 	}
 	defer tx.Rollback()
-	miningState, err := mining.Prepare(nil, tx)
-	if err != nil {
-		return err
-	}
-	if err = miningState.Run(nil, tx, false); err != nil {
+	if err = mining.Run(nil, tx, false); err != nil {
 		return err
 	}
 	tx.Rollback()
@@ -252,75 +204,73 @@ func NewStagedSync2(
 	client *snapshotsync.Client,
 	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
-) (*stagedsync.StagedSync, error) {
-	var pruningDistance uint64
-	if !cfg.StorageMode.History {
-		pruningDistance = params.FullImmutabilityThreshold
-	}
-
-	return NewStagedSync(ctx, cfg.StorageMode,
-		stagedsync.StageHeadersCfg(
-			db,
-			controlServer.Hd,
-			*controlServer.ChainConfig,
-			controlServer.SendHeaderRequest,
-			controlServer.PropagateNewBlockHashes,
-			controlServer.Penalize,
-			cfg.BatchSize,
+) (*stagedsync.Sync, error) {
+	return stagedsync.New(
+		stagedsync.DefaultStages(
+			ctx,
+			cfg.Prune,
+			stagedsync.StageHeadersCfg(
+				db,
+				controlServer.Hd,
+				*controlServer.ChainConfig,
+				controlServer.SendHeaderRequest,
+				controlServer.PropagateNewBlockHashes,
+				controlServer.Penalize,
+				cfg.BatchSize,
+			),
+			stagedsync.StageBlockHashesCfg(db, tmpdir),
+			stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator),
+			stagedsync.StageBodiesCfg(
+				db,
+				controlServer.Bd,
+				controlServer.SendBodyRequest,
+				controlServer.Penalize,
+				controlServer.BroadcastNewBlock,
+				cfg.BodyDownloadTimeoutSeconds,
+				*controlServer.ChainConfig,
+				cfg.BatchSize,
+			),
+			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
+			stagedsync.StageExecuteBlocksCfg(
+				db,
+				cfg.Prune,
+				cfg.BatchSize,
+				nil,
+				controlServer.ChainConfig,
+				controlServer.Engine,
+				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				accumulator,
+				cfg.StateStream,
+				tmpdir,
+			),
+			stagedsync.StageTranspileCfg(
+				db,
+				cfg.BatchSize,
+				controlServer.ChainConfig,
+			),
+			stagedsync.StageSnapshotStateCfg(db, cfg.Snapshot, tmpdir, client, snapshotMigrator),
+			stagedsync.StageHashStateCfg(db, tmpdir),
+			stagedsync.StageTrieCfg(db, true, true, tmpdir),
+			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageTxPoolCfg(db, txPool, func() {
+				for i := range txPoolServer.Sentries {
+					go func(i int) {
+						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
+					}(i)
+					go func(i int) {
+						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.RecentPeers, nil)
+					}(i)
+				}
+				txPoolServer.TxFetcher.Start()
+			}),
+			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator),
+			false, /* test */
 		),
-		stagedsync.StageBlockHashesCfg(db, tmpdir),
-		stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator),
-		stagedsync.StageBodiesCfg(
-			db,
-			controlServer.Bd,
-			controlServer.SendBodyRequest,
-			controlServer.Penalize,
-			controlServer.BroadcastNewBlock,
-			cfg.BodyDownloadTimeoutSeconds,
-			*controlServer.ChainConfig,
-			cfg.BatchSize,
-		),
-		stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
-		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
-		stagedsync.StageExecuteBlocksCfg(
-			db,
-			cfg.StorageMode.Receipts,
-			cfg.StorageMode.CallTraces,
-			cfg.StorageMode.TEVM,
-			pruningDistance,
-			cfg.BatchSize,
-			nil,
-			controlServer.ChainConfig,
-			controlServer.Engine,
-			&vm.Config{NoReceipts: !cfg.StorageMode.Receipts, EnableTEMV: cfg.StorageMode.TEVM},
-			accumulator,
-			cfg.StateStream,
-			tmpdir,
-		),
-		stagedsync.StageTranspileCfg(
-			db,
-			cfg.BatchSize,
-			controlServer.ChainConfig,
-		),
-		stagedsync.StageSnapshotStateCfg(db, cfg.Snapshot, tmpdir, client, snapshotMigrator),
-		stagedsync.StageHashStateCfg(db, tmpdir),
-		stagedsync.StageTrieCfg(db, true, true, tmpdir),
-		stagedsync.StageHistoryCfg(db, tmpdir),
-		stagedsync.StageLogIndexCfg(db, tmpdir),
-		stagedsync.StageCallTracesCfg(db, 0, cfg.BatchSize, tmpdir, controlServer.ChainConfig, controlServer.Engine),
-		stagedsync.StageTxLookupCfg(db, tmpdir),
-		stagedsync.StageTxPoolCfg(db, txPool, func() {
-			for i := range txPoolServer.Sentries {
-				go func(i int) {
-					txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
-				}(i)
-				go func(i int) {
-					txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.RecentPeers, nil)
-				}(i)
-			}
-			txPoolServer.TxFetcher.Start()
-		}),
-		stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator),
-		false, /* test */
+		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
 	), nil
 }
