@@ -229,14 +229,32 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	if errStart != nil {
 		return errStart
 	}
+	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
+	{
+		// Important hack for Pruned Nodes. Prohibit huge jumps if HashStateProgress > 0
+		// because HashState stage does require ChangeSets
+		// but this stage doesn't write ChangeSets for block older than `cfg.prune.Receipts.PruneTo(to)`
+		//
+		// HashStateProgress == 0 means no jump limits - because this case doesn't use ChangeSets at all
+		hashStateStageProgress, err := stages.GetStageProgress(tx, stages.HashState)
+		if err != nil {
+			return err
+		}
+		if hashStateStageProgress > 0 {
+			maxForwardMove := cfg.prune.MaxForwardMove(s.BlockNumber)
+			if to > maxForwardMove {
+				log.Info(fmt.Sprintf("[%s] Pruned node does force limit huge jumps", logPrefix), "max_distance", maxForwardMove)
+				to = maxForwardMove
+			}
+		}
+	}
 	if to <= s.BlockNumber {
 		return nil
 	}
-	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
