@@ -156,6 +156,9 @@ func syncBySmallSteps(db ethdb.RwKV, miningConfig params.MiningConfig, ctx conte
 	expectedAccountChanges := make(map[uint64]*changeset.ChangeSet)
 	expectedStorageChanges := make(map[uint64]*changeset.ChangeSet)
 	changeSetHook := func(blockNum uint64, csw *state.ChangeSetWriter) {
+		if csw == nil {
+			return
+		}
 		accountChanges, err := csw.GetAccountChanges()
 		if err != nil {
 			panic(err)
@@ -376,6 +379,9 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, tx eth
 		checkHistoryFrom = prunedTo
 	}
 	for blockN := range expectedAccountChanges {
+		if blockN <= checkHistoryFrom {
+			continue
+		}
 		if err := checkChangeSet(tx, blockN, expectedAccountChanges[blockN], expectedStorageChanges[blockN]); err != nil {
 			return err
 		}

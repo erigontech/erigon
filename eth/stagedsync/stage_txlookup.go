@@ -85,8 +85,8 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
 		}
 
-		for _, tx := range body.Transactions {
-			if err := next(k, tx.Hash().Bytes(), bigNum.SetUint64(blocknum).Bytes()); err != nil {
+		for _, txn := range body.Transactions {
+			if err := next(k, txn.Hash().Bytes(), bigNum.SetUint64(blocknum).Bytes()); err != nil {
 				return err
 			}
 		}

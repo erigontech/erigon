@@ -24,15 +24,16 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/consensus"
 )
 
 // Draws an validator nonce modulo number of validators.
-func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint) (common.Address, error) {
-	d, err := set.defaultCaller(parent)
-	if err != nil {
-		return common.Address{}, err
-	}
-	return set.getWithCaller(parent, nonce, d)
+func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call consensus.Call) (common.Address, error) {
+	//d, err := set.defaultCaller(parent)
+	//if err != nil {
+	//	return common.Address{}, err
+	//}
+	return set.getWithCaller(parent, nonce, call)
 }
 
 // Different ways of specifying validators.
@@ -52,7 +53,7 @@ func newValidatorSetFromJson(j *ValidatorSetJson, posdaoTransition *uint64) Vali
 		return &SimpleList{validators: j.List}
 	}
 	if j.SafeContract != nil {
-		return &ValidatorSafeContract{contractAddress: *j.SafeContract, posdaoTransition: posdaoTransition}
+		return NewValidatorSafeContract(*j.SafeContract, posdaoTransition, nil)
 	}
 	if j.Contract != nil {
 		return &ValidatorContract{

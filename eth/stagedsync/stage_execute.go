@@ -112,7 +112,7 @@ func executeBlock(
 	callTracer := NewCallTracer(checkTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, checkTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, checkTEVM)
 	if err != nil {
 		return err
 	}
@@ -229,6 +229,13 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	if errStart != nil {
 		return errStart
 	}
+	nextStageProgress, err := stages.GetStageProgress(tx, stages.HashState)
+	if err != nil {
+		return err
+	}
+	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+
+	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
@@ -236,7 +243,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	if to <= s.BlockNumber {
 		return nil
 	}
-	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
@@ -281,9 +287,10 @@ Loop:
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
-		writeReceipts := blockNum > cfg.prune.Receipts.PruneTo(to)
-		writeChangeSets := blockNum > cfg.prune.History.PruneTo(to)
-		writeCallTraces := blockNum > cfg.prune.CallTraces.PruneTo(to)
+		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
+		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
+		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())

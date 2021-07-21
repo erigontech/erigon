@@ -364,6 +364,15 @@ func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) 
 func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
 }
+func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
+}
+func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
+}
+func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
+}
 
 func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
