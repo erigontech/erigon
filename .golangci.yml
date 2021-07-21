@@ -15,6 +15,7 @@ linters:
     - unused
     - varcheck
     - gocritic
+#    - forcetypeassert
 
 linters-settings:
   gocritic:
