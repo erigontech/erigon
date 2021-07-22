@@ -7,6 +7,7 @@ import (
 
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -72,13 +73,17 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		return nil, err
 	}
 	defer tx.Rollback()
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
-	//curHeader := rawdb.ReadCurrentHeader(tx)
+	curHeader := rawdb.ReadCurrentHeader(tx)
 	// Flatten the pending transactions
 	for account, txs := range pending {
 		dump := make(map[string]*RPCTransaction)
 		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn)
+			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
 		content["pending"][account.Hex()] = dump
 	}
@@ -86,7 +91,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	for account, txs := range queued {
 		dump := make(map[string]*RPCTransaction)
 		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn)
+			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
 		content["queued"][account.Hex()] = dump
 	}
