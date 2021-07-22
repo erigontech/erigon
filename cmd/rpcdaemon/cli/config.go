@@ -177,17 +177,6 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 			return nil, nil, nil, nil, compatErr
 		}
 		kv = rwKv
-		if cfg.SnapshotMode != "" {
-			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
-			if innerErr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
-			}
-			snapKv, innerErr1 := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
-			if innerErr1 != nil {
-				return nil, nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr1)
-			}
-			kv = snapKv
-		}
 	} else {
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
