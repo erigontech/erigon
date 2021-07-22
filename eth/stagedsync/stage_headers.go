@@ -305,12 +305,15 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			return err
 		}
 		if maxNum == 0 {
-			// Read genesis hash
-			if maxHash, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
+			maxNum = u.UnwindPoint
+			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
 				return err
 			}
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
+			return err
+		}
+		if err = u.Done(tx); err != nil {
 			return err
 		}
 		if err = s.Update(tx, maxNum); err != nil {
