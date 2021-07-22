@@ -88,10 +88,8 @@ func HeadersForward(
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	fmt.Printf("Header progress %d, header progress hash %x\n", headerProgress, hash)
 	if hash == (common.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		fmt.Printf("fixCanonicalChain headHash %x\n", headHash)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx); err != nil {
 			return err
 		}
@@ -303,7 +301,6 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			var hash common.Hash
 			copy(hash[:], k[8:])
 			if cfg.hd.IsBadHeader(hash) {
-				//fmt.Printf("Skip %x TD record as bad\n", k)
 				continue
 			}
 			var td big.Int
@@ -314,21 +311,17 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 				maxTd.Set(&td)
 				copy(maxHash[:], k[8:])
 				maxNum = binary.BigEndian.Uint64(k[:8])
-				fmt.Printf("Set TD record as max %x\n", k)
 			}
 		}
 		if err != nil {
-			fmt.Printf("0. error %v\n", err)
 			return err
 		}
-		fmt.Printf("1. maxNum = %d, maxHash = %x\n", maxNum, maxHash)
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
 			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
 				return err
 			}
 		}
-		fmt.Printf("2. maxNum = %d, maxHash = %x\n", maxNum, maxHash)
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
 		}
