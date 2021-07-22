@@ -71,19 +71,19 @@ var (
 		Value: "disabled",
 	}
 	PruneHistoryFlag = cli.Uint64Flag{
-		Name:  "prune.history.older",
+		Name:  "prune.h.older",
 		Usage: `Prune data after this amount of blocks (if --prune flag has 'h', then default is 90K)`,
 	}
 	PruneReceiptFlag = cli.Uint64Flag{
-		Name:  "prune.receipt.older",
+		Name:  "prune.r.older",
 		Usage: `Prune data after this amount of blocks (if --prune flag has 'r', then default is 90K)`,
 	}
 	PruneTxIndexFlag = cli.Uint64Flag{
-		Name:  "prune.txindex.older",
+		Name:  "prune.t.older",
 		Usage: `Prune data after this amount of blocks (if --prune flag has 't', then default is 90K)`,
 	}
 	PruneCallTracesFlag = cli.Uint64Flag{
-		Name:  "prune.calltrace.older",
+		Name:  "prune.c.older",
 		Usage: `Prune data after this amount of blocks (if --prune flag has 'c', then default is 90K)`,
 	}
 	ExperimentsFlag = cli.StringFlag{
