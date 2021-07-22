@@ -40,6 +40,7 @@ var DefaultFlags = []cli.Flag{
 	TLSKeyFlag,
 	TLSCACertFlag,
 	SyncLoopThrottleFlag,
+	BadBlockFlag,
 	utils.ListenPortFlag,
 	utils.ListenPort65Flag,
 	utils.NATFlag,

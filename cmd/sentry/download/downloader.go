@@ -419,8 +419,11 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
 				canRequestMore = canRequestMore || requestMore
+				if len(penalties) > 0 {
+					cs.Penalize(ctx, penalties)
+				}
 			}
 
 			if canRequestMore {
@@ -491,8 +494,11 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
 				canRequestMore = canRequestMore || requestMore
+				if len(penalties) > 0 {
+					cs.Penalize(ctx, penalties)
+				}
 			}
 
 			if canRequestMore {
