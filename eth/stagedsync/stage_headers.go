@@ -264,7 +264,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			return err
 		}
 	}
-	if u.BadBlock != (common.Hash{}) {
+	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Find header with biggest TD
 		tdCursor, cErr := tx.Cursor(dbutils.HeaderTDBucket)
@@ -287,6 +287,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			var hash common.Hash
 			copy(hash[:], k[8:])
 			if cfg.hd.IsBadHeader(hash) {
+				fmt.Printf("Skip %x TD record as bad\n", k)
 				continue
 			}
 			var td big.Int
@@ -297,6 +298,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 				maxTd.Set(&td)
 				copy(maxHash[:], k[8:])
 				maxNum = binary.BigEndian.Uint64(k[:8])
+				fmt.Printf("Set TD record as max %x\n", k)
 			}
 		}
 		if err != nil {
