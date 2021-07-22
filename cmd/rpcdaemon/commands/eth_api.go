@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
@@ -267,8 +268,12 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 }
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
-func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
-	return newRPCTransaction(tx, common.Hash{}, 0, 0, nil)
+func newRPCPendingTransaction(tx types.Transaction, current *types.Header, config *params.ChainConfig) *RPCTransaction {
+	var baseFee *big.Int
+	if current != nil {
+		baseFee = misc.CalcBaseFee(config, current)
+	}
+	return newRPCTransaction(tx, common.Hash{}, 0, 0, baseFee)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
