@@ -152,7 +152,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
 		ExtractStartKey: dbutils.EncodeBlockNumber(u.UnwindPoint + 1),
-		//ExtractEndKey:   dbutils.EncodeBlockNumber(s.BlockNumber - 1),
+		ExtractEndKey:   dbutils.EncodeBlockNumber(s.BlockNumber),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
