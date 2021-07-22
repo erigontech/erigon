@@ -111,27 +111,6 @@ It allows:
 
 see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
-
-addr+max(shard)
-
-addr+123
-addr+234
-addr+999
-
-prune(150):
-cs.Walk(0-150,k,v {
-	etl.Collect(k)
-})
-
-elt.Load(k {
-	c.Seek(k:150)
-    for c.Prev() { c.Del() }
-})
-
-elt.Load(k {
-    for addr,n=c.Seek(k); addr==k && n<150 ;c.Next() { c.Del() }
-})
-
 AccountsHistoryBucket:
 	key - address + shard_id_u64
 	value - roaring bitmap  - list of block where it changed
