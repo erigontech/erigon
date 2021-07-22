@@ -48,6 +48,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		return newRPCTransaction(txn, blockHash, blockNumber, txIndex, baseFee), nil
 	}
 
+	curHeader := rawdb.ReadCurrentHeader(tx)
+
 	// No finalized transaction, try to retrieve it from the pool
 	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(hash)}})
 	if err != nil {
@@ -58,7 +60,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		if err != nil {
 			return nil, err
 		}
-		return newRPCPendingTransaction(txn), nil
+		return newRPCPendingTransaction(txn, curHeader, chainConfig), nil
 	}
 
 	// Transaction unknown, return as such

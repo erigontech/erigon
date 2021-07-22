@@ -40,7 +40,7 @@ type journalEntry interface {
 type journal struct {
 	entries []journalEntry         // Current changes tracked by the journal
 	dirties map[common.Address]int // Dirty accounts and the number of changes
-	sync.RWMutex
+	mu      sync.RWMutex
 }
 
 // newJournal create a new initialized journal.
@@ -52,18 +52,18 @@ func newJournal() *journal {
 
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
-	j.Lock()
+	j.mu.Lock()
 	j.entries = append(j.entries, entry)
 	if addr := entry.dirtied(); addr != nil {
 		j.dirties[*addr]++
 	}
-	j.Unlock()
+	j.mu.Unlock()
 }
 
 // revert undoes a batch of journalled modifications along with any reverted
 // dirty handling too.
 func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
-	j.Lock()
+	j.mu.Lock()
 	for i := len(j.entries) - 1; i >= snapshot; i-- {
 		// Undo the changes made by the operation
 		j.entries[i].revert(statedb)
@@ -76,23 +76,23 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 		}
 	}
 	j.entries = j.entries[:snapshot]
-	j.Unlock()
+	j.mu.Unlock()
 }
 
 // dirty explicitly sets an address to dirty, even if the change entries would
 // otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
 // precompile consensus exception.
 func (j *journal) dirty(addr common.Address) {
-	j.Lock()
+	j.mu.Lock()
 	j.dirties[addr]++
-	j.Unlock()
+	j.mu.Unlock()
 }
 
 // length returns the current number of entries in the journal.
 func (j *journal) length() int {
-	j.RLock()
+	j.mu.RLock()
 	n := len(j.entries)
-	j.RUnlock()
+	j.mu.RUnlock()
 	return n
 }
 
@@ -136,9 +136,6 @@ type (
 	}
 	addLogChange struct {
 		txhash common.Hash
-	}
-	addPreimageChange struct {
-		hash common.Hash
 	}
 	touchChange struct {
 		account *common.Address
@@ -242,14 +239,6 @@ func (ch addLogChange) revert(s *IntraBlockState) {
 }
 
 func (ch addLogChange) dirtied() *common.Address {
-	return nil
-}
-
-func (ch addPreimageChange) revert(s *IntraBlockState) {
-	delete(s.preimages, ch.hash)
-}
-
-func (ch addPreimageChange) dirtied() *common.Address {
 	return nil
 }
 

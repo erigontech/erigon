@@ -69,8 +69,6 @@ type IntraBlockState struct {
 	logs         map[common.Hash][]*types.Log
 	logSize      uint
 
-	preimages map[common.Hash][]byte
-
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
 	journal        *journal
@@ -89,7 +87,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjectsDirty: make(map[common.Address]struct{}),
 		nilAccounts:       make(map[common.Address]struct{}),
 		logs:              make(map[common.Hash][]*types.Log),
-		preimages:         make(map[common.Hash][]byte),
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 	}
@@ -107,7 +104,6 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 		refund:            sdb.refund,
 		logs:              make(map[common.Hash][]*types.Log, len(sdb.logs)),
 		logSize:           sdb.logSize,
-		preimages:         make(map[common.Hash][]byte, len(sdb.preimages)),
 		journal:           newJournal(),
 	}
 	// Copy the dirty states, logs, and preimages
@@ -140,9 +136,6 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 			*cpy[i] = *l
 		}
 		ibs.logs[hash] = cpy
-	}
-	for hash, preimage := range sdb.preimages {
-		ibs.preimages[hash] = preimage
 	}
 	// comment from https://github.com/ethereum/go-ethereum/commit/6487c002f6b47e08cb9814f16712c6789b313a97#diff-c3757dc9e9d868f63bc84a0cc67159c1d5c22cc5d8c9468757098f0492e0658cR705
 	// Do we need to copy the access list? In practice: No. At the start of a
@@ -183,7 +176,6 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.txIndex = 0
 	sdb.logs = make(map[common.Hash][]*types.Log)
 	sdb.logSize = 0
-	sdb.preimages = make(map[common.Hash][]byte)
 	sdb.clearJournalAndRefund()
 	sdb.accessList = newAccessList()
 }
@@ -209,21 +201,6 @@ func (sdb *IntraBlockState) Logs() []*types.Log {
 		logs = append(logs, lgs...)
 	}
 	return logs
-}
-
-// AddPreimage records a SHA3 preimage seen by the VM.
-func (sdb *IntraBlockState) AddPreimage(hash common.Hash, preimage []byte) {
-	if _, ok := sdb.preimages[hash]; !ok {
-		sdb.journal.append(addPreimageChange{hash: hash})
-		pi := make([]byte, len(preimage))
-		copy(pi, preimage)
-		sdb.preimages[hash] = pi
-	}
-}
-
-// Preimages returns a list of SHA3 preimages that have been submitted.
-func (sdb *IntraBlockState) Preimages() map[common.Hash][]byte {
-	return sdb.preimages
 }
 
 // AddRefund adds gas to the refund counter

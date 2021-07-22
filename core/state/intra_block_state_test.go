@@ -148,15 +148,6 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 			args: make([]int64, 1),
 		},
 		{
-			name: "AddPreimage",
-			fn: func(a testAction, s *IntraBlockState) {
-				preimage := []byte{1}
-				hash := common.BytesToHash(preimage)
-				s.AddPreimage(hash, preimage)
-			},
-			args: make([]int64, 1),
-		},
-		{
 			name: "AddAddressToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
 				s.AddAddressToAccessList(addr)
@@ -354,12 +345,8 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 
 func TestAccessList(t *testing.T) {
 	// Some helpers
-	addr := func(a string) common.Address {
-		return common.HexToAddress(a)
-	}
-	slot := func(a string) common.Hash {
-		return common.HexToHash(a)
-	}
+	addr := common.HexToAddress
+	slot := common.HexToHash
 
 	_, tx := kv.NewTestTx(t)
 	state := New(NewPlainKvState(tx, 0))

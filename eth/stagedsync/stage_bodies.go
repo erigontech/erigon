@@ -79,7 +79,6 @@ func BodiesForward(
 	}
 	bodyProgress = s.BlockNumber
 	if bodyProgress == headerProgress {
-		s.Done()
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -157,9 +156,7 @@ Loop:
 			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
 			if err != nil {
 				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "error", err)
-				if unwindErr := u.UnwindTo(blockHeight-1, tx, header.Hash()); unwindErr != nil {
-					return unwindErr
-				}
+				u.UnwindTo(blockHeight-1, header.Hash())
 				break Loop
 			}
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
@@ -200,7 +197,7 @@ Loop:
 		d6 += time.Since(start)
 		stageBodiesGauge.Update(int64(bodyProgress))
 	}
-	if err := s.DoneAndUpdate(tx, bodyProgress); err != nil {
+	if err := s.Update(tx, bodyProgress); err != nil {
 		return err
 	}
 	if !useExternalTx {
@@ -228,25 +225,42 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 		"sys", common.StorageSize(m.Sys))
 }
 
-func UnwindBodiesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg BodiesCfg) error {
+func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
-	err := u.Done(tx)
-	logPrefix := s.state.LogPrefix()
-	if err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+
+	logPrefix := u.LogPrefix()
+	if err = u.Done(tx); err != nil {
+		return fmt.Errorf("[%s]: reset: %v", logPrefix, err)
 	}
 	if !useExternalTx {
-		err = tx.Commit()
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
+		}
+	}
+	return nil
+}
+
+func PruneBodiesStage(s *PruneState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	logPrefix := s.LogPrefix()
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
 		}
 	}
 	return nil

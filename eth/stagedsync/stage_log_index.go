@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -29,24 +30,26 @@ const (
 type LogIndexCfg struct {
 	tmpdir     string
 	db         ethdb.RwKV
+	prune      prune.Mode
 	bufLimit   datasize.ByteSize
 	flushEvery time.Duration
 }
 
-func StageLogIndexCfg(db ethdb.RwKV, tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db ethdb.RwKV, prune prune.Mode, tmpDir string) LogIndexCfg {
 	return LogIndexCfg{
 		db:         db,
+		prune:      prune,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,
 	}
 }
 
-func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan struct{}) error {
+func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -54,29 +57,32 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan st
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
 	}
 	if endBlock == s.BlockNumber {
-		s.Done()
 		return nil
 	}
 
-	start := s.BlockNumber
-	if start > 0 {
-		start++
+	startBlock := s.BlockNumber
+	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)
+	if startBlock < pruneTo {
+		startBlock = pruneTo
+	}
+	if startBlock > 0 {
+		startBlock++
 	}
 
-	if err := promoteLogIndex(logPrefix, tx, start, cfg, quit); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, cfg, ctx); err != nil {
+		return err
+	}
+	if err = s.Update(tx, endBlock); err != nil {
 		return err
 	}
 
-	if err := s.DoneAndUpdate(tx, endBlock); err != nil {
-		return err
-	}
 	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -84,7 +90,8 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quit <-chan st
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, quit <-chan struct{}) error {
+func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndexCfg, ctx context.Context) error {
+	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -216,18 +223,18 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndex
 	return nil
 }
 
-func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, quitCh <-chan struct{}) error {
+func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
+	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.state.LogPrefix()
+	logPrefix := s.LogPrefix()
 	if err := unwindLogIndex(logPrefix, tx, u.UnwindPoint, cfg, quitCh); err != nil {
 		return err
 	}
@@ -235,13 +242,11 @@ func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCf
 	if err := u.Done(tx); err != nil {
 		return fmt.Errorf("%s: %w", logPrefix, err)
 	}
-
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -249,6 +254,7 @@ func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, cfg LogIndexCfg,
 	topics := map[string]struct{}{}
 	addrs := map[string]struct{}{}
 
+	reader := bytes.NewReader(nil)
 	c, err := db.Cursor(dbutils.Log)
 	if err != nil {
 		return err
@@ -263,7 +269,8 @@ func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, cfg LogIndexCfg,
 			return err
 		}
 		var logs types.Logs
-		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+		reader.Reset(v)
+		if err := cbor.Unmarshal(&logs, reader); err != nil {
 			return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
 		}
 
@@ -322,5 +329,129 @@ func truncateBitmaps(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to
 		}
 	}
 
+	return nil
+}
+
+func pruneOldLogChunks(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, pruneTo uint64, logPrefix string, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	keys := make([]string, 0, len(inMem))
+	for k := range inMem {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	c, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for _, kS := range keys {
+		seek := []byte(kS)
+		for k, _, err := c.Seek(seek); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := uint64(binary.BigEndian.Uint32(k[len(seek):]))
+			if !bytes.HasPrefix(k, seek) || blockNum >= pruneTo {
+				break
+			}
+			select {
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.AccountsHistoryBucket, "block", blockNum)
+			case <-ctx.Done():
+				return common.ErrStopped
+			default:
+			}
+			if err = c.DeleteCurrent(); err != nil {
+				return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
+			}
+		}
+	}
+	return nil
+}
+
+func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
+	logPrefix := s.LogPrefix()
+
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
+	if err = s.Done(tx); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint64, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	topics := map[string]struct{}{}
+	addrs := map[string]struct{}{}
+
+	reader := bytes.NewReader(nil)
+	{
+		c, err := tx.Cursor(dbutils.Log)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k)
+			if blockNum >= pruneTo {
+				break
+			}
+			select {
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Log, "block", blockNum)
+			case <-ctx.Done():
+				return common.ErrStopped
+			default:
+			}
+
+			var logs types.Logs
+			reader.Reset(v)
+			if err := cbor.Unmarshal(&logs, reader); err != nil {
+				return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
+			}
+
+			for _, l := range logs {
+				for _, topic := range l.Topics {
+					topics[string(topic.Bytes())] = struct{}{}
+				}
+				addrs[string(l.Address.Bytes())] = struct{}{}
+			}
+		}
+	}
+
+	if err := pruneOldLogChunks(tx, dbutils.LogTopicIndex, topics, pruneTo, logPrefix, ctx); err != nil {
+		return err
+	}
+	if err := pruneOldLogChunks(tx, dbutils.LogAddressIndex, addrs, pruneTo, logPrefix, ctx); err != nil {
+		return err
+	}
 	return nil
 }

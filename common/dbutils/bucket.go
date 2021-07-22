@@ -199,10 +199,10 @@ const (
 	HeadersBucket         = "Header"                 // block_num_u64 + hash -> header (RLP)
 	HeaderTDBucket        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
-	BlockBodyPrefix     = "BlockBody"        // block_num_u64 + hash -> block body
-	EthTx               = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
-	BlockReceiptsPrefix = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log                 = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
+	BlockBodyPrefix = "BlockBody"        // block_num_u64 + hash -> block body
+	EthTx           = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
+	Receipts        = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log             = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -234,8 +234,6 @@ const (
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
-	// Position to where to unwind sync stages: stageName -> stageData
-	SyncStageUnwind = "SyncStageUnwind"
 
 	CliqueBucket             = "Clique"
 	CliqueSeparateBucket     = "CliqueSeparate"
@@ -259,21 +257,19 @@ const (
 	Sequence      = "Sequence" // tbl_name -> seq_u64
 	HeadHeaderKey = "LastHeader"
 
-	Epoch = "DevEpoch" // block_num_u64+block_hash->transition_proof
+	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
+	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 )
 
 // Keys
 var (
-	//StorageModeHistory - does node save history.
-	StorageModeHistory = []byte("smHistory")
-	//StorageModeReceipts - does node save receipts.
-	StorageModeReceipts = []byte("smReceipts")
-	//StorageModeTxIndex - does node save transactions index.
-	StorageModeTxIndex = []byte("smTxIndex")
-	//StorageModeCallTraces - does not build index of call traces
-	StorageModeCallTraces = []byte("smCallTraces")
 	//StorageModeTEVM - does not translate EVM to TEVM
 	StorageModeTEVM = []byte("smTEVM")
+
+	PruneDistanceHistory    = []byte("pruneHistory")
+	PruneDistanceReceipts   = []byte("pruneReceipts")
+	PruneDistanceTxIndex    = []byte("pruneTxIndex")
+	PruneDistanceCallTraces = []byte("pruneCallTraces")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 
@@ -294,7 +290,7 @@ var Buckets = []string{
 	ContractCodeBucket,
 	HeaderNumberBucket,
 	BlockBodyPrefix,
-	BlockReceiptsPrefix,
+	Receipts,
 	TxLookupPrefix,
 	BloomBitsPrefix,
 	ConfigPrefix,
@@ -306,7 +302,6 @@ var Buckets = []string{
 	CliqueLastSnapshotBucket,
 	CliqueSnapshotBucket,
 	SyncStageProgress,
-	SyncStageUnwind,
 	PlainStateBucket,
 	PlainContractCodeBucket,
 	AccountChangeSetBucket,
@@ -333,6 +328,7 @@ var Buckets = []string{
 	HeadersBucket,
 	HeaderTDBucket,
 	Epoch,
+	PendingEpoch,
 }
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration

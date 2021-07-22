@@ -124,7 +124,7 @@ func (dbs *PlainDBState) ForEachStorage(addr common.Address, startLocation commo
 		}
 		si.value.SetBytes(vs)
 		st.InsertNoReplace(&si)
-		if bytes.Compare(kLoc[:], lastKey[:]) > 0 {
+		if bytes.Compare(kLoc, lastKey[:]) > 0 {
 			// Beyond overrides
 			return st.Len() < maxResults+numDeletes, nil
 		}
@@ -376,7 +376,7 @@ func (s *PlainKVState) ForEachStorage(addr common.Address, startLocation common.
 		}
 		si.value.SetBytes(vs)
 		st.InsertNoReplace(&si)
-		if bytes.Compare(kLoc[:], lastKey[:]) > 0 {
+		if bytes.Compare(kLoc, lastKey[:]) > 0 {
 			// Beyond overrides
 			return st.Len() < maxResults+numDeletes, nil
 		}

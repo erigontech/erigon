@@ -187,7 +187,7 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 		}
 	}
 
-	if attachmentLink.persisted {
+	if _, bad := hd.badHeaders[attachmentLink.hash]; !bad && attachmentLink.persisted {
 		link := hd.links[linkHeader.Hash()]
 		hd.insertList = append(hd.insertList, link)
 	}
@@ -223,6 +223,9 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 			}
 		}
 
+		// Anchor is removed from the map, but not from the anchorQueue
+		// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
+		// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
 		delete(hd.anchors, anchor.parentHash)
 		// Add all headers in the segments as links to this anchor
 		var prevLink *Link
@@ -252,21 +255,21 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 }
 
 // Connect connects some working trees using anchors of some, and a link of another
-func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
+func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]PenaltyItem, error) {
 	// Find attachment link again
 	linkHeader := segment.Headers[end-1]
 	// Find attachement anchors again
 	anchorHeader := segment.Headers[start]
 	attachmentLink, ok1 := hd.getLink(linkHeader.ParentHash)
 	if !ok1 {
-		return fmt.Errorf("connect attachment link not found for %x", linkHeader.ParentHash)
+		return nil, fmt.Errorf("connect attachment link not found for %x", linkHeader.ParentHash)
 	}
 	if attachmentLink.preverified && len(attachmentLink.next) > 0 {
-		return fmt.Errorf("cannot connect to preverified link %d with children", attachmentLink.blockHeight)
+		return nil, fmt.Errorf("cannot connect to preverified link %d with children", attachmentLink.blockHeight)
 	}
 	anchor, ok2 := hd.anchors[anchorHeader.Hash()]
 	if !ok2 {
-		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
+		return nil, fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
 	}
 	anchorPreverified := false
 	for _, link := range anchor.links {
@@ -275,6 +278,9 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 			break
 		}
 	}
+	// Anchor is removed from the map, but not from the anchorQueue
+	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
+	// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
 	delete(hd.anchors, anchor.parentHash)
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink
@@ -294,11 +300,15 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 		// Mark the entire segment as preverified
 		hd.markPreverified(prevLink)
 	}
-	if attachmentLink.persisted {
+	var penalties []PenaltyItem
+	if _, bad := hd.badHeaders[attachmentLink.hash]; bad {
+		hd.invalidateAnchor(anchor)
+		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
+	} else if attachmentLink.persisted {
 		link := hd.links[linkHeader.Hash()]
 		hd.insertList = append(hd.insertList, link)
 	}
-	return nil
+	return penalties, nil
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
@@ -820,7 +830,7 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 // it allows higher-level algo immediately request more headers without waiting all stages precessing,
 // speeds up visibility of new blocks
 // It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
-func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, peerID string) (requestMore bool) {
+func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, peerID string) (requestMore bool, penalties []PenaltyItem) {
 	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -843,7 +853,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 	if foundAnchor {
 		if foundTip {
 			// Connect
-			if err := hd.connect(segment, start, end); err != nil {
+			var err error
+			if penalties, err = hd.connect(segment, start, end); err != nil {
 				log.Debug("Connect failed", "error", err)
 				return
 			}
@@ -913,7 +924,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 	default:
 	}
 
-	return hd.requestChaining && requestMore
+	return hd.requestChaining && requestMore, penalties
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {

@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 )
 
@@ -139,7 +138,7 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	if len(version) != 12 {
 		return fmt.Errorf("database does not have major schema version. upgrade and restart Erigon core")
 	}
-	major := binary.BigEndian.Uint32(version[:])
+	major := binary.BigEndian.Uint32(version)
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
@@ -177,17 +176,6 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 			return nil, nil, nil, nil, compatErr
 		}
 		kv = rwKv
-		if cfg.SnapshotMode != "" {
-			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
-			if innerErr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
-			}
-			snapKv, innerErr := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
-			if innerErr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
-			}
-			kv = snapKv
-		}
 	} else {
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}

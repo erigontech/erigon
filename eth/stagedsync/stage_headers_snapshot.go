@@ -29,14 +29,13 @@ func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client 
 	}
 }
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, quit <-chan struct{}) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
 	if !initial {
-		s.Done()
 		return nil
 	}
 
-	readTX, err := cfg.db.BeginRo(context.Background())
+	readTX, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -49,7 +48,6 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 
 	//it's too early for snapshot
 	if to < snapshotsync.EpochSize {
-		s.Done()
 		return nil
 	}
 
@@ -63,7 +61,6 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	//So we have to move headers to snapshot right after headers stage.
 	//but we don't want to block not initial sync
 	if snapshotBlock <= currentSnapshotBlock {
-		s.Done()
 		return nil
 	}
 
@@ -78,7 +75,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 		log.Info("Wait old snapshot to close")
 	}
 
-	writeTX, err := cfg.db.BeginRw(context.Background())
+	writeTX, err := cfg.db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -88,7 +85,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	if err != nil {
 		return err
 	}
-	err = s.DoneAndUpdate(tx, snapshotBlock)
+	err = s.Update(tx, snapshotBlock)
 	if err != nil {
 		return err
 	}
@@ -99,7 +96,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	}
 
 	final := func() (bool, error) {
-		readTX, err = cfg.db.BeginRw(context.Background())
+		readTX, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return false, err
 		}
@@ -122,11 +119,10 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	return nil
 }
 
-func UnwindHeadersSnapshotGenerationStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, quit <-chan struct{}) error {
+func UnwindHeadersSnapshotGenerationStage(u *UnwindState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
@@ -136,6 +132,24 @@ func UnwindHeadersSnapshotGenerationStage(u *UnwindState, s *StageState, tx ethd
 	if err := u.Done(tx); err != nil {
 		return err
 	}
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func PruneHeadersSnapshotGenerationStage(u *PruneState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err

@@ -29,6 +29,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -69,8 +69,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:   1,
-	StorageMode: ethdb.DefaultStorageMode,
+	NetworkID: 1,
+	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -133,8 +133,9 @@ type Config struct {
 
 	P2PEnabled bool
 
-	StorageMode ethdb.StorageMode
-	BatchSize   datasize.ByteSize // Batch size for execution stage
+	Prune     prune.Mode
+	BatchSize datasize.ByteSize // Batch size for execution stage
+	BadBlock  uint64            // Block marked as bad (for forced reorg)
 
 	Snapshot Snapshot
 
@@ -146,8 +147,6 @@ type Config struct {
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
-
-	Preimages bool
 
 	// Mining options
 	Miner params.MiningConfig
@@ -164,27 +163,12 @@ type Config struct {
 	// Gas Price Oracle options
 	GPO gasprice.Config
 
-	// Enables tracking of SHA3 preimages in the VM
-	EnablePreimageRecording bool
-
-	// Enables the dbg protocol
-	EnableDebugProtocol bool
-
-	// Miscellaneous options
-	DocRoot string `toml:"-"`
-
 	// RPCGasCap is the global gas cap for eth-call variants.
 	RPCGasCap uint64 `toml:",omitempty"`
 
 	// RPCTxFeeCap is the global transaction fee(price * gaslimit) cap for
 	// send-transction variants. The unit is ether.
 	RPCTxFeeCap float64 `toml:",omitempty"`
-
-	// Checkpoint is a hardcoded checkpoint which can be nil.
-	Checkpoint *params.TrustedCheckpoint `toml:",omitempty"`
-
-	// CheckpointOracle is the configuration for checkpoint oracle.
-	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
 	StateStream                bool
 	BodyDownloadTimeoutSeconds int // TODO change to duration

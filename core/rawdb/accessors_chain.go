@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -510,7 +511,7 @@ func DeleteTd(db ethdb.Deleter, hash common.Hash, number uint64) error {
 // HasReceipts verifies the existence of all the transaction receipts belonging
 // to a block.
 func HasReceipts(db ethdb.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number)); !has || err != nil {
+	if has, err := db.Has(dbutils.Receipts, dbutils.ReceiptsKey(number)); !has || err != nil {
 		return false
 	}
 	return true
@@ -521,7 +522,7 @@ func HasReceipts(db ethdb.Has, hash common.Hash, number uint64) bool {
 // should not be used. Use ReadReceipts instead if the metadata is needed.
 func ReadRawReceipts(db ethdb.Tx, blockNum uint64) types.Receipts {
 	// Retrieve the flattened receipt slice
-	data, err := db.GetOne(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNum))
+	data, err := db.GetOne(dbutils.Receipts, dbutils.ReceiptsKey(blockNum))
 	if err != nil {
 		log.Error("ReadRawReceipts failed", "err", err)
 	}
@@ -616,7 +617,7 @@ func WriteReceipts(tx ethdb.Putter, number uint64, receipts types.Receipts) erro
 		return fmt.Errorf("encode block receipts for block %d: %v", number, err)
 	}
 
-	if err = tx.Put(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), buf.Bytes()); err != nil {
+	if err = tx.Put(dbutils.Receipts, dbutils.ReceiptsKey(number), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %v", number, err)
 	}
 	return nil
@@ -625,6 +626,7 @@ func WriteReceipts(tx ethdb.Putter, number uint64, receipts types.Receipts) erro
 // AppendReceipts stores all the transaction receipts belonging to a block.
 func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) error {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
+
 	for txId, r := range receipts {
 		//fmt.Printf("1: %d,%x\n", txId, r.TxHash)
 		if len(r.Logs) == 0 {
@@ -648,7 +650,7 @@ func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) 
 		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
 	}
 
-	if err = tx.Append(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
+	if err = tx.Append(dbutils.Receipts, dbutils.ReceiptsKey(blockNumber), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
 	}
 	return nil
@@ -656,7 +658,7 @@ func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) 
 
 // DeleteReceipts removes all receipt data associated with a block hash.
 func DeleteReceipts(db ethdb.RwTx, number uint64) error {
-	if err := db.Delete(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), nil); err != nil {
+	if err := db.Delete(dbutils.Receipts, dbutils.ReceiptsKey(number), nil); err != nil {
 		return fmt.Errorf("receipts delete failed: %d, %w", number, err)
 	}
 
@@ -672,8 +674,8 @@ func DeleteReceipts(db ethdb.RwTx, number uint64) error {
 
 // DeleteNewerReceipts removes all receipt for given block number or newer
 func DeleteNewerReceipts(db ethdb.RwTx, number uint64) error {
-	if err := db.ForEach(dbutils.BlockReceiptsPrefix, dbutils.ReceiptsKey(number), func(k, v []byte) error {
-		return db.Delete(dbutils.BlockReceiptsPrefix, k, nil)
+	if err := db.ForEach(dbutils.Receipts, dbutils.ReceiptsKey(number), func(k, v []byte) error {
+		return db.Delete(dbutils.Receipts, k, nil)
 	}); err != nil {
 		return err
 	}
@@ -686,6 +688,22 @@ func DeleteNewerReceipts(db ethdb.RwTx, number uint64) error {
 		return err
 	}
 	return nil
+}
+
+func ReceiptsAvailableFrom(tx ethdb.Tx) (uint64, error) {
+	c, err := tx.Cursor(dbutils.Receipts)
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	if len(k) == 0 {
+		return math.MaxUint64, nil
+	}
+	return binary.BigEndian.Uint64(k), nil
 }
 
 // ReadBlock retrieves an entire block corresponding to the hash, assembling it
@@ -859,15 +877,56 @@ func ReadAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, 
 }
 
 func ReadEpoch(tx ethdb.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
-	k := make([]byte, 8+32)
+	k := make([]byte, dbutils.NumberLength+common.HashLength)
 	binary.BigEndian.PutUint64(k, blockNum)
-	copy(k[8:], blockHash[:])
+	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.GetOne(dbutils.Epoch, k)
+}
+func FindEpochBeforeOrEqualNumber(tx ethdb.Tx, n uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+	c, err := tx.Cursor(dbutils.Epoch)
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
+	defer c.Close()
+	k := make([]byte, dbutils.NumberLength)
+	binary.BigEndian.PutUint64(k, n)
+	k, v, err := c.Seek(k)
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
+	if k != nil {
+		num := binary.BigEndian.Uint64(k)
+		if num == n {
+			return n, common.BytesToHash(k[dbutils.NumberLength:]), v, nil
+		}
+	}
+	k, v, err = c.Prev()
+	if err != nil {
+		return 0, common.Hash{}, nil, err
+	}
+	if k == nil {
+		return 0, common.Hash{}, nil, nil
+	}
+	return binary.BigEndian.Uint64(k), common.BytesToHash(k[dbutils.NumberLength:]), v, nil
 }
 
 func WriteEpoch(tx ethdb.RwTx, blockNum uint64, blockHash common.Hash, transitionProof []byte) (err error) {
+	k := make([]byte, dbutils.NumberLength+common.HashLength)
+	binary.BigEndian.PutUint64(k, blockNum)
+	copy(k[dbutils.NumberLength:], blockHash[:])
+	return tx.Put(dbutils.Epoch, k, transitionProof)
+}
+
+func ReadPendingEpoch(tx ethdb.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
 	k := make([]byte, 8+32)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[8:], blockHash[:])
-	return tx.Put(dbutils.Epoch, k, transitionProof)
+	return tx.GetOne(dbutils.PendingEpoch, k)
+}
+
+func WritePendingEpoch(tx ethdb.RwTx, blockNum uint64, blockHash common.Hash, transitionProof []byte) (err error) {
+	k := make([]byte, 8+32)
+	binary.BigEndian.PutUint64(k, blockNum)
+	copy(k[8:], blockHash[:])
+	return tx.Put(dbutils.PendingEpoch, k, transitionProof)
 }

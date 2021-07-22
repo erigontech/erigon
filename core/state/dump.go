@@ -40,9 +40,9 @@ type Dumper struct {
 type DumpAccount struct {
 	Balance   string            `json:"balance"`
 	Nonce     uint64            `json:"nonce"`
-	Root      string            `json:"root"`
-	CodeHash  string            `json:"codeHash"`
-	Code      string            `json:"code,omitempty"`
+	Root      hexutil.Bytes     `json:"root"`
+	CodeHash  hexutil.Bytes     `json:"codeHash"`
+	Code      hexutil.Bytes     `json:"code,omitempty"`
 	Storage   map[string]string `json:"storage,omitempty"`
 	Address   *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
 	SecureKey *hexutil.Bytes    `json:"key,omitempty"`     // If we don't have address, we can output the key
@@ -129,7 +129,7 @@ func NewDumper(db ethdb.Tx, blockNumber uint64) *Dumper {
 	}
 }
 
-func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _ bool, startAddress common.Address, maxResults int) ([]byte, error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
 	var nextKey []byte
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
 	var emptyHash = common.Hash{}
@@ -160,8 +160,8 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     common.Bytes2Hex(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: common.Bytes2Hex(emptyCodeHash[:]),
+			Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+			CodeHash: hexutil.Bytes(emptyCodeHash[:]),
 			Storage:  make(map[string]string),
 		}
 		accountList = append(accountList, &account)
@@ -184,9 +184,9 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
 			}
 			if codeHash != nil {
-				account.CodeHash = common.Bytes2Hex(codeHash)
+				account.CodeHash = codeHash
 			} else {
-				account.CodeHash = emptyCodeHash.String()
+				account.CodeHash = emptyCodeHash[:]
 			}
 
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
@@ -194,7 +194,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
 					return nil, err
 				}
-				account.Code = common.Bytes2Hex(code)
+				account.Code = code
 			}
 		}
 
@@ -213,7 +213,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 				}); err != nil {
 				return nil, fmt.Errorf("walking over storage for %x: %v", addr, err)
 			}
-			account.Root = t.Hash().String()
+			account.Root = t.Hash().Bytes()
 		}
 		c.OnAccount(addr, *account)
 	}
@@ -222,18 +222,18 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, _
 }
 
 // RawDump returns the entire state an a single large object
-func (d *Dumper) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
+func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.DumpToCollector(dump, excludeCode, excludeStorage, excludeMissingPreimages, common.Address{}, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, common.Address{}, 0)
 	return *dump
 }
 
 // Dump returns a JSON string representing the entire state as a single json-object
-func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
-	dump := d.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
+func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
+	dump := d.RawDump(excludeCode, excludeStorage)
 	json, err := json.MarshalIndent(dump, "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
@@ -242,26 +242,26 @@ func (d *Dumper) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool)
 }
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
-func (d *Dumper) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
+func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages, common.Address{}, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
-func (d *Dumper) IteratorDump(excludeCode, excludeStorage, excludeMissingPreimages bool, start common.Address, maxResults int) (IteratorDump, error) {
+func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start common.Address, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	var err error
-	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, excludeMissingPreimages, start, maxResults)
+	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, start, maxResults)
 	return *iterator, err
 }
 
 func (d *Dumper) DefaultRawDump() Dump {
-	return d.RawDump(false, false, false)
+	return d.RawDump(false, false)
 }
 
 // DefaultDump returns a JSON string representing the state with the default params
 func (d *Dumper) DefaultDump() []byte {
-	return d.Dump(false, false, false)
+	return d.Dump(false, false)
 }

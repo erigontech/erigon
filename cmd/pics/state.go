@@ -69,7 +69,7 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	dbutils.BlockReceiptsPrefix:    "Receipts",
+	dbutils.Receipts:               "Receipts",
 	dbutils.Log:                    "Event Logs",
 	dbutils.AccountsHistoryBucket:  "History Of Accounts",
 	dbutils.StorageHistoryBucket:   "History Of Storage",
@@ -86,7 +86,6 @@ var bucketLabels = map[string]string{
 	dbutils.HashedStorageBucket:    "Hashed Storage",
 	dbutils.TrieOfAccountsBucket:   "Intermediate Hashes Of Accounts",
 	dbutils.TrieOfStorageBucket:    "Intermediate Hashes Of Storage",
-	dbutils.SyncStageUnwind:        "Unwind",
 	dbutils.AccountChangeSetBucket: "Account Changes",
 	dbutils.StorageChangeSetBucket: "Storage Changes",
 	dbutils.IncarnationMapBucket:   "Incarnations",

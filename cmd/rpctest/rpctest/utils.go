@@ -1,6 +1,7 @@
 package rpctest
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -181,6 +182,48 @@ func compareResults(trace, traceg *fastjson.Value) error {
 	r := trace.Get("result")
 	rg := traceg.Get("result")
 	return compareJsonValues("result", r, rg)
+}
+
+func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer) error {
+	recording := rec != nil
+	res := reqGen.Erigon2(methodName, request)
+	if res.Err != nil {
+		return fmt.Errorf("could not invoke %s (Erigon): %w\n", methodName, res.Err)
+	}
+	if errVal := res.Result.Get("error"); errVal != nil {
+		return fmt.Errorf("error invoking %s (Erigon): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+	}
+	if needCompare {
+		resg := reqGen.Geth2(methodName, request)
+		if resg.Err != nil {
+			return fmt.Errorf("could not invoke %s (Geth/OE): %w\n", methodName, res.Err)
+		}
+		if errVal := resg.Result.Get("error"); errVal != nil {
+			return fmt.Errorf("error invoking %s (Geth/OE): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+		}
+		if resg.Err == nil && resg.Result.Get("error") == nil {
+			if err := compareResults(res.Result, resg.Result); err != nil {
+				recording = false
+				if errs != nil {
+					fmt.Printf("different results for method %s, errCtx: %s: %v\n", methodName, errCtx, err)
+					fmt.Fprintf(errs, "\nDifferent results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
+					fmt.Fprintf(errs, "Request=====================================\n%s\n", request)
+					fmt.Fprintf(errs, "TG response=================================\n%s\n", res.Response)
+					fmt.Fprintf(errs, "G/OE response=================================\n%s\n", resg.Response)
+					errs.Flush() // nolint:errcheck
+					// Keep going
+				} else {
+					fmt.Printf("TG response=================================\n%s\n", res.Response)
+					fmt.Printf("G response=================================\n%s\n", resg.Response)
+					return fmt.Errorf("different results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
+				}
+			}
+		}
+	}
+	if recording {
+		fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
+	}
+	return nil
 }
 
 func compareBalances(balance, balanceg *EthBalance) bool {
@@ -372,11 +415,11 @@ func compareAccountRanges(erigon, geth map[common.Address]state.DumpAccount) boo
 			different = true
 		}
 		// We do not compare Root, because Erigon does not compute it
-		if eriAcc.CodeHash != gethAcc.CodeHash {
+		if eriAcc.CodeHash.String() != gethAcc.CodeHash.String() {
 			fmt.Printf("Different codehash for %x: erigon %s, geth %s\n", addr, eriAcc.CodeHash, gethAcc.CodeHash)
 			different = true
 		}
-		if eriAcc.Code != gethAcc.Code {
+		if eriAcc.Code.String() != gethAcc.Code.String() {
 			fmt.Printf("Different codehash for %x: erigon %s, geth %s\n", addr, eriAcc.Code, gethAcc.Code)
 			different = true
 		}

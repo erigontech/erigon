@@ -1,8 +1,10 @@
 package rpctest
 
 import (
+	"bufio"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -11,10 +13,32 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func Bench12(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
+	}
+	var rec *bufio.Writer
+	if recordFile != "" {
+		f, err := os.Create(recordFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for recording: %v\n", recordFile, err)
+			return
+		}
+		defer f.Close()
+		rec = bufio.NewWriter(f)
+		defer rec.Flush()
+	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
 	}
 
 	var res CallResult
@@ -68,35 +92,11 @@ func Bench12(erigonURL, gethURL string, needCompare bool, blockFrom uint64, bloc
 		for _, tx := range b.Result.Transactions {
 			reqGen.reqID++
 
-			var trace EthTxTrace
-			res = reqGen.Erigon("debug_traceCall", reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1), &trace)
-			if res.Err != nil {
-				fmt.Printf("Could not debug traceCall (Erigon) %s: %v\n", tx.Hash, res.Err)
+			request := reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
+			errCtx := fmt.Sprintf("block %d tx %s", bn, tx.Hash)
+			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				fmt.Println(err)
 				return
-			}
-
-			if trace.Error != nil {
-				fmt.Printf("Error tracing call (Erigon): %d %s\n", trace.Error.Code, trace.Error.Message)
-				return
-			}
-
-			if needCompare {
-				var traceg EthTxTrace
-				res = reqGen.Geth("debug_traceCall", reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1), &traceg)
-				if res.Err != nil {
-					fmt.Printf("Could not debug traceCall (geth) %s: %v\n", tx.Hash, res.Err)
-				} else {
-					if traceg.Error != nil {
-						fmt.Printf("Error tracing call (geth): %d %s\n", traceg.Error.Code, traceg.Error.Message)
-						return
-					}
-					if res.Err == nil && trace.Error == nil {
-						if !compareTraces(&trace, &traceg) {
-							fmt.Printf("Different traces block %d, tx %s\n", bn, tx.Hash)
-							return
-						}
-					}
-				}
 			}
 		}
 	}

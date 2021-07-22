@@ -122,42 +122,9 @@ var (
 		Name:  "identity",
 		Usage: "Custom node name",
 	}
-	DocRootFlag = DirectoryFlag{
-		Name:  "docroot",
-		Usage: "Document Root for HTTPClient file scheme",
-		Value: DirectoryString(HomeDir()),
-	}
-	ExitWhenSyncedFlag = cli.BoolFlag{
-		Name:  "exitwhensynced",
-		Usage: "Exits after block synchronisation completes",
-	}
-	IterativeOutputFlag = cli.BoolFlag{
-		Name:  "iterative",
-		Usage: "Print streaming JSON iteratively, delimited by newlines",
-	}
-	ExcludeStorageFlag = cli.BoolFlag{
-		Name:  "nostorage",
-		Usage: "Exclude storage entries (save db lookups)",
-	}
-	IncludeIncompletesFlag = cli.BoolFlag{
-		Name:  "incompletes",
-		Usage: "Include accounts for which we don't have the address (missing preimage)",
-	}
-	ExcludeCodeFlag = cli.BoolFlag{
-		Name:  "nocode",
-		Usage: "Exclude contract code (save db lookups)",
-	}
 	WhitelistFlag = cli.StringFlag{
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
-	}
-	OverrideLondonFlag = cli.Uint64Flag{
-		Name:  "override.london",
-		Usage: "Manually specify London fork-block, overriding the bundled setting",
-	}
-	DebugProtocolFlag = cli.BoolFlag{
-		Name:  "debug-protocol",
-		Usage: "Enable the DBG (debug) protocol",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
@@ -1198,16 +1165,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
-	}
-
-	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
-
-	if ctx.GlobalIsSet(DocRootFlag.Name) {
-		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
-	}
-	if ctx.GlobalIsSet(VMEnableDebugFlag.Name) {
-		// TODO(fjl): force-enable this in --dev mode
-		cfg.EnablePreimageRecording = ctx.GlobalBool(VMEnableDebugFlag.Name)
 	}
 
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {

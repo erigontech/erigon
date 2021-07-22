@@ -708,7 +708,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	peerID := string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 	x, ok := ss.GoodPeers.Load(peerID)
 	if !ok {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
+		//TODO: enable after support peer to sentry mapping
+		//return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
+		return &proto_sentry.SentPeers{}, nil
 	}
 	peerInfo := x.(*PeerInfo)
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
@@ -782,7 +784,9 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Id]
-	if msgcode != eth.NewBlockMsg && msgcode != eth.NewBlockHashesMsg {
+	if msgcode != eth.NewBlockMsg &&
+		msgcode != eth.NewPooledTransactionHashesMsg && // to broadcast new local transactions
+		msgcode != eth.NewBlockHashesMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
@@ -945,7 +949,7 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 
 // MessageStreams - it's safe to use this class as non-pointer
 type MessageStreams struct {
-	sync.RWMutex
+	mu      sync.RWMutex
 	id      uint
 	streams map[uint]proto_sentry.Sentry_MessagesServer
 }
@@ -955,8 +959,8 @@ func NewStreamsList() *MessageStreams {
 }
 
 func (s *MessageStreams) Add(stream proto_sentry.Sentry_MessagesServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.streams == nil {
 		s.streams = make(map[uint]proto_sentry.Sentry_MessagesServer)
 	}
@@ -967,8 +971,8 @@ func (s *MessageStreams) Add(stream proto_sentry.Sentry_MessagesServer) (remove 
 }
 
 func (s *MessageStreams) doBroadcast(reply *proto_sentry.InboundMessage) (ids []uint, errs []error) {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for id, stream := range s.streams {
 		err := stream.Send(reply)
 		if err != nil {
@@ -987,8 +991,8 @@ func (s *MessageStreams) Broadcast(reply *proto_sentry.InboundMessage) (errs []e
 	var ids []uint
 	ids, errs = s.doBroadcast(reply)
 	if len(ids) > 0 {
-		s.Lock()
-		defer s.Unlock()
+		s.mu.Lock()
+		defer s.mu.Unlock()
 	}
 	for _, id := range ids {
 		delete(s.streams, id)
@@ -997,14 +1001,14 @@ func (s *MessageStreams) Broadcast(reply *proto_sentry.InboundMessage) (errs []e
 }
 
 func (s *MessageStreams) Len() int {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return len(s.streams)
 }
 
 func (s *MessageStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.streams[id]
 	if !ok { // double-unsubscribe support
 		return
@@ -1031,7 +1035,7 @@ func (ss *SentryServerImpl) Peers(req *proto_sentry.PeersRequest, server proto_s
 
 // PeersStreams - it's safe to use this class as non-pointer
 type PeersStreams struct {
-	sync.RWMutex
+	mu      sync.RWMutex
 	id      uint
 	streams map[uint]proto_sentry.Sentry_PeersServer
 }
@@ -1041,8 +1045,8 @@ func NewPeersStreams() *PeersStreams {
 }
 
 func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.streams == nil {
 		s.streams = make(map[uint]proto_sentry.Sentry_PeersServer)
 	}
@@ -1053,8 +1057,8 @@ func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func(
 }
 
 func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeersReply) (ids []uint, errs []error) {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for id, stream := range s.streams {
 		err := stream.Send(reply)
 		if err != nil {
@@ -1073,8 +1077,8 @@ func (s *PeersStreams) Broadcast(reply *proto_sentry.PeersReply) (errs []error) 
 	var ids []uint
 	ids, errs = s.doBroadcast(reply)
 	if len(ids) > 0 {
-		s.Lock()
-		defer s.Unlock()
+		s.mu.Lock()
+		defer s.mu.Unlock()
 	}
 	for _, id := range ids {
 		delete(s.streams, id)
@@ -1083,14 +1087,14 @@ func (s *PeersStreams) Broadcast(reply *proto_sentry.PeersReply) (errs []error) 
 }
 
 func (s *PeersStreams) Len() int {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return len(s.streams)
 }
 
 func (s *PeersStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.streams[id]
 	if !ok { // double-unsubscribe support
 		return
