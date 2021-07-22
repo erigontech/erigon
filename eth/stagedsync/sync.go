@@ -202,6 +202,9 @@ func (s *Sync) Run(db ethdb.RwKV, tx ethdb.RwTx, firstCycle bool) error {
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}
+			// If there were unwinds at the start, a heavier but invalid chain may be present, so
+			// we relax the rules for Stage1
+			firstCycle = false
 		}
 
 		stage := s.stages[s.currentStage]
