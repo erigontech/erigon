@@ -304,14 +304,17 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			}
 		}
 		if err != nil {
+			fmt.Printf("0. error %v\n", err)
 			return err
 		}
+		fmt.Printf("1. maxNum = %d, maxHash = %x\n", maxNum, maxHash)
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
 			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
 				return err
 			}
 		}
+		fmt.Printf("2. maxNum = %d, maxHash = %x\n", maxNum, maxHash)
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
 			return err
 		}
