@@ -289,7 +289,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			var hash common.Hash
 			copy(hash[:], k[8:])
 			if cfg.hd.IsBadHeader(hash) {
-				fmt.Printf("Skip %x TD record as bad\n", k)
+				//fmt.Printf("Skip %x TD record as bad\n", k)
 				continue
 			}
 			var td big.Int
