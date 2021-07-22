@@ -91,6 +91,7 @@ func HeadersForward(
 	fmt.Printf("Header progress %d, header progress hash %x\n", headerProgress, hash)
 	if hash == (common.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
+		fmt.Printf("fixCanonicalChain headHash %x\n", headHash)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx); err != nil {
 			return err
 		}

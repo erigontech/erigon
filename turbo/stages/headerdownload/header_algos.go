@@ -187,7 +187,7 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 		}
 	}
 
-	if attachmentLink.persisted {
+	if _, bad := hd.badHeaders[attachmentLink.hash]; !bad && attachmentLink.persisted {
 		link := hd.links[linkHeader.Hash()]
 		hd.insertList = append(hd.insertList, link)
 	}
@@ -300,7 +300,7 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) error {
 		// Mark the entire segment as preverified
 		hd.markPreverified(prevLink)
 	}
-	if attachmentLink.persisted {
+	if _, bad := hd.badHeaders[attachmentLink.hash]; !bad && attachmentLink.persisted {
 		link := hd.links[linkHeader.Hash()]
 		hd.insertList = append(hd.insertList, link)
 	}
