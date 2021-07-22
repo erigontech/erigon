@@ -182,9 +182,9 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 			if innerErr != nil {
 				return nil, nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
 			}
-			snapKv, innerErr := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
-			if innerErr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
+			snapKv, innerErr1 := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
+			if innerErr1 != nil {
+				return nil, nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr1)
 			}
 			kv = snapKv
 		}
