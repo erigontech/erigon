@@ -88,6 +88,7 @@ func HeadersForward(
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	fmt.Printf("Header progress %d, header progress hash %x\n", headerProgress, hash)
 	if hash == (common.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx); err != nil {
