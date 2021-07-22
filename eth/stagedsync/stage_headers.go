@@ -252,20 +252,34 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		return err
 	}
 	badBlock := u.BadBlock != (common.Hash{})
-	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
-		if badBlock {
-			var hash common.Hash
-			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
+	if badBlock {
+		cfg.hd.ReportBadHeader(u.BadBlock)
+		// Mark all descendants of bad block as bad too
+		headerCursor, cErr := tx.Cursor(dbutils.HeadersBucket)
+		if cErr != nil {
+			return cErr
+		}
+		defer headerCursor.Close()
+		var k, v []byte
+		for k, v, err = headerCursor.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
+			var h types.Header
+			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
 			}
-			cfg.hd.ReportBadHeader(hash)
+			if cfg.hd.IsBadHeader(h.ParentHash) {
+				cfg.hd.ReportBadHeader(h.Hash())
+			}
 		}
+		if err != nil {
+			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
+		}
+	}
+	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
 		}
 	}
-	if u.BadBlock != (common.Hash{}) {
-		cfg.hd.ReportBadHeader(u.BadBlock)
+	if badBlock {
 		// Find header with biggest TD
 		tdCursor, cErr := tx.Cursor(dbutils.HeaderTDBucket)
 		if cErr != nil {
@@ -303,12 +317,15 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			return err
 		}
 		if maxNum == 0 {
-			// Read genesis hash
-			if maxHash, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
+			maxNum = u.UnwindPoint
+			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
 				return err
 			}
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
+			return err
+		}
+		if err = u.Done(tx); err != nil {
 			return err
 		}
 		if err = s.Update(tx, maxNum); err != nil {

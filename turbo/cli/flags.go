@@ -149,6 +149,12 @@ var (
 		Usage: "Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)",
 		Value: "",
 	}
+
+	BadBlockFlag = cli.IntFlag{
+		Name:  "bad.block",
+		Usage: "Marks block with given number bad and forces initial reorg before normal staged sync",
+		Value: 0,
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -201,6 +207,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 		cfg.SyncLoopThrottle = syncLoopThrottle
 	}
+	cfg.BadBlock = uint64(ctx.GlobalInt(BadBlockFlag.Name))
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {

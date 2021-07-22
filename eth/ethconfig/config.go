@@ -135,6 +135,7 @@ type Config struct {
 
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
+	BadBlock  uint64            // Block marked as bad (for forced reorg)
 
 	Snapshot Snapshot
 

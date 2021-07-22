@@ -440,6 +440,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
+	if config.BadBlock != 0 {
+		var badHash common.Hash
+		if err = chainKv.View(context.Background(), func(tx ethdb.Tx) error {
+			var hErr error
+			badHash, hErr = rawdb.ReadCanonicalHash(tx, config.BadBlock)
+			return hErr
+		}); err != nil {
+			return nil, err
+		}
+		backend.stagedSync.UnwindTo(config.BadBlock-1, badHash)
+	}
 
 	go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 
