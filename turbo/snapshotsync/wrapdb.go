@@ -187,33 +187,33 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 		}); err != nil {
 			log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
 		} else {
-
-		}
-		torrentClient.Download()
-		var innerErr error
-		var downloadedSnapshots map[SnapshotType]*SnapshotsInfo
-		if err := chainDb.RwKV().View(context.Background(), func(tx ethdb.Tx) (err error) {
-			downloadedSnapshots, err = torrentClient.GetSnapshots(tx, networkID)
-			if err != nil {
+			torrentClient.Download()
+			var innerErr error
+			var downloadedSnapshots map[SnapshotType]*SnapshotsInfo
+			if err := chainDb.RwKV().View(context.Background(), func(tx ethdb.Tx) (err error) {
+				downloadedSnapshots, err = torrentClient.GetSnapshots(tx, networkID)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
-			return nil
-		}); err != nil {
-			return err
+
+			snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
+			snapshotKV, innerErr = WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
+			if innerErr != nil {
+				return innerErr
+			}
+			chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
+			if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+				return PostProcessing(tx, downloadedSnapshots)
+			}); err != nil {
+
+				return err
+			}
 		}
 
-		snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
-		snapshotKV, innerErr = WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
-		if innerErr != nil {
-			return innerErr
-		}
-		chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
-		if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-			return PostProcessing(tx, downloadedSnapshots)
-		}); err != nil {
-
-			return err
-		}
 	}
 	return nil
 }
