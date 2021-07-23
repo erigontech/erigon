@@ -468,7 +468,7 @@ func (tx *LegacyTx) FakeSign(address common.Address) (Transaction, error) {
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx LegacyTx) Hash() common.Hash {
+func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}
