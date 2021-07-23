@@ -41,10 +41,10 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	if block == nil {
 		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
 	}
-	var txIndex uint64
+	var txIndex int
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == txHash {
-			txIndex = uint64(idx)
+			txIndex = idx
 			break
 		}
 	}
@@ -57,7 +57,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -66,13 +66,13 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	blockno := uint64(bn)
 	for txno, trace := range traces {
 		txhash := block.Transactions()[txno].Hash()
-		txpos := uint64(txno)
 		// We're only looking for a specific transaction
-		if txpos == txIndex {
+		if txno == txIndex {
 			for _, pt := range trace.Trace {
 				pt.BlockHash = &hash
 				pt.BlockNumber = &blockno
 				pt.TransactionHash = &txhash
+				txpos := uint64(txno)
 				pt.TransactionPosition = &txpos
 				out = append(out, *pt)
 			}
@@ -135,7 +135,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		parentNr -= 1
 	}
 
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +290,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
 		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header())
+		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */)
 		if tErr != nil {
 			stream.WriteNil()
 			return tErr
@@ -412,7 +412,7 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	return false
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int) ([]*TraceCallResult, error) {
 	var toExecute []TraceCallParam
 
 	for _, tx := range txs {
@@ -447,7 +447,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
-	}, header, false /* gasBailout */)
+	}, header, false /* gasBailout */, txIndex)
 
 	if cmErr != nil {
 		return nil, cmErr

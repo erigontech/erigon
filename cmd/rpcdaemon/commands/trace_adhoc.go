@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"time"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -187,12 +189,14 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 
 // OpenEthereum-style tracer
 type OeTracer struct {
-	r          *TraceCallResult
-	traceAddr  []int
-	traceStack []*ParityTrace
-	lastTop    *ParityTrace
-	precompile bool // Whether the last CaptureStart was called with `precompile = true`
-	compat     bool // Bug for bug compatibility mode
+	r                *TraceCallResult
+	traceAddr        []int
+	traceStack       []*ParityTrace
+	lastTop          *ParityTrace
+	precompile       bool // Whether the last CaptureStart was called with `precompile = true`
+	compat           bool // Bug for bug compatibility mode
+	lastCreateAction *CreateTraceAction
+	lastCallAction   *CallTraceAction
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
@@ -237,10 +241,11 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	if create {
 		action := CreateTraceAction{}
 		action.From = from
-		action.Gas.ToInt().SetUint64(gas)
+		//action.Gas.ToInt().SetUint64(gas)
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value)
 		trace.Action = &action
+		ot.lastCreateAction = &action
 	} else {
 		action := CallTraceAction{}
 		switch calltype {
@@ -255,10 +260,11 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		}
 		action.From = from
 		action.To = to
-		action.Gas.ToInt().SetUint64(gas)
+		//action.Gas.ToInt().SetUint64(gas)
 		action.Input = common.CopyBytes(input)
 		action.Value.ToInt().Set(value)
 		trace.Action = &action
+		ot.lastCallAction = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
 	ot.traceStack = append(ot.traceStack, trace)
@@ -270,6 +276,8 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.precompile = false
 		return nil
 	}
+	ot.lastCreateAction = nil
+	ot.lastCallAction = nil
 	//fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
@@ -327,6 +335,16 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 }
 
 func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
+	if ot.lastCreateAction != nil {
+		fmt.Printf("%s Setting gas for create action to %d\n", op, gas)
+		ot.lastCreateAction.Gas.ToInt().SetUint64(gas)
+		ot.lastCreateAction = nil
+	}
+	if ot.lastCallAction != nil {
+		fmt.Printf("%s Setting gas for call action to %d\n", op, gas)
+		ot.lastCallAction.Gas.ToInt().SetUint64(gas)
+		ot.lastCallAction = nil
+	}
 	return nil
 }
 
@@ -520,10 +538,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	if block == nil {
 		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
 	}
-	var txIndex uint64
+	var txIndex int
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == txHash {
-			txIndex = uint64(idx)
+			txIndex = idx
 			break
 		}
 	}
@@ -535,7 +553,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -556,9 +574,8 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	result := &TraceCallResult{}
 
 	for txno, trace := range traces {
-		txpos := uint64(txno)
 		// We're only looking for a specific transaction
-		if txpos == txIndex {
+		if txno == txIndex {
 			result.Output = trace.Output
 			if traceTypeTrace {
 				result.Trace = trace.Trace
@@ -616,7 +633,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */)
 	if err != nil {
 		return nil, err
 	}
@@ -824,11 +841,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	if tok != json.Delim(']') {
 		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
 	}
-	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil, true /* gasBailout */)
+	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil, true /* gasBailout */, -1 /* all tx indices */)
 }
 
 func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
-	gasBailout bool) ([]*TraceCallResult, error) {
+	gasBailout bool, txIndexNeeded int) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
@@ -890,11 +907,38 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 				return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 			}
 		}
-		var ot OeTracer
-		ot.compat = api.compatibility
-		if traceTypeTrace {
-			ot.r = traceResult
-			ot.traceAddr = []int{}
+		vmConfig := vm.Config{}
+		var stream *jsoniter.Stream
+		if txIndexNeeded == -1 || txIndex == txIndexNeeded {
+			var ot OeTracer
+			ot.compat = api.compatibility
+			if traceTypeTrace {
+				ot.r = traceResult
+				ot.traceAddr = []int{}
+			}
+			vmConfig.Debug = true
+			vmConfig.Tracer = &ot
+
+			w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
+			if werr != nil {
+				return nil, werr
+			}
+			defer w.Close()
+			stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+			defer stream.Flush()
+			stream.WriteObjectStart()
+			stream.WriteObjectField("jsonrpc")
+			stream.WriteString("2.0")
+			stream.WriteMore()
+			stream.WriteObjectField("id")
+			stream.WriteInt(1)
+			stream.WriteMore()
+			stream.WriteObjectField("result")
+			stream.WriteObjectStart()
+			stream.WriteObjectField("structlogs")
+			stream.WriteArrayStart()
+			tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
+			vmConfig.Tracer = tracer
 		}
 
 		// Get a new instance of the EVM.
@@ -924,7 +968,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		var execResult *core.ExecutionResult
@@ -939,7 +983,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		} else {
 			ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
 		}
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
@@ -969,6 +1013,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			return nil, fmt.Errorf("vmTrace not implemented yet")
 		}
 		results = append(results, traceResult)
+		if stream != nil {
+			stream.WriteArrayEnd()
+			stream.WriteObjectEnd()
+			stream.WriteObjectEnd()
+		}
 	}
 	return results, nil
 }
