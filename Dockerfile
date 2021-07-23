@@ -13,11 +13,12 @@ RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
 RUN adduser -H -u 1000 -g 1000 -D erigon
-RUN chown -R erigon:erigon /home/erigon
 USER erigon
 
 # Directories spec https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+RUN mkdir -p /home/erigon
 RUN mkdir -p /home/erigon/.local/share
+RUN chown -R erigon:erigon /home/erigon
 VOLUME /home/erigon/.local/share
 WORKDIR /home/erigon/.local/share
 
