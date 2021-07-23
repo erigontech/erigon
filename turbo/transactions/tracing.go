@@ -224,6 +224,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 	} else {
 		l.firstCapture = false
 	}
+	var outputStorage bool
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract
 		// if not present.
@@ -238,6 +239,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			)
 			env.IntraBlockState.GetState(contract.Address(), &address, &value)
 			l.storage[contract.Address()][address] = common.Hash(value.Bytes32())
+			outputStorage = true
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == vm.SSTORE && stack.Len() >= 2 {
@@ -246,6 +248,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
 			)
 			l.storage[contract.Address()][address] = value
+			outputStorage = true
 		}
 	}
 	// create a new snapshot of the EVM.
@@ -277,7 +280,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(fmt.Sprintf("%x", stackValue.Bytes32()))
+			l.stream.WriteString(stackValue.String())
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -294,7 +297,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if !l.cfg.DisableStorage {
+	if outputStorage {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()
