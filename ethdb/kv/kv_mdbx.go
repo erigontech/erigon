@@ -695,11 +695,11 @@ func (tx *MdbxTx) DropBucket(bucket string) error {
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
 }
 
-func (tx *MdbxTx) ExistsBucket(bucket string) bool {
+func (tx *MdbxTx) ExistsBucket(bucket string) (bool, error) {
 	if cfg, ok := tx.db.buckets[bucket]; ok {
-		return cfg.DBI != NonExistingDBI
+		return cfg.DBI != NonExistingDBI, nil
 	}
-	return false
+	return false, nil
 }
 
 func (tx *MdbxTx) Commit() error {

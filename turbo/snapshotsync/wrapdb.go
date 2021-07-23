@@ -171,44 +171,48 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 		}
 		chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
 
-		innerErr = PostProcessing(chainDb, downloadedSnapshots)
-		if innerErr != nil {
-			return innerErr
-		}
-	} else {
-		err := torrentClient.Load(chainDb)
-		if err != nil {
+		if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+			return PostProcessing(tx, downloadedSnapshots)
+		}); err != nil {
 			return err
 		}
-		err = torrentClient.AddSnapshotsTorrents(context.Background(), chainDb, networkID, snapshotMode)
-		if err == nil {
-			torrentClient.Download()
-			var innerErr error
-			snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
-			downloadedSnapshots, innerErr := torrentClient.GetSnapshots(chainDb, networkID)
-			if innerErr != nil {
-				return innerErr
-			}
 
-			snapshotKV, innerErr = WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
-			if innerErr != nil {
-				return innerErr
-			}
-			chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
-			tx, err := chainDb.Begin(context.Background(), ethdb.RW)
+	} else {
+		if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+			err := torrentClient.Load(tx)
 			if err != nil {
 				return err
 			}
-			defer tx.Rollback()
-			innerErr = PostProcessing(chainDb, downloadedSnapshots)
-			if err = tx.Commit(); err != nil {
+			return torrentClient.AddSnapshotsTorrents(context.Background(), tx, networkID, snapshotMode)
+		}); err != nil {
+			log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
+		} else {
+
+		}
+		torrentClient.Download()
+		var innerErr error
+		var downloadedSnapshots map[SnapshotType]*SnapshotsInfo
+		if err := chainDb.RwKV().View(context.Background(), func(tx ethdb.Tx) (err error) {
+			downloadedSnapshots, err = torrentClient.GetSnapshots(tx, networkID)
+			if err != nil {
 				return err
 			}
-			if innerErr != nil {
-				return innerErr
-			}
-		} else {
-			log.Error("There was an error in snapshot init. Swithing to regular sync", "err", err)
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		snapshotKV := chainDb.(ethdb.HasRwKV).RwKV()
+		snapshotKV, innerErr = WrapBySnapshotsFromDownloader(snapshotKV, downloadedSnapshots)
+		if innerErr != nil {
+			return innerErr
+		}
+		chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
+		if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+			return PostProcessing(tx, downloadedSnapshots)
+		}); err != nil {
+
+			return err
 		}
 	}
 	return nil

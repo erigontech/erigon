@@ -67,16 +67,16 @@ func (cli *Client) Torrents() []metainfo.Hash {
 	}
 	return hashes
 }
-func (cli *Client) Load(db ethdb.Database) error {
+func (cli *Client) Load(tx ethdb.Tx) error {
 	log.Info("Load added torrents")
-	return db.ForEach(dbutils.SnapshotInfoBucket, []byte{}, func(k, infoHashBytes []byte) error {
+	return tx.ForEach(dbutils.SnapshotInfoBucket, []byte{}, func(k, infoHashBytes []byte) error {
 		if !bytes.HasPrefix(k[8:], []byte(SnapshotInfoHashPrefix)) {
 			return nil
 		}
 		networkID, snapshotName := ParseInfoHashKey(k)
 		infoHash := metainfo.Hash{}
 		copy(infoHash[:], infoHashBytes)
-		infoBytes, err := db.GetOne(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
+		infoBytes, err := tx.GetOne(dbutils.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Has
 	return t, err
 }
 
-func (cli *Client) AddTorrent(ctx context.Context, db ethdb.Database, snapshotType SnapshotType, networkID uint64) error { //nolint: interfacer
+func (cli *Client) AddTorrent(ctx context.Context, db ethdb.RwTx, snapshotType SnapshotType, networkID uint64) error { //nolint: interfacer
 	infoHashBytes, infoBytes, err := getTorrentSpec(db, snapshotType.String(), networkID)
 	if err != nil {
 		return err
@@ -178,7 +178,7 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 	}
 }
 
-func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.Database, networkId uint64, mode SnapshotMode) error {
+func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db ethdb.RwTx, networkId uint64, mode SnapshotMode) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
 	defer cancel()
 	eg := errgroup.Group{}
@@ -256,11 +256,11 @@ func (cli *Client) Download() {
 	}
 }
 
-func (cli *Client) GetSnapshots(db ethdb.Database, networkID uint64) (map[SnapshotType]*SnapshotsInfo, error) {
+func (cli *Client) GetSnapshots(tx ethdb.Tx, networkID uint64) (map[SnapshotType]*SnapshotsInfo, error) {
 	mp := make(map[SnapshotType]*SnapshotsInfo)
 	networkIDBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
-	err := db.ForPrefix(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), func(k, v []byte) error {
+	err := tx.ForPrefix(dbutils.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), func(k, v []byte) error {
 		var hash metainfo.Hash
 		if len(v) != metainfo.HashSize {
 			return nil
@@ -331,7 +331,7 @@ func (cli *Client) StopSeeding(hash metainfo.Hash) error {
 	return nil
 }
 
-func getTorrentSpec(db ethdb.Database, snapshotName string, networkID uint64) ([]byte, []byte, error) {
+func getTorrentSpec(db ethdb.Tx, snapshotName string, networkID uint64) ([]byte, []byte, error) {
 	var infohash, infobytes []byte
 	var err error
 	b := make([]byte, 8)
