@@ -270,7 +270,6 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.precompile = false
 		return nil
 	}
-	//fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
 	}
@@ -284,7 +283,7 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		switch err {
 		case vm.ErrInvalidJump:
 			topTrace.Error = "Bad jump destination"
-		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas:
+		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
 			topTrace.Error = "Out of gas"
 		case vm.ErrExecutionReverted:
 			topTrace.Error = "Reverted"
@@ -503,6 +502,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
@@ -520,10 +523,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	if block == nil {
 		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
 	}
-	var txIndex uint64
+	var txIndex int
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == txHash {
-			txIndex = uint64(idx)
+			txIndex = idx
 			break
 		}
 	}
@@ -535,7 +538,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -556,9 +559,8 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	result := &TraceCallResult{}
 
 	for txno, trace := range traces {
-		txpos := uint64(txno)
 		// We're only looking for a specific transaction
-		if txpos == txIndex {
+		if txno == txIndex {
 			result.Output = trace.Output
 			if traceTypeTrace {
 				result.Trace = trace.Trace
@@ -583,6 +585,10 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
@@ -616,7 +622,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header())
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -777,7 +783,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
 	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -824,11 +830,38 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	if tok != json.Delim(']') {
 		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
 	}
-	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil, true /* gasBailout */)
+	var baseFee *uint256.Int
+	if parentNrOrHash == nil {
+		var num = rpc.LatestBlockNumber
+		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+	}
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	parentHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	if parentHeader == nil {
+		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+	}
+	if parentHeader != nil && parentHeader.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(parentHeader.BaseFee)
+		if overflow {
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+		}
+	}
+	msgs := make([]types.Message, len(callParams))
+	for i, args := range callParams {
+		msgs[i], err = args.ToMessage(api.gasCap, baseFee)
+		if err != nil {
+			return nil, fmt.Errorf("convert callParam to msg: %w", err)
+		}
+	}
+	return api.doCallMany(ctx, dbtx, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, -1 /* all tx indices */)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
-	gasBailout bool) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, msgs []types.Message, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
+	gasBailout bool, txIndexNeeded int) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
 		return nil, err
@@ -872,12 +905,13 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 	defer cancel()
 	results := []*TraceCallResult{}
 
-	for txIndex, args := range callParams {
+	for txIndex, msg := range msgs {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return nil, err
 		}
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+		args := callParams[txIndex]
 		for _, traceType := range args.traceTypes {
 			switch traceType {
 			case TraceTypeTrace:
@@ -890,27 +924,19 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 				return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 			}
 		}
-		var ot OeTracer
-		ot.compat = api.compatibility
-		if traceTypeTrace {
-			ot.r = traceResult
-			ot.traceAddr = []int{}
+		vmConfig := vm.Config{}
+		if txIndexNeeded == -1 || txIndex == txIndexNeeded {
+			var ot OeTracer
+			ot.compat = api.compatibility
+			if traceTypeTrace {
+				ot.r = traceResult
+				ot.traceAddr = []int{}
+			}
+			vmConfig.Debug = true
+			vmConfig.Tracer = &ot
 		}
 
 		// Get a new instance of the EVM.
-		var baseFee *uint256.Int
-		if header != nil && header.BaseFee != nil {
-			var overflow bool
-			baseFee, overflow = uint256.FromBig(header.BaseFee)
-			if overflow {
-				return nil, fmt.Errorf("header.BaseFee uint256 overflow")
-			}
-		}
-		msg, err := args.ToMessage(api.gasCap, baseFee)
-		if err != nil {
-			return nil, err
-		}
-
 		useParent := false
 		if header == nil {
 			header = parentHeader
@@ -924,7 +950,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		ibs := state.New(cachedReader)
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		var execResult *core.ExecutionResult
@@ -939,7 +965,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 		} else {
 			ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
 		}
-		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
