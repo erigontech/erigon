@@ -6,7 +6,7 @@ WORKDIR /app
 ADD . .
 
 # expect that host run `git submodule update --init`
-RUN make all
+RUN make erigon rpcdaemon integration sentry
 
 FROM docker.io/library/alpine:3.13
 
