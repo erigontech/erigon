@@ -2,24 +2,22 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
-	"fmt"
+	"errors"
+	pkg2_big "math/big"
+	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/log"
-
-	"errors"
-	pkg2_big "math/big"
-	"runtime"
-	"strconv"
 
 	pkg1_common "github.com/ledgerwatch/erigon/common"
 	codec1978 "github.com/ugorji/go/codec"
@@ -38,20 +36,23 @@ type OldReceipts []*OldReceipt
 
 var ReceiptCbor = Migration{
 	Name: "receipt_cbor",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		var tx ethdb.RwTx
-		if hasTx, ok := db.(ethdb.HasTx); ok {
-			tx = hasTx.Tx().(ethdb.RwTx)
-		} else {
-			return fmt.Errorf("no transaction")
+	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
 		}
+		defer tx.Rollback()
+
 		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 		if err != nil {
 			return err
 		}
 		if genesisBlock == nil {
 			// Empty database check
-			return CommitProgress(db, nil, true)
+			if err := BeforeCommit(tx, nil, true); err != nil {
+				return err
+			}
+			return tx.Commit()
 		}
 		chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 		if cerr != nil {
@@ -112,7 +113,10 @@ var ReceiptCbor = Migration{
 				return err
 			}
 		}
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }
 

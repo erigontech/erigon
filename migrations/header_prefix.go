@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -12,16 +13,28 @@ import (
 
 var headerPrefixToSeparateBuckets = Migration{
 	Name: "header_prefix_to_separate_buckets",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.HeaderPrefixOld)
+	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
+		exists, err := tx.ExistsBucket(dbutils.HeaderPrefixOld)
 		if err != nil {
 			return err
 		}
 		if !exists {
-			return CommitProgress(db, nil, true)
+			if err := BeforeCommit(tx, nil, true); err != nil {
+				return err
+			}
+			return tx.Commit()
 		}
 
-		if err = db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.HeaderCanonicalBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket); err != nil {
+		if err = tx.ClearBucket(dbutils.HeaderCanonicalBucket); err != nil {
+			return err
+		}
+		if err = tx.ClearBucket(dbutils.HeaderTDBucket); err != nil {
 			return err
 		}
 		logPrefix := "split_header_prefix_bucket"
@@ -91,7 +104,7 @@ var headerPrefixToSeparateBuckets = Migration{
 			headersCollector.Close(logPrefix)
 		}()
 
-		err = db.ForEach(dbutils.HeaderPrefixOld, []byte{}, func(k, v []byte) error {
+		err = tx.ForEach(dbutils.HeaderPrefixOld, []byte{}, func(k, v []byte) error {
 			var innerErr error
 			switch {
 			case IsHeaderKey(k):
@@ -108,22 +121,25 @@ var headerPrefixToSeparateBuckets = Migration{
 			}
 			return nil
 		})
-		if err = db.(ethdb.BucketsMigrator).DropBuckets(dbutils.HeaderPrefixOld); err != nil {
+		if err = tx.DropBucket(dbutils.HeaderPrefixOld); err != nil {
 			return err
 		}
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = canonicalCollector.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeaderCanonicalBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = canonicalCollector.Load(logPrefix, tx, dbutils.HeaderCanonicalBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the storage table: %w", err)
 		}
-		if err = tdCollector.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeaderTDBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = tdCollector.Load(logPrefix, tx, dbutils.HeaderTDBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		if err = headersCollector.Load(logPrefix, db.(ethdb.HasTx).Tx().(ethdb.RwTx), dbutils.HeadersBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = headersCollector.Load(logPrefix, tx, dbutils.HeadersBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }
 

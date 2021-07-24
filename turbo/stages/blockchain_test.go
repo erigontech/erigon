@@ -878,8 +878,6 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var (
@@ -907,25 +905,38 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); !st.Exist(theAddr) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); !st.Exist(theAddr) {
+			t.Error("expected account to exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// account needs to be deleted post eip 161
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// account mustn't be created post eip 161
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
+	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
@@ -978,24 +989,28 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	err = m.InsertChain(chain)
 	assert.NoError(t, err)
 
-	st := state.New(state.NewDbStateReader(db))
+	err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+		st := state.New(state.NewDbStateReader(tx))
+		assert.NoError(t, err)
+		assert.False(t, st.Exist(theAddr), "Contract should've been removed")
+		return nil
+	})
 	assert.NoError(t, err)
-	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 
 	tx, err := db.RwKV().BeginRo(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer tx.Rollback()
-	st = state.New(state.NewPlainKvState(tx, 0))
+	st := state.New(state.NewPlainState(tx, 0))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainKvState(tx, 1))
+	st = state.New(state.NewPlainState(tx, 1))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainKvState(tx, 2))
+	st = state.New(state.NewPlainState(tx, 2))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -1354,7 +1369,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 1))
+		statedb := state.New(state.NewPlainState(tx, 1))
 
 		// If all is correct, then slot 1 and 2 are zero
 		key1 := common.HexToHash("01")
@@ -1439,7 +1454,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 1))
+		statedb := state.New(state.NewPlainState(tx, 1))
 
 		// If all is correct, then both slots are zero
 		key1 := common.HexToHash("01")
@@ -1620,37 +1635,42 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
-		statedb := state.New(state.NewDbStateReader(db))
-		// If all is correct, then slot 1 and 2 are zero
-		key1 := common.HexToHash("01")
-		var got uint256.Int
-		statedb.GetState(aa, &key1, &got)
-		if !got.IsZero() {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
-		}
-		key2 := common.HexToHash("02")
-		statedb.GetState(aa, &key2, &got)
-		if !got.IsZero() {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
-		}
-		exp := expectations[i]
-		if exp.exist {
-			if !statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
+		err = m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+
+			statedb := state.New(state.NewDbStateReader(tx))
+			// If all is correct, then slot 1 and 2 are zero
+			key1 := common.HexToHash("01")
+			var got uint256.Int
+			statedb.GetState(aa, &key1, &got)
+			if !got.IsZero() {
+				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
-			for slot, val := range exp.values {
-				key := asHash(slot)
-				var gotValue uint256.Int
-				statedb.GetState(aa, &key, &gotValue)
-				if gotValue.Uint64() != uint64(val) {
-					t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
+			key2 := common.HexToHash("02")
+			statedb.GetState(aa, &key2, &got)
+			if !got.IsZero() {
+				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
+			}
+			exp := expectations[i]
+			if exp.exist {
+				if !statedb.Exist(aa) {
+					t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
+				}
+				for slot, val := range exp.values {
+					key := asHash(slot)
+					var gotValue uint256.Int
+					statedb.GetState(aa, &key, &gotValue)
+					if gotValue.Uint64() != uint64(val) {
+						t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
+					}
+				}
+			} else {
+				if statedb.Exist(aa) {
+					t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
 				}
 			}
-		} else {
-			if statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
-			}
-		}
+			return nil
+		})
+		require.NoError(t, err)
 	}
 }
 
@@ -1749,7 +1769,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
 
 		// Import the canonical chain
-		statedb := state.New(state.NewPlainKvState(tx, 1))
+		statedb := state.New(state.NewPlainState(tx, 1))
 		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 			t.Fatalf("Genesis err, got %v exp %v", got, exp)
 		}
@@ -1759,7 +1779,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			if err := m.InsertChain(chain.Slice(0, 1)); err != nil {
 				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 			}
-			statedb = state.New(state.NewPlainKvState(tx, 0))
+			statedb = state.New(state.NewPlainState(tx, 0))
 			if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 				t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 			}
@@ -1955,7 +1975,7 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 0))
+		statedb := state.New(state.NewPlainState(tx, 0))
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual := statedb.GetBalance(block.Coinbase())
@@ -1996,7 +2016,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 	block = chain.Blocks[0]
 	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 0))
+		statedb := state.New(state.NewPlainState(tx, 0))
 		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.

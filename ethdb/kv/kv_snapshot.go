@@ -5,13 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/log"
 	"sync"
-	"unsafe"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 var (
@@ -347,7 +346,7 @@ func (s *snTX) CreateBucket(bucket string) error {
 	return s.dbTX.(ethdb.BucketMigrator).CreateBucket(bucket)
 }
 
-func (s *snTX) ExistsBucket(bucket string) bool {
+func (s *snTX) ExistsBucket(bucket string) (bool, error) {
 	return s.dbTX.(ethdb.BucketMigrator).ExistsBucket(bucket)
 }
 
@@ -355,8 +354,8 @@ func (s *snTX) ClearBucket(bucket string) error {
 	return s.dbTX.(ethdb.BucketMigrator).ClearBucket(bucket)
 }
 
-func (s *snTX) ExistingBuckets() ([]string, error) {
-	return s.dbTX.(ethdb.BucketMigrator).ExistingBuckets()
+func (s *snTX) ListBuckets() ([]string, error) {
+	return s.dbTX.(ethdb.BucketMigrator).ListBuckets()
 }
 
 func (s *snTX) Cursor(bucket string) (ethdb.Cursor, error) {
@@ -639,10 +638,6 @@ func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 
 func (s *snTX) ReadSequence(bucket string) (uint64, error) {
 	return s.dbTX.ReadSequence(bucket)
-}
-
-func (s *snTX) CHandle() unsafe.Pointer {
-	return s.dbTX.CHandle()
 }
 
 func (s *snTX) BucketExists(bucket string) (bool, error) {

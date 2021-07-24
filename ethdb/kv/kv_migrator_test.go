@@ -63,7 +63,7 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
 
-	buckets, err := migrator.ExistingBuckets()
+	buckets, err := migrator.ListBuckets()
 	require.NoError(err)
 	require.True(len(buckets) > 10)
 

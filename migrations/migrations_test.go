@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/stretchr/testify/require"
 )
@@ -19,14 +18,32 @@ func TestApplyWithInit(t *testing.T) {
 	m := []Migration{
 		{
 			"one",
-			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-				return OnLoadCommit(db, nil, true)
+			func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+				tx, err := db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				if err := BeforeCommit(tx, nil, true); err != nil {
+					return err
+				}
+				return tx.Commit()
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-				return OnLoadCommit(db, nil, true)
+			func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+				tx, err := db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				if err := BeforeCommit(tx, nil, true); err != nil {
+					return err
+				}
+				return tx.Commit()
 			},
 		},
 	}
@@ -65,15 +82,24 @@ func TestApplyWithoutInit(t *testing.T) {
 	m := []Migration{
 		{
 			"one",
-			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-				return OnLoadCommit(db, nil, true)
+			func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+				tx, err := db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				if err := BeforeCommit(tx, nil, true); err != nil {
+					return err
+				}
+				return tx.Commit()
 			},
 		},
 	}
@@ -120,13 +146,22 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	m := []Migration{
 		{
 			"one",
-			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-				return OnLoadCommit(db, nil, true)
+			func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+				tx, err := db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				if err := BeforeCommit(tx, nil, true); err != nil {
+					return err
+				}
+				return tx.Commit()
 			},
 		},
 		{
 			"two",
-			func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
+			func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
@@ -192,14 +227,32 @@ func TestValidation(t *testing.T) {
 	m := []Migration{
 		{
 			Name: "repeated_name",
-			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-				return OnLoadCommit(db, nil, true)
+			Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+				tx, err := db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				if err := BeforeCommit(tx, nil, true); err != nil {
+					return err
+				}
+				return tx.Commit()
 			},
 		},
 		{
 			Name: "repeated_name",
-			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-				return OnLoadCommit(db, nil, true)
+			Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+				tx, err := db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				if err := BeforeCommit(tx, nil, true); err != nil {
+					return err
+				}
+				return tx.Commit()
 			},
 		},
 	}
@@ -223,8 +276,9 @@ func TestCommitCallRequired(t *testing.T) {
 	m := []Migration{
 		{
 			Name: "one",
-			Up: func(db ethdb.Database, tmpdir string, progress []byte, OnLoadCommit etl.LoadCommitHandler) error {
-				return nil // don't call OnLoadCommit
+			Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+				//don't call BeforeCommit
+				return nil
 			},
 		},
 	}

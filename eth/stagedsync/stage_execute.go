@@ -275,10 +275,6 @@ Loop:
 			break
 		}
 
-		if err = cfg.engine.VerifyFamily(&chainReader{config: cfg.chainConfig, tx: tx}, block.Header()); err != nil {
-			return err
-		}
-
 		lastLogTx += uint64(block.Transactions().Len())
 
 		var checkTEVMCode func(contractHash common.Hash) (bool, error)

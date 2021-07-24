@@ -393,7 +393,6 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 }
 
 // Tests that the transaction receipts can be retrieved based on hashes.
-func TestGetBlockReceipts64(t *testing.T) { testGetBlockReceipts(t, 64) }
 func TestGetBlockReceipts65(t *testing.T) { testGetBlockReceipts(t, 65) }
 func TestGetBlockReceipts66(t *testing.T) { testGetBlockReceipts(t, 66) }
 
@@ -464,8 +463,8 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 
 	m.StreamWg.Wait()
 
-	// Send the hash request and verify the response
 	m.ReceiveWg.Add(1)
+	// Send the hash request and verify the response
 	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[eth.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}

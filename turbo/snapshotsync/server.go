@@ -23,7 +23,7 @@ var (
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 	db := kv.MustOpen(dir + "/db")
 	sn := &SNDownloaderServer{
-		db: kv.NewObjectDatabase(db),
+		db: db,
 	}
 	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
 		peerID, err := tx.GetOne(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
@@ -51,23 +51,31 @@ func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 type SNDownloaderServer struct {
 	DownloaderServer
 	t  *Client
-	db ethdb.Database
+	db ethdb.RwKV
 }
 
 func (s *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnapshotRequest) (*empty.Empty, error) {
-	err := s.t.AddSnapshotsTorrents(ctx, s.db, request.NetworkId, FromSnapshotTypes(request.Type))
-	if err != nil {
+	if err := s.db.Update(ctx, func(tx ethdb.RwTx) error {
+		return s.t.AddSnapshotsTorrents(ctx, tx, request.NetworkId, FromSnapshotTypes(request.Type))
+	}); err != nil {
 		return nil, err
 	}
 	return &empty.Empty{}, nil
 }
 func (s *SNDownloaderServer) Load() error {
-	return s.t.Load(s.db)
+	return s.db.View(context.Background(), func(tx ethdb.Tx) error {
+		return s.t.Load(tx)
+	})
 }
 
 func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *SnapshotsRequest) (*SnapshotsInfoReply, error) {
 	reply := SnapshotsInfoReply{}
-	resp, err := s.t.GetSnapshots(s.db, request.NetworkId)
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	resp, err := s.t.GetSnapshots(tx, request.NetworkId)
 	if err != nil {
 		return nil, err
 	}

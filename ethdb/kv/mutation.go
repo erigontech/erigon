@@ -21,9 +21,9 @@ import (
 type mutation struct {
 	puts       *btree.BTree
 	db         ethdb.Database
-	searchItem MutationItem
 	quit       <-chan struct{}
 	clean      func()
+	searchItem MutationItem
 	mu         sync.RWMutex
 	size       int
 }

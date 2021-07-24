@@ -85,7 +85,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(dbtx)
 	} else {
-		stateReader = state.NewPlainKvState(dbtx, blockNumber)
+		stateReader = state.NewPlainState(dbtx, blockNumber)
 	}
 	header := rawdb.ReadHeader(dbtx, hash, blockNumber)
 	if header == nil {

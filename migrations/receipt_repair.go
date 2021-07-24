@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"time"
@@ -9,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -41,13 +41,12 @@ func availableReceiptFrom(tx ethdb.Tx) (uint64, error) {
 
 var ReceiptRepair = Migration{
 	Name: "receipt_repair",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		var tx ethdb.RwTx
-		if hasTx, ok := db.(ethdb.HasTx); ok {
-			tx = hasTx.Tx().(ethdb.RwTx)
-		} else {
-			return fmt.Errorf("no transaction")
+	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
 		}
+		defer tx.Rollback()
 
 		blockNum, err := changeset.AvailableFrom(tx)
 		if err != nil {
@@ -112,7 +111,7 @@ var ReceiptRepair = Migration{
 				return err
 			}
 
-			dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
+			dbstate := state.NewPlainState(tx, block.NumberU64()-1)
 			intraBlockState := state.New(dbstate)
 
 			getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
@@ -141,7 +140,10 @@ var ReceiptRepair = Migration{
 				fixedCount++
 			}
 		}
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }
 

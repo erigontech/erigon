@@ -897,7 +897,7 @@ func TestReproduceCrash(t *testing.T) {
 
 	_, tx := kv.NewTestTx(t)
 	tsw := state.NewPlainStateWriter(tx, nil, 0)
-	intraBlockState := state.New(state.NewPlainKvState(tx, 0))
+	intraBlockState := state.New(state.NewPlainState(tx, 0))
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
@@ -1286,8 +1286,8 @@ func TestWrongIncarnation2(t *testing.T) {
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	db := kv.NewTestDB(t)
-	r, tsw := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, nil, 0)
+	_, tx := kv.NewTestTx(t)
+	r, tsw := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1299,10 +1299,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %w", err)
 	}
-	err := db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		_, err := trie.CalcRoot("test", tx)
-		return err
-	})
+	_, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
 	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
 	trieCode, tcErr := r.ReadAccountCode(contract, 1, oldCodeHash)
@@ -1328,7 +1325,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx := kv.NewTestTx(t)
-	r, w := state.NewPlainKvState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
+	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1361,7 +1358,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx := kv.NewTestTx(t)
-	r, w := state.NewPlainKvState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
+	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)

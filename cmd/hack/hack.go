@@ -309,7 +309,7 @@ func bucketStats(chaindata string) error {
 
 	var bucketList []string
 	if err1 := ethDb.View(context.Background(), func(txa ethdb.Tx) error {
-		if bl, err := txa.(ethdb.BucketMigrator).ExistingBuckets(); err == nil {
+		if bl, err := txa.(ethdb.BucketMigrator).ListBuckets(); err == nil {
 			bucketList = bl
 		} else {
 			return err
@@ -2198,7 +2198,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			return err
 		}
 
-		dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
+		dbstate := state.NewPlainState(tx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }

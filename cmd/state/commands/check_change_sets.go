@@ -126,7 +126,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			break
 		}
 
-		intraBlockState := state.New(state.NewPlainKvState(historyTx, block.NumberU64()-1))
+		intraBlockState := state.New(state.NewPlainState(historyTx, block.NumberU64()-1))
 		csw := state.NewChangeSetWriterPlain(nil /* db */, block.NumberU64()-1)
 		var blockWriter state.StateWriter
 		if nocheck {

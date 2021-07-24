@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/stretchr/testify/require"
 
 	"github.com/holiman/uint256"
 )
@@ -132,7 +133,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 	signer := types.LatestSignerForChainID(big.NewInt(1))
-	tx, err := types.SignTx(unsignedTx, *signer, privateKeyECDSA)
+	txn, err := types.SignTx(unsignedTx, *signer, privateKeyECDSA)
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
@@ -145,7 +146,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	    gas (assuming no mem expansion): 32006
 	    result: 0x60f3f640a8508fC6a86d45DF051962668E1e8AC7
 	*/
-	origin, _ := signer.Sender(tx)
+	origin, _ := signer.Sender(txn)
 	txContext := vm.TxContext{
 		Origin:   origin,
 		GasPrice: big.NewInt(1),
@@ -174,7 +175,9 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
-	statedb, _ := tests.MakePreState(params.Rules{}, kv.NewTestDB(t), alloc, context.BlockNumber)
+
+	_, tx := kv.NewTestTx(t)
+	statedb, _ := tests.MakePreState(params.Rules{}, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := New("prestateTracer", txContext)
@@ -183,11 +186,11 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 	evm := vm.NewEVM(context, txContext, statedb, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
 
-	msg, err := tx.AsMessage(*signer, nil)
+	msg, err := txn.AsMessage(*signer, nil)
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
-	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()))
+	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(txn.GetGas()))
 	if _, err = st.TransitionDb(false, false); err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
@@ -230,15 +233,15 @@ func TestCallTracer(t *testing.T) {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(common.FromHex(test.Input)), 0))
+			txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(common.FromHex(test.Input)), 0))
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
-			origin, _ := signer.Sender(tx)
+			origin, _ := signer.Sender(txn)
 			txContext := vm.TxContext{
 				Origin:   origin,
-				GasPrice: big.NewInt(int64(tx.GetPrice().Uint64())),
+				GasPrice: big.NewInt(int64(txn.GetPrice().Uint64())),
 			}
 			context := vm.BlockContext{
 				CanTransfer: core.CanTransfer,
@@ -250,7 +253,10 @@ func TestCallTracer(t *testing.T) {
 				GasLimit:    uint64(test.Context.GasLimit),
 				CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 			}
-			statedb, _ := tests.MakePreState(params.Rules{}, kv.NewTestDB(t), test.Genesis.Alloc, uint64(test.Context.Number))
+
+			_, tx := kv.NewTestTx(t)
+			statedb, err := tests.MakePreState(params.Rules{}, tx, test.Genesis.Alloc, uint64(test.Context.Number))
+			require.NoError(t, err)
 
 			// Create the tracer, the EVM environment and run it
 			tracer, err := New("callTracer", txContext)
@@ -259,11 +265,11 @@ func TestCallTracer(t *testing.T) {
 			}
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 
-			msg, err := tx.AsMessage(*signer, nil)
+			msg, err := txn.AsMessage(*signer, nil)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()))
+			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(txn.GetGas()))
 			if _, err = st.TransitionDb(false, false); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}

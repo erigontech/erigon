@@ -371,7 +371,7 @@ func pruneOldLogChunks(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, 
 }
 
 func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Context) (err error) {
-	if !cfg.prune.History.Enabled() {
+	if !cfg.prune.Receipts.Enabled() {
 		return nil
 	}
 	logPrefix := s.LogPrefix()
@@ -385,7 +385,7 @@ func PruneLogIndex(s *PruneState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
 	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx); err != nil {
 		return err
 	}

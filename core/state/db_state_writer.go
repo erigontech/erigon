@@ -22,7 +22,7 @@ import (
 
 var _ WriterWithChangeSets = (*DbStateWriter)(nil)
 
-func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
+func NewDbStateWriter(db putDel, blockNr uint64) *DbStateWriter {
 	return &DbStateWriter{
 		db:      db,
 		blockNr: blockNr,
@@ -31,7 +31,7 @@ func NewDbStateWriter(db ethdb.Database, blockNr uint64) *DbStateWriter {
 }
 
 type DbStateWriter struct {
-	db      ethdb.Database
+	db      putDel
 	blockNr uint64
 	csw     *ChangeSetWriter
 }
