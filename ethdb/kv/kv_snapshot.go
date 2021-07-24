@@ -34,6 +34,7 @@ type WriteDB interface {
 }
 
 func NewSnapshotKV() snapshotOpts {
+
 	return snapshotOpts{}
 }
 
