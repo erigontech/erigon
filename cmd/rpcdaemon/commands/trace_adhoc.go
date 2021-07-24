@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -291,7 +290,7 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		switch err {
 		case vm.ErrInvalidJump:
 			topTrace.Error = "Bad jump destination"
-		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas:
+		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
 			topTrace.Error = "Out of gas"
 		case vm.ErrExecutionReverted:
 			topTrace.Error = "Reverted"
@@ -334,18 +333,6 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 }
 
 func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
-	/*
-		if ot.lastCreateAction != nil {
-			fmt.Printf("%s Setting gas for create action to %d\n", op, gas)
-			ot.lastCreateAction.Gas.ToInt().SetUint64(gas)
-			ot.lastCreateAction = nil
-		}
-		if ot.lastCallAction != nil {
-			fmt.Printf("%s Setting gas for call action to %d\n", op, gas)
-			ot.lastCallAction.Gas.ToInt().SetUint64(gas)
-			ot.lastCallAction = nil
-		}
-	*/
 	return nil
 }
 
@@ -945,7 +932,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, msgs []t
 			}
 		}
 		vmConfig := vm.Config{}
-		var stream *jsoniter.Stream
 		if txIndexNeeded == -1 || txIndex == txIndexNeeded {
 			var ot OeTracer
 			ot.compat = api.compatibility
@@ -955,29 +941,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, msgs []t
 			}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
-
-			/*
-				w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
-				if werr != nil {
-					return nil, werr
-				}
-				defer w.Close()
-				stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
-				defer stream.Flush()
-				stream.WriteObjectStart()
-				stream.WriteObjectField("jsonrpc")
-				stream.WriteString("2.0")
-				stream.WriteMore()
-				stream.WriteObjectField("id")
-				stream.WriteInt(1)
-				stream.WriteMore()
-				stream.WriteObjectField("result")
-				stream.WriteObjectStart()
-				stream.WriteObjectField("structlogs")
-				stream.WriteArrayStart()
-				tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
-				vmConfig.Tracer = tracer
-			*/
 		}
 
 		// Get a new instance of the EVM.
@@ -1039,11 +1002,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, msgs []t
 			return nil, fmt.Errorf("vmTrace not implemented yet")
 		}
 		results = append(results, traceResult)
-		if stream != nil {
-			stream.WriteArrayEnd()
-			stream.WriteObjectEnd()
-			stream.WriteObjectEnd()
-		}
 	}
 	return results, nil
 }
