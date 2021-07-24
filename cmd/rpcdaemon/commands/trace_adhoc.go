@@ -193,8 +193,6 @@ type OeTracer struct {
 	lastTop    *ParityTrace
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
 	compat     bool // Bug for bug compatibility mode
-	//lastCreateAction *CreateTraceAction
-	//lastCallAction   *CallTraceAction
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
@@ -243,7 +241,6 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value)
 		trace.Action = &action
-		//ot.lastCreateAction = &action
 	} else {
 		action := CallTraceAction{}
 		switch calltype {
@@ -262,7 +259,6 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		action.Input = common.CopyBytes(input)
 		action.Value.ToInt().Set(value)
 		trace.Action = &action
-		//ot.lastCallAction = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
 	ot.traceStack = append(ot.traceStack, trace)
@@ -274,9 +270,6 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.precompile = false
 		return nil
 	}
-	//ot.lastCreateAction = nil
-	//ot.lastCallAction = nil
-	//fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
 	}
