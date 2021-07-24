@@ -451,11 +451,11 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
 	}
 
-	if err := changes.Load(logPrefix, tx, stateBucket, func(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := changes.Load(logPrefix, tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
-			if len(value) > 0 {
+			if len(v) > 0 {
 				var acc accounts.Account
-				if err := acc.DecodeForStorage(value); err != nil {
+				if err := acc.DecodeForStorage(v); err != nil {
 					return err
 				}
 
@@ -506,10 +506,10 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 			copy(address[:], k[:common.AddressLength])
 			incarnation = binary.BigEndian.Uint64(k[common.AddressLength:])
 			copy(location[:], k[common.AddressLength+common.IncarnationLength:])
-			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(value))
+			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
 		}
-		if len(value) > 0 {
-			if err := next(k, k[:storageKeyLength], value); err != nil {
+		if len(v) > 0 {
+			if err := next(k, k[:storageKeyLength], v); err != nil {
 				return err
 			}
 		} else {
@@ -528,6 +528,9 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	}
 
 	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
+	}
+	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
 	}
 
