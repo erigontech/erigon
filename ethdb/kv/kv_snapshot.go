@@ -5,9 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/log"
 	"sync"
 	"unsafe"
+
+	"github.com/ledgerwatch/erigon/log"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
