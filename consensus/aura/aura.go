@@ -799,13 +799,12 @@ func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) 
 	//return nil
 }
 
-func (c *AuRa) Initialize(cc *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header,
-	syscall consensus.SystemCall, call consensus.Call) {
+func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 	//TODO: hardcoded boolean!!!
 	// 	let is_epoch_begin = chain.epoch_transition(parent.number(), *header.parent_hash()).is_some();
 
 	if header.Number.Uint64() == 1 {
-		proof, err := c.GenesisEpochData(header, call)
+		proof, err := c.GenesisEpochData(header, syscall)
 		if err != nil {
 			panic(err)
 		}
@@ -815,9 +814,9 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, chain consensus.ChainHeaderRea
 		}
 	}
 
-	if err := c.verifyFamily(chain, e, header, call, syscall); err != nil { //TODO: OE has it as a separate engine call? why?
-		panic(err)
-	}
+	//if err := c.verifyFamily(chain, e, header, call, syscall); err != nil { //TODO: OE has it as a separate engine call? why?
+	//	panic(err)
+	//}
 
 	// check_and_lock_block -> check_epoch_end_signal
 	epoch, err := e.GetEpoch(header.ParentHash, header.Number.Uint64()-1)
@@ -839,11 +838,9 @@ func (c *AuRa) Initialize(cc *params.ChainConfig, chain consensus.ChainHeaderRea
 }
 
 //word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs []types.Transaction, uncles []*types.Header, r types.Receipts,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) error {
+func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
 	// accumulateRewards retrieves rewards for a block and applies them to the coinbase accounts for miner and uncle miners
-	beneficiaries, _, rewards, err := AccumulateRewards(cc, c, header, uncles, syscall)
+	beneficiaries, _, rewards, err := AccumulateRewards(config, c, header, uncles, syscall)
 	if err != nil {
 		return fmt.Errorf("buildAncestrySubChain: %w", err)
 	}
@@ -870,7 +867,7 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
 
-	finalized := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, call, syscall)
+	finalized := buildFinality(c.EpochManager, chain, e, c.cfg.Validators, header, syscall)
 	c.EpochManager.finalityChecker.print(header.Number.Uint64())
 	epochEndProof, err := isEpochEnd(chain, e, finalized, header)
 	if err != nil {
@@ -887,7 +884,7 @@ func (c *AuRa) Finalize(cc *params.ChainConfig, header *types.Header, state *sta
 	return nil
 }
 
-func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, call consensus.Call, syscall consensus.SystemCall) []unAssembledHeader {
+func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {
 	// commit_block -> aura.build_finality
 	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, syscall)
 	if !ok {
@@ -986,7 +983,7 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to c
 // FinalizeAndAssemble implements consensus.Engine
 func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
-	c.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall, call)
+	c.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
 
 	// Assemble and return the final block for sealing
 	return types.NewBlock(header, txs, uncles, r), nil
@@ -1002,7 +999,7 @@ func (c *AuRa) Authorize(signer common.Address, signFn clique.SignerFn) {
 	//c.signFn = signFn
 }
 
-func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.Call) ([]byte, error) {
+func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.SystemCall) ([]byte, error) {
 	setProof, err := c.cfg.Validators.genesisEpochData(header, caller)
 	if err != nil {
 		return nil, err
