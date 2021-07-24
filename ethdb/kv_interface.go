@@ -3,7 +3,6 @@ package ethdb
 import (
 	"context"
 	"errors"
-	"unsafe"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -223,8 +222,6 @@ type Tx interface {
 	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
-
-	CHandle() unsafe.Pointer // Pointer to the underlying C transaction handle (e.g. *C.MDB_txn)
 }
 
 type RwTx interface {
@@ -246,7 +243,7 @@ type BucketMigrator interface {
 	CreateBucket(string) error
 	ExistsBucket(string) bool
 	ClearBucket(string) error
-	ExistingBuckets() ([]string, error)
+	ListBuckets() ([]string, error)
 }
 
 // Cursor - class for navigating through a database

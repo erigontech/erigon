@@ -11,7 +11,6 @@ import (
 	"io/ioutil"
 	"net"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -241,9 +240,7 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) (er
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
-func (tx *remoteTx) CollectMetrics()         {}
-func (tx *remoteTx) CHandle() unsafe.Pointer { panic("not implemented yet") }
-
+func (tx *remoteTx) CollectMetrics() {}
 func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")
 }

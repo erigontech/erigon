@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -375,9 +374,9 @@ type MdbxTx struct {
 }
 
 type MdbxCursor struct {
-	bucketName string
 	tx         *MdbxTx
 	c          *mdbx.Cursor
+	bucketName string
 	bucketCfg  dbutils.BucketConfigItem
 	dbi        mdbx.DBI
 	id         uint64
@@ -549,24 +548,8 @@ func (tx *MdbxTx) CollectMetrics() {
 }
 
 // ExistingBuckets - all buckets stored as keys of un-named bucket
-func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
-	var res []string
-	rawTx := tx.tx
-	root, err := rawTx.OpenRoot(0)
-	if err != nil {
-		return nil, err
-	}
-	c, err := rawTx.OpenCursor(root)
-	if err != nil {
-		return nil, err
-	}
-	for k, _, err := c.Get(nil, nil, mdbx.First); k != nil; k, _, err = c.Get(nil, nil, mdbx.Next) {
-		if err != nil {
-			return nil, err
-		}
-		res = append(res, string(k))
-	}
-	return res, nil
+func (tx *MdbxTx) ListBuckets() ([]string, error) {
+	return tx.tx.ListDBI()
 }
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx ethdb.Tx) error) (err error) {
@@ -998,10 +981,6 @@ func (tx *MdbxTx) RwCursorDupSort(bucket string) (ethdb.RwCursorDupSort, error) 
 
 func (tx *MdbxTx) CursorDupSort(bucket string) (ethdb.CursorDupSort, error) {
 	return tx.RwCursorDupSort(bucket)
-}
-
-func (tx *MdbxTx) CHandle() unsafe.Pointer {
-	panic("not implemented yet")
 }
 
 // methods here help to see better pprof picture

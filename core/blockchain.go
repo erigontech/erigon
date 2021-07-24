@@ -189,7 +189,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	}
 
 	noop := state.NewNoopWriter()
-	tx, err := SysCallContractTx(contract, data, ibs)
+	tx, err := SysCallContractTx(contract, data)
 	if err != nil {
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
@@ -216,7 +216,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 }
 
 // from the null sender, with 50M gas.
-func SysCallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
+func SysCallContractTx(contract common.Address, data []byte) (tx types.Transaction, err error) {
 	//nonce := ibs.GetNonce(SystemAddress)
 	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data)
 	return tx.FakeSign(SystemAddress)
@@ -272,8 +272,6 @@ func FinalizeBlockExecution(engine consensus.Engine, header *types.Header,
 
 	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
-	}, func(contract common.Address, data []byte) ([]byte, error) {
-		return CallContract(contract, data, *cc, ibs, header, engine)
 	}); err != nil {
 		return err
 	}
@@ -303,8 +301,6 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
-	}, func(contract common.Address, data []byte) ([]byte, error) {
-		return CallContract(contract, data, *cc, ibs, header, engine)
 	})
 	//fmt.Printf("====InitializeBlockExecution start %d====\n", header.Number.Uint64())
 	//ibs.Print(cc.Rules(header.Number.Uint64()))

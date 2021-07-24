@@ -309,7 +309,7 @@ func bucketStats(chaindata string) error {
 
 	var bucketList []string
 	if err1 := ethDb.View(context.Background(), func(txa ethdb.Tx) error {
-		if bl, err := txa.(ethdb.BucketMigrator).ExistingBuckets(); err == nil {
+		if bl, err := txa.(ethdb.BucketMigrator).ListBuckets(); err == nil {
 			bucketList = bl
 		} else {
 			return err
