@@ -171,9 +171,7 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 		}
 		chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
 
-		if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-			return PostProcessing(tx, downloadedSnapshots)
-		}); err != nil {
+		if err := PostProcessing(chainDb.RwKV(), downloadedSnapshots); err != nil {
 			return err
 		}
 
@@ -206,9 +204,7 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 				return innerErr
 			}
 			chainDb.(ethdb.HasRwKV).SetRwKV(snapshotKV)
-			if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-				return PostProcessing(tx, downloadedSnapshots)
-			}); err != nil {
+			if err := PostProcessing(snapshotKV, downloadedSnapshots); err != nil {
 
 				return err
 			}

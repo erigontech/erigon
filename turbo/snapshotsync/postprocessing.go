@@ -40,23 +40,26 @@ var (
 	Snapshot11kkTD             = []byte{138, 3, 199, 118, 5, 203, 95, 162, 81, 64, 161}
 )
 
-func PostProcessing(tx ethdb.RwTx, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
+func PostProcessing(db ethdb.RwKV, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
 	if _, ok := downloadedSnapshots[SnapshotType_headers]; ok {
-		err := GenerateHeaderIndexes(context.Background(), tx)
-		if err != nil {
+		if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+			return GenerateHeaderIndexes(context.Background(), tx)
+		}); err != nil {
 			return err
 		}
 	}
 	if _, ok := downloadedSnapshots[SnapshotType_state]; ok {
-		err := PostProcessState(tx, downloadedSnapshots[SnapshotType_state])
-		if err != nil {
+		if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+			return PostProcessState(tx, downloadedSnapshots[SnapshotType_state])
+		}); err != nil {
 			return err
 		}
 	}
 
 	if _, ok := downloadedSnapshots[SnapshotType_bodies]; ok {
-		err := PostProcessBodies(tx)
-		if err != nil {
+		if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+			return PostProcessBodies(tx)
+		}); err != nil {
 			return err
 		}
 	}
@@ -325,7 +328,7 @@ func GenerateHeaderIndexes(ctx context.Context, tx ethdb.RwTx) error {
 			return err1
 		}
 
-		return tx.Commit()
+		return nil
 	}
 	return nil
 }
