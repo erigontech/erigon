@@ -543,7 +543,7 @@ func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Hea
 	return nil
 }
 
-//nolit
+//nolint
 func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
