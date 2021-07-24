@@ -5,13 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/log"
 	"sync"
-	"unsafe"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 var (
@@ -527,10 +526,6 @@ func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 
 func (s *snTX) ReadSequence(bucket string) (uint64, error) {
 	return s.dbTX.ReadSequence(bucket)
-}
-
-func (s *snTX) CHandle() unsafe.Pointer {
-	return s.dbTX.CHandle()
 }
 
 func (s *snTX) BucketExists(bucket string) (bool, error) {

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -375,9 +374,9 @@ type MdbxTx struct {
 }
 
 type MdbxCursor struct {
-	bucketName string
 	tx         *MdbxTx
 	c          *mdbx.Cursor
+	bucketName string
 	bucketCfg  dbutils.BucketConfigItem
 	dbi        mdbx.DBI
 	id         uint64
@@ -982,10 +981,6 @@ func (tx *MdbxTx) RwCursorDupSort(bucket string) (ethdb.RwCursorDupSort, error) 
 
 func (tx *MdbxTx) CursorDupSort(bucket string) (ethdb.CursorDupSort, error) {
 	return tx.RwCursorDupSort(bucket)
-}
-
-func (tx *MdbxTx) CHandle() unsafe.Pointer {
-	panic("not implemented yet")
 }
 
 // methods here help to see better pprof picture
