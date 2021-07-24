@@ -18,7 +18,6 @@ RUN mkdir -p /home/erigon
 RUN mkdir -p /home/erigon/.local/share/erigon
 RUN chown -R erigon:erigon /home/erigon
 
-WORKDIR /home/erigon
 USER erigon
 
 EXPOSE 8545 8546 30303 30303/udp 30304 30304/udp 8080 9090 6060
