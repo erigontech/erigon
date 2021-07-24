@@ -24,6 +24,10 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
@@ -57,7 +61,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex)
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +139,11 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		parentNr -= 1
 	}
 
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */)
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNum))
 	if err != nil {
 		return nil, err
 	}
@@ -152,10 +160,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 			pt.TransactionPosition = &txpos
 			out = append(out, *pt)
 		}
-	}
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
 	}
 	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 	var tr ParityTrace
@@ -290,7 +294,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
 		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */)
+		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b))
 		if tErr != nil {
 			stream.WriteNil()
 			return tErr
@@ -412,38 +416,22 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	return false
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int) ([]*TraceCallResult, error) {
-	var toExecute []TraceCallParam
-
-	for _, tx := range txs {
-		sender, _ := tx.GetSender()
-		gas := hexutil.Uint64(tx.GetGas())
-		gasPrice := hexutil.Big(*tx.GetPrice().ToBig())
-		var feeCap *hexutil.Big
-		if tx.GetFeeCap() != nil {
-			feeCap = (*hexutil.Big)(tx.GetFeeCap().ToBig())
-		}
-		var tip *hexutil.Big
-		if tx.GetTip() != nil {
-			tip = (*hexutil.Big)(tx.GetTip().ToBig())
-		}
-		value := hexutil.Big(*tx.GetValue().ToBig())
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer) ([]*TraceCallResult, error) {
+	callParams := make([]TraceCallParam, 0, len(txs))
+	msgs := make([]types.Message, len(txs))
+	for i, tx := range txs {
 		hash := tx.Hash()
-		toExecute = append(toExecute, TraceCallParam{
-			From:                 &sender,
-			To:                   tx.GetTo(),
-			Gas:                  &gas,
-			GasPrice:             &gasPrice,
-			MaxFeePerGas:         feeCap,
-			MaxPriorityFeePerGas: tip,
-			Value:                &value,
-			Data:                 tx.GetData(),
-			txHash:               &hash,
-			traceTypes:           []string{TraceTypeTrace, TraceTypeStateDiff},
+		callParams = append(callParams, TraceCallParam{
+			txHash:     &hash,
+			traceTypes: []string{TraceTypeTrace, TraceTypeStateDiff},
 		})
+		var err error
+		if msgs[i], err = tx.AsMessage(*signer, header.BaseFee); err != nil {
+			return nil, fmt.Errorf("convert tx into msg: %w", err)
+		}
 	}
 
-	traces, cmErr := api.doCallMany(ctx, dbtx, toExecute, &rpc.BlockNumberOrHash{
+	traces, cmErr := api.doCallMany(ctx, dbtx, msgs, callParams, &rpc.BlockNumberOrHash{
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,

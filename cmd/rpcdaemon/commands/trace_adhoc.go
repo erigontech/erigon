@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"os"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -189,14 +188,14 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 
 // OpenEthereum-style tracer
 type OeTracer struct {
-	r                *TraceCallResult
-	traceAddr        []int
-	traceStack       []*ParityTrace
-	lastTop          *ParityTrace
-	precompile       bool // Whether the last CaptureStart was called with `precompile = true`
-	compat           bool // Bug for bug compatibility mode
-	lastCreateAction *CreateTraceAction
-	lastCallAction   *CallTraceAction
+	r          *TraceCallResult
+	traceAddr  []int
+	traceStack []*ParityTrace
+	lastTop    *ParityTrace
+	precompile bool // Whether the last CaptureStart was called with `precompile = true`
+	compat     bool // Bug for bug compatibility mode
+	//lastCreateAction *CreateTraceAction
+	//lastCallAction   *CallTraceAction
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
@@ -241,11 +240,11 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	if create {
 		action := CreateTraceAction{}
 		action.From = from
-		//action.Gas.ToInt().SetUint64(gas)
+		action.Gas.ToInt().SetUint64(gas)
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value)
 		trace.Action = &action
-		ot.lastCreateAction = &action
+		//ot.lastCreateAction = &action
 	} else {
 		action := CallTraceAction{}
 		switch calltype {
@@ -260,11 +259,11 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		}
 		action.From = from
 		action.To = to
-		//action.Gas.ToInt().SetUint64(gas)
+		action.Gas.ToInt().SetUint64(gas)
 		action.Input = common.CopyBytes(input)
 		action.Value.ToInt().Set(value)
 		trace.Action = &action
-		ot.lastCallAction = &action
+		//ot.lastCallAction = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
 	ot.traceStack = append(ot.traceStack, trace)
@@ -276,8 +275,8 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.precompile = false
 		return nil
 	}
-	ot.lastCreateAction = nil
-	ot.lastCallAction = nil
+	//ot.lastCreateAction = nil
+	//ot.lastCallAction = nil
 	//fmt.Printf("CaptureEnd depth %d, output %x, gasUsed %d, err %v\n", depth, output, gasUsed, err)
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
@@ -335,16 +334,18 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 }
 
 func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
-	if ot.lastCreateAction != nil {
-		fmt.Printf("%s Setting gas for create action to %d\n", op, gas)
-		ot.lastCreateAction.Gas.ToInt().SetUint64(gas)
-		ot.lastCreateAction = nil
-	}
-	if ot.lastCallAction != nil {
-		fmt.Printf("%s Setting gas for call action to %d\n", op, gas)
-		ot.lastCallAction.Gas.ToInt().SetUint64(gas)
-		ot.lastCallAction = nil
-	}
+	/*
+		if ot.lastCreateAction != nil {
+			fmt.Printf("%s Setting gas for create action to %d\n", op, gas)
+			ot.lastCreateAction.Gas.ToInt().SetUint64(gas)
+			ot.lastCreateAction = nil
+		}
+		if ot.lastCallAction != nil {
+			fmt.Printf("%s Setting gas for call action to %d\n", op, gas)
+			ot.lastCallAction.Gas.ToInt().SetUint64(gas)
+			ot.lastCallAction = nil
+		}
+	*/
 	return nil
 }
 
@@ -521,6 +522,10 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
@@ -553,7 +558,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex)
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -600,6 +605,10 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
@@ -633,7 +642,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */)
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -794,7 +803,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 }
 
 // CallMany implements trace_callMany.
-func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, blockNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash) ([]*TraceCallResult, error) {
 	dbtx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -841,10 +850,37 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, bl
 	if tok != json.Delim(']') {
 		return nil, fmt.Errorf("expected end of array of [callparam, tracetypes]")
 	}
-	return api.doCallMany(ctx, dbtx, callParams, blockNrOrHash, nil, true /* gasBailout */, -1 /* all tx indices */)
+	var baseFee *uint256.Int
+	if parentNrOrHash == nil {
+		var num = rpc.LatestBlockNumber
+		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
+	}
+	blockNumber, hash, err := rpchelper.GetBlockNumber(*parentNrOrHash, dbtx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	parentHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	if parentHeader == nil {
+		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+	}
+	if parentHeader != nil && parentHeader.BaseFee != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(parentHeader.BaseFee)
+		if overflow {
+			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
+		}
+	}
+	msgs := make([]types.Message, len(callParams))
+	for i, args := range callParams {
+		msgs[i], err = args.ToMessage(api.gasCap, baseFee)
+		if err != nil {
+			return nil, fmt.Errorf("convert callParam to msg: %w", err)
+		}
+	}
+	return api.doCallMany(ctx, dbtx, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, -1 /* all tx indices */)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, msgs []types.Message, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
 	gasBailout bool, txIndexNeeded int) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -889,12 +925,13 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 	defer cancel()
 	results := []*TraceCallResult{}
 
-	for txIndex, args := range callParams {
+	for txIndex, msg := range msgs {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return nil, err
 		}
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+		args := callParams[txIndex]
 		for _, traceType := range args.traceTypes {
 			switch traceType {
 			case TraceTypeTrace:
@@ -919,42 +956,31 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, callPara
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
 
-			w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
-			if werr != nil {
-				return nil, werr
-			}
-			defer w.Close()
-			stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
-			defer stream.Flush()
-			stream.WriteObjectStart()
-			stream.WriteObjectField("jsonrpc")
-			stream.WriteString("2.0")
-			stream.WriteMore()
-			stream.WriteObjectField("id")
-			stream.WriteInt(1)
-			stream.WriteMore()
-			stream.WriteObjectField("result")
-			stream.WriteObjectStart()
-			stream.WriteObjectField("structlogs")
-			stream.WriteArrayStart()
-			tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
-			vmConfig.Tracer = tracer
+			/*
+				w, werr := os.Create(fmt.Sprintf("tx_%d.json", txIndex))
+				if werr != nil {
+					return nil, werr
+				}
+				defer w.Close()
+				stream = jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096)
+				defer stream.Flush()
+				stream.WriteObjectStart()
+				stream.WriteObjectField("jsonrpc")
+				stream.WriteString("2.0")
+				stream.WriteMore()
+				stream.WriteObjectField("id")
+				stream.WriteInt(1)
+				stream.WriteMore()
+				stream.WriteObjectField("result")
+				stream.WriteObjectStart()
+				stream.WriteObjectField("structlogs")
+				stream.WriteArrayStart()
+				tracer := transactions.NewJsonStreamLogger(nil, ctx, stream)
+				vmConfig.Tracer = tracer
+			*/
 		}
 
 		// Get a new instance of the EVM.
-		var baseFee *uint256.Int
-		if header != nil && header.BaseFee != nil {
-			var overflow bool
-			baseFee, overflow = uint256.FromBig(header.BaseFee)
-			if overflow {
-				return nil, fmt.Errorf("header.BaseFee uint256 overflow")
-			}
-		}
-		msg, err := args.ToMessage(api.gasCap, baseFee)
-		if err != nil {
-			return nil, err
-		}
-
 		useParent := false
 		if header == nil {
 			header = parentHeader
