@@ -548,7 +548,7 @@ func (tx *MdbxTx) CollectMetrics() {
 }
 
 // ExistingBuckets - all buckets stored as keys of un-named bucket
-func (tx *MdbxTx) ExistingBuckets() ([]string, error) {
+func (tx *MdbxTx) ListBuckets() ([]string, error) {
 	return tx.tx.ListDBI()
 }
 

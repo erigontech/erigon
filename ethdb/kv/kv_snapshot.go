@@ -291,8 +291,8 @@ func (s *snTX) ClearBucket(bucket string) error {
 	return s.dbTX.(ethdb.BucketMigrator).ClearBucket(bucket)
 }
 
-func (s *snTX) ExistingBuckets() ([]string, error) {
-	return s.dbTX.(ethdb.BucketMigrator).ExistingBuckets()
+func (s *snTX) ListBuckets() ([]string, error) {
+	return s.dbTX.(ethdb.BucketMigrator).ListBuckets()
 }
 
 func (s *snTX) Cursor(bucket string) (ethdb.Cursor, error) {

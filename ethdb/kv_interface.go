@@ -243,7 +243,7 @@ type BucketMigrator interface {
 	CreateBucket(string) error
 	ExistsBucket(string) bool
 	ClearBucket(string) error
-	ExistingBuckets() ([]string, error)
+	ListBuckets() ([]string, error)
 }
 
 // Cursor - class for navigating through a database
