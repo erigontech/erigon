@@ -23,7 +23,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -82,7 +81,7 @@ type vmExecMarshaling struct {
 }
 
 func (t *VMTest) Run(tx ethdb.RwTx, vmconfig vm.Config, blockNr uint64) error {
-	state, err := MakePreState(params.MainnetChainConfig.Rules(blockNr), kv.WrapIntoTxDB(tx), t.json.Pre, blockNr)
+	state, err := MakePreState(params.MainnetChainConfig.Rules(blockNr), tx, t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
 	}

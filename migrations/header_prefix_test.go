@@ -20,22 +20,18 @@ func TestHeaderPrefix(t *testing.T) {
 	db := kv.NewTestKV(t)
 
 	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		err := tx.(ethdb.BucketMigrator).CreateBucket(dbutils.HeaderPrefixOld)
-		if err != nil {
-			return err
-		}
-		c, err := tx.RwCursor(dbutils.HeaderPrefixOld)
+		err := tx.CreateBucket(dbutils.HeaderPrefixOld)
 		if err != nil {
 			return err
 		}
 		for i := uint64(0); i < 10; i++ {
 			//header
-			err = c.Put(dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))
+			err = tx.Put(dbutils.HeaderPrefixOld, dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))
 			require.NoError(err)
 			//canonical
-			err = c.Put(HeaderHashKey(i), common.Hash{uint8(i)}.Bytes())
+			err = tx.Put(dbutils.HeaderPrefixOld, HeaderHashKey(i), common.Hash{uint8(i)}.Bytes())
 			require.NoError(err)
-			err = c.Put(append(dbutils.HeaderKey(i, common.Hash{uint8(i)}), HeaderTDSuffix...), []byte{uint8(i)})
+			err = tx.Put(dbutils.HeaderPrefixOld, append(dbutils.HeaderKey(i, common.Hash{uint8(i)}), HeaderTDSuffix...), []byte{uint8(i)})
 			require.NoError(err)
 		}
 		return nil

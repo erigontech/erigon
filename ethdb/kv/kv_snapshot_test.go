@@ -1072,6 +1072,147 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 
 	}
 }
+func TestPlainStateProxy(t *testing.T) {
+	snapshotData := []KvData{
+		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{2}, V: []byte{2}},
+	}
+
+	writeDBData := []KvData{
+		{K: []byte{3}, V: []byte{3}},
+	}
+
+	tmpDBData := []KvData{
+		{K: []byte{4}, V: []byte{4}},
+	}
+
+	snapshotDB, err := GenStateData(snapshotData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainDB := NewTestKV(t)
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
+		Open()
+	err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		c, err := tx.RwCursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
+		for i := range writeDBData {
+			innerErr := c.Put(writeDBData[i].K, writeDBData[i].V)
+			if innerErr != nil {
+				return innerErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmpDB := NewTestKV(t)
+	kv.SetTempDB(tmpDB, []string{dbutils.PlainStateBucket})
+
+	nonStateKey := []byte{11}
+	nonStateValue := []byte{99}
+
+	err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		err = tx.Put(dbutils.BlockBodyPrefix, nonStateKey, nonStateValue)
+		if err != nil {
+			return err
+		}
+
+		c, err := tx.RwCursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
+		for i := range tmpDBData {
+			innerErr := c.Put(tmpDBData[i].K, tmpDBData[i].V)
+			if innerErr != nil {
+				return innerErr
+			}
+		}
+		return nil
+
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fullStateResult := []KvData{}
+	err = kv.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
+		if err != nil {
+			t.Error(err)
+		}
+		if !bytes.Equal(v, nonStateValue) {
+			t.Error(v, nonStateValue)
+		}
+
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			fullStateResult = append(fullStateResult, KvData{
+				K: k,
+				V: v,
+			})
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullStateExpected := append(append(snapshotData, writeDBData...), tmpDBData...)
+	require.Equal(t, fullStateExpected, fullStateResult)
+
+	tmpDBResult := []KvData{}
+	err = kv.tmpDB.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
+		if err != nil {
+			t.Error(err)
+		}
+		if len(v) != 0 {
+			t.Error(v)
+		}
+
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			tmpDBResult = append(tmpDBResult, KvData{
+				K: k,
+				V: v,
+			})
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	require.Equal(t, tmpDBData, tmpDBData)
+
+	writeDBResult := []KvData{}
+	err = kv.WriteDB().View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
+		if err != nil {
+			t.Error(err)
+		}
+		if !bytes.Equal(v, nonStateValue) {
+			t.Error(v, nonStateValue)
+		}
+
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			writeDBResult = append(writeDBResult, KvData{
+				K: k,
+				V: v,
+			})
+
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	require.Equal(t, writeDBData, writeDBResult)
+
+}
 
 func printBucket(kv ethdb.RoKV, bucket string) {
 	fmt.Println("+Print bucket", bucket)
@@ -1124,4 +1265,35 @@ func checkKV(t *testing.T, key, val, expectedKey, expectedVal []byte) {
 		t.Log("-", common.Bytes2Hex(val))
 		t.Fatal("wrong value for key", common.Bytes2Hex(key))
 	}
+}
+
+type KvData struct {
+	K []byte
+	V []byte
+}
+
+func GenStateData(data []KvData) (ethdb.RwKV, error) {
+	snapshot := NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		return dbutils.BucketsCfg{
+			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
+		}
+	}).InMem().MustOpen()
+
+	err := snapshot.Update(context.Background(), func(tx ethdb.RwTx) error {
+		c, err := tx.RwCursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
+		for i := range data {
+			innerErr := c.Put(data[i].K, data[i].V)
+			if innerErr != nil {
+				return innerErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }

@@ -1,14 +1,24 @@
 package migrations
 
 import (
-	"github.com/ledgerwatch/erigon/common/etl"
+	"context"
+
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var dbSchemaVersion = Migration{
 	Name: "db_schema_version",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
+	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
 		// This migration is no-op, but it forces the migration mechanism to apply it and thus write the DB schema version info
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"unsafe"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -78,6 +77,9 @@ type SnapshotKV struct {
 	bodiesSnapshot  ethdb.RoKV
 	stateSnapshot   ethdb.RoKV
 	mtx             sync.RWMutex
+
+	tmpDB        ethdb.RwKV
+	tmpDBBuckets map[string]struct{}
 }
 
 func (s *SnapshotKV) View(ctx context.Context, f func(tx ethdb.Tx) error) error {
@@ -149,6 +151,19 @@ func (s *SnapshotKV) WriteDB() ethdb.RwKV {
 	return s.db
 }
 
+func (s *SnapshotKV) TempDB() ethdb.RwKV {
+	return s.tmpDB
+}
+
+func (s *SnapshotKV) SetTempDB(kv ethdb.RwKV, buckets []string) {
+	bucketsMap := make(map[string]struct{}, len(buckets))
+	for _, bucket := range buckets {
+		bucketsMap[bucket] = struct{}{}
+	}
+	s.tmpDB = kv
+	s.tmpDBBuckets = bucketsMap
+}
+
 //todo
 func (s *SnapshotKV) HeadersSnapshot() ethdb.RoKV {
 	return s.headersSnapshot
@@ -201,6 +216,13 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
+	var tmpTX ethdb.Tx
+	if s.tmpDB != nil {
+		tmpTX, err = s.tmpDB.BeginRo(context.Background())
+		if err != nil {
+			return nil, err
+		}
+	}
 	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
 	if err != nil {
 		return nil, err
@@ -210,6 +232,8 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 		headersTX: headersTX,
 		bodiesTX:  bodiesTX,
 		stateTX:   stateTX,
+		tmpTX:     tmpTX,
+		buckets:   s.tmpDBBuckets,
 	}, nil
 }
 
@@ -219,6 +243,14 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 		return nil, err
 	}
 
+	var tmpTX ethdb.Tx
+	if s.tmpDB != nil {
+		tmpTX, err = s.tmpDB.BeginRw(context.Background())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	headersTX, bodiesTX, stateTX, err := s.snapsthotsTx(ctx)
 	if err != nil {
 		return nil, err
@@ -229,6 +261,8 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 		headersTX: headersTX,
 		bodiesTX:  bodiesTX,
 		stateTX:   stateTX,
+		tmpTX:     tmpTX,
+		buckets:   s.tmpDBBuckets,
 	}, nil
 }
 
@@ -243,6 +277,10 @@ type snTX struct {
 	headersTX ethdb.Tx
 	bodiesTX  ethdb.Tx
 	stateTX   ethdb.Tx
+
+	//just an experiment with temp db for state snapshot migration.
+	tmpTX   ethdb.Tx
+	buckets map[string]struct{}
 }
 
 type DBTX interface {
@@ -253,6 +291,9 @@ func (s *snTX) DBTX() ethdb.RwTx {
 	return s.dbTX.(ethdb.RwTx)
 }
 func (s *snTX) RwCursor(bucket string) (ethdb.RwCursor, error) {
+	if !IsSnapshotBucket(bucket) {
+		return s.dbTX.(ethdb.RwTx).RwCursor(bucket)
+	}
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -261,14 +302,35 @@ func (s *snTX) RwCursor(bucket string) (ethdb.RwCursor, error) {
 	if errors.Is(err, ErrUnavailableSnapshot) {
 		return s.dbTX.(ethdb.RwTx).RwCursor(bucket)
 	}
-	dbCursor, err := s.dbTX.(ethdb.RwTx).RwCursor(bucket)
-	if err != nil {
-		return nil, err
-	}
+
 	snCursor2, err := tx.Cursor(bucket)
 	if err != nil {
 		return nil, err
 	}
+
+	if IsStateSnapshotSnapshotBucket(bucket) && s.tmpTX != nil {
+		mainDBCursor, err := s.dbTX.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+		tmpDBCursor, err := s.tmpTX.(ethdb.RwTx).RwCursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+
+		return &snCursor{
+			dbCursor: &snCursor{
+				dbCursor: tmpDBCursor,
+				snCursor: mainDBCursor,
+			},
+			snCursor: snCursor2,
+		}, nil
+	}
+	dbCursor, err := s.dbTX.(ethdb.RwTx).RwCursor(bucket)
+	if err != nil {
+		return nil, err
+	}
+
 	return &snCursor{
 		dbCursor: dbCursor,
 		snCursor: snCursor2,
@@ -284,7 +346,7 @@ func (s *snTX) CreateBucket(bucket string) error {
 	return s.dbTX.(ethdb.BucketMigrator).CreateBucket(bucket)
 }
 
-func (s *snTX) ExistsBucket(bucket string) bool {
+func (s *snTX) ExistsBucket(bucket string) (bool, error) {
 	return s.dbTX.(ethdb.BucketMigrator).ExistsBucket(bucket)
 }
 
@@ -292,11 +354,15 @@ func (s *snTX) ClearBucket(bucket string) error {
 	return s.dbTX.(ethdb.BucketMigrator).ClearBucket(bucket)
 }
 
-func (s *snTX) ExistingBuckets() ([]string, error) {
-	return s.dbTX.(ethdb.BucketMigrator).ExistingBuckets()
+func (s *snTX) ListBuckets() ([]string, error) {
+	return s.dbTX.(ethdb.BucketMigrator).ListBuckets()
 }
 
 func (s *snTX) Cursor(bucket string) (ethdb.Cursor, error) {
+	if !IsSnapshotBucket(bucket) {
+		return s.dbTX.Cursor(bucket)
+	}
+
 	tx, err := s.getSnapshotTX(bucket)
 	if err != nil && !errors.Is(err, ErrUnavailableSnapshot) {
 		panic(err.Error())
@@ -312,6 +378,20 @@ func (s *snTX) Cursor(bucket string) (ethdb.Cursor, error) {
 	snCursor2, err := tx.Cursor(bucket)
 	if err != nil {
 		return nil, err
+	}
+	if IsStateSnapshotSnapshotBucket(bucket) && s.tmpTX != nil {
+		tmpDBCursor, err := s.tmpTX.Cursor(bucket)
+		if err != nil {
+			return nil, err
+		}
+
+		return &snCursor{
+			dbCursor: &snCursor{
+				dbCursor: tmpDBCursor,
+				snCursor: dbCursor,
+			},
+			snCursor: snCursor2,
+		}, nil
 	}
 	return &snCursor{
 		dbCursor: dbCursor,
@@ -379,14 +459,33 @@ func (s *snTX) GetOne(bucket string, key []byte) (val []byte, err error) {
 	return v, nil
 }
 
-func (s *snTX) Put(bucket string, k, v []byte) error { return s.dbTX.(ethdb.RwTx).Put(bucket, k, v) }
+func (s *snTX) Put(bucket string, k, v []byte) error {
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
+		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, v)
+	}
+	return s.dbTX.(ethdb.RwTx).Put(bucket, k, v)
+}
 func (s *snTX) Append(bucket string, k, v []byte) error {
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
+		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, v)
+	}
 	return s.dbTX.(ethdb.RwTx).Append(bucket, k, v)
 }
 func (s *snTX) AppendDup(bucket string, k, v []byte) error {
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
+		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, v)
+	}
 	return s.dbTX.(ethdb.RwTx).AppendDup(bucket, k, v)
 }
 func (s *snTX) Delete(bucket string, k, v []byte) error {
+	//note we can't use Delete here, because we can't change snapshots
+	//if we delete in main database we can find the value in snapshot
+	//so we are just marking that this value is deleted.
+	//this value will be removed on snapshot merging
+	if s.tmpTX != nil && IsStateSnapshotSnapshotBucket(bucket) {
+		return s.tmpTX.(ethdb.RwTx).Put(bucket, k, DeletedValue)
+	}
+
 	return s.dbTX.(ethdb.RwTx).Put(bucket, k, DeletedValue)
 }
 
@@ -499,6 +598,13 @@ func (s *snTX) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker
 
 func (s *snTX) Commit() error {
 	defer s.snapshotsRollback()
+	if s.tmpTX != nil {
+		err := s.tmpTX.Commit()
+		if err != nil {
+			s.dbTX.Rollback()
+			return err
+		}
+	}
 	return s.dbTX.Commit()
 }
 func (s *snTX) snapshotsRollback() {
@@ -514,6 +620,11 @@ func (s *snTX) snapshotsRollback() {
 }
 func (s *snTX) Rollback() {
 	defer s.snapshotsRollback()
+	defer func() {
+		if s.tmpTX != nil {
+			s.tmpTX.Rollback()
+		}
+	}()
 	s.dbTX.Rollback()
 }
 
@@ -527,10 +638,6 @@ func (s *snTX) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 
 func (s *snTX) ReadSequence(bucket string) (uint64, error) {
 	return s.dbTX.ReadSequence(bucket)
-}
-
-func (s *snTX) CHandle() unsafe.Pointer {
-	return s.dbTX.CHandle()
 }
 
 func (s *snTX) BucketExists(bucket string) (bool, error) {
@@ -910,127 +1017,15 @@ func KeyCmpBackward(key1, key2 []byte) (int, bool) {
 	}
 }
 
-type KvData struct {
-	K []byte
-	V []byte
+func IsSnapshotBucket(bucket string) bool {
+	return IsStateSnapshotSnapshotBucket(bucket) || IsHeaderSnapshotSnapshotBucket(bucket) || IsBodiesSnapshotSnapshotBucket(bucket)
 }
-
-func GenStateData(data []KvData) (ethdb.RwKV, error) {
-	snapshot := NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket: dbutils.BucketConfigItem{},
-		}
-	}).InMem().MustOpen()
-
-	err := snapshot.Update(context.Background(), func(tx ethdb.RwTx) error {
-		c, err := tx.RwCursor(dbutils.PlainStateBucket)
-		if err != nil {
-			return err
-		}
-		for i := range data {
-			innerErr := c.Put(data[i].K, data[i].V)
-			if innerErr != nil {
-				return innerErr
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return snapshot, nil
+func IsHeaderSnapshotSnapshotBucket(bucket string) bool {
+	return bucket == dbutils.HeadersBucket
 }
-
-//type cursorSnapshotDupsort struct {
-//
-//}
-//
-//func (c *cursorSnapshotDupsort) First() ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Seek(seek []byte) ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) SeekExact(key []byte) ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Next() ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Prev() ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Last() ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Current() ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Put(k, v []byte) error {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Append(k []byte, v []byte) error {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Delete(k, v []byte) error {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) DeleteCurrent() error {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Count() (uint64, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) Close() {
-//	panic("implement me")
-//}
-//
-//
-////dupsort
-//func (c *cursorSnapshotDupsort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) SeekBothRange(key, value []byte) ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) FirstDup() ([]byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) NextDup() ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) NextNoDup() ([]byte, []byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) LastDup(k []byte) ([]byte, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) CountDuplicates() (uint64, error) {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) DeleteCurrentDuplicates() error {
-//	panic("implement me")
-//}
-//
-//func (c *cursorSnapshotDupsort) AppendDup(key, value []byte) error {
-//	panic("implement me")
-//}
+func IsBodiesSnapshotSnapshotBucket(bucket string) bool {
+	return bucket == dbutils.BlockBodyPrefix || bucket == dbutils.EthTx
+}
+func IsStateSnapshotSnapshotBucket(bucket string) bool {
+	return bucket == dbutils.PlainStateBucket || bucket == dbutils.PlainContractCodeBucket || bucket == dbutils.CodeBucket
+}

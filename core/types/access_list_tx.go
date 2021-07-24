@@ -580,7 +580,7 @@ func (tx *AccessListTx) FakeSign(address common.Address) (Transaction, error) {
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx AccessListTx) Hash() common.Hash {
+func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}

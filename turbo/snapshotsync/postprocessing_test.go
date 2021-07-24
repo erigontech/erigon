@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/stretchr/testify/require"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
@@ -41,8 +42,10 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	db := kv.NewMDBX().InMem().WithBucketsConfig(kv.DefaultBucketConfigs).MustOpen()
 	defer db.Close()
 	//we need genesis
-	err = rawdb.WriteCanonicalHash(kv.NewObjectDatabase(db), headers[0].Hash(), headers[0].Number.Uint64())
-	if err != nil {
+	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		return rawdb.WriteCanonicalHash(tx, headers[0].Hash(), headers[0].Number.Uint64())
+
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -50,16 +53,18 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	defer snKV.Close()
 
 	snKV = kv.NewSnapshotKV().HeadersSnapshot(snKV).DB(db).Open()
-	snDb := kv.NewObjectDatabase(snKV)
-	err = GenerateHeaderIndexes(context.Background(), snDb)
+	snTx, err := snKV.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer snTx.Rollback()
+
+	err = GenerateHeaderIndexes(context.Background(), snTx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snDB := kv.NewObjectDatabase(snKV)
 	td := big.NewInt(0)
 	for i, header := range headers {
 		td = td.Add(td, header.Difficulty)
-		canonical, err1 := rawdb.ReadCanonicalHash(snDB, header.Number.Uint64())
+		canonical, err1 := rawdb.ReadCanonicalHash(snTx, header.Number.Uint64())
 		if err1 != nil {
 			t.Errorf("reading canonical hash for block %d: %v", header.Number.Uint64(), err1)
 		}
@@ -67,11 +72,11 @@ func TestHeadersGenerateIndex(t *testing.T) {
 			t.Error(i, "canonical not correct", canonical)
 		}
 
-		hasHeader := rawdb.HasHeader(snDB, header.Hash(), header.Number.Uint64())
+		hasHeader := rawdb.HasHeader(snTx, header.Hash(), header.Number.Uint64())
 		if !hasHeader {
 			t.Error(i, header.Hash(), header.Number.Uint64(), "not exists")
 		}
-		headerNumber := rawdb.ReadHeaderNumber(snDB, header.Hash())
+		headerNumber := rawdb.ReadHeaderNumber(snTx, header.Hash())
 		if headerNumber == nil {
 			t.Error(i, "empty header number")
 		} else if *headerNumber != header.Number.Uint64() {
@@ -80,7 +85,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 		if td == nil {
 			t.Error(i, "empty td")
 		} else {
-			td, err := rawdb.ReadTd(snDB, header.Hash(), header.Number.Uint64())
+			td, err := rawdb.ReadTd(snTx, header.Hash(), header.Number.Uint64())
 			if err != nil {
 				panic(err)
 			}
