@@ -103,8 +103,8 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	db := kv.NewTestDB(t)
-	state := state.New(state.NewDbStateReader(db))
+	_, tx := kv.NewTestTx(t)
+	state := state.New(state.NewDbStateReader(tx))
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -161,7 +161,7 @@ func BenchmarkCall(b *testing.B) {
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	_, tx := kv.NewTestTx(bench)
 	var (
-		statedb  = state.New(state.NewPlainKvState(tx, 0))
+		statedb  = state.New(state.NewPlainState(tx, 0))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -330,7 +330,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.
 	cfg := new(Config)
 	setDefaults(cfg)
 	_, tx := kv.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainKvState(tx, 0))
+	cfg.State = state.New(state.NewPlainState(tx, 0))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))

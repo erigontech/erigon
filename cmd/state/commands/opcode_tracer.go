@@ -544,7 +544,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate := state.NewPlainKvState(historyTx, block.NumberU64()-1)
+		dbstate := state.NewPlainState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
 

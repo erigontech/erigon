@@ -111,7 +111,7 @@ var ReceiptRepair = Migration{
 				return err
 			}
 
-			dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
+			dbstate := state.NewPlainState(tx, block.NumberU64()-1)
 			intraBlockState := state.New(dbstate)
 
 			getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }

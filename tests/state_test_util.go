@@ -296,8 +296,8 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(rules params.Rules, db ethdb.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := state.NewPlainStateReader(db)
+func MakePreState(rules params.Rules, tx ethdb.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+	r := state.NewPlainStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -315,10 +315,10 @@ func MakePreState(rules params.Rules, db ethdb.RwTx, accounts core.GenesisAlloc,
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
 	return statedb, nil
