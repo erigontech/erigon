@@ -229,12 +229,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
 			if !reflect.DeepEqual(pm, config.Prune) {
-				return errors.New("prune is " + config.Prune.ToString() + " original prune is " + pm.ToString())
+				return errors.New("prune is " + config.Prune.String() + " original prune is " + pm.String())
 			}
 		} else {
 			config.Prune = pm
 		}
-		log.Info("Effective", "prune", config.Prune.ToString())
+		log.Info("Effective", "prune", config.Prune.String())
 
 		return nil
 	}); err != nil {

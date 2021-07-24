@@ -982,7 +982,7 @@ func overrideStorageMode(db ethdb.RwKV) error {
 		if err != nil {
 			return err
 		}
-		log.Info("Storage mode in DB", "mode", pm.ToString())
+		log.Info("Storage mode in DB", "mode", pm.String())
 		return nil
 	})
 }
