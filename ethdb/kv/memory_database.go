@@ -23,14 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-func NewMemDatabase() *ObjectDatabase {
-	return NewObjectDatabase(NewMemKV())
-}
-
-func NewTestDB(t testing.TB) *ObjectDatabase {
-	return NewObjectDatabase(NewTestKV(t))
-}
-
 func NewMemKV() ethdb.RwKV {
 	return NewMDBX().InMem().MustOpen()
 }
