@@ -34,9 +34,6 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *type
 func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	panic("must not be called")
 }
-func (c *powEngine) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
-	panic("must not be called")
-}
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Header, uncles []*types.Header) error {
 	panic("must not be called")
 }

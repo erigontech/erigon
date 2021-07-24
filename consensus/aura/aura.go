@@ -537,12 +537,6 @@ func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newH
 	*/
 }
 
-/// Phase 3 verification. Check block information against parent. Returns either a null `Ok` or a general error detailing the problem with import.
-//nolint
-func (c *AuRa) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return nil
-}
-
 //nolint
 func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call

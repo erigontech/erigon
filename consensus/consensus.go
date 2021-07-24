@@ -130,9 +130,6 @@ type Engine interface {
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []rlp.RawValue
 
-	// VerifyFamily only used by Aura now - later may be merged into VerifyHeaders
-	VerifyFamily(chain ChainHeaderReader, header *types.Header) error
-
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 
