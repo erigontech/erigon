@@ -18,7 +18,6 @@ package stages_test
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -62,8 +61,6 @@ func TestDefaultGenesisBlock(t *testing.T) {
 	if err != nil {
 		t.Errorf("error: %w", err)
 	}
-	aa, _ := rlp.EncodeToBytes(block.Header())
-	fmt.Printf("a: %x\n", aa)
 	if block.Root() != params.SokolGenesisStateRoot {
 		t.Errorf("wrong sokol genesis state root, got %v, want %v", block.Root(), params.SokolGenesisStateRoot)
 	}

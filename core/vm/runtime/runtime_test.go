@@ -103,8 +103,8 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	db := kv.NewTestDB(t)
-	state := state.New(state.NewDbStateReader(db))
+	_, tx := kv.NewTestTx(t)
+	state := state.New(state.NewDbStateReader(tx))
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,

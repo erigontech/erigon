@@ -331,7 +331,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 			panic(err)
 		}
 		defer tx.Rollback()
-		r, w := state.NewDbStateReader(kv.WrapIntoTxDB(tx)), state.NewDbStateWriter(kv.WrapIntoTxDB(tx), 0)
+		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
 		for addr, account := range g.Alloc {
 			balance, overflow := uint256.FromBig(account.Balance)

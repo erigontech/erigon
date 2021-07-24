@@ -265,9 +265,9 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	return db, execRs, nil
 }
 
-func MakePreState(chainRules params.Rules, db ethdb.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
+func MakePreState(chainRules params.Rules, tx ethdb.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
-	r, _ := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, db, blockNr)
+	r, _ := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -285,10 +285,10 @@ func MakePreState(chainRules params.Rules, db ethdb.RwTx, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(db, db, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(chainRules, state.NewPlainStateWriter(db, db, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
 		panic(err)
 	}
 	return statedb
