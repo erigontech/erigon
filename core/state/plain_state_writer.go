@@ -30,7 +30,7 @@ func NewPlainStateWriter(db plainStateWriterDB, changeSetsDB ethdb.RwTx, blockNu
 	}
 }
 
-func NewPlainStateWriterNoHistory(db ethdb.Database) *PlainStateWriter {
+func NewPlainStateWriterNoHistory(db plainStateWriterDB) *PlainStateWriter {
 	return &PlainStateWriter{
 		db: db,
 	}

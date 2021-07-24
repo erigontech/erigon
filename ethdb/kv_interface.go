@@ -241,7 +241,7 @@ type RwTx interface {
 type BucketMigrator interface {
 	DropBucket(string) error
 	CreateBucket(string) error
-	ExistsBucket(string) bool
+	ExistsBucket(string) (bool, error)
 	ClearBucket(string) error
 	ListBuckets() ([]string, error)
 }

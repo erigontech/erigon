@@ -103,13 +103,6 @@ func (m *TxDb) Close() {
 	panic("don't call me")
 }
 
-// NewTxDbWithoutTransaction creates TxDb object without opening transaction,
-// such TxDb not usable before .Begin() call on it
-// It allows inject TxDb object into class hierarchy, but open write transaction later
-func NewTxDbWithoutTransaction(db ethdb.Database, flags ethdb.TxFlags) ethdb.DbWithPendingMutations {
-	return &TxDb{db: db, txFlags: flags}
-}
-
 func (m *TxDb) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
 	batch := m
 	if m.tx != nil {
@@ -327,13 +320,11 @@ func (m *TxDb) Tx() ethdb.Tx {
 }
 
 func (m *TxDb) BucketExists(name string) (bool, error) {
-	exists := false
 	migrator, ok := m.tx.(ethdb.BucketMigrator)
 	if !ok {
 		return false, fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 	}
-	exists = migrator.ExistsBucket(name)
-	return exists, nil
+	return migrator.ExistsBucket(name)
 }
 
 func (m *TxDb) ClearBuckets(buckets ...string) error {

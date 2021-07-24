@@ -106,9 +106,16 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		}
 		return h
 	}
+	db := kv.NewMemKV()
+
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+
 	var (
-		db          = kv.NewMemDatabase()
-		ibs         = MakePreState(chainConfig.Rules(0), db, pre.Pre)
+		ibs         = MakePreState(chainConfig.Rules(0), tx, pre.Pre)
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -146,20 +153,20 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		misc.ApplyDAOHardFork(ibs)
 	}
 
-	for i, tx := range txs {
-		msg, err := tx.AsMessage(*signer, pre.Env.BaseFee)
+	for i, txn := range txs {
+		msg, err := txn.AsMessage(*signer, pre.Env.BaseFee)
 		if err != nil {
-			log.Warn("rejected tx", "index", i, "hash", tx.Hash(), "error", err)
+			log.Warn("rejected txn", "index", i, "hash", txn.Hash(), "error", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}
-		tracer, err := getTracerFn(txIndex, tx.Hash())
+		tracer, err := getTracerFn(txIndex, txn.Hash())
 		if err != nil {
 			return nil, nil, err
 		}
 		vmConfig.Tracer = tracer
 		vmConfig.Debug = (tracer != nil)
-		ibs.Prepare(tx.Hash(), blockHash, txIndex)
+		ibs.Prepare(txn.Hash(), blockHash, txIndex)
 		txContext := core.NewEVMTxContext(msg)
 		snapshot := ibs.Snapshot()
 		evm := vm.NewEVM(vmContext, txContext, ibs, chainConfig, vmConfig)
@@ -168,11 +175,11 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		msgResult, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			ibs.RevertToSnapshot(snapshot)
-			log.Info("rejected tx", "index", i, "hash", tx.Hash(), "from", msg.From(), "error", err)
+			log.Info("rejected txn", "index", i, "hash", txn.Hash(), "from", msg.From(), "error", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}
-		includedTxs = append(includedTxs, tx)
+		includedTxs = append(includedTxs, txn)
 		if hashError != nil {
 			return nil, nil, NewError(ErrorMissingBlockhash, hashError)
 		}
@@ -181,23 +188,23 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		// Receipt:
 		{
 			// Create a new receipt for the transaction, storing the intermediate root and
-			// gas used by the tx.
-			receipt := &types.Receipt{Type: tx.Type(), CumulativeGasUsed: gasUsed}
+			// gas used by the txn.
+			receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: gasUsed}
 			if msgResult.Failed() {
 				receipt.Status = types.ReceiptStatusFailed
 			} else {
 				receipt.Status = types.ReceiptStatusSuccessful
 			}
-			receipt.TxHash = tx.Hash()
+			receipt.TxHash = txn.Hash()
 			receipt.GasUsed = msgResult.UsedGas
 
 			// If the transaction created a contract, store the creation address in the receipt.
 			if msg.To() == nil {
-				receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.GetNonce())
+				receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, txn.GetNonce())
 			}
 
 			// Set the receipt logs and create a bloom for filtering
-			receipt.Logs = ibs.GetLogs(tx.Hash())
+			receipt.Logs = ibs.GetLogs(txn.Hash())
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 			// These three are non-consensus fields:
 			//receipt.BlockHash
@@ -233,19 +240,19 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		ibs.AddBalance(pre.Env.Coinbase, minerReward)
 	}
 
-	err := ibs.FinalizeTx(chainConfig.Rules(1), state.NewDbStateWriter(db, 1))
-	if err != nil {
-		return nil, nil, err
-	}
 	// Commit block
 	var root common.Hash
-	err = db.RwKV().View(context.Background(), func(tx ethdb.Tx) error {
-		root, err = trie.CalcRoot("", tx)
-		return err
-	})
+	if err = ibs.FinalizeTx(chainConfig.Rules(1), state.NewPlainStateWriter(tx, tx, 1)); err != nil {
+		return nil, nil, err
+	}
+	root, err = trie.CalcRoot("", tx)
 	if err != nil {
 		return nil, nil, err
 	}
+	if err = tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+
 	execRs := &ExecutionResult{
 		StateRoot:   root,
 		TxRoot:      types.DeriveSha(includedTxs),
@@ -255,12 +262,12 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		Receipts:    receipts,
 		Rejected:    rejectedTxs,
 	}
-	return db.RwKV(), execRs, nil
+	return db, execRs, nil
 }
 
-func MakePreState(chainRules params.Rules, db ethdb.Database, accounts core.GenesisAlloc) *state.IntraBlockState {
+func MakePreState(chainRules params.Rules, db ethdb.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
-	r, _ := state.NewDbStateReader(db), state.NewDbStateWriter(db, blockNr)
+	r, _ := state.NewPlainStateReader(db), state.NewPlainStateWriter(db, db, blockNr)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -278,10 +285,10 @@ func MakePreState(chainRules params.Rules, db ethdb.Database, accounts core.Gene
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(chainRules, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(db, db, blockNr+1)); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(chainRules, state.NewDbStateWriter(db, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(chainRules, state.NewPlainStateWriter(db, db, blockNr+1)); err != nil {
 		panic(err)
 	}
 	return statedb

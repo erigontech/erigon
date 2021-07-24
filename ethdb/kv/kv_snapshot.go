@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ledgerwatch/erigon/log"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -346,7 +348,7 @@ func (s *snTX) CreateBucket(bucket string) error {
 	return s.dbTX.(ethdb.BucketMigrator).CreateBucket(bucket)
 }
 
-func (s *snTX) ExistsBucket(bucket string) bool {
+func (s *snTX) ExistsBucket(bucket string) (bool, error) {
 	return s.dbTX.(ethdb.BucketMigrator).ExistsBucket(bucket)
 }
 

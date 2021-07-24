@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -15,9 +14,14 @@ import (
 
 var rebuilCallTraceIndex = Migration{
 	Name: "rebuild_call_trace_index",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
+	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
 		// Find the lowest key in the TraceCallSet table
-		tx := db.(ethdb.HasTx).Tx().(ethdb.RwTx)
 		c, err := tx.CursorDupSort(dbutils.CallTraceSet)
 		if err != nil {
 			return err
@@ -30,12 +34,12 @@ var rebuilCallTraceIndex = Migration{
 		}
 		if k == nil {
 			log.Warn("Nothing to rebuild, CallTraceSet table is empty")
-			return CommitProgress(db, nil, true)
+			return BeforeCommit(tx, nil, true)
 		}
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum == 0 {
 			log.Warn("Nothing to rebuild, CallTraceSet's first record", "number", blockNum)
-			return CommitProgress(db, nil, true)
+			return BeforeCommit(tx, nil, true)
 		}
 		logPrefix := "db migration rebuild_call_trace_index"
 
@@ -48,9 +52,12 @@ var rebuilCallTraceIndex = Migration{
 		}
 
 		log.Info("First record in CallTraceTable", "number", blockNum)
-		if err = stages.SaveStageProgress(db, stages.CallTraces, blockNum-1); err != nil {
+		if err = stages.SaveStageProgress(tx, stages.CallTraces, blockNum-1); err != nil {
 			return err
 		}
-		return CommitProgress(db, nil, true)
+		if err = BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }
