@@ -1,25 +1,37 @@
 package migrations
 
 import (
+	"context"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var removeCliqueBucket = Migration{
 	Name: "remove_clique_bucket",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
+	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.CliqueBucket); err != nil {
+		if exists, err := tx.ExistsBucket(dbutils.CliqueBucket); err != nil {
 			return err
 		} else if !exists {
-			return CommitProgress(db, nil, true)
+			if err := BeforeCommit(tx, nil, true); err != nil {
+				return err
+			}
+			return tx.Commit()
 		}
 
-		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.CliqueBucket); err != nil {
+		if err := tx.DropBucket(dbutils.CliqueBucket); err != nil {
 			return err
 		}
 
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }

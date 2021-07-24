@@ -447,7 +447,7 @@ func (g *Genesis) MustWrite(tx ethdb.RwTx, history bool) (*types.Block, *state.I
 	return b, s
 }
 
-// Commit writes the block and state of a genesis specification to the database.
+// Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
 func (g *Genesis) Write(tx ethdb.RwTx) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err2 := g.WriteGenesisState(tx)
@@ -483,22 +483,6 @@ func (g *Genesis) Write(tx ethdb.RwTx) (*types.Block, *state.IntraBlockState, er
 		return nil, nil, err
 	}
 	return block, statedb, nil
-}
-
-func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, error) {
-	tx, err := db.Begin(context.Background(), ethdb.RW)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	block, _, err := g.Write(tx.(ethdb.HasTx).Tx().(ethdb.RwTx))
-	if err != nil {
-		return block, err
-	}
-	if err := tx.Commit(); err != nil {
-		return block, err
-	}
-	return block, nil
 }
 
 // MustCommit writes the genesis block and state to db, panicking on error.

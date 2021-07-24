@@ -217,12 +217,15 @@ func (db *ObjectDatabase) Delete(bucket string, k, v []byte) error {
 
 func (db *ObjectDatabase) BucketExists(name string) (bool, error) {
 	exists := false
-	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) (err error) {
 		migrator, ok := tx.(ethdb.BucketMigrator)
 		if !ok {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", db.kv)
 		}
-		exists = migrator.ExistsBucket(name)
+		exists, err = migrator.ExistsBucket(name)
+		if err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return false, err
