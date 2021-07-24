@@ -5,7 +5,8 @@ RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgc
 WORKDIR /app
 ADD . .
 
-RUN make erigon rpcdaemon integration sentry
+# expect that host run `git submodule update --init`
+RUN make all
 
 FROM docker.io/library/alpine:3.13
 
@@ -14,6 +15,7 @@ COPY --from=builder /app/build/bin/* /usr/local/bin/
 
 RUN adduser -H -u 1000 -g 1000 -D erigon
 RUN mkdir -p /home/erigon
+RUN mkdir -p /home/erigon/.local/share/erigon
 RUN chown -R erigon:erigon /home/erigon
 USER erigon
 
