@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 
@@ -211,16 +212,16 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 		return hash[:], err
 	case common.AddressLength + common.IncarnationLength + common.HashLength:
 		// storage
-		address, incarnation, key := dbutils.PlainParseCompositeStorageKey(key)
-		addrHash, err := common.HashData(address[:])
+		addrHash, err := common.HashData(key[:common.AddressLength])
 		if err != nil {
 			return nil, err
 		}
-		secKey, err := common.HashData(key[:])
+		inc := binary.BigEndian.Uint64(key[common.AddressLength:])
+		secKey, err := common.HashData(key[common.AddressLength+common.IncarnationLength:])
 		if err != nil {
 			return nil, err
 		}
-		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey)
+		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
 		return compositeKey, nil
 	default:
 		// no other keys are supported
