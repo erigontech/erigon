@@ -149,7 +149,7 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 	return stageHead - uint64(p)
 }
 
-func (m Mode) ToString() string {
+func (m Mode) String() string {
 	if !m.Initialised {
 		return "default"
 	}

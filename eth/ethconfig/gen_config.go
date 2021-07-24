@@ -32,7 +32,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Whitelist = c.Whitelist
-	enc.StorageMode = c.Prune.ToString()
+	enc.StorageMode = c.Prune.String()
 	enc.Miner = c.Miner
 	enc.Ethash = c.Ethash
 	enc.TxPool = c.TxPool

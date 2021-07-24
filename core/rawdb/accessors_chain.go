@@ -876,6 +876,16 @@ func ReadAncestor(db ethdb.KVGetter, hash common.Hash, number, ancestor uint64, 
 	return hash, number
 }
 
+func DeleteNewerEpochs(tx ethdb.RwTx, number uint64) error {
+	if err := tx.ForEach(dbutils.PendingEpoch, dbutils.EncodeBlockNumber(number), func(k, v []byte) error {
+		return tx.Delete(dbutils.Epoch, k, nil)
+	}); err != nil {
+		return err
+	}
+	return tx.ForEach(dbutils.Epoch, dbutils.EncodeBlockNumber(number), func(k, v []byte) error {
+		return tx.Delete(dbutils.Epoch, k, nil)
+	})
+}
 func ReadEpoch(tx ethdb.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
 	k := make([]byte, dbutils.NumberLength+common.HashLength)
 	binary.BigEndian.PutUint64(k, blockNum)
@@ -888,9 +898,8 @@ func FindEpochBeforeOrEqualNumber(tx ethdb.Tx, n uint64) (blockNum uint64, block
 		return 0, common.Hash{}, nil, err
 	}
 	defer c.Close()
-	k := make([]byte, dbutils.NumberLength)
-	binary.BigEndian.PutUint64(k, n)
-	k, v, err := c.Seek(k)
+	seek := dbutils.EncodeBlockNumber(n)
+	k, v, err := c.Seek(seek)
 	if err != nil {
 		return 0, common.Hash{}, nil, err
 	}
