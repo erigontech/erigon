@@ -107,6 +107,9 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, incarnation ui
 		}
 	}
 	code, err := dbr.db.GetOne(dbutils.CodeBucket, codeHash[:])
+	if err != nil {
+		return nil, err
+	}
 	if dbr.codeCache != nil && len(code) <= 1024 {
 		dbr.codeCache.Set(address[:], code)
 	}
@@ -141,11 +144,12 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 }
 
 func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	if b, err := dbr.db.GetOne(dbutils.IncarnationMapBucket, address[:]); err == nil {
-		return binary.BigEndian.Uint64(b), nil
-	} else if b == nil {
-		return 0, nil
-	} else {
+	b, err := dbr.db.GetOne(dbutils.IncarnationMapBucket, address[:])
+	if err != nil {
 		return 0, err
 	}
+	if b == nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(b), nil
 }
