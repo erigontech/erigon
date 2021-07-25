@@ -24,18 +24,27 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFetch(t *testing.T) {
+	logger := log.NewTest(t)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
+
 	var genesisHash [32]byte
 	var networkId uint64 = 1
 	forks := []uint64{1, 5, 10}
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+
 	mock := NewMockSentry(ctx)
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, mock)
-	mockPool := &MockPool{}
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, mockPool)
+	pool := &PoolMock{
+		IdHashKnownFunc: func(hash []byte) bool { return false },
+	}
+
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, logger)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	mock.StreamWg.Add(2)
@@ -55,4 +64,17 @@ func TestFetch(t *testing.T) {
 		}
 	}
 	wg.Wait()
+}
+
+func TestSendTxPropagate(t *testing.T) {
+	logger := log.NewTest(t)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
+
+	mock := NewMockSentry(ctx)
+	send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, mock)}, nil, logger)
+	// Send one transaction id
+	send.BroadcastRemotePooledTxs([][32]byte{[32]byte{1}, [32]byte{42}})
+	require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, mock.sentMessages[0].Id)
 }

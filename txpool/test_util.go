@@ -25,6 +25,8 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+//go:generate moq -out mocks.go . Pool
+
 type MockSentry struct {
 	sentry.UnimplementedSentryServer
 	streams      map[sentry.MessageId][]sentry.Sentry_MessagesServer
@@ -39,7 +41,7 @@ func NewMockSentry(ctx context.Context) *MockSentry {
 	return &MockSentry{ctx: ctx}
 }
 
-var PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
+var PeerId PeerID = gointerfaces.ConvertBytesToH512([]byte("12345"))
 
 // Stream returns stream, waiting if necessary
 func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
@@ -106,11 +108,4 @@ func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_Peers
 	case <-stream.Context().Done():
 		return nil
 	}
-}
-
-type MockPool struct {
-}
-
-func (mp *MockPool) IdHashKnown(hash []byte) bool {
-	return false
 }

@@ -21,13 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -43,7 +43,19 @@ type Fetch struct {
 	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
 	pool          Pool                  // Transaction pool implementation
 	wg            *sync.WaitGroup       // Waitgroup used for synchronisation in the tests (nil when not in tests)
-	logger        *log.Logger
+	logger        *zap.SugaredLogger
+}
+
+type Timings struct {
+	propagateAllNewTxsEvery         time.Duration
+	syncToNewPeersEvery             time.Duration
+	broadcastLocalTransactionsEvery time.Duration
+}
+
+var DefaultTimings = Timings{
+	propagateAllNewTxsEvery:         5 * time.Second,
+	broadcastLocalTransactionsEvery: 2 * time.Minute,
+	syncToNewPeersEvery:             2 * time.Minute,
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
@@ -55,6 +67,7 @@ func NewFetch(ctx context.Context,
 	networkId uint64,
 	forks []uint64,
 	pool Pool,
+	logger *zap.SugaredLogger,
 ) *Fetch {
 	statusData := &sentry.StatusData{
 		NetworkId:       networkId,
@@ -71,16 +84,12 @@ func NewFetch(ctx context.Context,
 		sentryClients: sentryClients,
 		statusData:    statusData,
 		pool:          pool,
-		logger:        log.Default(),
+		logger:        logger.Named("txpool.fetch"),
 	}
 }
 
 func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
 	f.wg = wg
-}
-
-func (f *Fetch) SetLogger(logger *log.Logger) {
-	f.logger = logger
 }
 
 // Start initialises connection to the sentry
@@ -96,6 +105,7 @@ func (f *Fetch) Start() {
 }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
+	logger := f.logger.Named("receiveMessageLoop")
 	for {
 		select {
 		case <-f.ctx.Done():
@@ -108,7 +118,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				return
 			}
 			// Report error and wait more
-			f.logger.Printf("[receiveMessageLoop] sentry not ready yet: %v\n", err)
+			logger.Warnf("sentry not ready yet: %s", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -137,7 +147,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			f.logger.Printf("[receiveMessageLoop] Messages: %v\n", err)
+			logger.Warnf("messages: %s", err)
 			return
 		}
 
@@ -155,14 +165,14 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				if errors.Is(err, io.EOF) {
 					return
 				}
-				f.logger.Printf("[receiveMessageLoop] stream.Recv: %v\n", err)
+				logger.Warnf("stream.Recv: %s", err)
 				return
 			}
 			if req == nil {
 				return
 			}
 			if err = f.handleInboundMessage(req, sentryClient); err != nil {
-				f.logger.Printf("[receiveMessageLoop] Handling incoming message: %v\n", err)
+				logger.Warnf("Handling incoming message: %s", err)
 			}
 			if f.wg != nil {
 				f.wg.Done()
@@ -216,6 +226,7 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
+	logger := f.logger.Named("receivePeerLoop")
 	for {
 		select {
 		case <-f.ctx.Done():
@@ -228,7 +239,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 				return
 			}
 			// Report error and wait more
-			f.logger.Printf("[receivePeerLoop] sentry not ready yet: %v\n", err)
+			logger.Warnf("sentry not ready yet: %s", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -248,7 +259,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			f.logger.Printf("[receivePeerLoop] Peers: %v\n", err)
+			logger.Warnf("peers: %s", err)
 			return
 		}
 
@@ -266,17 +277,14 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 				if errors.Is(err, io.EOF) {
 					return
 				}
-				f.logger.Printf("[receivePeerLoop] stream.Recv: %v\n", err)
+				logger.Warnf("stream.Recv: %s", err)
 				return
 			}
 			if req == nil {
 				return
 			}
-			switch req.Event {
-			case sentry.PeersReply_Connect:
-				if err = f.handleNewPeer(req, sentryClient); err != nil {
-					f.logger.Printf("[receivePeerLoop] Handling new peer: %v\n", err)
-				}
+			if err = f.handleNewPeer(req); err != nil {
+				logger.Warnf("Handling new peer: %s", err)
 			}
 			if f.wg != nil {
 				f.wg.Done()
@@ -285,6 +293,14 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 	}
 }
 
-func (f *Fetch) handleNewPeer(req *sentry.PeersReply, sentryClient sentry.SentryClient) error {
+func (f *Fetch) handleNewPeer(req *sentry.PeersReply) error {
+	if req == nil {
+		return nil
+	}
+	switch req.Event {
+	case sentry.PeersReply_Connect:
+		f.pool.NotifyNewPeer(req.PeerId)
+	}
+
 	return nil
 }
