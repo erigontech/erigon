@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -77,17 +78,20 @@ func TestSendTxPropagate(t *testing.T) {
 		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
 		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, m.sentMessages[0].Id)
 		require.Equal(t, 68, len(m.sentMessages[0].Data))
-
-		m.sentMessages = m.sentMessages[:0]
 	})
-	t.Run("3x of max p2p size", func(t *testing.T) {
-		// method must slice them
+	t.Run("slice large messages", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
-		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
-		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, m.sentMessages[0].Id)
-		require.Equal(t, 68, len(m.sentMessages[0].Data))
-
-		m.sentMessages = m.sentMessages[:0]
+		list := make(Hashes, p2pTxPacketLimit*3)
+		for i := 0; i < len(list); i += 32 {
+			b := []byte(fmt.Sprintf("%x", i))
+			copy(list[i:i+32], b)
+		}
+		send.BroadcastRemotePooledTxs(list)
+		require.Equal(t, 3, len(m.sentMessages))
+		for i := 0; i < 3; i++ {
+			require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, m.sentMessages[i].Id)
+			require.Less(t, 0, len(m.sentMessages[i].Data))
+		}
 	})
 }
