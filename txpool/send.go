@@ -22,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -193,7 +192,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 	return
 }
 
-func (f *Send) PropagatePooledTxsToPeersList(peers []*types.H512, txs []byte) {
+func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 	defer f.notifyTests()
 
 	if len(txs) == 0 {

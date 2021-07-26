@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"go.uber.org/zap"
 )
 
@@ -114,16 +113,16 @@ func (p *PoolImpl) FillRemoteHashes(to []byte)                       {}
 // it doesn't track if peer disconnected, it's fine
 type recentlyConnectedPeers struct {
 	lock  sync.RWMutex
-	peers []*types.H512
+	peers []PeerID
 }
 
-func (l *recentlyConnectedPeers) AddPeer(p *types.H512) {
+func (l *recentlyConnectedPeers) AddPeer(p PeerID) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	l.peers = append(l.peers, p)
 }
 
-func (l *recentlyConnectedPeers) GetAndClean() []*types.H512 {
+func (l *recentlyConnectedPeers) GetAndClean() []PeerID {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	peers := l.peers
