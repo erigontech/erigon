@@ -27,18 +27,23 @@ import (
 	"google.golang.org/grpc"
 )
 
+type SentryClient interface {
+	sentry.SentryClient
+	Protocol() uint
+}
+
 // Send - does send concrete P2P messages to Sentry. Same as Fetch but for outbound traffic
 // does not initiate any messages by self
 type Send struct {
 	ctx           context.Context
-	sentryClients []sentry.SentryClient // sentry clients that will be used for accessing the network
+	sentryClients []SentryClient // sentry clients that will be used for accessing the network
 	pool          Pool
 
 	logger *zap.SugaredLogger
 	wg     *sync.WaitGroup
 }
 
-func NewSend(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, logger *zap.SugaredLogger) *Send {
+func NewSend(ctx context.Context, sentryClients []SentryClient, pool Pool, logger *zap.SugaredLogger) *Send {
 	return &Send{
 		ctx:           ctx,
 		pool:          pool,
@@ -91,9 +96,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 			//if !sentryClient.Ready() {
 			//	continue
 			//}
-			//protocol:=sentryClient.Protocol()
-			protocol := direct.ETH66
-			switch protocol {
+			switch sentryClient.Protocol() {
 			case direct.ETH65:
 				if req65 == nil {
 					req65 = &sentry.OutboundMessageData{
@@ -155,9 +158,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 			//	continue
 			//}
 
-			//protocol:=sentryClient.Protocol()
-			protocol := direct.ETH66
-			switch protocol {
+			switch sentryClient.Protocol() {
 			case direct.ETH65:
 				if req65 == nil {
 					req65 = &sentry.SendMessageToRandomPeersRequest{
@@ -220,9 +221,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []*types.H512, txs []byte) {
 			//}
 
 			for _, peer := range peers {
-				//protocol:=sentryClient.Protocol()
-				protocol := direct.ETH66
-				switch protocol {
+				switch sentryClient.Protocol() {
 				case direct.ETH65:
 					req65 := &sentry.SendMessageByIdRequest{
 						PeerId: peer,

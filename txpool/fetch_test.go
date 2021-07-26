@@ -76,7 +76,7 @@ func TestSendTxPropagate(t *testing.T) {
 	defer cancelFn()
 	t.Run("few remote txs", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
 		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
 
 		calls := m.SendMessageToRandomPeersCalls()
@@ -87,7 +87,7 @@ func TestSendTxPropagate(t *testing.T) {
 	})
 	t.Run("much remote txs", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -107,7 +107,7 @@ func TestSendTxPropagate(t *testing.T) {
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
-		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
 		send.BroadcastLocalPooledTxs(toHashes([32]byte{1}, [32]byte{42}))
 
 		calls := m.SendMessageToAllCalls()
