@@ -502,7 +502,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
-	assert.Equal(t, expectedErr, err)
+	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedErr = nil
 
