@@ -70,6 +70,7 @@ func TestFetch(t *testing.T) {
 
 func TestSendTxPropagate(t *testing.T) {
 	logger := log.NewTest(t)
+	//logger := log.New()
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
