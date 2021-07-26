@@ -85,7 +85,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 			txs = txs[:0]
 		}
 
-		data, err := EncodeHashes(pending, len(pending)/32, nil)
+		data, err := EncodeHashes(pending, nil)
 		if err != nil {
 			f.logger.Warnf("encode hashes: %s", err)
 			return
@@ -145,7 +145,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 			txs = txs[:0]
 		}
 
-		data, err := EncodeHashes(pending, len(pending)/32, nil)
+		data, err := EncodeHashes(pending, nil)
 		if err != nil {
 			f.logger.Warnf("encode hashes: %s", err)
 			return
@@ -207,7 +207,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 			txs = txs[:0]
 		}
 
-		data, err := EncodeHashes(pending, len(pending)/32, nil)
+		data, err := EncodeHashes(pending, nil)
 		if err != nil {
 			f.logger.Warnf("encode hashes: %s", err)
 			return

@@ -72,6 +72,8 @@ var hashEncodeTests = []struct {
 }{
 	{payloadStr: "e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
 		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, expectedErr: false},
+	{hashesStr: fmt.Sprintf("%x", toHashes([32]byte{1}, [32]byte{2}, [32]byte{3})),
+		payloadStr: "f863a00100000000000000000000000000000000000000000000000000000000000000a00200000000000000000000000000000000000000000000000000000000000000a00300000000000000000000000000000000000000000000000000000000000000", hashCount: 3, expectedErr: false},
 }
 
 func TestEncodeHash(t *testing.T) {
@@ -87,7 +89,7 @@ func TestEncodeHash(t *testing.T) {
 			if hashes, err = hex.DecodeString(tt.hashesStr); err != nil {
 				t.Fatal(err)
 			}
-			if encodeBuf, err = EncodeHashes(hashes, tt.hashCount, encodeBuf); err != nil {
+			if encodeBuf, err = EncodeHashes(hashes, encodeBuf); err != nil {
 				if !tt.expectedErr {
 					t.Fatal(err)
 				}
@@ -126,7 +128,7 @@ func TestEncodeGPT66(t *testing.T) {
 			if hashes, err = hex.DecodeString(tt.hashesStr); err != nil {
 				t.Fatal(err)
 			}
-			if encodeBuf, err = EncodeGetPooledTransactions66(hashes, tt.hashCount, tt.requestId, encodeBuf); err != nil {
+			if encodeBuf, err = EncodeGetPooledTransactions66(hashes, tt.requestId, encodeBuf); err != nil {
 				if !tt.expectedErr {
 					t.Fatal(err)
 				}
@@ -137,5 +139,23 @@ func TestEncodeGPT66(t *testing.T) {
 				t.Errorf("encoding expected %x, got %x", payload, encodeBuf)
 			}
 		})
+	}
+}
+
+func BenchmarkEncHashes(b *testing.B) {
+	h := make(Hashes, 32*40)
+	buf := make([]byte, 39*40)
+	for i := 0; i < b.N; i++ {
+		buf = buf[:0]
+		EncodeHashes(h, buf)
+	}
+}
+
+func BenchmarkEncHashes2(b *testing.B) {
+	h := make(Hashes, 32*40)
+	buf := make([]byte, 39*40)
+	for i := 0; i < b.N; i++ {
+		buf = buf[:0]
+		EncodeHashes(h, buf)
 	}
 }
