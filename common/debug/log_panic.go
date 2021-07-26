@@ -74,10 +74,10 @@ func LogPanic() {
 //  func A() (err error) {
 //	    defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
 //  }
-func ReportPanicAndRecover() (err error) {
+func ReportPanicAndRecover(err error) error {
 	panicResult := recover()
 	if panicResult == nil {
-		return nil
+		return err
 	}
 
 	stack := string(debug.Stack())

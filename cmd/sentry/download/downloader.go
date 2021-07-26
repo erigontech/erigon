@@ -87,7 +87,7 @@ func RecvUploadMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug2.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
+	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -173,7 +173,7 @@ func RecvMessage(
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug2.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
+	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()

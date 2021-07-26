@@ -55,7 +55,7 @@ func StageLoop(
 				return
 			}
 
-			log.Error("ID loop failure", "error", err)
+			log.Error("Staged Sync", "error", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header downloader", "error", recoveryErr)
 			}
@@ -88,7 +88,7 @@ func StageLoopStep(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx ethdb.Tx) error,
 ) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
+	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
 	var origin, hashStateStageProgress, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
@@ -178,7 +178,7 @@ func StageLoopStep(
 }
 
 func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things -
+	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {

@@ -628,7 +628,6 @@ func AppendReceipts(tx ethdb.RwTx, blockNumber uint64, receipts types.Receipts) 
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 
 	for txId, r := range receipts {
-		//fmt.Printf("1: %d,%x\n", txId, r.TxHash)
 		if len(r.Logs) == 0 {
 			continue
 		}
