@@ -14,6 +14,7 @@ import (
 )
 
 type SnapshotHeadersCfg struct {
+	enabled			bool
 	db               ethdb.RwKV
 	snapshotDir      string
 	client           *snapshotsync.Client
@@ -22,6 +23,7 @@ type SnapshotHeadersCfg struct {
 
 func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotHeadersCfg {
 	return SnapshotHeadersCfg{
+		enabled: snapshot.Enabled && snapshot.Mode.Headers,
 		db:               db,
 		snapshotDir:      snapshot.Dir,
 		client:           client,

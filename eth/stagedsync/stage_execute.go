@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"runtime"
 	"sort"
 	"time"
@@ -54,6 +55,7 @@ type ExecuteBlockCfg struct {
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
+	stateSnapshotGeneration bool
 }
 
 func StageExecuteBlocksCfg(
@@ -67,6 +69,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
+	stateSnapshotGeneration bool,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -79,6 +82,7 @@ func StageExecuteBlocksCfg(
 		tmpdir:        tmpdir,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
+		stateSnapshotGeneration: stateSnapshotGeneration,
 	}
 }
 
@@ -283,6 +287,42 @@ Loop:
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
+		if snapshotsync.IsSnapshotBlock(blockNum, snapshotsync.EpochSize) &&
+			prevStageProgress - blockNum < snapshotsync.EpochSize &&
+			cfg.stateSnapshotGeneration {
+			if err = batch.Commit(); err != nil {
+				return err
+			}
+			//todo must commit here and add temp db
+			if err = s.Update(tx, stageProgress); err != nil {
+				return err
+			}
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+			if cfg.db.(*kv.SnapshotKV).TempDB()!=nil {
+				log.Error("Unexpected tmp db")
+			}
+
+			tmpDB,err:=snapshotsync.CreateStateSnapshotTmpDB(ctx, cfg.tmpdir, block.Hash())
+			if err!=nil {
+				return err
+			}
+			//todo[Boris]: remove PlainContractCodeBucket
+			cfg.db.(*kv.SnapshotKV).SetTempDB(tmpDB, []string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket})
+			tx, err = cfg.db.BeginRw(context.Background())
+			if err != nil {
+				return err
+			}
+			if !useExternalTx {
+				// TODO: This creates stacked up deferrals
+				defer tx.Rollback()
+			}
+			batch = kv.NewBatch(tx, quit)
+			// TODO: This creates stacked up deferrals
+			defer batch.Rollback()
+		}
+
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
@@ -451,7 +491,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		return fmt.Errorf("getting rewind data: %w", errRewind)
 	}
 
-	if err := changes.Load(logPrefix, tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	loadFunc:=func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
 			if len(v) > 0 {
 				var acc accounts.Account
@@ -518,9 +558,28 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 			}
 		}
 		return nil
+	}
 
-	}, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
+	snapshotBlock:=snapshotsync.CurrentStateSnapshotBlock(s.BlockNumber, snapshotsync.EpochSize)
+	if !(cfg.stateSnapshotGeneration && (s.BlockNumber >= snapshotBlock && u.UnwindPoint < snapshotBlock)) {
+		if err := changes.Load(logPrefix, tx, stateBucket, loadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+			return err
+		}
+	} else {
+		err := tx.Commit()
+		if err!=nil {
+			return err
+		}
+		go func() {
+			cfg.db.(*kv.SnapshotKV).TempDB().Close()
+			log.Info("Temp database closed")
+		}()
+		cfg.db.(*kv.SnapshotKV).SetTempDB(nil, nil)
+		//todo[Boris] Add stateStream support
+		if err := changes.Load(logPrefix, tx, stateBucket, loadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+			return err
+		}
+
 	}
 
 	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {

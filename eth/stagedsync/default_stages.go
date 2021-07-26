@@ -59,7 +59,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.CreateHeadersSnapshot,
 			Description:         "Create headers snapshot",
-			Disabled:            true,
+			Disabled:            snapshotHeaders.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, firstCycle, ctx)
@@ -87,7 +87,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.CreateBodiesSnapshot,
 			Description:         "Create bodies snapshot",
-			Disabled:            true,
+			Disabled:            snapshotBodies.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, ctx)
@@ -116,7 +116,7 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle)
+				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle, )
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle)
@@ -143,7 +143,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.CreateStateSnapshot,
 			Description:         "Create state snapshot",
-			Disabled:            true,
+			Disabled:            snapshotState.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
 				return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, ctx)

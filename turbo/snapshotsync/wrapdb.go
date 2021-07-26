@@ -15,21 +15,16 @@ import (
 var (
 	BucketConfigs = map[SnapshotType]dbutils.BucketsCfg{
 		SnapshotType_bodies: {
-			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
-			dbutils.EthTx:           dbutils.BucketConfigItem{},
+			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
+			dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
 		},
 		SnapshotType_headers: {
-			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
+			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		},
 		SnapshotType_state: {
-			dbutils.PlainStateBucket: dbutils.BucketConfigItem{
-				Flags:                     dbutils.DupSort,
-				AutoDupSortKeysConversion: true,
-				DupFromLen:                60,
-				DupToLen:                  28,
-			},
-			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
-			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
+			dbutils.PlainStateBucket: dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
+			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
 		},
 	}
 )

@@ -270,6 +270,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				nil,
 				cfg.StateStream,
 				mock.tmpdir,
+				false,
 			),
 			stagedsync.StageTranspileCfg(
 				mock.DB,

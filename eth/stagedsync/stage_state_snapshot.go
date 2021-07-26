@@ -9,6 +9,7 @@ import (
 )
 
 type SnapshotStateCfg struct {
+	enabled			bool
 	db               ethdb.RwKV
 	snapshotDir      string
 	tmpDir           string
@@ -18,6 +19,7 @@ type SnapshotStateCfg struct {
 
 func StageSnapshotStateCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, tmpDir string, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotStateCfg {
 	return SnapshotStateCfg{
+		enabled: snapshot.Enabled && snapshot.Mode.State,
 		db:               db,
 		snapshotDir:      snapshot.Dir,
 		client:           client,

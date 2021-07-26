@@ -161,8 +161,19 @@ func (s *SnapshotKV) SetTempDB(kv ethdb.RwKV, buckets []string) {
 	for _, bucket := range buckets {
 		bucketsMap[bucket] = struct{}{}
 	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
 	s.tmpDB = kv
 	s.tmpDBBuckets = bucketsMap
+}
+func (s *SnapshotKV) TmpDBBucketsCopy() map[string]struct{} {
+	bucketsMap := make(map[string]struct{}, len(s.tmpDBBuckets))
+	for bucket := range s.tmpDBBuckets {
+		bucketsMap[bucket] = struct{}{}
+	}
+	return bucketsMap
 }
 
 //todo
@@ -217,7 +228,11 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var tmpTX ethdb.Tx
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
 	if s.tmpDB != nil {
 		tmpTX, err = s.tmpDB.BeginRo(context.Background())
 		if err != nil {
@@ -234,7 +249,7 @@ func (s *SnapshotKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 		bodiesTX:  bodiesTX,
 		stateTX:   stateTX,
 		tmpTX:     tmpTX,
-		buckets:   s.tmpDBBuckets,
+		buckets:   s.TmpDBBucketsCopy(),
 	}, nil
 }
 
@@ -245,6 +260,9 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 	}
 
 	var tmpTX ethdb.Tx
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
 	if s.tmpDB != nil {
 		tmpTX, err = s.tmpDB.BeginRw(context.Background())
 		if err != nil {
@@ -263,7 +281,7 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
 		bodiesTX:  bodiesTX,
 		stateTX:   stateTX,
 		tmpTX:     tmpTX,
-		buckets:   s.tmpDBBuckets,
+		buckets:   s.TmpDBBucketsCopy(),
 	}, nil
 }
 
