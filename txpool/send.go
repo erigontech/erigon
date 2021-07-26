@@ -43,7 +43,7 @@ func NewSend(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool
 		ctx:           ctx,
 		pool:          pool,
 		sentryClients: sentryClients,
-		logger:        logger.Named("txpool.send"),
+		logger:        logger.Named("[TxPool.Send]"),
 	}
 }
 
@@ -121,7 +121,6 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 					return
 				}
 				avgPeersPerSent66 += len(peers.Peers)
-				f.logger.Warnf("yay: %d", avgPeersPerSent66)
 			}
 		}
 	}

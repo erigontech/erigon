@@ -84,7 +84,7 @@ func NewFetch(ctx context.Context,
 		sentryClients: sentryClients,
 		statusData:    statusData,
 		pool:          pool,
-		logger:        logger.Named("txpool.fetch"),
+		logger:        logger.Named("[TxPool.Fetch]"),
 	}
 }
 

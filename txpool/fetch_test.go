@@ -115,7 +115,5 @@ func TestSendTxPropagate(t *testing.T) {
 		first := calls[0].OutboundMessageData
 		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, first.Id)
 		require.Equal(t, 68, len(first.Data))
-		t.Fail()
 	})
-
 }
