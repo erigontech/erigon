@@ -189,7 +189,7 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 		}
 		var hashbuf [32]byte
-		var unknownHashes []byte
+		var unknownHashes Hashes
 		var unknownCount int
 		for i := 0; i < hashCount; i++ {
 			_, pos, err = ParseHash(req.Data, pos, hashbuf[:0])

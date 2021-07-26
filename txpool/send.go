@@ -63,7 +63,7 @@ func (f *Send) notifyTests() {
 	}
 }
 
-func (f *Send) BroadcastLocalPooledTxs(txs [][32]byte) {
+func (f *Send) BroadcastLocalPooledTxs(txs Hashes) {
 	defer f.notifyTests()
 	if len(txs) == 0 {
 		return
@@ -74,20 +74,16 @@ func (f *Send) BroadcastLocalPooledTxs(txs [][32]byte) {
 	avgPeersPerSent66 := 0
 	initialTxs := txs
 	for len(txs) > 0 {
-
-		pendingLen := p2pTxPacketLimit / 32
-		pending := make([][32]byte, 0, pendingLen)
-
-		for i := 0; i < pendingLen && i < len(txs); i++ {
-			pending = append(pending, txs[i])
+		var pending Hashes
+		if len(txs) > p2pTxPacketLimit {
+			pending = txs[:p2pTxPacketLimit]
+			txs = txs[p2pTxPacketLimit:]
+		} else {
+			pending = txs[:]
+			txs = txs[:0]
 		}
-		txs = txs[len(pending):]
 
-		//data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
-		var (
-			data []byte
-			err  error
-		)
+		data, err := EncodeHashes(pending, len(pending)/32, nil)
 		if err != nil {
 			f.logger.Warn(err)
 			return
@@ -138,7 +134,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs [][32]byte) {
 	return
 }
 
-func (f *Send) BroadcastRemotePooledTxs(txs [][32]byte) {
+func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 	defer f.notifyTests()
 
 	if len(txs) == 0 {
@@ -146,18 +142,16 @@ func (f *Send) BroadcastRemotePooledTxs(txs [][32]byte) {
 	}
 
 	for len(txs) > 0 {
-		pendingLen := p2pTxPacketLimit / 32
-		pending := make([][32]byte, 0, pendingLen)
-		for i := 0; i < pendingLen && i < len(txs); i++ {
-			pending = append(pending, txs[i])
+		var pending Hashes
+		if len(txs) > p2pTxPacketLimit {
+			pending = txs[:p2pTxPacketLimit]
+			txs = txs[p2pTxPacketLimit:]
+		} else {
+			pending = txs[:]
+			txs = txs[:0]
 		}
-		txs = txs[len(pending):]
 
-		//data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
-		var (
-			data []byte
-			err  error
-		)
+		data, err := EncodeHashes(pending, len(pending)/32, nil)
 		if err != nil {
 			f.logger.Warn(err)
 			return
@@ -205,7 +199,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs [][32]byte) {
 	return
 }
 
-func (f *Send) PropagatePooledTxsToPeersList(peers []*types.H512, txs [][32]byte) {
+func (f *Send) PropagatePooledTxsToPeersList(peers []*types.H512, txs []byte) {
 	defer f.notifyTests()
 
 	if len(txs) == 0 {
@@ -213,19 +207,16 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []*types.H512, txs [][32]byte
 	}
 
 	for len(txs) > 0 {
-		pendingLen := p2pTxPacketLimit / 32
-		pending := make([][32]byte, 0, pendingLen)
-
-		for i := 0; i < pendingLen && i < len(txs); i++ {
-			pending = append(pending, txs[i])
+		var pending Hashes
+		if len(txs) > p2pTxPacketLimit {
+			pending = txs[:p2pTxPacketLimit]
+			txs = txs[p2pTxPacketLimit:]
+		} else {
+			pending = txs[:]
+			txs = txs[:0]
 		}
-		txs = txs[len(pending):]
 
-		//data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
-		var (
-			data []byte
-			err  error
-		)
+		data, err := EncodeHashes(pending, len(pending)/32, nil)
 		if err != nil {
 			f.logger.Warn(err)
 			return

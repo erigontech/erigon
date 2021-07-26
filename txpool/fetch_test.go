@@ -71,10 +71,23 @@ func TestSendTxPropagate(t *testing.T) {
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
+	t.Run("small message", func(t *testing.T) {
+		m := NewMockSentry(ctx)
+		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
+		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, m.sentMessages[0].Id)
+		require.Equal(t, 68, len(m.sentMessages[0].Data))
 
-	mock := NewMockSentry(ctx)
-	send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, mock)}, nil, logger)
-	// Send one transaction id
-	send.BroadcastRemotePooledTxs([][32]byte{[32]byte{1}, [32]byte{42}})
-	require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, mock.sentMessages[0].Id)
+		m.sentMessages = m.sentMessages[:0]
+	})
+	t.Run("3x of max p2p size", func(t *testing.T) {
+		// method must slice them
+		m := NewMockSentry(ctx)
+		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
+		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, m.sentMessages[0].Id)
+		require.Equal(t, 68, len(m.sentMessages[0].Data))
+
+		m.sentMessages = m.sentMessages[:0]
+	})
 }

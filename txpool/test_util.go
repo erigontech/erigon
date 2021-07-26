@@ -109,3 +109,10 @@ func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_Peers
 		return nil
 	}
 }
+
+func toHashes(h ...[32]byte) (out Hashes) {
+	for i := range h {
+		out = append(out, h[i][:]...)
+	}
+	return out
+}

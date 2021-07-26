@@ -62,8 +62,8 @@ func (p *PoolImpl) Loop(ctx context.Context, send *Send, timings Timings) {
 	broadcastLocalTransactionsEvery := time.NewTicker(timings.broadcastLocalTransactionsEvery)
 	defer broadcastLocalTransactionsEvery.Stop()
 
-	localTxHashes := make([][32]byte, 128)
-	remoteTxHashes := make([][32]byte, 128)
+	localTxHashes := make([]byte, 0, 128)
+	remoteTxHashes := make([]byte, 0, 128)
 
 	for {
 		select {
@@ -95,10 +95,10 @@ func (p *PoolImpl) Loop(ctx context.Context, send *Send, timings Timings) {
 	}
 }
 
-func (p *PoolImpl) FillLocalHashesSince(since time.Time, to [][32]byte)  {}
-func (p *PoolImpl) FillRemoteHashesSince(since time.Time, to [][32]byte) {}
-func (p *PoolImpl) FillLocalHashes(to [][32]byte)                        {}
-func (p *PoolImpl) FillRemoteHashes(to [][32]byte)                       {}
+func (p *PoolImpl) FillLocalHashesSince(since time.Time, to []byte)  {}
+func (p *PoolImpl) FillRemoteHashesSince(since time.Time, to []byte) {}
+func (p *PoolImpl) FillLocalHashes(to []byte)                        {}
+func (p *PoolImpl) FillRemoteHashes(to []byte)                       {}
 
 // recentlyConnectedPeers does buffer IDs of recently connected good peers
 // then sync of pooled Transaction can happen to all of then at once
