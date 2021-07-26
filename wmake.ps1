@@ -56,7 +56,7 @@ if ($BuildTargets.Count -gt 1) {
 $headerText = @"
 
  ------------------------------------------------------------------------------
-  Erigon's wmake.ps1 : Selected target $($BuildTarget)
+  Erigon's wmake.ps1 : Selected target(s) $($BuildTargets -join " ")
  ------------------------------------------------------------------------------
  
 "@
