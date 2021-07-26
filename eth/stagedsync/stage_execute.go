@@ -45,16 +45,16 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type ExecuteBlockCfg struct {
-	db            ethdb.RwKV
-	batchSize     datasize.ByteSize
-	prune         prune.Mode
-	changeSetHook ChangeSetHook
-	chainConfig   *params.ChainConfig
-	engine        consensus.Engine
-	vmConfig      *vm.Config
-	tmpdir        string
-	stateStream   bool
-	accumulator   *shards.Accumulator
+	db                      ethdb.RwKV
+	batchSize               datasize.ByteSize
+	prune                   prune.Mode
+	changeSetHook           ChangeSetHook
+	chainConfig             *params.ChainConfig
+	engine                  consensus.Engine
+	vmConfig                *vm.Config
+	tmpdir                  string
+	stateStream             bool
+	accumulator             *shards.Accumulator
 	stateSnapshotGeneration bool
 }
 
@@ -72,16 +72,16 @@ func StageExecuteBlocksCfg(
 	stateSnapshotGeneration bool,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:            kv,
-		prune:         prune,
-		batchSize:     batchSize,
-		changeSetHook: changeSetHook,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		vmConfig:      vmConfig,
-		tmpdir:        tmpdir,
-		accumulator:   accumulator,
-		stateStream:   stateStream,
+		db:                      kv,
+		prune:                   prune,
+		batchSize:               batchSize,
+		changeSetHook:           changeSetHook,
+		chainConfig:             chainConfig,
+		engine:                  engine,
+		vmConfig:                vmConfig,
+		tmpdir:                  tmpdir,
+		accumulator:             accumulator,
+		stateStream:             stateStream,
 		stateSnapshotGeneration: stateSnapshotGeneration,
 	}
 }
@@ -288,7 +288,7 @@ Loop:
 		}
 
 		if snapshotsync.IsSnapshotBlock(blockNum, snapshotsync.EpochSize) &&
-			prevStageProgress - blockNum < snapshotsync.EpochSize &&
+			prevStageProgress-blockNum < snapshotsync.EpochSize &&
 			cfg.stateSnapshotGeneration {
 			if err = batch.Commit(); err != nil {
 				return err
@@ -300,12 +300,12 @@ Loop:
 			if err = tx.Commit(); err != nil {
 				return err
 			}
-			if cfg.db.(*kv.SnapshotKV).TempDB()!=nil {
+			if cfg.db.(*kv.SnapshotKV).TempDB() != nil {
 				log.Error("Unexpected tmp db")
 			}
 
-			tmpDB,err:=snapshotsync.CreateStateSnapshotTmpDB(ctx, cfg.tmpdir, block.Hash())
-			if err!=nil {
+			tmpDB, err := snapshotsync.CreateStateSnapshotTmpDB(ctx, cfg.tmpdir, block.Hash())
+			if err != nil {
 				return err
 			}
 			//todo[Boris]: remove PlainContractCodeBucket
@@ -491,7 +491,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		return fmt.Errorf("getting rewind data: %w", errRewind)
 	}
 
-	loadFunc:=func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	loadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
 			if len(v) > 0 {
 				var acc accounts.Account
@@ -560,14 +560,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		return nil
 	}
 
-	snapshotBlock:=snapshotsync.CurrentStateSnapshotBlock(s.BlockNumber, snapshotsync.EpochSize)
+	snapshotBlock := snapshotsync.CurrentStateSnapshotBlock(s.BlockNumber, snapshotsync.EpochSize)
 	if !(cfg.stateSnapshotGeneration && (s.BlockNumber >= snapshotBlock && u.UnwindPoint < snapshotBlock)) {
 		if err := changes.Load(logPrefix, tx, stateBucket, loadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
 	} else {
 		err := tx.Commit()
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 		go func() {

@@ -22,7 +22,7 @@ var (
 			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
 		},
 		SnapshotType_state: {
-			dbutils.PlainStateBucket: dbutils.BucketsConfigs[dbutils.PlainStateBucket],
+			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
 			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
 			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
 		},

@@ -243,8 +243,7 @@ func NewStagedSync2(
 				accumulator,
 				cfg.StateStream,
 				tmpdir,
-				cfg.Snapshot.Enabled&&cfg.Snapshot.Mode.State,
-
+				cfg.Snapshot.Enabled && cfg.Snapshot.Mode.State,
 			),
 			stagedsync.StageTranspileCfg(
 				db,

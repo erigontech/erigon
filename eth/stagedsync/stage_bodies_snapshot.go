@@ -9,7 +9,7 @@ import (
 )
 
 type SnapshotBodiesCfg struct {
-	enabled			bool
+	enabled          bool
 	db               ethdb.RwKV
 	snapshotDir      string
 	tmpDir           string
@@ -19,7 +19,7 @@ type SnapshotBodiesCfg struct {
 
 func StageSnapshotBodiesCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, tmpDir string) SnapshotBodiesCfg {
 	return SnapshotBodiesCfg{
-		enabled: snapshot.Enabled && snapshot.Mode.Bodies,
+		enabled:          snapshot.Enabled && snapshot.Mode.Bodies,
 		db:               db,
 		snapshotDir:      snapshot.Dir,
 		client:           client,

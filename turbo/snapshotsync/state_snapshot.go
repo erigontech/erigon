@@ -9,14 +9,14 @@ import (
 	"os"
 )
 
-func CreateStateSnapshotTmpDB(ctx context.Context, snapshotPath string, blockHash common.Hash) (ethdb.RwKV,error) {
+func CreateStateSnapshotTmpDB(ctx context.Context, snapshotPath string, blockHash common.Hash) (ethdb.RwKV, error) {
 	// remove created snapshot if it's not saved in main db(to avoid append error)
-	err := os.RemoveAll(snapshotPath+blockHash.String())
+	err := os.RemoveAll(snapshotPath + blockHash.String())
 	if err != nil {
 		return nil, err
 	}
 
-	return  kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	return kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 		return BucketConfigs[SnapshotType_state]
 	}).Path(snapshotPath).Open()
 }

@@ -116,7 +116,7 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle, )
+				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				return UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle)
