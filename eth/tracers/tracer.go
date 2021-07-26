@@ -584,8 +584,6 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 				return err1
 			}
 			jst.ctx["intrinsicGas"] = intrinsicGas
-			jst.ctx["gasPrice"] = env.TxContext.GasPrice
-
 			jst.inited = true
 		}
 		// If tracing was interrupted, set the error and stop
