@@ -83,7 +83,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, cfg Trans
 	for stageProgress <= toBlock {
 		stageProgress, err = transpileBatch(logPrefix, stageProgress, to, cfg, tx, observedAddresses, observedCodeHashes, ctx.Done())
 		if err != nil {
-			return fmt.Errorf("[%s] %w", logPrefix, err)
+			return err
 		}
 	}
 
@@ -341,13 +341,12 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Tran
 		}
 	}
 
-	logPrefix := s.LogPrefix()
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil
@@ -368,10 +367,9 @@ func PruneTranspileStage(p *PruneState, tx ethdb.RwTx, cfg TranspileCfg, initial
 		defer tx.Rollback()
 	}
 
-	logPrefix := p.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

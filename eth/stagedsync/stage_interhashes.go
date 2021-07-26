@@ -412,7 +412,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx,
 		return err
 	}
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %w", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -454,7 +454,7 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return err
 	}
 	if hash != expectedRootHash {
-		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {

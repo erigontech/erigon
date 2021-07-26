@@ -42,7 +42,7 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 	logPrefix := s.LogPrefix()
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	if s.BlockNumber == to {
@@ -59,11 +59,11 @@ func SpawnHashStateStage(s *StageState, tx ethdb.RwTx, cfg HashStateCfg, ctx con
 	}
 	if s.BlockNumber == 0 { // Initial hashing of the state is performed at the previous stage
 		if err := PromoteHashedStateCleanly(logPrefix, tx, cfg, ctx.Done()); err != nil {
-			return fmt.Errorf("[%s] %w", logPrefix, err)
+			return err
 		}
 	} else {
 		if err := promoteHashedStateIncrementally(logPrefix, s, s.BlockNumber, to, tx, cfg, ctx.Done()); err != nil {
-			return fmt.Errorf("[%s] %w", logPrefix, err)
+			return err
 		}
 	}
 
@@ -91,10 +91,10 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Hash
 
 	logPrefix := u.LogPrefix()
 	if err = unwindHashStateStageImpl(logPrefix, u, s, tx, cfg, ctx.Done()); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

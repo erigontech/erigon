@@ -82,7 +82,7 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(tx, blockHash, blocknum)
 		if body == nil {
-			return fmt.Errorf("%s: tx lookup generation, empty block body %d, hash %x", logPrefix, blocknum, v)
+			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
 		}
 
 		for _, txn := range body.Transactions {
@@ -136,7 +136,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
 		if err := rlp.Decode(reader, body); err != nil {
-			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
+			return fmt.Errorf("rlp decode err: %w", err)
 		}
 
 		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
@@ -199,7 +199,7 @@ func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, s *PruneState, prune
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
 		if err := rlp.Decode(reader, body); err != nil {
-			return fmt.Errorf("%s, rlp decode err: %w", logPrefix, err)
+			return fmt.Errorf("rlp decode: %w", err)
 		}
 
 		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)

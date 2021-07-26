@@ -65,7 +65,7 @@ func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 	}
 	logPrefix := s.LogPrefix()
 	if err != nil {
-		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	if endBlock == s.BlockNumber {
 		return nil
@@ -102,7 +102,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 
 	traceCursor, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
-		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
+		return fmt.Errorf("failed to create cursor: %w", err)
 	}
 	defer traceCursor.Close()
 
@@ -117,7 +117,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 			break
 		}
 		if len(v) != common.AddressLength+1 {
-			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
+			return fmt.Errorf(" wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 		}
 		mapKey := string(v[:common.AddressLength])
 		if v[common.AddressLength]&1 > 0 {
@@ -151,7 +151,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		case <-checkFlushEvery.C:
 			if needFlush64(froms, bufLimit) {
 				if err := flushBitmaps64(collectorFrom, froms); err != nil {
-					return fmt.Errorf("[%s] %w", logPrefix, err)
+					return err
 				}
 
 				froms = map[string]*roaring64.Bitmap{}
@@ -159,7 +159,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 
 			if needFlush64(tos, bufLimit) {
 				if err := flushBitmaps64(collectorTo, tos); err != nil {
-					return fmt.Errorf("[%s] %w", logPrefix, err)
+					return err
 				}
 
 				tos = map[string]*roaring64.Bitmap{}
@@ -194,7 +194,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 				"sys", common.StorageSize(m.Sys))
 		}
 		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
+			return fmt.Errorf("remove trace call set for block %d: %w", blockNum, err)
 		}
 		if blockNum < prunedMin {
 			prunedMin = blockNum
@@ -207,7 +207,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
 	}
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 	return nil
 }
@@ -276,16 +276,16 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTrac
 
 	logPrefix := u.LogPrefix()
 	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, ctx, cfg); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: %w", logPrefix, err)
+		return err
 	}
 
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("[%s] %w", logPrefix, err)
+			return err
 		}
 	}
 
@@ -301,7 +301,7 @@ func DoUnwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, ctx co
 
 	traceCursor, err := db.RwCursorDupSort(dbutils.CallTraceSet)
 	if err != nil {
-		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
+		return fmt.Errorf("create cursor for call traces: %w", err)
 	}
 	defer traceCursor.Close()
 
@@ -316,7 +316,7 @@ func DoUnwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, ctx co
 			break
 		}
 		if len(v) != common.AddressLength+1 {
-			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
+			return fmt.Errorf("wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 		}
 		mapKey := string(v[:common.AddressLength])
 		if v[common.AddressLength]&1 > 0 {
@@ -446,7 +446,7 @@ func pruneCallTraces(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, ct
 	{
 		traceCursor, err := tx.CursorDupSort(dbutils.CallTraceSet)
 		if err != nil {
-			return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
+			return fmt.Errorf("create cursor for call traces: %w", err)
 		}
 		defer traceCursor.Close()
 
@@ -460,7 +460,7 @@ func pruneCallTraces(tx ethdb.RwTx, logPrefix, tmpDir string, pruneTo uint64, ct
 				break
 			}
 			if len(v) != common.AddressLength+1 {
-				return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
+				return fmt.Errorf("wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 			}
 			mapKey := string(v[:common.AddressLength])
 			if v[common.AddressLength]&1 > 0 {

@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -122,7 +123,7 @@ func TestErroredStage(t *testing.T) {
 	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
-	assert.Equal(t, expectedErr, err)
+	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedFlow := []stages.SyncStage{
 		stages.Headers, stages.Bodies,
@@ -501,7 +502,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 	state := New(s, nil, nil)
 	db, tx := kv.NewTestTx(t)
 	err := state.Run(db, tx, true)
-	assert.Equal(t, expectedErr, err)
+	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedErr = nil
 

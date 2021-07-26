@@ -59,7 +59,7 @@ func SpawnLogIndex(s *StageState, tx ethdb.RwTx, cfg LogIndexCfg, ctx context.Co
 	endBlock, err := s.ExecutionAt(tx)
 	logPrefix := s.LogPrefix()
 	if err != nil {
-		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	if endBlock == s.BlockNumber {
 		return nil
@@ -147,7 +147,7 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndex
 		var ll types.Logs
 		reader.Reset(v)
 		if err := cbor.Unmarshal(&ll, reader); err != nil {
-			return fmt.Errorf("%s: receipt unmarshal failed: %w, blocl=%d", logPrefix, err, blockNum)
+			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
 		}
 
 		for _, l := range ll {
@@ -188,14 +188,14 @@ func promoteLogIndex(logPrefix string, tx ethdb.RwTx, start uint64, cfg LogIndex
 		binary.BigEndian.PutUint32(lastChunkKey[len(k):], ^uint32(0))
 		lastChunkBytes, err := table.Get(lastChunkKey)
 		if err != nil {
-			return fmt.Errorf("%s: find last chunk failed: %w", logPrefix, err)
+			return fmt.Errorf("find last chunk: %w", err)
 		}
 
 		lastChunk := roaring.New()
 		if len(lastChunkBytes) > 0 {
 			_, err = lastChunk.FromBuffer(lastChunkBytes)
 			if err != nil {
-				return fmt.Errorf("%s: couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", logPrefix, err, len(lastChunkBytes))
+				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}
 		}
 
@@ -240,7 +240,7 @@ func UnwindLogIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg LogIndexCf
 	}
 
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: %w", logPrefix, err)
+		return fmt.Errorf("%w", err)
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -271,7 +271,7 @@ func unwindLogIndex(logPrefix string, db ethdb.RwTx, to uint64, cfg LogIndexCfg,
 		var logs types.Logs
 		reader.Reset(v)
 		if err := cbor.Unmarshal(&logs, reader); err != nil {
-			return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
+			return fmt.Errorf("receipt unmarshal: %w, block=%d", err, binary.BigEndian.Uint64(k))
 		}
 
 		for _, l := range logs {
@@ -435,7 +435,7 @@ func pruneLogIndex(logPrefix string, tx ethdb.RwTx, tmpDir string, pruneTo uint6
 			var logs types.Logs
 			reader.Reset(v)
 			if err := cbor.Unmarshal(&logs, reader); err != nil {
-				return fmt.Errorf("%s: receipt unmarshal failed: %w, block=%d", logPrefix, err, binary.BigEndian.Uint64(k))
+				return fmt.Errorf("receipt unmarshal failed: %w, block=%d", err, binary.BigEndian.Uint64(k))
 			}
 
 			for _, l := range logs {

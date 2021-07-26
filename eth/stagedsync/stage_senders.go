@@ -333,13 +333,12 @@ func UnwindSendersStage(s *UnwindState, tx ethdb.RwTx, cfg SendersCfg, ctx conte
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
 	if err = s.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil
@@ -355,10 +354,9 @@ func PruneSendersStage(s *PruneState, tx ethdb.RwTx, cfg SendersCfg, ctx context
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

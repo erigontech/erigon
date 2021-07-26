@@ -305,7 +305,7 @@ func (s *Sync) runStage(stage *Stage, db ethdb.RwKV, tx ethdb.RwTx, firstCycle b
 	}
 
 	if err = stage.Forward(firstCycle, stageState, s, tx); err != nil {
-		return err
+		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
 	t := time.Since(start)
@@ -337,7 +337,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethd
 
 	err = stage.Unwind(firstCycle, unwind, stageState, tx)
 	if err != nil {
-		return err
+		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
 	took := time.Since(t)
@@ -368,7 +368,7 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db ethdb.RwKV, tx ethdb
 
 	err = stage.Prune(firstCycle, prune, tx)
 	if err != nil {
-		return err
+		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
 	took := time.Since(t)
