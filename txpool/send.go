@@ -188,7 +188,6 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 			}
 		}
 	}
-	return
 }
 
 func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
@@ -248,5 +247,4 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 			}
 		}
 	}
-	return
 }
