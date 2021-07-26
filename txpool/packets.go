@@ -82,20 +82,21 @@ func ParseHashesCount(payload []byte, pos int) (int, int, error) {
 // there is there is enough capacity.
 // The first returned value is the slice where encodinfg
 func EncodeHashes(hashes Hashes, encodeBuf []byte) ([]byte, error) {
-	dataLen := len(hashes) / 32 * 33
-	prefixLen := rlpListPrefixLen(dataLen)
+	hashesLen := len(hashes) / 32 * 33
+	dataLen := hashesLen
+	prefixLen := rlpListPrefixLen(hashesLen)
 	var encoding []byte
-	if total := dataLen + prefixLen; cap(encodeBuf) >= total {
+	if total := prefixLen + dataLen; cap(encodeBuf) >= total {
 		encoding = encodeBuf[:total] // Reuse the space in pkbuf, is it has enough capacity
 	} else {
 		encoding = make([]byte, total)
 		copy(encoding, encodeBuf)
 	}
-	rlpListPrefix(dataLen, encoding)
-	encP := prefixLen
+	rlpListPrefix(hashesLen, encoding)
+	pos := prefixLen
 	for i := 0; i < len(hashes); i += 32 {
-		rlpEncodeString(hashes[i:i+32], encoding[encP:])
-		encP += 33
+		rlpEncodeHash(hashes[i:i+32], encoding[pos:])
+		pos += 33
 	}
 	return encoding, nil
 }
@@ -125,14 +126,6 @@ func rlpU64Len(i uint64) int {
 }
 
 func rlpU64(i uint64, to []byte) {
-	/*
-		if requestId == 0 || requestId > 128 {
-			encoding[pos] = 128 + byte(requestIdLen)
-		} else {
-			encoding[pos] = byte(requestId)
-		}
-	*/
-
 	if i > 128 {
 		l := (bits.Len64(i) + 7) / 8
 		to[0] = 128 + byte(l)
@@ -145,18 +138,6 @@ func rlpU64(i uint64, to []byte) {
 		return
 	}
 	to[0] = byte(i)
-	return
-
-	//if i == 0 {
-	//	w.str = append(w.str, 0x80)
-	//} else if i < 128 {
-	//w.str = append(w.str, byte(i))
-	//} else {
-	//	s := putint(w.sizebuf[1:], i)
-	//	w.sizebuf[0] = 0x80 + byte(s)
-	//	w.str = append(w.str, w.sizebuf[:s+1]...)
-	//}
-
 }
 
 func rlpEncodeString(s []byte, to []byte) {
@@ -193,20 +174,12 @@ func rlpEncodeHash(h, to []byte) {
 
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
 func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []byte) ([]byte, error) {
-	requestIdLen := (bits.Len64(requestId) + 7) / 8
 	hashesLen := len(hashes) / 32 * 33
-	var hashesBeLen int
-	if hashesLen >= 56 {
-		hashesBeLen = (bits.Len64(uint64(hashesLen)) + 7) / 8
-	}
-	dataLen := requestIdLen + hashesLen + 1 + hashesBeLen
-	if requestId == 0 || requestId >= 128 {
-		dataLen++
-	}
+	dataLen := rlpListPrefixLen(hashesLen) + hashesLen + rlpU64Len(requestId)
 	prefixLen := rlpListPrefixLen(dataLen)
 	var encoding []byte
 	if total := dataLen + prefixLen; cap(encodeBuf) >= total {
-		encoding = encodeBuf[:dataLen+prefixLen] // Reuse the space in pkbuf, is it has enough capacity
+		encoding = encodeBuf[:total] // Reuse the space in pkbuf, is it has enough capacity
 	} else {
 		encoding = make([]byte, total)
 		copy(encoding, encodeBuf)
@@ -216,18 +189,6 @@ func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []
 	pos := prefixLen
 	// encode requestId
 	rlpU64(requestId, encoding[pos:])
-	//if requestId == 0 || requestId > 128 {
-	//	encoding[pos] = 128 + byte(requestIdLen)
-	//} else {
-	//	encoding[pos] = byte(requestId)
-	//}
-	//pos++
-	if requestId > 128 {
-		//binary.BigEndian.PutUint64(encoding[pos:], requestId)
-		//copy(encoding[pos:], encoding[pos+8-requestIdLen:pos+8])
-		//pos += requestIdLen
-	}
-	fmt.Printf("aa: %d,%d,%d\n", requestId, rlpU64Len(requestId), requestIdLen)
 	pos += rlpU64Len(requestId)
 	// Encode length prefix for hashes
 	rlpListPrefix(hashesLen, encoding[pos:])
