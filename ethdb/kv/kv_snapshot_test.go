@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -1072,7 +1073,8 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 
 	}
 }
-func TestPlainStateProxy(t *testing.T) {
+
+func TestTempDBForState(t *testing.T) {
 	snapshotData := []KvData{
 		{K: []byte{1}, V: []byte{1}},
 		{K: []byte{2}, V: []byte{2}},
@@ -1212,6 +1214,116 @@ func TestPlainStateProxy(t *testing.T) {
 
 	require.Equal(t, writeDBData, writeDBResult)
 
+}
+
+func TestTempDBReplace(t *testing.T) {
+	snapshotData := []KvData{
+		{K: []byte{1}, V: []byte{1}},
+		{K: []byte{2}, V: []byte{2}},
+	}
+
+	writeDBData := []KvData{
+		{K: []byte{3}, V: []byte{3}},
+	}
+
+	tmpDBData := []KvData{
+		{K: []byte{4}, V: []byte{4}},
+	}
+
+	snapshotDB, err := GenStateData(snapshotData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainDB := NewTestKV(t)
+	kv := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
+		Open()
+	err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		c, err := tx.RwCursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
+		for i := range writeDBData {
+			innerErr := c.Put(writeDBData[i].K, writeDBData[i].V)
+			if innerErr != nil {
+				return innerErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmpDB := NewTestKV(t)
+	kv.SetTempDB(tmpDB, []string{dbutils.PlainStateBucket})
+
+	nonStateKey := []byte{11}
+	nonStateValue := []byte{99}
+
+	err = kv.Update(context.Background(), func(tx ethdb.RwTx) error {
+		err = tx.Put(dbutils.BlockBodyPrefix, nonStateKey, nonStateValue)
+		if err != nil {
+			return err
+		}
+
+		c, err := tx.RwCursor(dbutils.PlainStateBucket)
+		if err != nil {
+			return err
+		}
+		for i := range tmpDBData {
+			innerErr := c.Put(tmpDBData[i].K, tmpDBData[i].V)
+			if innerErr != nil {
+				return innerErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := kv.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		//wait until we start gorutine
+		wg.Done()
+		kv.TempDB().Close()
+		wg.Done()
+	}()
+	wg.Wait()
+	wg.Add(1)
+	err = tx.Commit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	//wait until we close db
+	wg.Wait()
+	kv.SetTempDB(nil, nil)
+	fullStateResult := []KvData{}
+	err = kv.View(context.Background(), func(tx ethdb.Tx) error {
+		v, err := tx.GetOne(dbutils.BlockBodyPrefix, nonStateKey)
+		if err != nil {
+			t.Error(err)
+		}
+		if !bytes.Equal(v, nonStateValue) {
+			t.Error(v, nonStateValue)
+		}
+
+		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			fullStateResult = append(fullStateResult, KvData{
+				K: k,
+				V: v,
+			})
+			return nil
+		})
+	})
+
+	fullStateExpected := append(snapshotData, writeDBData...)
+	require.Equal(t, fullStateExpected, fullStateResult)
 }
 
 func printBucket(kv ethdb.RoKV, bucket string) {
