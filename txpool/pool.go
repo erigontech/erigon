@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"go.uber.org/zap"
 )
 
 // Pool is interface for the transaction pool
@@ -37,6 +38,7 @@ type Pool interface {
 type PoolImpl struct {
 	recentlyConnectedPeers     *recentlyConnectedPeers
 	lastTxPropagationTimestamp time.Time
+	logger                     *zap.SugaredLogger
 }
 
 func NewPool() *PoolImpl {
@@ -76,7 +78,13 @@ func (p *PoolImpl) Loop(ctx context.Context, send *Send, timings Timings) {
 			// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
 			localTxHashes = localTxHashes[:0]
 			p.FillLocalHashesSince(last, localTxHashes)
-			send.BroadcastLocalPooledTxs(localTxHashes)
+			initialAmount := len(localTxHashes)
+			sentToPeers := send.BroadcastLocalPooledTxs(localTxHashes)
+			if initialAmount == 1 {
+				p.logger.Infof("local tx %x, propagated to %d peers", localTxHashes, sentToPeers)
+			} else {
+				p.logger.Infof("%d local txs propagated to %d peers", initialAmount, sentToPeers)
+			}
 
 			remoteTxHashes = remoteTxHashes[:0]
 			p.FillRemoteHashesSince(last, remoteTxHashes)

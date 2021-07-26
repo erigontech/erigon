@@ -25,7 +25,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,22 +41,20 @@ func TestFetch(t *testing.T) {
 	var networkId uint64 = 1
 	forks := []uint64{1, 5, 10}
 
-	mock := NewMockSentry(ctx)
-	sentryClient := direct.NewSentryClientDirect(direct.ETH66, mock)
-	pool := &PoolMock{
-		IdHashKnownFunc: func(hash []byte) bool { return false },
-	}
+	m := NewMockSentry(ctx)
+	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
+	pool := &PoolMock{}
 
 	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, logger)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
-	mock.StreamWg.Add(2)
+	m.StreamWg.Add(2)
 	fetch.Start()
-	mock.StreamWg.Wait()
+	m.StreamWg.Wait()
 	// Send one transaction id
 	wg.Add(1)
 	data, _ := hex.DecodeString("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328")
-	errs := mock.Send(&sentry.InboundMessage{
+	errs := m.Send(&sentry.InboundMessage{
 		Id:     sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 		Data:   data,
 		PeerId: PeerId,
@@ -65,6 +65,7 @@ func TestFetch(t *testing.T) {
 		}
 	}
 	wg.Wait()
+
 }
 
 func TestSendTxPropagate(t *testing.T) {
@@ -72,14 +73,18 @@ func TestSendTxPropagate(t *testing.T) {
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
-	t.Run("small message", func(t *testing.T) {
+	t.Run("few remote txs", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
 		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
-		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, m.sentMessages[0].Id)
-		require.Equal(t, 68, len(m.sentMessages[0].Data))
+
+		calls := m.SendMessageToRandomPeersCalls()
+		assert.Equal(t, 1, len(calls))
+		first := calls[0].SendMessageToRandomPeersRequest.Data
+		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, first.Id)
+		require.Equal(t, 68, len(first.Data))
 	})
-	t.Run("slice large messages", func(t *testing.T) {
+	t.Run("much remote txs", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
 		list := make(Hashes, p2pTxPacketLimit*3)
@@ -88,10 +93,28 @@ func TestSendTxPropagate(t *testing.T) {
 			copy(list[i:i+32], b)
 		}
 		send.BroadcastRemotePooledTxs(list)
-		require.Equal(t, 3, len(m.sentMessages))
+		calls := m.SendMessageToRandomPeersCalls()
+		require.Equal(t, 3, len(calls))
 		for i := 0; i < 3; i++ {
-			require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, m.sentMessages[i].Id)
-			require.Less(t, 0, len(m.sentMessages[i].Data))
+			call := calls[i].SendMessageToRandomPeersRequest.Data
+			require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, call.Id)
+			require.Less(t, 0, len(call.Data))
 		}
 	})
+	t.Run("few local txs", func(t *testing.T) {
+		m := NewMockSentry(ctx)
+		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
+			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
+		}
+		send := NewSend(ctx, []sentry.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send.BroadcastLocalPooledTxs(toHashes([32]byte{1}, [32]byte{42}))
+
+		calls := m.SendMessageToAllCalls()
+		assert.Equal(t, 1, len(calls))
+		first := calls[0].OutboundMessageData
+		require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, first.Id)
+		require.Equal(t, 68, len(first.Data))
+		t.Fail()
+	})
+
 }

@@ -184,9 +184,6 @@ type SentryServerMock struct {
 
 // Messages calls MessagesFunc.
 func (mock *SentryServerMock) Messages(messagesRequest *MessagesRequest, sentry_MessagesServer Sentry_MessagesServer) error {
-	if mock.MessagesFunc == nil {
-		panic("SentryServerMock.MessagesFunc: method is nil but SentryServer.Messages was just called")
-	}
 	callInfo := struct {
 		MessagesRequest       *MessagesRequest
 		Sentry_MessagesServer Sentry_MessagesServer
@@ -197,6 +194,12 @@ func (mock *SentryServerMock) Messages(messagesRequest *MessagesRequest, sentry_
 	mock.lockMessages.Lock()
 	mock.calls.Messages = append(mock.calls.Messages, callInfo)
 	mock.lockMessages.Unlock()
+	if mock.MessagesFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
 	return mock.MessagesFunc(messagesRequest, sentry_MessagesServer)
 }
 
@@ -219,9 +222,6 @@ func (mock *SentryServerMock) MessagesCalls() []struct {
 
 // PeerCount calls PeerCountFunc.
 func (mock *SentryServerMock) PeerCount(contextMoqParam context.Context, peerCountRequest *PeerCountRequest) (*PeerCountReply, error) {
-	if mock.PeerCountFunc == nil {
-		panic("SentryServerMock.PeerCountFunc: method is nil but SentryServer.PeerCount was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam  context.Context
 		PeerCountRequest *PeerCountRequest
@@ -232,6 +232,13 @@ func (mock *SentryServerMock) PeerCount(contextMoqParam context.Context, peerCou
 	mock.lockPeerCount.Lock()
 	mock.calls.PeerCount = append(mock.calls.PeerCount, callInfo)
 	mock.lockPeerCount.Unlock()
+	if mock.PeerCountFunc == nil {
+		var (
+			peerCountReplyOut *PeerCountReply
+			errOut            error
+		)
+		return peerCountReplyOut, errOut
+	}
 	return mock.PeerCountFunc(contextMoqParam, peerCountRequest)
 }
 
@@ -254,9 +261,6 @@ func (mock *SentryServerMock) PeerCountCalls() []struct {
 
 // PeerMinBlock calls PeerMinBlockFunc.
 func (mock *SentryServerMock) PeerMinBlock(contextMoqParam context.Context, peerMinBlockRequest *PeerMinBlockRequest) (*emptypb.Empty, error) {
-	if mock.PeerMinBlockFunc == nil {
-		panic("SentryServerMock.PeerMinBlockFunc: method is nil but SentryServer.PeerMinBlock was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam     context.Context
 		PeerMinBlockRequest *PeerMinBlockRequest
@@ -267,6 +271,13 @@ func (mock *SentryServerMock) PeerMinBlock(contextMoqParam context.Context, peer
 	mock.lockPeerMinBlock.Lock()
 	mock.calls.PeerMinBlock = append(mock.calls.PeerMinBlock, callInfo)
 	mock.lockPeerMinBlock.Unlock()
+	if mock.PeerMinBlockFunc == nil {
+		var (
+			emptyOut *emptypb.Empty
+			errOut   error
+		)
+		return emptyOut, errOut
+	}
 	return mock.PeerMinBlockFunc(contextMoqParam, peerMinBlockRequest)
 }
 
@@ -289,9 +300,6 @@ func (mock *SentryServerMock) PeerMinBlockCalls() []struct {
 
 // Peers calls PeersFunc.
 func (mock *SentryServerMock) Peers(peersRequest *PeersRequest, sentry_PeersServer Sentry_PeersServer) error {
-	if mock.PeersFunc == nil {
-		panic("SentryServerMock.PeersFunc: method is nil but SentryServer.Peers was just called")
-	}
 	callInfo := struct {
 		PeersRequest       *PeersRequest
 		Sentry_PeersServer Sentry_PeersServer
@@ -302,6 +310,12 @@ func (mock *SentryServerMock) Peers(peersRequest *PeersRequest, sentry_PeersServ
 	mock.lockPeers.Lock()
 	mock.calls.Peers = append(mock.calls.Peers, callInfo)
 	mock.lockPeers.Unlock()
+	if mock.PeersFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
 	return mock.PeersFunc(peersRequest, sentry_PeersServer)
 }
 
@@ -324,9 +338,6 @@ func (mock *SentryServerMock) PeersCalls() []struct {
 
 // PenalizePeer calls PenalizePeerFunc.
 func (mock *SentryServerMock) PenalizePeer(contextMoqParam context.Context, penalizePeerRequest *PenalizePeerRequest) (*emptypb.Empty, error) {
-	if mock.PenalizePeerFunc == nil {
-		panic("SentryServerMock.PenalizePeerFunc: method is nil but SentryServer.PenalizePeer was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam     context.Context
 		PenalizePeerRequest *PenalizePeerRequest
@@ -337,6 +348,13 @@ func (mock *SentryServerMock) PenalizePeer(contextMoqParam context.Context, pena
 	mock.lockPenalizePeer.Lock()
 	mock.calls.PenalizePeer = append(mock.calls.PenalizePeer, callInfo)
 	mock.lockPenalizePeer.Unlock()
+	if mock.PenalizePeerFunc == nil {
+		var (
+			emptyOut *emptypb.Empty
+			errOut   error
+		)
+		return emptyOut, errOut
+	}
 	return mock.PenalizePeerFunc(contextMoqParam, penalizePeerRequest)
 }
 
@@ -359,9 +377,6 @@ func (mock *SentryServerMock) PenalizePeerCalls() []struct {
 
 // SendMessageById calls SendMessageByIdFunc.
 func (mock *SentryServerMock) SendMessageById(contextMoqParam context.Context, sendMessageByIdRequest *SendMessageByIdRequest) (*SentPeers, error) {
-	if mock.SendMessageByIdFunc == nil {
-		panic("SentryServerMock.SendMessageByIdFunc: method is nil but SentryServer.SendMessageById was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam        context.Context
 		SendMessageByIdRequest *SendMessageByIdRequest
@@ -372,6 +387,13 @@ func (mock *SentryServerMock) SendMessageById(contextMoqParam context.Context, s
 	mock.lockSendMessageById.Lock()
 	mock.calls.SendMessageById = append(mock.calls.SendMessageById, callInfo)
 	mock.lockSendMessageById.Unlock()
+	if mock.SendMessageByIdFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageByIdFunc(contextMoqParam, sendMessageByIdRequest)
 }
 
@@ -394,9 +416,6 @@ func (mock *SentryServerMock) SendMessageByIdCalls() []struct {
 
 // SendMessageByMinBlock calls SendMessageByMinBlockFunc.
 func (mock *SentryServerMock) SendMessageByMinBlock(contextMoqParam context.Context, sendMessageByMinBlockRequest *SendMessageByMinBlockRequest) (*SentPeers, error) {
-	if mock.SendMessageByMinBlockFunc == nil {
-		panic("SentryServerMock.SendMessageByMinBlockFunc: method is nil but SentryServer.SendMessageByMinBlock was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam              context.Context
 		SendMessageByMinBlockRequest *SendMessageByMinBlockRequest
@@ -407,6 +426,13 @@ func (mock *SentryServerMock) SendMessageByMinBlock(contextMoqParam context.Cont
 	mock.lockSendMessageByMinBlock.Lock()
 	mock.calls.SendMessageByMinBlock = append(mock.calls.SendMessageByMinBlock, callInfo)
 	mock.lockSendMessageByMinBlock.Unlock()
+	if mock.SendMessageByMinBlockFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageByMinBlockFunc(contextMoqParam, sendMessageByMinBlockRequest)
 }
 
@@ -429,9 +455,6 @@ func (mock *SentryServerMock) SendMessageByMinBlockCalls() []struct {
 
 // SendMessageToAll calls SendMessageToAllFunc.
 func (mock *SentryServerMock) SendMessageToAll(contextMoqParam context.Context, outboundMessageData *OutboundMessageData) (*SentPeers, error) {
-	if mock.SendMessageToAllFunc == nil {
-		panic("SentryServerMock.SendMessageToAllFunc: method is nil but SentryServer.SendMessageToAll was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam     context.Context
 		OutboundMessageData *OutboundMessageData
@@ -442,6 +465,13 @@ func (mock *SentryServerMock) SendMessageToAll(contextMoqParam context.Context, 
 	mock.lockSendMessageToAll.Lock()
 	mock.calls.SendMessageToAll = append(mock.calls.SendMessageToAll, callInfo)
 	mock.lockSendMessageToAll.Unlock()
+	if mock.SendMessageToAllFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageToAllFunc(contextMoqParam, outboundMessageData)
 }
 
@@ -464,9 +494,6 @@ func (mock *SentryServerMock) SendMessageToAllCalls() []struct {
 
 // SendMessageToRandomPeers calls SendMessageToRandomPeersFunc.
 func (mock *SentryServerMock) SendMessageToRandomPeers(contextMoqParam context.Context, sendMessageToRandomPeersRequest *SendMessageToRandomPeersRequest) (*SentPeers, error) {
-	if mock.SendMessageToRandomPeersFunc == nil {
-		panic("SentryServerMock.SendMessageToRandomPeersFunc: method is nil but SentryServer.SendMessageToRandomPeers was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam                 context.Context
 		SendMessageToRandomPeersRequest *SendMessageToRandomPeersRequest
@@ -477,6 +504,13 @@ func (mock *SentryServerMock) SendMessageToRandomPeers(contextMoqParam context.C
 	mock.lockSendMessageToRandomPeers.Lock()
 	mock.calls.SendMessageToRandomPeers = append(mock.calls.SendMessageToRandomPeers, callInfo)
 	mock.lockSendMessageToRandomPeers.Unlock()
+	if mock.SendMessageToRandomPeersFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageToRandomPeersFunc(contextMoqParam, sendMessageToRandomPeersRequest)
 }
 
@@ -499,9 +533,6 @@ func (mock *SentryServerMock) SendMessageToRandomPeersCalls() []struct {
 
 // SetStatus calls SetStatusFunc.
 func (mock *SentryServerMock) SetStatus(contextMoqParam context.Context, statusData *StatusData) (*SetStatusReply, error) {
-	if mock.SetStatusFunc == nil {
-		panic("SentryServerMock.SetStatusFunc: method is nil but SentryServer.SetStatus was just called")
-	}
 	callInfo := struct {
 		ContextMoqParam context.Context
 		StatusData      *StatusData
@@ -512,6 +543,13 @@ func (mock *SentryServerMock) SetStatus(contextMoqParam context.Context, statusD
 	mock.lockSetStatus.Lock()
 	mock.calls.SetStatus = append(mock.calls.SetStatus, callInfo)
 	mock.lockSetStatus.Unlock()
+	if mock.SetStatusFunc == nil {
+		var (
+			setStatusReplyOut *SetStatusReply
+			errOut            error
+		)
+		return setStatusReplyOut, errOut
+	}
 	return mock.SetStatusFunc(contextMoqParam, statusData)
 }
 
@@ -534,14 +572,14 @@ func (mock *SentryServerMock) SetStatusCalls() []struct {
 
 // mustEmbedUnimplementedSentryServer calls mustEmbedUnimplementedSentryServerFunc.
 func (mock *SentryServerMock) mustEmbedUnimplementedSentryServer() {
-	if mock.mustEmbedUnimplementedSentryServerFunc == nil {
-		panic("SentryServerMock.mustEmbedUnimplementedSentryServerFunc: method is nil but SentryServer.mustEmbedUnimplementedSentryServer was just called")
-	}
 	callInfo := struct {
 	}{}
 	mock.lockmustEmbedUnimplementedSentryServer.Lock()
 	mock.calls.mustEmbedUnimplementedSentryServer = append(mock.calls.mustEmbedUnimplementedSentryServer, callInfo)
 	mock.lockmustEmbedUnimplementedSentryServer.Unlock()
+	if mock.mustEmbedUnimplementedSentryServerFunc == nil {
+		return
+	}
 	mock.mustEmbedUnimplementedSentryServerFunc()
 }
 
@@ -742,9 +780,6 @@ type SentryClientMock struct {
 
 // Messages calls MessagesFunc.
 func (mock *SentryClientMock) Messages(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error) {
-	if mock.MessagesFunc == nil {
-		panic("SentryClientMock.MessagesFunc: method is nil but SentryClient.Messages was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *MessagesRequest
@@ -757,6 +792,13 @@ func (mock *SentryClientMock) Messages(ctx context.Context, in *MessagesRequest,
 	mock.lockMessages.Lock()
 	mock.calls.Messages = append(mock.calls.Messages, callInfo)
 	mock.lockMessages.Unlock()
+	if mock.MessagesFunc == nil {
+		var (
+			sentry_MessagesClientOut Sentry_MessagesClient
+			errOut                   error
+		)
+		return sentry_MessagesClientOut, errOut
+	}
 	return mock.MessagesFunc(ctx, in, opts...)
 }
 
@@ -781,9 +823,6 @@ func (mock *SentryClientMock) MessagesCalls() []struct {
 
 // PeerCount calls PeerCountFunc.
 func (mock *SentryClientMock) PeerCount(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error) {
-	if mock.PeerCountFunc == nil {
-		panic("SentryClientMock.PeerCountFunc: method is nil but SentryClient.PeerCount was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *PeerCountRequest
@@ -796,6 +835,13 @@ func (mock *SentryClientMock) PeerCount(ctx context.Context, in *PeerCountReques
 	mock.lockPeerCount.Lock()
 	mock.calls.PeerCount = append(mock.calls.PeerCount, callInfo)
 	mock.lockPeerCount.Unlock()
+	if mock.PeerCountFunc == nil {
+		var (
+			peerCountReplyOut *PeerCountReply
+			errOut            error
+		)
+		return peerCountReplyOut, errOut
+	}
 	return mock.PeerCountFunc(ctx, in, opts...)
 }
 
@@ -820,9 +866,6 @@ func (mock *SentryClientMock) PeerCountCalls() []struct {
 
 // PeerMinBlock calls PeerMinBlockFunc.
 func (mock *SentryClientMock) PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	if mock.PeerMinBlockFunc == nil {
-		panic("SentryClientMock.PeerMinBlockFunc: method is nil but SentryClient.PeerMinBlock was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *PeerMinBlockRequest
@@ -835,6 +878,13 @@ func (mock *SentryClientMock) PeerMinBlock(ctx context.Context, in *PeerMinBlock
 	mock.lockPeerMinBlock.Lock()
 	mock.calls.PeerMinBlock = append(mock.calls.PeerMinBlock, callInfo)
 	mock.lockPeerMinBlock.Unlock()
+	if mock.PeerMinBlockFunc == nil {
+		var (
+			emptyOut *emptypb.Empty
+			errOut   error
+		)
+		return emptyOut, errOut
+	}
 	return mock.PeerMinBlockFunc(ctx, in, opts...)
 }
 
@@ -859,9 +909,6 @@ func (mock *SentryClientMock) PeerMinBlockCalls() []struct {
 
 // Peers calls PeersFunc.
 func (mock *SentryClientMock) Peers(ctx context.Context, in *PeersRequest, opts ...grpc.CallOption) (Sentry_PeersClient, error) {
-	if mock.PeersFunc == nil {
-		panic("SentryClientMock.PeersFunc: method is nil but SentryClient.Peers was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *PeersRequest
@@ -874,6 +921,13 @@ func (mock *SentryClientMock) Peers(ctx context.Context, in *PeersRequest, opts 
 	mock.lockPeers.Lock()
 	mock.calls.Peers = append(mock.calls.Peers, callInfo)
 	mock.lockPeers.Unlock()
+	if mock.PeersFunc == nil {
+		var (
+			sentry_PeersClientOut Sentry_PeersClient
+			errOut                error
+		)
+		return sentry_PeersClientOut, errOut
+	}
 	return mock.PeersFunc(ctx, in, opts...)
 }
 
@@ -898,9 +952,6 @@ func (mock *SentryClientMock) PeersCalls() []struct {
 
 // PenalizePeer calls PenalizePeerFunc.
 func (mock *SentryClientMock) PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	if mock.PenalizePeerFunc == nil {
-		panic("SentryClientMock.PenalizePeerFunc: method is nil but SentryClient.PenalizePeer was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *PenalizePeerRequest
@@ -913,6 +964,13 @@ func (mock *SentryClientMock) PenalizePeer(ctx context.Context, in *PenalizePeer
 	mock.lockPenalizePeer.Lock()
 	mock.calls.PenalizePeer = append(mock.calls.PenalizePeer, callInfo)
 	mock.lockPenalizePeer.Unlock()
+	if mock.PenalizePeerFunc == nil {
+		var (
+			emptyOut *emptypb.Empty
+			errOut   error
+		)
+		return emptyOut, errOut
+	}
 	return mock.PenalizePeerFunc(ctx, in, opts...)
 }
 
@@ -937,9 +995,6 @@ func (mock *SentryClientMock) PenalizePeerCalls() []struct {
 
 // SendMessageById calls SendMessageByIdFunc.
 func (mock *SentryClientMock) SendMessageById(ctx context.Context, in *SendMessageByIdRequest, opts ...grpc.CallOption) (*SentPeers, error) {
-	if mock.SendMessageByIdFunc == nil {
-		panic("SentryClientMock.SendMessageByIdFunc: method is nil but SentryClient.SendMessageById was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *SendMessageByIdRequest
@@ -952,6 +1007,13 @@ func (mock *SentryClientMock) SendMessageById(ctx context.Context, in *SendMessa
 	mock.lockSendMessageById.Lock()
 	mock.calls.SendMessageById = append(mock.calls.SendMessageById, callInfo)
 	mock.lockSendMessageById.Unlock()
+	if mock.SendMessageByIdFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageByIdFunc(ctx, in, opts...)
 }
 
@@ -976,9 +1038,6 @@ func (mock *SentryClientMock) SendMessageByIdCalls() []struct {
 
 // SendMessageByMinBlock calls SendMessageByMinBlockFunc.
 func (mock *SentryClientMock) SendMessageByMinBlock(ctx context.Context, in *SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*SentPeers, error) {
-	if mock.SendMessageByMinBlockFunc == nil {
-		panic("SentryClientMock.SendMessageByMinBlockFunc: method is nil but SentryClient.SendMessageByMinBlock was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *SendMessageByMinBlockRequest
@@ -991,6 +1050,13 @@ func (mock *SentryClientMock) SendMessageByMinBlock(ctx context.Context, in *Sen
 	mock.lockSendMessageByMinBlock.Lock()
 	mock.calls.SendMessageByMinBlock = append(mock.calls.SendMessageByMinBlock, callInfo)
 	mock.lockSendMessageByMinBlock.Unlock()
+	if mock.SendMessageByMinBlockFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageByMinBlockFunc(ctx, in, opts...)
 }
 
@@ -1015,9 +1081,6 @@ func (mock *SentryClientMock) SendMessageByMinBlockCalls() []struct {
 
 // SendMessageToAll calls SendMessageToAllFunc.
 func (mock *SentryClientMock) SendMessageToAll(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error) {
-	if mock.SendMessageToAllFunc == nil {
-		panic("SentryClientMock.SendMessageToAllFunc: method is nil but SentryClient.SendMessageToAll was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *OutboundMessageData
@@ -1030,6 +1093,13 @@ func (mock *SentryClientMock) SendMessageToAll(ctx context.Context, in *Outbound
 	mock.lockSendMessageToAll.Lock()
 	mock.calls.SendMessageToAll = append(mock.calls.SendMessageToAll, callInfo)
 	mock.lockSendMessageToAll.Unlock()
+	if mock.SendMessageToAllFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageToAllFunc(ctx, in, opts...)
 }
 
@@ -1054,9 +1124,6 @@ func (mock *SentryClientMock) SendMessageToAllCalls() []struct {
 
 // SendMessageToRandomPeers calls SendMessageToRandomPeersFunc.
 func (mock *SentryClientMock) SendMessageToRandomPeers(ctx context.Context, in *SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*SentPeers, error) {
-	if mock.SendMessageToRandomPeersFunc == nil {
-		panic("SentryClientMock.SendMessageToRandomPeersFunc: method is nil but SentryClient.SendMessageToRandomPeers was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *SendMessageToRandomPeersRequest
@@ -1069,6 +1136,13 @@ func (mock *SentryClientMock) SendMessageToRandomPeers(ctx context.Context, in *
 	mock.lockSendMessageToRandomPeers.Lock()
 	mock.calls.SendMessageToRandomPeers = append(mock.calls.SendMessageToRandomPeers, callInfo)
 	mock.lockSendMessageToRandomPeers.Unlock()
+	if mock.SendMessageToRandomPeersFunc == nil {
+		var (
+			sentPeersOut *SentPeers
+			errOut       error
+		)
+		return sentPeersOut, errOut
+	}
 	return mock.SendMessageToRandomPeersFunc(ctx, in, opts...)
 }
 
@@ -1093,9 +1167,6 @@ func (mock *SentryClientMock) SendMessageToRandomPeersCalls() []struct {
 
 // SetStatus calls SetStatusFunc.
 func (mock *SentryClientMock) SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error) {
-	if mock.SetStatusFunc == nil {
-		panic("SentryClientMock.SetStatusFunc: method is nil but SentryClient.SetStatus was just called")
-	}
 	callInfo := struct {
 		Ctx  context.Context
 		In   *StatusData
@@ -1108,6 +1179,13 @@ func (mock *SentryClientMock) SetStatus(ctx context.Context, in *StatusData, opt
 	mock.lockSetStatus.Lock()
 	mock.calls.SetStatus = append(mock.calls.SetStatus, callInfo)
 	mock.lockSetStatus.Unlock()
+	if mock.SetStatusFunc == nil {
+		var (
+			setStatusReplyOut *SetStatusReply
+			errOut            error
+		)
+		return setStatusReplyOut, errOut
+	}
 	return mock.SetStatusFunc(ctx, in, opts...)
 }
 

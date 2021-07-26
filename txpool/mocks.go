@@ -55,9 +55,6 @@ type PoolMock struct {
 
 // IdHashKnown calls IdHashKnownFunc.
 func (mock *PoolMock) IdHashKnown(hash []byte) bool {
-	if mock.IdHashKnownFunc == nil {
-		panic("PoolMock.IdHashKnownFunc: method is nil but Pool.IdHashKnown was just called")
-	}
 	callInfo := struct {
 		Hash []byte
 	}{
@@ -66,6 +63,12 @@ func (mock *PoolMock) IdHashKnown(hash []byte) bool {
 	mock.lockIdHashKnown.Lock()
 	mock.calls.IdHashKnown = append(mock.calls.IdHashKnown, callInfo)
 	mock.lockIdHashKnown.Unlock()
+	if mock.IdHashKnownFunc == nil {
+		var (
+			bOut bool
+		)
+		return bOut
+	}
 	return mock.IdHashKnownFunc(hash)
 }
 
@@ -86,9 +89,6 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 
 // NotifyNewPeer calls NotifyNewPeerFunc.
 func (mock *PoolMock) NotifyNewPeer(peerID PeerID) {
-	if mock.NotifyNewPeerFunc == nil {
-		panic("PoolMock.NotifyNewPeerFunc: method is nil but Pool.NotifyNewPeer was just called")
-	}
 	callInfo := struct {
 		PeerID PeerID
 	}{
@@ -97,6 +97,9 @@ func (mock *PoolMock) NotifyNewPeer(peerID PeerID) {
 	mock.lockNotifyNewPeer.Lock()
 	mock.calls.NotifyNewPeer = append(mock.calls.NotifyNewPeer, callInfo)
 	mock.lockNotifyNewPeer.Unlock()
+	if mock.NotifyNewPeerFunc == nil {
+		return
+	}
 	mock.NotifyNewPeerFunc(peerID)
 }
 

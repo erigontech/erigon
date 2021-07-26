@@ -63,16 +63,14 @@ func (f *Send) notifyTests() {
 	}
 }
 
-func (f *Send) BroadcastLocalPooledTxs(txs Hashes) {
+func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 	defer f.notifyTests()
 	if len(txs) == 0 {
 		return
 	}
 
-	initialAmount := len(txs)
 	avgPeersPerSent65 := 0
 	avgPeersPerSent66 := 0
-	initialTxs := txs
 	for len(txs) > 0 {
 		var pending Hashes
 		if len(txs) > p2pTxPacketLimit {
@@ -123,15 +121,11 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) {
 					return
 				}
 				avgPeersPerSent66 += len(peers.Peers)
+				f.logger.Warnf("yay: %d", avgPeersPerSent66)
 			}
 		}
 	}
-	if initialAmount == 1 {
-		f.logger.Infof("local tx %x, propageted to %d peers", initialTxs, avgPeersPerSent65+avgPeersPerSent66)
-	} else {
-		f.logger.Infof("%d local txs propagated to %d peers", initialAmount, avgPeersPerSent65+avgPeersPerSent66)
-	}
-	return
+	return avgPeersPerSent65 + avgPeersPerSent66
 }
 
 func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
