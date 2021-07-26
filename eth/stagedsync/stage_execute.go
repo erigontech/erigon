@@ -486,10 +486,6 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 
 	changes := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer changes.Close(logPrefix)
-	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
-	if errRewind != nil {
-		return fmt.Errorf("getting rewind data: %w", errRewind)
-	}
 
 	loadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
@@ -562,6 +558,10 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 
 	snapshotBlock := snapshotsync.CurrentStateSnapshotBlock(s.BlockNumber, snapshotsync.EpochSize)
 	if !(cfg.stateSnapshotGeneration && (s.BlockNumber >= snapshotBlock && u.UnwindPoint < snapshotBlock)) {
+		errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
+		if errRewind != nil {
+			return fmt.Errorf("getting rewind data: %w", errRewind)
+		}
 		if err := changes.Load(logPrefix, tx, stateBucket, loadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
@@ -576,10 +576,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 		}()
 		cfg.db.(*kv.SnapshotKV).SetTempDB(nil, nil)
 		//todo[Boris] Add stateStream support
+		errRewind := changeset.RewindData(tx, snapshotBlock, u.UnwindPoint, changes, quit)
+		if errRewind != nil {
+			return fmt.Errorf("getting rewind data: %w", errRewind)
+		}
 		if err := changes.Load(logPrefix, tx, stateBucket, loadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 			return err
 		}
-
 	}
 
 	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
