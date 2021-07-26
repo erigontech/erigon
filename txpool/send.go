@@ -22,7 +22,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"go.uber.org/zap"
+	"github.com/ledgerwatch/erigon-lib/log"
 	"google.golang.org/grpc"
 )
 
@@ -38,11 +38,11 @@ type Send struct {
 	sentryClients []SentryClient // sentry clients that will be used for accessing the network
 	pool          Pool
 
-	logger *zap.SugaredLogger
+	logger log.Logger
 	wg     *sync.WaitGroup
 }
 
-func NewSend(ctx context.Context, sentryClients []SentryClient, pool Pool, logger *zap.SugaredLogger) *Send {
+func NewSend(ctx context.Context, sentryClients []SentryClient, pool Pool, logger log.Logger) *Send {
 	return &Send{
 		ctx:           ctx,
 		pool:          pool,
@@ -87,7 +87,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 
 		data, err := EncodeHashes(pending, len(pending)/32, nil)
 		if err != nil {
-			f.logger.Warn(err)
+			f.logger.Warnf("encode hashes: %s", err)
 			return
 		}
 		var req66, req65 *sentry.OutboundMessageData
@@ -106,7 +106,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req65, &grpc.EmptyCallOption{})
 				if err != nil {
-					f.logger.Warn(err)
+					f.logger.Warnf("sentry response: %s", err)
 				}
 				avgPeersPerSent65 += len(peers.Peers)
 
@@ -119,8 +119,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 				}
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
-					f.logger.Warn(err)
-					return
+					f.logger.Warnf("sentry response: %s", err)
 				}
 				avgPeersPerSent66 += len(peers.Peers)
 			}
@@ -148,7 +147,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 
 		data, err := EncodeHashes(pending, len(pending)/32, nil)
 		if err != nil {
-			f.logger.Warn(err)
+			f.logger.Warnf("encode hashes: %s", err)
 			return
 		}
 		var req66, req65 *sentry.SendMessageToRandomPeersRequest
@@ -170,7 +169,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 				}
 
 				if _, err = sentryClient.SendMessageToRandomPeers(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-					f.logger.Warn(err)
+					f.logger.Warnf("sentry response: %s", err)
 				}
 
 			case direct.ETH66:
@@ -184,7 +183,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 					}
 				}
 				if _, err = sentryClient.SendMessageToRandomPeers(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-					f.logger.Warn(err)
+					f.logger.Warnf("sentry response: %s", err)
 				}
 			}
 		}
@@ -211,7 +210,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 
 		data, err := EncodeHashes(pending, len(pending)/32, nil)
 		if err != nil {
-			f.logger.Warn(err)
+			f.logger.Warnf("encode hashes: %s", err)
 			return
 		}
 		for _, sentryClient := range f.sentryClients {
@@ -231,7 +230,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 					}
 
 					if _, err = sentryClient.SendMessageById(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-						f.logger.Warn(err)
+						f.logger.Warnf("sentry response: %s", err)
 					}
 
 				case direct.ETH66:
@@ -243,7 +242,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 						},
 					}
 					if _, err = sentryClient.SendMessageById(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-						f.logger.Warn(err)
+						f.logger.Warnf("sentry response: %s", err)
 					}
 				}
 			}

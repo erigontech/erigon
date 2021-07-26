@@ -27,7 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"go.uber.org/zap"
+	"github.com/ledgerwatch/erigon-lib/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -43,7 +43,7 @@ type Fetch struct {
 	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
 	pool          Pool                  // Transaction pool implementation
 	wg            *sync.WaitGroup       // Waitgroup used for synchronisation in the tests (nil when not in tests)
-	logger        *zap.SugaredLogger
+	logger        log.Logger
 }
 
 type Timings struct {
@@ -67,7 +67,7 @@ func NewFetch(ctx context.Context,
 	networkId uint64,
 	forks []uint64,
 	pool Pool,
-	logger *zap.SugaredLogger,
+	logger log.Logger,
 ) *Fetch {
 	statusData := &sentry.StatusData{
 		NetworkId:       networkId,

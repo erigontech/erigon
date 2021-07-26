@@ -8,22 +8,39 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func New() *zap.SugaredLogger {
+// Logger - limited *zap.SugaredLogger interface
+type Logger interface {
+	Debugf(template string, args ...interface{})
+	Infof(template string, args ...interface{})
+	Warnf(template string, args ...interface{})
+	Errorf(template string, args ...interface{})
+	Named(name string) Logger
+}
+
+type LoggerImpl struct {
+	*zap.SugaredLogger
+}
+
+func (l *LoggerImpl) Named(name string) Logger {
+	return &LoggerImpl{l.SugaredLogger.Named(name)}
+}
+
+func New() *LoggerImpl {
 	ll, err := cfg().Build()
 	if err != nil {
 		panic(err)
 	}
-	return ll.Sugar()
+	return &LoggerImpl{ll.Sugar()}
 }
 
 func cfg() zap.Config {
 	cfg := zap.NewProductionConfig()
 	cfg.Encoding = "console"
-	cfg.EncoderConfig.EncodeTime = GethCompatibleTime //zapcore.RFC3339TimeEncoder
+	cfg.EncoderConfig.EncodeTime = gethCompatibleTime //zapcore.RFC3339TimeEncoder
 	cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 	return cfg
 }
-func NewTest(tb testing.TB) *zap.SugaredLogger {
+func NewTest(tb testing.TB) *LoggerImpl {
 	cfg := cfg()
 	cfg.Level.SetLevel(zapcore.DebugLevel)
 	ll, err := cfg.Build(zap.AddCaller())
@@ -34,10 +51,10 @@ func NewTest(tb testing.TB) *zap.SugaredLogger {
 	tb.Cleanup(func() {
 		_ = logger.Sync()
 	})
-	return logger
+	return &LoggerImpl{logger}
 }
 
-func GethCompatibleTime(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+func gethCompatibleTime(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 	encodeTimeLayout(t, "01-02|15:04:05", enc)
 }
 

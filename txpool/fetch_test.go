@@ -33,7 +33,6 @@ import (
 
 func TestFetch(t *testing.T) {
 	logger := log.NewTest(t)
-
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 
