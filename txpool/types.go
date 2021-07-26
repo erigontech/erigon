@@ -23,9 +23,14 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 )
+
+type PeerID *types.H512
+
+type Hashes []byte // flatten list of 32-byte hashes
 
 // TxContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations

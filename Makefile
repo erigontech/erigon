@@ -21,6 +21,8 @@ grpc:
 
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
 	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
+	$(GOBUILD) -o $(GOBIN)/moq	  github.com/matryer/moq
+
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
 		types/types.proto
 	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
@@ -32,3 +34,5 @@ grpc:
 		consensus_engine/consensus.proto \
 		testing/testing.proto \
 		txpool/txpool.proto txpool/mining.proto
+
+	PATH=$(GOBIN):$(PATH) go generate ./...

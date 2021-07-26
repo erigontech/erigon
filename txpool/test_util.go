@@ -18,30 +18,30 @@ package txpool
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+//go:generate moq -stub -out mocks.go . Pool
+
 type MockSentry struct {
-	sentry.UnimplementedSentryServer
+	*sentry.SentryServerMock
 	streams      map[sentry.MessageId][]sentry.Sentry_MessagesServer
 	peersStreams []sentry.Sentry_PeersServer
 	StreamWg     sync.WaitGroup
-	sentMessages []*sentry.OutboundMessageData
 	ctx          context.Context
 	lock         sync.RWMutex
 }
 
 func NewMockSentry(ctx context.Context) *MockSentry {
-	return &MockSentry{ctx: ctx}
+	return &MockSentry{ctx: ctx, SentryServerMock: &sentry.SentryServerMock{}}
 }
 
-var PeerId = gointerfaces.ConvertBytesToH512([]byte("12345"))
+var PeerId PeerID = gointerfaces.ConvertBytesToH512([]byte("12345"))
 
-// Stream returns stream, waiting if necessary
 func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
 	ms.lock.RLock()
 	defer ms.lock.RUnlock()
@@ -53,24 +53,6 @@ func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
 	return errs
 }
 
-func (ms *MockSentry) PenalizePeer(context.Context, *sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
-	return nil, nil
-}
-func (ms *MockSentry) SendMessageById(_ context.Context, r *sentry.SendMessageByIdRequest) (*sentry.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r.Data)
-	return nil, nil
-}
-func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *sentry.SendMessageToRandomPeersRequest) (*sentry.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r.Data)
-	return nil, nil
-}
-func (ms *MockSentry) SendMessageToAll(_ context.Context, r *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r)
-	return nil, nil
-}
-func (ms *MockSentry) SentMessage(i int) *sentry.OutboundMessageData {
-	return ms.sentMessages[i]
-}
 func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.SetStatusReply, error) {
 	return &sentry.SetStatusReply{Protocol: sentry.Protocol_ETH66}, nil
 }
@@ -91,9 +73,6 @@ func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry
 		return nil
 	}
 }
-func (ms *MockSentry) PeerCount(_ context.Context, req *sentry.PeerCountRequest) (*sentry.PeerCountReply, error) {
-	return &sentry.PeerCountReply{Count: 1}, nil
-}
 
 func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_PeersServer) error {
 	ms.lock.Lock()
@@ -108,9 +87,16 @@ func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_Peers
 	}
 }
 
-type MockPool struct {
+func toHashes(h ...[32]byte) (out Hashes) {
+	for i := range h {
+		out = append(out, h[i][:]...)
+	}
+	return out
 }
 
-func (mp *MockPool) IdHashKnown(hash []byte) bool {
-	return false
+func toPeerIDs(h ...int) (out []PeerID) {
+	for i := range h {
+		out = append(out, gointerfaces.ConvertBytesToH512([]byte(fmt.Sprintf("%x", h[i]))))
+	}
+	return out
 }

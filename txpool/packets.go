@@ -24,6 +24,8 @@ import (
 
 const ParseHashErrorPrefix = "parse hash payload"
 
+type NewPooledTransactionHashesPacket [][32]byte
+
 // ParseHash extracts the next hash from the RLP encoding (payload) from a given position.
 // It appends the hash to the given slice, reusing the space if there is enough capacity
 // The first returned value is the slice where hash is appended to.
@@ -79,7 +81,7 @@ func ParseHashesCount(payload []byte, pos int) (int, int, error) {
 // It appends encoding to the given given slice (encodeBuf), reusing the space
 // there is there is enough capacity.
 // The first returned value is the slice where encodinfg
-func EncodeHashes(hashes []byte, count int, encodeBuf []byte) ([]byte, error) {
+func EncodeHashes(hashes Hashes, count int, encodeBuf []byte) ([]byte, error) {
 	dataLen := count * 33
 	var beLen int
 	if dataLen >= 56 {
