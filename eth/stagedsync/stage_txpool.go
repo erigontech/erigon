@@ -49,7 +49,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 
 	logPrefix := s.LogPrefix()
 	if to < s.BlockNumber {
-		return fmt.Errorf("%s: to (%d) < from (%d)", logPrefix, to, s.BlockNumber)
+		return fmt.Errorf("to (%d) < from (%d)", to, s.BlockNumber)
 	}
 	if cfg.pool != nil && !cfg.pool.IsStarted() {
 		log.Info(fmt.Sprintf("[%s] Starting tx pool after sync", logPrefix), "from", s.BlockNumber, "to", to)
@@ -59,7 +59,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 		}
 		headHeader := rawdb.ReadHeader(tx, headHash, to)
 		if err := cfg.pool.Start(headHeader.GasLimit, to); err != nil {
-			return fmt.Errorf("%s: start pool phase 1: %w", logPrefix, err)
+			return fmt.Errorf(" start pool phase 1: %w", err)
 		}
 		if cfg.startFunc != nil {
 			cfg.startFunc()
@@ -67,7 +67,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 	}
 	if cfg.pool != nil && cfg.pool.IsStarted() && s.BlockNumber > 0 {
 		if err := incrementalTxPoolUpdate(logPrefix, s.BlockNumber, to, cfg.pool, tx, quitCh); err != nil {
-			return fmt.Errorf("[%s]: %w", logPrefix, err)
+			return err
 		}
 		pending, queued := cfg.pool.Stats()
 		log.Info(fmt.Sprintf("[%s] Transaction stats", logPrefix), "pending", pending, "queued", queued)
@@ -165,13 +165,13 @@ func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, c
 	logPrefix := s.LogPrefix()
 	if cfg.pool != nil && cfg.pool.IsStarted() {
 		if err := unwindTxPoolUpdate(logPrefix, u.UnwindPoint, s.BlockNumber, cfg.pool, tx, quitCh); err != nil {
-			return fmt.Errorf("[%s]: %w", logPrefix, err)
+			return err
 		}
 		pending, queued := cfg.pool.Stats()
 		log.Info(fmt.Sprintf("[%s] Transaction stats", logPrefix), "pending", pending, "queued", queued)
 	}
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %w", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {

@@ -334,7 +334,7 @@ Loop:
 		return err
 	}
 	if err = batch.Commit(); err != nil {
-		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+		return fmt.Errorf("batch commit: %v", err)
 	}
 
 	if !useExternalTx {
@@ -419,7 +419,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx cont
 		return err
 	}
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+		return err
 	}
 
 	if !useExternalTx {
@@ -439,7 +439,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	if !initialCycle && cfg.stateStream {
 		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 		if err != nil {
-			return fmt.Errorf("%s: reading canonical hash of unwind point: %v", logPrefix, err)
+			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}
 		accumulator.StartChange(u.UnwindPoint, hash, true /* unwind */)
 	}
@@ -448,7 +448,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	defer changes.Close(logPrefix)
 	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 	if errRewind != nil {
-		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
+		return fmt.Errorf("getting rewind data: %w", errRewind)
 	}
 
 	if err := changes.Load(logPrefix, tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -467,14 +467,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 				// cleanup contract code bucket
 				original, err := state.NewPlainStateReader(tx).ReadAccountData(address)
 				if err != nil {
-					return fmt.Errorf("%s: read account for %x: %w", logPrefix, address, err)
+					return fmt.Errorf("read account for %x: %w", address, err)
 				}
 				if original != nil {
 					// clean up all the code incarnations original incarnation and the new one
 					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
 						err = tx.Delete(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), nil)
 						if err != nil {
-							return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
+							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
 						}
 					}
 				}
@@ -524,14 +524,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	}
 
 	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
+		return fmt.Errorf("walking receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
+		return fmt.Errorf("walking epoch: %w", err)
 	}
 
 	// Truncate CallTraceSet
@@ -610,7 +610,7 @@ func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

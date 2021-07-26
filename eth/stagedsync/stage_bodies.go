@@ -106,7 +106,7 @@ Loop:
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
-				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
+				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 		}
@@ -127,7 +127,7 @@ Loop:
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
-				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
+				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 			peer = nil
@@ -160,12 +160,12 @@ Loop:
 				break Loop
 			}
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
-				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
+				return fmt.Errorf("writing block body: %w", err)
 			}
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
 				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
-					return fmt.Errorf("[%s] saving Bodies progress: %w", logPrefix, err)
+					return fmt.Errorf("saving Bodies progress: %w", err)
 				}
 			}
 		}
@@ -235,13 +235,12 @@ func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context
 		defer tx.Rollback()
 	}
 
-	logPrefix := u.LogPrefix()
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf("[%s]: reset: %v", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil
@@ -257,10 +256,9 @@ func PruneBodiesStage(s *PruneState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.C
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

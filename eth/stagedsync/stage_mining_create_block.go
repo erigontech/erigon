@@ -99,7 +99,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 	logPrefix := s.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
-		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
@@ -172,7 +172,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
-		return fmt.Errorf("[%s] mining failed", logPrefix)
+		return err
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not

@@ -187,7 +187,7 @@ func HeadersForward(
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
 	} else if headerInserter.GetHighest() != 0 {
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
-			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
+			return fmt.Errorf("fix canonical chain: %w", err)
 		}
 	}
 	if !useExternalTx {
@@ -215,7 +215,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	var err error
 	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
-			return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, ancestorHeight, ancestorHash, err)
+			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
@@ -231,7 +231,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 		ancestorHeight--
 	}
 	if err != nil {
-		return fmt.Errorf("[%s] reading canonical hash for %d: %w", logPrefix, ancestorHeight, err)
+		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 	return nil
 }
@@ -401,10 +401,9 @@ func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Cont
 		defer tx.Rollback()
 	}
 
-	logPrefix := p.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil
