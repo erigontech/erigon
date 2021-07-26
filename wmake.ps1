@@ -19,10 +19,35 @@ Param(
     [Parameter(Position=0, 
     HelpMessage="Enter the build target")]
     [Alias("target")]
-    [AllowEmptyString()]
     [ValidateSet("all", "clean", "test", "erigon","rpcdaemon","rpctest", "hack", "state", "integration", "db-tools", "sentry")]
-    [string]$BuildTarget="erigon"
+    [string[]]$BuildTargets=@("erigon","rpcdaemon")
 )
+
+# Sanity checks on $BuildTargets
+if ($BuildTargets.Count -gt 1) {
+    
+    # "all" target must be alone
+    if ($BuildTargets.Contains("all")) {
+        Write-Host @"
+
+  Error ! Target "all" must be set alone.
+
+"@
+        exit 1
+    }
+
+    # "clean" target must be alone
+    if ($BuildTargets.Contains("clean")) {
+        Write-Host @"
+
+  Error ! Target "clean" must be set alone.
+
+"@
+        exit 1
+    }
+
+}
+
 
 # ====================================================================
 # Messages texts
@@ -334,6 +359,7 @@ if (!($?)) {
 #    return
 # }
 
+
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
 $Erigon.Commit  = [string]@(git.exe rev-list -1 HEAD)
@@ -362,6 +388,7 @@ Write-Host @"
 
 "@
 
+foreach($BuildTarget in $BuildTargets) {
 ## Choco components for building db-tools
 if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
     if(!(Test-choco-Installed)) {
@@ -526,6 +553,6 @@ if ($BuildTarget -eq "clean") {
         }
     }
 }
-
+}
 # Return to source folder
 Set-Location $MyContext.Directory
