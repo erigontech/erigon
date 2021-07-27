@@ -8,7 +8,6 @@ import (
 	"os"
 )
 
-
 func CreateStateSnapshot(ctx context.Context, snapshotPath string) (ethdb.RwKV, error) {
 	// remove created snapshot if it's not saved in main db(to avoid append error)
 	err := os.RemoveAll(snapshotPath)

@@ -29,7 +29,6 @@ var (
 	StateSnapshotBuckets = []string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}
 )
 
-
 func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.RwKV, error) {
 	snKV := kv2.NewSnapshotKV().DB(kv)
 	for k, v := range snapshots {

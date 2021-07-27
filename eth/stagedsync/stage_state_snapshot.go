@@ -63,19 +63,19 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	roTX.Rollback()
 
 	//prelimary checks finished. we can start migration.
-	tmpDB:=cfg.db.(*kv.SnapshotKV).TempDB()
-	if tmpDB!=nil {
+	tmpDB := cfg.db.(*kv.SnapshotKV).TempDB()
+	if tmpDB != nil {
 		log.Error("Empty tmp db")
 		defer func() {
 			//recover tmp db in case of error
-			if err!=nil {
+			if err != nil {
 				cfg.db.(*kv.SnapshotKV).SetTempDB(tmpDB, snapshotsync.StateSnapshotBuckets)
 			}
 		}()
 	}
 
 	//get rid of block after epoch block
-	cfg.db.(*kv.SnapshotKV).SetTempDB(nil,nil)
+	cfg.db.(*kv.SnapshotKV).SetTempDB(nil, nil)
 	mainDBTX, err := cfg.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -83,105 +83,105 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	defer mainDBTX.Rollback()
 
 	//collect whole state snapshot
-	plainStateCollector:=etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	codeCollector:=etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	contractCodeBucketCollector:=etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainStateCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	contractCodeBucketCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	err = mainDBTX.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
 		return plainStateCollector.Collect(k, v)
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	err = mainDBTX.ForEach(dbutils.CodeBucket, []byte{}, func(k, v []byte) error {
 		return codeCollector.Collect(k, v)
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	err = mainDBTX.ForEach(dbutils.PlainContractCodeBucket, []byte{}, func(k, v []byte) error {
 		return contractCodeBucketCollector.Collect(k, v)
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
-	snapshotPath:=snapshotsync.SnapshotName(cfg.tmpDir,"state", snapshotBlock)
+	snapshotPath := snapshotsync.SnapshotName(cfg.tmpDir, "state", snapshotBlock)
 	//todo change tmp dir to snapshots folder
-	snKV,err:=snapshotsync.CreateStateSnapshot(ctx, snapshotPath)
-	if err!=nil {
+	snKV, err := snapshotsync.CreateStateSnapshot(ctx, snapshotPath)
+	if err != nil {
 		return err
 	}
 
-	snRwTX,err:=snKV.BeginRw(context.Background())
-	if err!=nil {
+	snRwTX, err := snKV.BeginRw(context.Background())
+	if err != nil {
 		return err
 	}
 
 	err = plainStateCollector.Load("plain state", snRwTX, dbutils.PlainStateBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
 	err = codeCollector.Load("codes", snRwTX, dbutils.CodeBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
 	err = contractCodeBucketCollector.Load("code hashes", snRwTX, dbutils.PlainContractCodeBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
 	err = snRwTX.Commit()
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	snKV.Close()
 	//snapshot creation finished
 
 	err = mainDBTX.ClearBucket(dbutils.PlainStateBucket)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	err = mainDBTX.ClearBucket(dbutils.CodeBucket)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 	err = mainDBTX.ClearBucket(dbutils.PlainContractCodeBucket)
-	if err!=nil {
+	if err != nil {
 		return err
 	}
 
-	if tmpDB!=nil {
-		tmpDBRoTX,err:=tmpDB.BeginRo(context.Background())
-		if err!=nil {
+	if tmpDB != nil {
+		tmpDBRoTX, err := tmpDB.BeginRo(context.Background())
+		if err != nil {
 			return err
 		}
 		defer tmpDBRoTX.Rollback()
-		migrateBucket:= func(from ethdb.Tx, to ethdb.RwTx, bucket string) error {
+		migrateBucket := func(from ethdb.Tx, to ethdb.RwTx, bucket string) error {
 			return from.ForEach(bucket, []byte{}, func(k, v []byte) error {
-				return to.Put(bucket, k,v)
+				return to.Put(bucket, k, v)
 			})
 		}
 
 		err = migrateBucket(tmpDBRoTX, mainDBTX, dbutils.PlainStateBucket)
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 
 		err = migrateBucket(tmpDBRoTX, mainDBTX, dbutils.PlainContractCodeBucket)
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 
 		err = migrateBucket(tmpDBRoTX, mainDBTX, dbutils.ContractCodeBucket)
-		if err!=nil {
+		if err != nil {
 			return err
 		}
 	}
@@ -189,18 +189,18 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	if err = s.Update(mainDBTX, snapshotBlock); err != nil {
 		return err
 	}
-	stateSnapshot,err := snapshotsync.OpenStateSnapshot(snapshotPath)
-	if err!=nil {
+	stateSnapshot, err := snapshotsync.OpenStateSnapshot(snapshotPath)
+	if err != nil {
 		return err
 	}
-	err =mainDBTX.Commit()
-	if err!=nil {
+	err = mainDBTX.Commit()
+	if err != nil {
 		return err
 	}
 
 	cfg.db.(*kv.SnapshotKV).UpdateSnapshots("state", stateSnapshot, make(chan struct{}))
 
-	if tmpDB!=nil {
+	if tmpDB != nil {
 		go func() {
 			tmpDB.Close()
 			//todo remove tmp db
