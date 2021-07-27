@@ -20,7 +20,7 @@ Param(
     HelpMessage="Enter the build target")]
     [Alias("target")]
     [ValidateSet("all", "clean", "test", "erigon","rpcdaemon","rpctest", "hack", "state", "integration", "db-tools", "sentry")]
-    [string[]]$BuildTargets=@("erigon","rpcdaemon")
+    [string[]]$BuildTargets=@("erigon","rpcdaemon","sentry","integration")
 )
 
 # Sanity checks on $BuildTargets
