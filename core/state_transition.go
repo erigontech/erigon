@@ -238,6 +238,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 				st.msg.From().Hex(), msgNonce, stNonce)
 		}
 	}
+
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
@@ -310,7 +311,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 
 	// Set up the initial access list.
 	if st.evm.ChainRules.IsBerlin {
-		st.state.PrepareAccessList(msg.From(), msg.To(), st.evm.ActivePrecompiles(), msg.AccessList())
+		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(st.evm.ChainRules), msg.AccessList())
 	}
 
 	var (
