@@ -362,10 +362,6 @@ func (m *mutation) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWith
 	return m.db.Begin(ctx, flags)
 }
 
-func (m *mutation) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {
-	return m.db.BeginGetter(ctx)
-}
-
 func (m *mutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")

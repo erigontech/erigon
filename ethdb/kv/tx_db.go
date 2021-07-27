@@ -64,10 +64,6 @@ func (m *roTxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker f
 	return m.tx.ForAmount(bucket, prefix, amount, walker)
 }
 
-func (m *roTxDb) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {
-	return &roTxDb{tx: m.tx, top: false}, nil
-}
-
 func (m *roTxDb) Rollback() {
 	if m.top {
 		m.tx.Rollback()
@@ -110,18 +106,6 @@ func (m *TxDb) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPend
 	}
 
 	if err := batch.begin(ctx, flags); err != nil {
-		return nil, err
-	}
-	return batch, nil
-}
-
-func (m *TxDb) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {
-	batch := m
-	if m.tx != nil {
-		panic("nested transactions not supported")
-	}
-
-	if err := batch.begin(ctx, ethdb.RO); err != nil {
 		return nil, err
 	}
 	return batch, nil
