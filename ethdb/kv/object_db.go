@@ -285,14 +285,6 @@ func (db *ObjectDatabase) SetRwKV(kv ethdb.RwKV) {
 	db.kv = kv
 }
 
-func (db *ObjectDatabase) BeginGetter(ctx context.Context) (ethdb.GetterTx, error) {
-	batch := &TxDb{db: db}
-	if err := batch.begin(ctx, ethdb.RO); err != nil {
-		return batch, err
-	}
-	return batch, nil
-}
-
 func (db *ObjectDatabase) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
 	batch := &TxDb{db: db}
 	if err := batch.begin(ctx, flags); err != nil {

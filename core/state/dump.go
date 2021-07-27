@@ -191,7 +191,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
-				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
+				if code, err = d.db.GetOne(dbutils.CodeBucket, codeHash); err != nil {
 					return nil, err
 				}
 				account.Code = code

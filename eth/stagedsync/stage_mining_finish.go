@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -71,7 +70,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, cfg MiningFinishCfg, q
 		"difficulty", block.Difficulty(),
 	)
 
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: kv.WrapIntoTxDB(tx)}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}

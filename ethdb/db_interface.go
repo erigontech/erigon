@@ -33,38 +33,17 @@ const (
 	RO TxFlags = 0x02
 )
 
-type DatabaseReader interface {
+// Getter wraps the database read operations.
+type Getter interface {
 	KVGetter
 
 	// Get returns the value for a given key if it's present.
 	Get(bucket string, key []byte) ([]byte, error)
 }
 
-// Getter wraps the database read operations.
-type Getter interface {
-	DatabaseReader
-}
-
-type GetterTx interface {
-	Getter
-
-	Rollback()
-}
-
-type GetterBeginner interface {
-	Getter
-
-	BeginGetter(ctx context.Context) (GetterTx, error)
-}
-
-type GetterPutter interface {
-	Getter
-	Putter
-}
-
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
-	GetterBeginner
+	Getter
 	Putter
 	Deleter
 	Closer
@@ -135,10 +114,6 @@ type HasTx interface {
 	Tx() Tx
 }
 
-type HasNetInterface interface {
-	DB() Database
-}
-
 type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
 	ClearBuckets(buckets ...string) error     // makes them empty
@@ -154,5 +129,3 @@ func GetOneWrapper(dat []byte, err error) ([]byte, error) {
 	}
 	return dat, nil
 }
-
-var ErrNotSupported = errors.New("not supported")

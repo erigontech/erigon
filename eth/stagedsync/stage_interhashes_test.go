@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func addTestAccount(tx ethdb.Putter, hash common.Hash, balance uint64, incarnation uint64) error {
@@ -29,7 +28,7 @@ func addTestAccount(tx ethdb.Putter, hash common.Hash, balance uint64, incarnati
 }
 
 func TestAccountAndStorageTrie(t *testing.T) {
-	db, tx := kv.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	hash1 := common.HexToHash("0xB000000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash1, 3*params.Ether, 0))
@@ -65,16 +64,13 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	hash6 := common.HexToHash("0xB340000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash6, 1*params.Ether, 0))
 
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
-	accountCursor, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
-	require.NoError(t, err)
-	defer accountCursor.Close()
-	err = ethdb.ForEach(accountCursor, func(k, v []byte) (bool, error) {
+	err = tx.ForEach(dbutils.TrieOfAccountsBucket, nil, func(k, v []byte) error {
 		accountTrie[string(k)] = v
-		return true, nil
+		return nil
 	})
 	assert.Nil(t, err)
 
@@ -95,12 +91,9 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	assert.Equal(t, 0, len(rootHash2))
 
 	storageTrie := make(map[string][]byte)
-	storageCursor, err := tx.Cursor(dbutils.TrieOfStorageBucket)
-	require.NoError(t, err)
-	defer storageCursor.Close()
-	err = ethdb.ForEach(storageCursor, func(k, v []byte) (bool, error) {
+	err = tx.ForEach(dbutils.TrieOfStorageBucket, nil, func(k, v []byte) error {
 		storageTrie[string(k)] = v
-		return true, nil
+		return nil
 	})
 	assert.Nil(t, err)
 
@@ -119,7 +112,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 }
 
 func TestAccountTrieAroundExtensionNode(t *testing.T) {
-	db, tx := kv.NewTestTx(t)
+	_, tx := kv.NewTestTx(t)
 
 	acc := accounts.NewAccount()
 	acc.Balance.SetUint64(1 * params.Ether)
@@ -144,16 +137,13 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	hash6 := common.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash6[:], encoded))
 
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
-	accountCursor, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
-	require.NoError(t, err)
-	defer accountCursor.Close()
-	err = ethdb.ForEach(accountCursor, func(k, v []byte) (bool, error) {
+	err = tx.ForEach(dbutils.TrieOfAccountsBucket, nil, func(k, v []byte) error {
 		accountTrie[string(k)] = v
-		return true, nil
+		return nil
 	})
 	assert.Nil(t, err)
 

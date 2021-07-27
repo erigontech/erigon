@@ -11,34 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
-func Get(tx KVGetter, bucket string, key []byte) ([]byte, error) {
-	v, err := tx.GetOne(bucket, key)
-	if err != nil {
-		return nil, err
-	}
-	if len(v) == 0 {
-		return nil, ErrKeyNotFound
-	}
-
-	return v, nil
-}
-
-func ForEach(c Cursor, walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
 func Walk(c Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	k, v, err := c.Seek(startkey)

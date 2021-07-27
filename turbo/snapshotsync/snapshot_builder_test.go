@@ -194,17 +194,17 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	snokv := db.HeadersSnapshot()
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
-	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
-	require.NoError(t, err)
 	headerNumber = 0
-	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = snRoTx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
 		headerNumber++
-
-		return true, nil
+		return nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	snRoTx.Rollback()
 	if err != nil {
 		t.Fatal(err)
@@ -215,18 +215,12 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		headersC, err := tx.Cursor(dbutils.HeadersBucket)
-		if err != nil {
-			return err
-		}
-		defer headersC.Close()
-
-		return ethdb.ForEach(headersC, func(k, v []byte) (bool, error) {
+		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
 			headerNumber++
-			return true, nil
+			return nil
 		})
 	})
 	if err != nil {
@@ -314,19 +308,16 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 
 	headerNumber = 0
-	snRoTx, err = db.HeadersSnapshot().BeginRo(context.Background())
-	require.NoError(t, err)
-	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
-	require.NoError(t, err)
-	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
-		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
-			t.Fatal(k)
-		}
-		headerNumber++
+	err = db.HeadersSnapshot().View(context.Background(), func(tx ethdb.Tx) error {
+		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
+				t.Fatal(k)
+			}
+			headerNumber++
 
-		return true, nil
+			return nil
+		})
 	})
-	snRoTx.Rollback()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,18 +327,12 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HeadersBucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
 			headerNumber++
-
-			return true, nil
+			return nil
 		})
 	})
 	if err != nil {
@@ -544,18 +529,12 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		headersC, err := tx.Cursor(dbutils.HeadersBucket)
-		if err != nil {
-			return err
-		}
-		defer headersC.Close()
-
-		return ethdb.ForEach(headersC, func(k, v []byte) (bool, error) {
+		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
 			headerNumber++
-			return true, nil
+			return nil
 		})
 	})
 	if err != nil {
@@ -670,13 +649,9 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
-	defer rotx.Rollback()
-	roc, err = rotx.Cursor(dbutils.HeadersBucket)
-	require.NoError(t, err)
-
-	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = rotx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
 		t.Fatal("main db must be empty here", k)
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -685,15 +660,12 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	headerNumber = 0
 	snRoTx, err = db.HeadersSnapshot().BeginRo(context.Background())
 	require.NoError(t, err)
-	headersCursor, err = snRoTx.Cursor(dbutils.HeadersBucket)
-	require.NoError(t, err)
-	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = snRoTx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
 		headerNumber++
-
-		return true, nil
+		return nil
 	})
 	snRoTx.Rollback()
 	if err != nil {
@@ -705,18 +677,12 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HeadersBucket)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
 			headerNumber++
-
-			return true, nil
+			return nil
 		})
 	})
 	if err != nil {
