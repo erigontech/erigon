@@ -12,7 +12,7 @@ import (
 //
 // General rules:
 //      - functions to calculate prefix len are fast (and pure). it's ok to call them multiple times during encoding of large object for readability.
-//      - functions to Parse (Decode) data - using data type as name (without any prefix): rlp.String(), rlp.List, rlp.U64()
+//      - functions to Parse (Decode) data - using data type as name (without any prefix): rlp.String(), rlp.List, rlp.U64(), rlp.U256()
 //
 
 func ListPrefixLen(dataLen int) int {
