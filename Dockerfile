@@ -23,6 +23,7 @@ USER erigon
 
 EXPOSE 8545 8546 30303 30303/udp 30304 30304/udp 8080 9090 6060
 
+# https://github.com/opencontainers/image-spec/blob/main/annotations.md
 ARG BUILD_DATE
 ARG VCS_REF
 LABEL org.label-schema.build-date=$BUILD_DATE \
