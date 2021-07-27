@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,8 +21,8 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
-	db1 ethdb.Tx,
-	db2 ethdb.Tx,
+	db1 kv.Tx,
+	db2 kv.Tx,
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
@@ -30,7 +30,7 @@ func compareCurrentState(
 	}
 }
 
-func compareBucket(t *testing.T, db1, db2 ethdb.Tx, bucketName string) {
+func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {
 	var err error
 
 	bucket1 := make(map[string][]byte)
@@ -52,13 +52,13 @@ func compareBucket(t *testing.T, db1, db2 ethdb.Tx, bucketName string) {
 
 type stateWriterGen func(uint64) state.WriterWithChangeSets
 
-func hashedWriterGen(tx ethdb.RwTx) stateWriterGen {
+func hashedWriterGen(tx kv.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
 		return state.NewDbStateWriter(tx, blockNum)
 	}
 }
 
-func plainWriterGen(tx ethdb.RwTx) stateWriterGen {
+func plainWriterGen(tx kv.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
 		return state.NewPlainStateWriter(tx, tx, blockNum)
 	}

@@ -23,8 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/spf13/cobra"
@@ -393,7 +393,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
-	chainDb := kv.MustOpen(chaindata)
+	chainDb := olddb.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
 	historyTx, err1 := historyDb.BeginRo(context.Background())
@@ -526,7 +526,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	blockNumLastReport := blockNum
 	for !interrupt {
 		var block *types.Block
-		if err := chainDb.View(context.Background(), func(tx ethdb.Tx) (err error) {
+		if err := chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
 			block, err = rawdb.ReadBlockByNumber(tx, blockNum)
 			return err
 		}); err != nil {

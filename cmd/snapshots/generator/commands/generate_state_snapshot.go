@@ -12,7 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/spf13/cobra"
 )
@@ -44,14 +45,14 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	if err != nil {
 		return err
 	}
-	var kv, snkv ethdb.RwKV
+	var db, snkv kv.RwKV
 
-	kv = kv2.NewMDBX().Path(dbPath).MustOpen()
-	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:        dbutils.BucketConfigItem{},
-			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
-			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
+	db = kv2.NewMDBX().Path(dbPath).MustOpen()
+	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+		return kv.BucketsCfg{
+			kv.PlainStateBucket:        kv.BucketConfigItem{},
+			kv.PlainContractCodeBucket: kv.BucketConfigItem{},
+			kv.CodeBucket:              kv.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -61,11 +62,11 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	}
 	defer writeTx.Rollback()
 
-	tx, err := kv.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
-	tx2, err := kv.BeginRo(context.Background())
+	tx2, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -104,7 +105,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 				j := 0
 				innerErr := state.WalkAsOfStorage(tx2, common.BytesToAddress(k), acc.Incarnation, common.Hash{}, toBlock+1, func(k1, k2 []byte, vv []byte) (bool, error) {
 					j++
-					innerErr1 := writeTx.Put(dbutils.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
+					innerErr1 := writeTx.Put(kv.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
 					if innerErr1 != nil {
 						return false, innerErr1
 					}
@@ -121,19 +122,19 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			}
 
 			if acc.IsEmptyCodeHash() {
-				codeHash, err1 := tx2.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
+				codeHash, err1 := tx2.GetOne(kv.PlainContractCodeBucket, storagePrefix)
 				if err1 != nil && errors.Is(err1, ethdb.ErrKeyNotFound) {
 					return false, fmt.Errorf("getting code hash for %x: %v", k, err1)
 				}
 				if len(codeHash) > 0 {
-					code, err1 := tx2.GetOne(dbutils.CodeBucket, codeHash)
+					code, err1 := tx2.GetOne(kv.CodeBucket, codeHash)
 					if err1 != nil {
 						return false, err1
 					}
-					if err1 = writeTx.Put(dbutils.CodeBucket, codeHash, code); err1 != nil {
+					if err1 = writeTx.Put(kv.CodeBucket, codeHash, code); err1 != nil {
 						return false, err1
 					}
-					if err1 = writeTx.Put(dbutils.PlainContractCodeBucket, storagePrefix, codeHash); err1 != nil {
+					if err1 = writeTx.Put(kv.PlainContractCodeBucket, storagePrefix, codeHash); err1 != nil {
 						return false, err1
 					}
 				}
@@ -141,7 +142,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 		}
 		newAcc := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(newAcc)
-		innerErr := writeTx.Put(dbutils.PlainStateBucket, common.CopyBytes(k), newAcc)
+		innerErr := writeTx.Put(kv.PlainStateBucket, common.CopyBytes(k), newAcc)
 		if innerErr != nil {
 			return false, innerErr
 		}

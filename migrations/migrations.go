@@ -8,9 +8,8 @@ import (
 	"path"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ugorji/go/codec"
 )
@@ -53,8 +52,8 @@ import (
 //	},
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test where apply migration twice
-var migrations = map[ethdb.Label][]Migration{
-	ethdb.Chain: {
+var migrations = map[kv.Label][]Migration{
+	kv.Chain: {
 		headerPrefixToSeparateBuckets,
 		removeCliqueBucket,
 		dbSchemaVersion,
@@ -62,14 +61,14 @@ var migrations = map[ethdb.Label][]Migration{
 		fixSequences,
 		storageMode,
 	},
-	ethdb.TxPool: {},
-	ethdb.Sentry: {},
+	kv.TxPool: {},
+	kv.Sentry: {},
 }
 
-type Callback func(tx ethdb.RwTx, progress []byte, isDone bool) error
+type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
 type Migration struct {
 	Name string
-	Up   func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) error
+	Up   func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) error
 }
 
 var (
@@ -78,7 +77,7 @@ var (
 	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 
-func NewMigrator(label ethdb.Label) *Migrator {
+func NewMigrator(label kv.Label) *Migrator {
 	return &Migrator{
 		Migrations: migrations[label],
 	}
@@ -88,9 +87,9 @@ type Migrator struct {
 	Migrations []Migration
 }
 
-func AppliedMigrations(tx ethdb.Tx, withPayload bool) (map[string][]byte, error) {
+func AppliedMigrations(tx kv.Tx, withPayload bool) (map[string][]byte, error) {
 	applied := map[string][]byte{}
-	err := tx.ForEach(dbutils.Migrations, nil, func(k []byte, v []byte) error {
+	err := tx.ForEach(kv.Migrations, nil, func(k []byte, v []byte) error {
 		if bytes.HasPrefix(k, []byte("_progress_")) {
 			return nil
 		}
@@ -104,9 +103,9 @@ func AppliedMigrations(tx ethdb.Tx, withPayload bool) (map[string][]byte, error)
 	return applied, err
 }
 
-func (m *Migrator) HasPendingMigrations(db ethdb.RwKV) (bool, error) {
+func (m *Migrator) HasPendingMigrations(db kv.RwKV) (bool, error) {
 	var has bool
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		pending, err := m.PendingMigrations(tx)
 		if err != nil {
 			return err
@@ -119,7 +118,7 @@ func (m *Migrator) HasPendingMigrations(db ethdb.RwKV) (bool, error) {
 	return has, nil
 }
 
-func (m *Migrator) PendingMigrations(tx ethdb.Tx) ([]Migration, error) {
+func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 	applied, err := AppliedMigrations(tx, false)
 	if err != nil {
 		return nil, err
@@ -145,13 +144,13 @@ func (m *Migrator) PendingMigrations(tx ethdb.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db ethdb.RwKV, datadir string) error {
+func (m *Migrator) Apply(db kv.RwKV, datadir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
 
 	var applied map[string][]byte
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
 		return err
@@ -179,17 +178,17 @@ func (m *Migrator) Apply(db ethdb.RwKV, datadir string) error {
 
 		log.Info("Apply migration", "name", v.Name)
 		var progress []byte
-		if err := db.View(context.Background(), func(tx ethdb.Tx) (err error) {
-			progress, err = tx.GetOne(dbutils.Migrations, []byte("_progress_"+v.Name))
+		if err := db.View(context.Background(), func(tx kv.Tx) (err error) {
+			progress, err = tx.GetOne(kv.Migrations, []byte("_progress_"+v.Name))
 			return err
 		}); err != nil {
 			return err
 		}
 
-		if err := v.Up(db, path.Join(datadir, "migrations", v.Name), progress, func(tx ethdb.RwTx, key []byte, isDone bool) error {
+		if err := v.Up(db, path.Join(datadir, "migrations", v.Name), progress, func(tx kv.RwTx, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
-					if err := tx.Put(dbutils.Migrations, []byte("_progress_"+v.Name), key); err != nil {
+					if err := tx.Put(kv.Migrations, []byte("_progress_"+v.Name), key); err != nil {
 						return err
 					}
 				}
@@ -201,12 +200,12 @@ func (m *Migrator) Apply(db ethdb.RwKV, datadir string) error {
 			if err != nil {
 				return err
 			}
-			err = tx.Put(dbutils.Migrations, []byte(v.Name), stagesProgress)
+			err = tx.Put(kv.Migrations, []byte(v.Name), stagesProgress)
 			if err != nil {
 				return err
 			}
 
-			err = tx.Delete(dbutils.Migrations, []byte("_progress_"+v.Name), nil)
+			err = tx.Delete(kv.Migrations, []byte("_progress_"+v.Name), nil)
 			if err != nil {
 				return err
 			}
@@ -223,29 +222,29 @@ func (m *Migrator) Apply(db ethdb.RwKV, datadir string) error {
 	}
 	// Write DB schema version
 	var version [12]byte
-	binary.BigEndian.PutUint32(version[:], dbutils.DBSchemaVersion.Major)
-	binary.BigEndian.PutUint32(version[4:], dbutils.DBSchemaVersion.Minor)
-	binary.BigEndian.PutUint32(version[8:], dbutils.DBSchemaVersion.Patch)
-	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err := tx.Put(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionKey, version[:]); err != nil {
+	binary.BigEndian.PutUint32(version[:], kv.DBSchemaVersion.Major)
+	binary.BigEndian.PutUint32(version[4:], kv.DBSchemaVersion.Minor)
+	binary.BigEndian.PutUint32(version[8:], kv.DBSchemaVersion.Patch)
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := tx.Put(kv.DatabaseInfoBucket, kv.DBSchemaVersionKey, version[:]); err != nil {
 			return fmt.Errorf("writing DB schema version: %w", err)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", dbutils.DBSchemaVersion.Major, dbutils.DBSchemaVersion.Minor, dbutils.DBSchemaVersion.Patch))
+	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, kv.DBSchemaVersion.Patch))
 	return nil
 }
 
-func MarshalMigrationPayload(db ethdb.KVGetter) ([]byte, error) {
+func MarshalMigrationPayload(db kv.KVGetter) ([]byte, error) {
 	s := map[string][]byte{}
 
 	buf := bytes.NewBuffer(nil)
 	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
 
 	for _, stage := range stages.AllStages {
-		v, err := db.GetOne(dbutils.SyncStageProgress, []byte(stage))
+		v, err := db.GetOne(kv.SyncStageProgress, []byte(stage))
 		if err != nil {
 			return nil, err
 		}

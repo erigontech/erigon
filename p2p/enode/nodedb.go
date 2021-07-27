@@ -30,10 +30,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -74,7 +73,7 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	kv     ethdb.RwKV    // Interface to the database itself
+	kv     kv.RwKV       // Interface to the database itself
 	runner sync.Once     // Ensures we can start at most one expirer
 	quit   chan struct{} // Channel to signal the expiring thread to stop
 }
@@ -88,9 +87,9 @@ func OpenDB(path string) (*DB, error) {
 	return newPersistentDB(path)
 }
 
-var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-	return dbutils.BucketsCfg{
-		dbutils.InodesBucket: {},
+var bucketsConfig = func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+	return kv.BucketsCfg{
+		kv.InodesBucket: {},
 	}
 }
 
@@ -98,7 +97,7 @@ var bucketsConfig = func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
 func newMemoryDB() (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	db.kv, err = kv.NewMDBX().InMem().Label(ethdb.Sentry).WithBucketsConfig(bucketsConfig).Open()
+	db.kv, err = mdbx.NewMDBX().InMem().Label(kv.Sentry).WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -108,9 +107,9 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	var db ethdb.RwKV
+	var db kv.RwKV
 	var err error
-	db, err = kv.NewMDBX().Path(path).Label(ethdb.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+	db, err = mdbx.NewMDBX().Path(path).Label(kv.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -120,8 +119,8 @@ func newPersistentDB(path string) (*DB, error) {
 	currentVer = currentVer[:binary.PutVarint(currentVer, int64(dbVersion))]
 
 	var blob []byte
-	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		c, err := tx.RwCursor(dbutils.InodesBucket)
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursor(kv.InodesBucket)
 		if err != nil {
 			return err
 		}
@@ -216,8 +215,8 @@ func localItemKey(id ID, field string) []byte {
 // fetchInt64 retrieves an integer associated with a particular key.
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
-	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		blob, errGet := tx.GetOne(dbutils.InodesBucket, key)
+	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
+		blob, errGet := tx.GetOne(kv.InodesBucket, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -238,16 +237,16 @@ func (db *DB) fetchInt64(key []byte) int64 {
 func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
-	return db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		return tx.Put(dbutils.InodesBucket, common.CopyBytes(key), blob)
+	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.InodesBucket, common.CopyBytes(key), blob)
 	})
 }
 
 // fetchUint64 retrieves an integer associated with a particular key.
 func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
-	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		blob, errGet := tx.GetOne(dbutils.InodesBucket, key)
+	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
+		blob, errGet := tx.GetOne(kv.InodesBucket, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -265,16 +264,16 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	return db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		return tx.Put(dbutils.InodesBucket, common.CopyBytes(key), blob)
+	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.InodesBucket, common.CopyBytes(key), blob)
 	})
 }
 
 // Node retrieves a node with a given id from the database.
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
-	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		v, errGet := tx.GetOne(dbutils.InodesBucket, nodeKey(id))
+	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
+		v, errGet := tx.GetOne(kv.InodesBucket, nodeKey(id))
 		if errGet != nil {
 			return errGet
 		}
@@ -311,8 +310,8 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	if err := db.kv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		return tx.Put(dbutils.InodesBucket, nodeKey(node.ID()), blob)
+	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.InodesBucket, nodeKey(node.ID()), blob)
 	}); err != nil {
 		return err
 	}
@@ -338,9 +337,9 @@ func (db *DB) DeleteNode(id ID) {
 	deleteRange(db.kv, nodeKey(id))
 }
 
-func deleteRange(db ethdb.RwKV, prefix []byte) {
-	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		c, err := tx.RwCursor(dbutils.InodesBucket)
+func deleteRange(db kv.RwKV, prefix []byte) {
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursor(kv.InodesBucket)
 		if err != nil {
 			return err
 		}
@@ -394,8 +393,8 @@ func (db *DB) expireNodes() {
 		youngestPong int64
 	)
 	var toDelete [][]byte
-	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.InodesBucket)
+	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.InodesBucket)
 		if err != nil {
 			return err
 		}
@@ -527,8 +526,8 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		id    ID
 	)
 
-	if err := db.kv.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.InodesBucket)
+	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.InodesBucket)
 		if err != nil {
 			return err
 		}
@@ -557,7 +556,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			db.ensureExpirer()
 			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
 			var lastPongReceived int64
-			blob, errGet := tx.GetOne(dbutils.InodesBucket, pongKey)
+			blob, errGet := tx.GetOne(kv.InodesBucket, pongKey)
 			if errGet != nil {
 				return errGet
 			}

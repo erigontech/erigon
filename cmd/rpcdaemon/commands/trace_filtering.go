@@ -7,13 +7,12 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -233,7 +232,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	var allBlocks roaring64.Bitmap
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			b, err := bitmapdb.Get64(dbtx, dbutils.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
+			b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
 			if err != nil {
 				stream.WriteNil()
 				return err
@@ -244,7 +243,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			b, err := bitmapdb.Get64(dbtx, dbutils.CallToIndex, addr.Bytes(), fromBlock, toBlock)
+			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
 			if err != nil {
 				stream.WriteNil()
 				return err
@@ -416,7 +415,7 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	return false
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx ethdb.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer) ([]*TraceCallResult, error) {
 	callParams := make([]TraceCallParam, 0, len(txs))
 	msgs := make([]types.Message, len(txs))
 	for i, tx := range txs {

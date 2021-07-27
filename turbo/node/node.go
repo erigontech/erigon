@@ -3,9 +3,9 @@ package node
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
@@ -45,7 +45,7 @@ func (eri *ErigonNode) run() {
 //
 // NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
-	CustomBuckets dbutils.BucketsCfg
+	CustomBuckets kv.BucketsCfg
 }
 
 func NewNodConfigUrfave(ctx *cli.Context) *node.Config {

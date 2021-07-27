@@ -28,9 +28,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 
@@ -171,19 +170,19 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	stack, _ := New(testNodeConfig())
 	defer stack.Close()
 
-	db, err := stack.OpenDatabase(ethdb.Chain, t.TempDir())
+	db, err := stack.OpenDatabase(kv.Chain, t.TempDir())
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
-	if err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		return tx.Put(dbutils.HashedAccountsBucket, []byte("testK"), []byte{})
+	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.HashedAccountsBucket, []byte("testK"), []byte{})
 	}); err != nil {
 		t.Fatal("can't Put on open DB:", err)
 	}
 
 	stack.Close()
-	if err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		return tx.Put(dbutils.HashedAccountsBucket, []byte("testK"), []byte{})
+	if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.HashedAccountsBucket, []byte("testK"), []byte{})
 	}); err == nil {
 		t.Fatal("Put succeeded after node is closed")
 	}
@@ -198,11 +197,11 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	stack, _ := New(testNodeConfig())
 	defer stack.Close()
 
-	var db ethdb.RwKV
+	var db kv.RwKV
 	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = stack.OpenDatabase(ethdb.Chain, t.TempDir())
+			db, err = stack.OpenDatabase(kv.Chain, t.TempDir())
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -227,7 +226,7 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 
 	stack.RegisterLifecycle(&InstrumentedService{
 		stopHook: func() {
-			db, err := stack.OpenDatabase(ethdb.Chain, t.TempDir())
+			db, err := stack.OpenDatabase(kv.Chain, t.TempDir())
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}

@@ -1,12 +1,12 @@
 package db
 
 import (
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 )
 
-func OpenDatabase(path string, inmem bool) ethdb.RwKV {
-	opts := kv.NewMDBX()
+func OpenDatabase(path string, inmem bool) kv.RwKV {
+	opts := mdbx.NewMDBX()
 	if inmem {
 		opts = opts.InMem()
 	} else {

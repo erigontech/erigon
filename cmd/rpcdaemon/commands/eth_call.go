@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
@@ -51,7 +51,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	return result.Return(), result.Err
 }
 
-func HeaderByNumberOrHash(ctx context.Context, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
+func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, error) {
 	if blockLabel, ok := blockNrOrHash.Number(); ok {
 		blockNum, err := getBlockNumber(blockLabel, tx)
 		if err != nil {

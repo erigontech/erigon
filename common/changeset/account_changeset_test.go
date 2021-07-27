@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestEncodingAccount(t *testing.T) {
-	bkt := dbutils.AccountChangeSetBucket
+	bkt := kv.AccountChangeSetBucket
 	m := Mapper[bkt]
 
 	ch := m.New()

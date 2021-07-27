@@ -1,4 +1,4 @@
-package kv_test
+package mdbx_test
 
 import (
 	"context"
@@ -9,10 +9,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/ethdb/remotedb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +21,7 @@ import (
 )
 
 func TestSequence(t *testing.T) {
-	writeDBs, _ := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	writeDBs, _ := setupDatabases(t, func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return defaultBuckets
 	})
 	ctx := context.Background()
@@ -32,29 +32,29 @@ func TestSequence(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		i, err := tx.ReadSequence(dbutils.Buckets[0])
+		i, err := tx.ReadSequence(kv.Buckets[0])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[0], 1)
+		i, err = tx.IncrementSequence(kv.Buckets[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[0], 6)
+		i, err = tx.IncrementSequence(kv.Buckets[0], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[0], 1)
+		i, err = tx.IncrementSequence(kv.Buckets[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 
-		i, err = tx.ReadSequence(dbutils.Buckets[1])
+		i, err = tx.ReadSequence(kv.Buckets[1])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
+		i, err = tx.IncrementSequence(kv.Buckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[1], 6)
+		i, err = tx.IncrementSequence(kv.Buckets[1], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
+		i, err = tx.IncrementSequence(kv.Buckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 		tx.Rollback()
@@ -62,18 +62,18 @@ func TestSequence(t *testing.T) {
 }
 
 func TestManagedTx(t *testing.T) {
-	defaultConfig := dbutils.BucketsConfigs
+	defaultConfig := kv.BucketsConfigs
 	defer func() {
-		dbutils.BucketsConfigs = defaultConfig
+		kv.BucketsConfigs = defaultConfig
 	}()
 
 	bucketID := 0
-	bucket1 := dbutils.Buckets[bucketID]
-	bucket2 := dbutils.Buckets[bucketID+1]
-	writeDBs, readDBs := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return map[string]dbutils.BucketConfigItem{
+	bucket1 := kv.Buckets[bucketID]
+	bucket2 := kv.Buckets[bucketID+1]
+	writeDBs, readDBs := setupDatabases(t, func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+		return map[string]kv.BucketConfigItem{
 			bucket1: {
-				Flags:                     dbutils.DupSort,
+				Flags:                     kv.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupToLen:                  4,
 				DupFromLen:                6,
@@ -118,7 +118,7 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
-		case *kv.RemoteKV:
+		case *remotedb.RemoteKV:
 		default:
 			continue
 		}
@@ -137,10 +137,10 @@ func TestManagedTx(t *testing.T) {
 }
 
 func TestRemoteKvVersion(t *testing.T) {
-	f := func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	f := func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return defaultBuckets
 	}
-	writeDb := kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen()
+	writeDb := mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen()
 	defer writeDb.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -154,7 +154,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Major versions
 	v1 := v
 	v1.Major++
-	a, err := kv.NewRemote(v1).InMem(conn).Open("", "", "")
+	a, err := remotedb.NewRemote(v1).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -162,7 +162,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Minor versions
 	v2 := v
 	v2.Minor++
-	_, err = kv.NewRemote(v2).InMem(conn).Open("", "", "")
+	_, err = remotedb.NewRemote(v2).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -170,17 +170,17 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Patch versions
 	v3 := v
 	v3.Patch++
-	_, err = kv.NewRemote(v3).InMem(conn).Open("", "", "")
+	_, err = remotedb.NewRemote(v3).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	require.False(t, a.EnsureVersionCompatibility())
 }
 
-func setupDatabases(t *testing.T, f kv.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV) {
-	writeDBs = []ethdb.RwKV{
-		kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
-		kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
+func setupDatabases(t *testing.T, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwKV, readDBs []kv.RwKV) {
+	writeDBs = []kv.RwKV{
+		mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
+		mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
@@ -193,8 +193,8 @@ func setupDatabases(t *testing.T, f kv.BucketConfigsFunc) (writeDBs []ethdb.RwKV
 		}
 	}()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
-	rdb := kv.NewRemote(v).InMem(conn).MustOpen()
-	readDBs = []ethdb.RwKV{
+	rdb := remotedb.NewRemote(v).InMem(conn).MustOpen()
+	readDBs = []kv.RwKV{
 		writeDBs[0],
 		writeDBs[1],
 		rdb,
@@ -219,12 +219,12 @@ func setupDatabases(t *testing.T, f kv.BucketConfigsFunc) (writeDBs []ethdb.RwKV
 	return writeDBs, readDBs
 }
 
-func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {
+func testCtxCancel(t *testing.T, db kv.RwKV, bucket1 string) {
 	assert := assert.New(t)
 	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
 
-	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
+	if err := db.View(cancelableCtx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(bucket1)
 		if err != nil {
 			return err
@@ -241,10 +241,10 @@ func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {
 	}
 }
 
-func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
+func testMultiCursor(t *testing.T, db kv.RwKV, bucket1, bucket2 string) {
 	assert, ctx := assert.New(t), context.Background()
 
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
+	if err := db.View(ctx, func(tx kv.Tx) error {
 		c1, err := tx.Cursor(bucket1)
 		if err != nil {
 			return err

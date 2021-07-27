@@ -9,43 +9,43 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestHeaderPrefix(t *testing.T) {
 	require := require.New(t)
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestKV(t)
 
-	err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		err := tx.CreateBucket(dbutils.HeaderPrefixOld)
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		err := tx.CreateBucket(kv.HeaderPrefixOld)
 		if err != nil {
 			return err
 		}
 		for i := uint64(0); i < 10; i++ {
 			//header
-			err = tx.Put(dbutils.HeaderPrefixOld, dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))
+			err = tx.Put(kv.HeaderPrefixOld, dbutils.HeaderKey(i, common.Hash{uint8(i)}), []byte("header "+strconv.Itoa(int(i))))
 			require.NoError(err)
 			//canonical
-			err = tx.Put(dbutils.HeaderPrefixOld, HeaderHashKey(i), common.Hash{uint8(i)}.Bytes())
+			err = tx.Put(kv.HeaderPrefixOld, HeaderHashKey(i), common.Hash{uint8(i)}.Bytes())
 			require.NoError(err)
-			err = tx.Put(dbutils.HeaderPrefixOld, append(dbutils.HeaderKey(i, common.Hash{uint8(i)}), HeaderTDSuffix...), []byte{uint8(i)})
+			err = tx.Put(kv.HeaderPrefixOld, append(dbutils.HeaderKey(i, common.Hash{uint8(i)}), HeaderTDSuffix...), []byte{uint8(i)})
 			require.NoError(err)
 		}
 		return nil
 	})
 	require.NoError(err)
 
-	migrator := NewMigrator(ethdb.Chain)
+	migrator := NewMigrator(kv.Chain)
 	migrator.Migrations = []Migration{headerPrefixToSeparateBuckets}
 	err = migrator.Apply(db, t.TempDir())
 	require.NoError(err)
 
 	num := 0
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeaderCanonicalBucket, []byte{}, func(k, v []byte) error {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.HeaderCanonicalBucket, []byte{}, func(k, v []byte) error {
 			require.Len(k, 8)
 			bytes.Equal(v, common.Hash{uint8(binary.BigEndian.Uint64(k))}.Bytes())
 			num++
@@ -56,8 +56,8 @@ func TestHeaderPrefix(t *testing.T) {
 	require.Equal(num, 10)
 
 	num = 0
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeaderTDBucket, []byte{}, func(k, v []byte) error {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.HeaderTDBucket, []byte{}, func(k, v []byte) error {
 			require.Len(k, 40)
 			bytes.Equal(v, []byte{uint8(binary.BigEndian.Uint64(k))})
 			num++
@@ -68,8 +68,8 @@ func TestHeaderPrefix(t *testing.T) {
 	require.Equal(num, 10)
 
 	num = 0
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeadersBucket, []byte{}, func(k, v []byte) error {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.HeadersBucket, []byte{}, func(k, v []byte) error {
 			require.Len(k, 40)
 			bytes.Equal(v, []byte("header "+strconv.Itoa(int(binary.BigEndian.Uint64(k)))))
 			num++

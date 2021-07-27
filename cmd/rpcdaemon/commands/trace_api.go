@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -31,14 +31,14 @@ type TraceAPI interface {
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
 	*BaseAPI
-	kv            ethdb.RoKV
+	kv            kv.RoKV
 	maxTraces     uint64
 	gasCap        uint64
 	compatibility bool // Bug for bug compatiblity with OpenEthereum
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(base *BaseAPI, kv ethdb.RoKV, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(base *BaseAPI, kv kv.RoKV, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		BaseAPI:       base,
 		kv:            kv,

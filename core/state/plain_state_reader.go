@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 var _ StateReader = (*PlainStateReader)(nil)
@@ -16,17 +16,17 @@ var _ StateReader = (*PlainStateReader)(nil)
 // Data in the plain state is stored using un-hashed account/storage items
 // as opposed to the "normal" state that uses hashes of merkle paths to store items.
 type PlainStateReader struct {
-	db ethdb.KVGetter
+	db kv.KVGetter
 }
 
-func NewPlainStateReader(db ethdb.KVGetter) *PlainStateReader {
+func NewPlainStateReader(db kv.KVGetter) *PlainStateReader {
 	return &PlainStateReader{
 		db: db,
 	}
 }
 
 func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := r.db.GetOne(dbutils.PlainStateBucket, address.Bytes())
+	enc, err := r.db.GetOne(kv.PlainStateBucket, address.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := r.db.GetOne(dbutils.PlainStateBucket, compositeKey)
+	enc, err := r.db.GetOne(kv.PlainStateBucket, compositeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (r *PlainStateReader) ReadAccountCode(address common.Address, incarnation u
 	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := r.db.GetOne(dbutils.CodeBucket, codeHash.Bytes())
+	code, err := r.db.GetOne(kv.CodeBucket, codeHash.Bytes())
 	if len(code) == 0 {
 		return nil, nil
 	}
@@ -69,7 +69,7 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, incarnati
 }
 
 func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	b, err := r.db.GetOne(dbutils.IncarnationMapBucket, address.Bytes())
+	b, err := r.db.GetOne(kv.IncarnationMapBucket, address.Bytes())
 	if err != nil {
 		return 0, err
 	}

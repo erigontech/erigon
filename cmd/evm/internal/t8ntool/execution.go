@@ -30,8 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -90,7 +90,7 @@ type stEnvMarshaling struct {
 // Apply applies a set of transactions to a pre-state
 func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	txs types.Transactions, miningReward int64,
-	getTracerFn func(txIndex int, txHash common.Hash) (tracer vm.Tracer, err error)) (ethdb.RwKV, *ExecutionResult, error) {
+	getTracerFn func(txIndex int, txHash common.Hash) (tracer vm.Tracer, err error)) (kv.RwKV, *ExecutionResult, error) {
 
 	// Capture errors for BLOCKHASH operation, if we haven't been supplied the
 	// required blockhashes
@@ -106,7 +106,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		}
 		return h
 	}
-	db := kv.NewMemKV()
+	db := memdb.NewMemKV()
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -265,7 +265,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	return db, execRs, nil
 }
 
-func MakePreState(chainRules params.Rules, tx ethdb.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
+func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
 	r, _ := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(r)

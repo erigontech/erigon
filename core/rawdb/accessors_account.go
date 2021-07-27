@@ -18,14 +18,13 @@ package rawdb
 
 import (
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
-func ReadAccount(db ethdb.Tx, addrHash common.Address, acc *accounts.Account) (bool, error) {
+func ReadAccount(db kv.Tx, addrHash common.Address, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
-	enc, err := db.GetOne(dbutils.PlainStateBucket, addrHashBytes)
+	enc, err := db.GetOne(kv.PlainStateBucket, addrHashBytes)
 	if err != nil {
 		return false, err
 	}

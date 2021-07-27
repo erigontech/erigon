@@ -16,12 +16,11 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/pics/contracts"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -69,28 +68,28 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	dbutils.Receipts:               "Receipts",
-	dbutils.Log:                    "Event Logs",
-	dbutils.AccountsHistoryBucket:  "History Of Accounts",
-	dbutils.StorageHistoryBucket:   "History Of Storage",
-	dbutils.HeadersBucket:          "Headers",
-	dbutils.HeaderCanonicalBucket:  "Canonical headers",
-	dbutils.HeaderTDBucket:         "Headers TD",
-	dbutils.BlockBodyPrefix:        "Block Bodies",
-	dbutils.HeaderNumberBucket:     "Header Numbers",
-	dbutils.TxLookupPrefix:         "Transaction Index",
-	dbutils.CodeBucket:             "Code Of Contracts",
-	dbutils.SyncStageProgress:      "Sync Progress",
-	dbutils.PlainStateBucket:       "Plain State",
-	dbutils.HashedAccountsBucket:   "Hashed Accounts",
-	dbutils.HashedStorageBucket:    "Hashed Storage",
-	dbutils.TrieOfAccountsBucket:   "Intermediate Hashes Of Accounts",
-	dbutils.TrieOfStorageBucket:    "Intermediate Hashes Of Storage",
-	dbutils.AccountChangeSetBucket: "Account Changes",
-	dbutils.StorageChangeSetBucket: "Storage Changes",
-	dbutils.IncarnationMapBucket:   "Incarnations",
-	dbutils.Senders:                "Transaction Senders",
-	dbutils.ContractTEVMCodeBucket: "Contract TEVM code",
+	kv.Receipts:               "Receipts",
+	kv.Log:                    "Event Logs",
+	kv.AccountsHistoryBucket:  "History Of Accounts",
+	kv.StorageHistoryBucket:   "History Of Storage",
+	kv.HeadersBucket:          "Headers",
+	kv.HeaderCanonicalBucket:  "Canonical headers",
+	kv.HeaderTDBucket:         "Headers TD",
+	kv.BlockBodyPrefix:        "Block Bodies",
+	kv.HeaderNumberBucket:     "Header Numbers",
+	kv.TxLookupPrefix:         "Transaction Index",
+	kv.CodeBucket:             "Code Of Contracts",
+	kv.SyncStageProgress:      "Sync Progress",
+	kv.PlainStateBucket:       "Plain State",
+	kv.HashedAccountsBucket:   "Hashed Accounts",
+	kv.HashedStorageBucket:    "Hashed Storage",
+	kv.TrieOfAccountsBucket:   "Intermediate Hashes Of Accounts",
+	kv.TrieOfStorageBucket:    "Intermediate Hashes Of Storage",
+	kv.AccountChangeSetBucket: "Account Changes",
+	kv.StorageChangeSetBucket: "Storage Changes",
+	kv.IncarnationMapBucket:   "Incarnations",
+	kv.Senders:                "Transaction Senders",
+	kv.ContractTEVMCodeBucket: "Contract TEVM code",
 }
 
 /*dbutils.PlainContractCodeBucket,
@@ -120,7 +119,7 @@ func hexPalette() error {
 	return nil
 }
 
-func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) error {
+func stateDatabaseComparison(first kv.RwKV, second kv.RwKV, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -132,8 +131,8 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 	noValues := make(map[int]struct{})
 	perBucketFiles := make(map[string]*os.File)
 
-	if err = second.View(context.Background(), func(readTx ethdb.Tx) error {
-		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
+	if err = second.View(context.Background(), func(readTx kv.Tx) error {
+		return first.View(context.Background(), func(firstTx kv.Tx) error {
 			for bucketName := range bucketLabels {
 				bucketName := bucketName
 				if err := readTx.ForEach(bucketName, nil, func(k, v []byte) error {
@@ -411,7 +410,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := kv.NewMemKV()
+	emptyKv := memdb.NewMemKV()
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -22,11 +22,11 @@ type TxPoolAPI interface {
 type TxPoolAPIImpl struct {
 	*BaseAPI
 	pool proto_txpool.TxpoolClient
-	db   ethdb.RoKV
+	db   kv.RoKV
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db ethdb.RoKV, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, db kv.RoKV, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
 		BaseAPI: base,
 		pool:    pool,

@@ -3,12 +3,12 @@ package migrations
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 var dbSchemaVersion = Migration{
 	Name: "db_schema_version",
-	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err

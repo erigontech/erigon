@@ -14,8 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"google.golang.org/grpc"
@@ -35,7 +34,7 @@ var KvServiceAPIVersion = &types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv ethdb.RwKV
+	kv kv.RwKV
 }
 
 func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, miningServer *MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
@@ -97,13 +96,13 @@ func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPo
 	return grpcServer, nil
 }
 
-func NewKvServer(kv ethdb.RwKV) *KvServer {
+func NewKvServer(kv kv.RwKV) *KvServer {
 	return &KvServer{kv: kv}
 }
 
 // Version returns the service-side interface version number
 func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply, error) {
-	dbSchemaVersion := &dbutils.DBSchemaVersion
+	dbSchemaVersion := &kv.DBSchemaVersion
 	if KvServiceAPIVersion.Major > dbSchemaVersion.Major {
 		return KvServiceAPIVersion, nil
 	}
@@ -132,7 +131,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	var CursorID uint32
 	type CursorInfo struct {
 		bucket string
-		c      ethdb.Cursor
+		c      kv.Cursor
 		k, v   []byte //fields to save current position of cursor - used when Tx reopen
 	}
 	cursors := map[uint32]*CursorInfo{}
@@ -176,7 +175,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 					return err
 				}
 				switch casted := c.c.(type) {
-				case ethdb.CursorDupSort:
+				case kv.CursorDupSort:
 					v, err := casted.SeekBothRange(c.k, c.v)
 					if err != nil {
 						return fmt.Errorf("server-side error: %w", err)
@@ -187,7 +186,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 							return fmt.Errorf("server-side error: %w", err)
 						}
 					}
-				case ethdb.Cursor:
+				case kv.Cursor:
 					if _, _, err := c.c.Seek(c.k); err != nil {
 						return fmt.Errorf("server-side error: %w", err)
 					}
@@ -195,7 +194,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 			}
 		}
 
-		var c ethdb.Cursor
+		var c kv.Cursor
 		if in.BucketName == "" {
 			cInfo, ok := cursors[in.Cursor]
 			if !ok {
@@ -240,30 +239,30 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	}
 }
 
-func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
+func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 	var k, v []byte
 	var err error
 	switch in.Op {
 	case remote.Op_FIRST:
 		k, v, err = c.First()
 	case remote.Op_FIRST_DUP:
-		v, err = c.(ethdb.CursorDupSort).FirstDup()
+		v, err = c.(kv.CursorDupSort).FirstDup()
 	case remote.Op_SEEK:
 		k, v, err = c.Seek(in.K)
 	case remote.Op_SEEK_BOTH:
-		v, err = c.(ethdb.CursorDupSort).SeekBothRange(in.K, in.V)
+		v, err = c.(kv.CursorDupSort).SeekBothRange(in.K, in.V)
 	case remote.Op_CURRENT:
 		k, v, err = c.Current()
 	case remote.Op_LAST:
 		k, v, err = c.Last()
 	case remote.Op_LAST_DUP:
-		v, err = c.(ethdb.CursorDupSort).LastDup()
+		v, err = c.(kv.CursorDupSort).LastDup()
 	case remote.Op_NEXT:
 		k, v, err = c.Next()
 	case remote.Op_NEXT_DUP:
-		k, v, err = c.(ethdb.CursorDupSort).NextDup()
+		k, v, err = c.(kv.CursorDupSort).NextDup()
 	case remote.Op_NEXT_NO_DUP:
-		k, v, err = c.(ethdb.CursorDupSort).NextNoDup()
+		k, v, err = c.(kv.CursorDupSort).NextNoDup()
 	case remote.Op_PREV:
 		k, v, err = c.Prev()
 	//case remote.Op_PREV_DUP:
@@ -279,7 +278,7 @@ func handleOp(c ethdb.Cursor, stream remote.KV_TxServer, in *remote.Cursor) erro
 	case remote.Op_SEEK_EXACT:
 		k, v, err = c.SeekExact(in.K)
 	case remote.Op_SEEK_BOTH_EXACT:
-		k, v, err = c.(ethdb.CursorDupSort).SeekBothExact(in.K, in.V)
+		k, v, err = c.(kv.CursorDupSort).SeekBothExact(in.K, in.V)
 	default:
 		return fmt.Errorf("unknown operation: %s", in.Op)
 	}

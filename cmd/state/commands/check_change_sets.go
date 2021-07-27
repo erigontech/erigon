@@ -19,7 +19,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -64,15 +66,15 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		interruptCh <- true
 	}()
 
-	kv, err := kv2.NewMDBX().Path(chaindata).Open()
+	db, err := kv2.NewMDBX().Path(chaindata).Open()
 	if err != nil {
 		return err
 	}
-	chainDb := kv
+	chainDb := db
 	defer chainDb.Close()
 	historyDb := chainDb
 	if chaindata != historyfile {
-		historyDb = kv2.MustOpen(historyfile)
+		historyDb = olddb.MustOpen(historyfile)
 	}
 	historyTx, err1 := historyDb.BeginRo(context.Background())
 	if err1 != nil {
@@ -161,7 +163,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			sort.Sort(accountChanges)
 			i := 0
 			match := true
-			err = changeset.Walk(historyTx, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
@@ -193,7 +195,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				expectedStorageChanges = changeset.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
-			err = changeset.Walk(historyTx, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, kv.StorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {

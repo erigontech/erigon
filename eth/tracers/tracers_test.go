@@ -35,7 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
@@ -176,7 +176,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Balance: big.NewInt(500000000000000),
 	}
 
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	statedb, _ := tests.MakePreState(params.Rules{}, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
@@ -254,7 +254,7 @@ func TestCallTracer(t *testing.T) {
 				CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
 			}
 
-			_, tx := kv.NewTestTx(t)
+			_, tx := memdb.NewTestTx(t)
 			statedb, err := tests.MakePreState(params.Rules{}, tx, test.Genesis.Alloc, uint64(test.Context.Number))
 			require.NoError(t, err)
 

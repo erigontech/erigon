@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-func getBlockNumber(number rpc.BlockNumber, tx ethdb.Tx) (uint64, error) {
+func getBlockNumber(number rpc.BlockNumber, tx kv.Tx) (uint64, error) {
 	var blockNum uint64
 	var err error
 	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
@@ -25,7 +25,7 @@ func getBlockNumber(number rpc.BlockNumber, tx ethdb.Tx) (uint64, error) {
 	return blockNum, nil
 }
 
-func getLatestBlockNumber(tx ethdb.Tx) (uint64, error) {
+func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return 0, fmt.Errorf("getting latest block number: %v", err)

@@ -4,8 +4,8 @@ import (
 	"path"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
@@ -36,8 +36,8 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDB(path string, applyMigrations bool) ethdb.RwKV {
-	label := ethdb.Chain
+func openDB(path string, applyMigrations bool) kv.RwKV {
+	label := kv.Chain
 	db := openKV(label, path, false)
 	if applyMigrations {
 		has, err := migrations.NewMigrator(label).HasPendingMigrations(db)
@@ -58,13 +58,13 @@ func openDB(path string, applyMigrations bool) ethdb.RwKV {
 	return db
 }
 
-func openKV(label ethdb.Label, path string, exclusive bool) ethdb.RwKV {
+func openKV(label kv.Label, path string, exclusive bool) kv.RwKV {
 	opts := kv2.NewMDBX().Path(path).Label(label)
 	if exclusive {
 		opts = opts.Exclusive()
 	}
 	if databaseVerbosity != -1 {
-		opts = opts.DBVerbosity(ethdb.DBVerbosityLvl(databaseVerbosity))
+		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}
 	kv := opts.MustOpen()
 	return kv

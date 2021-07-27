@@ -1,4 +1,4 @@
-package kv
+package olddb
 
 import (
 	"bytes"
@@ -12,14 +12,14 @@ import (
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 type mutation struct {
 	puts       *btree.BTree
-	db         ethdb.RwTx
+	db         kv.RwTx
 	quit       <-chan struct{}
 	clean      func()
 	searchItem MutationItem
@@ -41,7 +41,7 @@ type MutationItem struct {
 // defer batch.Rollback()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewBatch(tx ethdb.RwTx, quit <-chan struct{}) *mutation {
+func NewBatch(tx kv.RwTx, quit <-chan struct{}) *mutation {
 	clean := func() {}
 	if quit == nil {
 		ch := make(chan struct{})
@@ -65,7 +65,7 @@ func (mi *MutationItem) Less(than btree.Item) bool {
 	return bytes.Compare(mi.key, i.key) < 0
 }
 
-func (m *mutation) RwKV() ethdb.RwKV {
+func (m *mutation) RwKV() kv.RwKV {
 	if casted, ok := m.db.(ethdb.HasRwKV); ok {
 		return casted.RwKV()
 	}
@@ -85,9 +85,9 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 }
 
 func (m *mutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
-	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
+	v, ok := m.getMem(kv.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
-		v, err = m.db.GetOne(dbutils.Sequence, []byte(bucket))
+		v, err = m.db.GetOne(kv.Sequence, []byte(bucket))
 		if err != nil {
 			return 0, err
 		}
@@ -100,16 +100,16 @@ func (m *mutation) IncrementSequence(bucket string, amount uint64) (res uint64, 
 
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, currentV+amount)
-	if err = m.Put(dbutils.Sequence, []byte(bucket), newVBytes); err != nil {
+	if err = m.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
 		return 0, err
 	}
 
 	return currentV, nil
 }
 func (m *mutation) ReadSequence(bucket string) (res uint64, err error) {
-	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
+	v, ok := m.getMem(kv.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
-		v, err = m.db.GetOne(dbutils.Sequence, []byte(bucket))
+		v, err = m.db.GetOne(kv.Sequence, []byte(bucket))
 		if err != nil {
 			return 0, err
 		}
@@ -205,22 +205,6 @@ func (m *mutation) AppendDup(table string, key []byte, value []byte) error {
 	return m.Put(table, key, value)
 }
 
-func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	l := len(tuples)
-	for i := 0; i < l; i += 3 {
-		newMi := &MutationItem{table: string(tuples[i]), key: tuples[i+1], value: tuples[i+2]}
-		i := m.puts.ReplaceOrInsert(newMi)
-		m.size += int(unsafe.Sizeof(newMi)) + len(newMi.key) + len(newMi.value)
-		if i != nil {
-			oldMi := i.(*MutationItem)
-			m.size -= (int(unsafe.Sizeof(oldMi)) + len(oldMi.key) + len(oldMi.value))
-		}
-	}
-	return 0, nil
-}
-
 func (m *mutation) BatchSize() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -250,19 +234,9 @@ func (m *mutation) Delete(table string, k, v []byte) error {
 	return m.Put(table, k, nil)
 }
 
-func (m *mutation) CommitAndBegin(ctx context.Context) error {
-	err := m.Commit()
-	return err
-}
-
-func (m *mutation) RollbackAndBegin(ctx context.Context) error {
-	m.Rollback()
-	return nil
-}
-
-func (m *mutation) doCommit(tx ethdb.RwTx) error {
+func (m *mutation) doCommit(tx kv.RwTx) error {
 	var prevTable string
-	var c ethdb.RwCursor
+	var c kv.RwCursor
 	var innerErr error
 	var isEndOfBucket bool
 	logEvery := time.NewTicker(30 * time.Second)
@@ -365,6 +339,6 @@ func (m *mutation) panicOnEmptyDB() {
 	}
 }
 
-func (m *mutation) SetRwKV(kv ethdb.RwKV) {
+func (m *mutation) SetRwKV(kv kv.RwKV) {
 	m.db.(ethdb.HasRwKV).SetRwKV(kv)
 }

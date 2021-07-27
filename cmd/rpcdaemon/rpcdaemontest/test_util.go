@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -25,7 +25,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func CreateTestKV(t *testing.T) ethdb.RwKV {
+func CreateTestKV(t *testing.T) kv.RwKV {
 	// Configure and generate a sample block chain
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

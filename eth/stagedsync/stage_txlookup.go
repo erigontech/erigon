@@ -12,19 +12,19 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type TxLookupCfg struct {
-	db     ethdb.RwKV
+	db     kv.RwKV
 	prune  prune.Mode
 	tmpdir string
 }
 
 func StageTxLookupCfg(
-	db ethdb.RwKV,
+	db kv.RwKV,
 	prune prune.Mode,
 	tmpdir string,
 ) TxLookupCfg {
@@ -35,7 +35,7 @@ func StageTxLookupCfg(
 	}
 }
 
-func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func SpawnTxLookup(s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -75,9 +75,9 @@ func SpawnTxLookup(s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 	return nil
 }
 
-func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, cfg TxLookupCfg) error {
+func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, cfg TxLookupCfg) error {
 	bigNum := new(big.Int)
-	return etl.Transform(logPrefix, tx, dbutils.HeaderCanonicalBucket, dbutils.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonicalBucket, kv.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(tx, blockHash, blocknum)
@@ -101,7 +101,7 @@ func TxLookupTransform(logPrefix string, tx ethdb.RwTx, startKey, endKey []byte,
 	})
 }
 
-func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
 	quitCh := ctx.Done()
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
@@ -129,10 +129,10 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 	return nil
 }
 
-func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
+func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
 	reader := bytes.NewReader(nil)
 	logPrefix := s.LogPrefix()
-	return etl.Transform(logPrefix, tx, dbutils.BlockBodyPrefix, dbutils.TxLookupPrefix, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform(logPrefix, tx, kv.BlockBodyPrefix, kv.TxLookupPrefix, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
 		if err := rlp.Decode(reader, body); err != nil {
@@ -159,7 +159,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxLookupCf
 	})
 }
 
-func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
 	if !cfg.prune.TxIndex.Enabled() {
 		return nil
 	}
@@ -193,9 +193,9 @@ func PruneTxLookup(s *PruneState, tx ethdb.RwTx, cfg TxLookupCfg, ctx context.Co
 	return nil
 }
 
-func pruneTxLookup(tx ethdb.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context) error {
+func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context) error {
 	reader := bytes.NewReader(nil)
-	return etl.Transform(logPrefix, tx, dbutils.BlockBodyPrefix, dbutils.TxLookupPrefix, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform(logPrefix, tx, kv.BlockBodyPrefix, kv.TxLookupPrefix, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
 		if err := rlp.Decode(reader, body); err != nil {

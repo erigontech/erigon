@@ -19,7 +19,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -40,34 +43,34 @@ func TestMatreshkaStream(t *testing.T) {
 	chaindataDir := "/media/b00ris/nvme/fresh_sync/tg/chaindata"
 	tmpDbDir := "/home/b00ris/event_stream"
 
-	chaindata, err := kv2.Open(chaindataDir, true)
+	chaindata, err := olddb.Open(chaindataDir, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	//tmpDb:=ethdb.NewMemDatabase()
 	os.RemoveAll(tmpDbDir)
 
-	kv, err := kv2.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		defaultBuckets[AccountDiff] = dbutils.BucketConfigItem{}
-		defaultBuckets[StorageDiff] = dbutils.BucketConfigItem{}
-		defaultBuckets[ContractDiff] = dbutils.BucketConfigItem{}
+	db, err := kv2.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+		defaultBuckets[AccountDiff] = kv.BucketConfigItem{}
+		defaultBuckets[StorageDiff] = kv.BucketConfigItem{}
+		defaultBuckets[ContractDiff] = kv.BucketConfigItem{}
 		return defaultBuckets
 	}).Open()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	chainConfig, _, genesisErr := core.CommitGenesisBlock(kv, core.DefaultGenesisBlock())
+	chainConfig, _, genesisErr := core.CommitGenesisBlock(db, core.DefaultGenesisBlock())
 	if genesisErr != nil {
 		t.Fatal(err)
 	}
-	if err := kv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		return tx.ClearBucket(dbutils.HeadHeaderKey)
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.ClearBucket(kv.HeadHeaderKey)
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	snkv := kv2.NewSnapshotKV().DB(kv).
+	snkv := snapshotdb.NewSnapshotKV().DB(db).
 		//broken
 		//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).
 		Open()
@@ -84,7 +87,7 @@ func TestMatreshkaStream(t *testing.T) {
 	//if err != nil {
 	//	t.Fatal(err)
 	//}
-	psCursor, err := tx.Cursor(dbutils.PlainStateBucket)
+	psCursor, err := tx.Cursor(kv.PlainStateBucket)
 	if err != nil {
 		t.Fatal(err)
 	}

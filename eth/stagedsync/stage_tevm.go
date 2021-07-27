@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
@@ -23,13 +24,13 @@ import (
 var stageTranspileGauge = metrics.NewRegisteredGauge("stage/tevm", nil)
 
 type TranspileCfg struct {
-	db          ethdb.RwKV
+	db          kv.RwKV
 	batchSize   datasize.ByteSize
 	chainConfig *params.ChainConfig
 }
 
 func StageTranspileCfg(
-	kv ethdb.RwKV,
+	kv kv.RwKV,
 	batchSize datasize.ByteSize,
 	chainConfig *params.ChainConfig,
 ) TranspileCfg {
@@ -40,12 +41,12 @@ func StageTranspileCfg(
 	}
 }
 
-func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, cfg TranspileCfg, ctx context.Context) error {
+func SpawnTranspileStage(s *StageState, tx kv.RwTx, toBlock uint64, cfg TranspileCfg, ctx context.Context) error {
 	var prevStageProgress uint64
 	var errStart error
 
 	if tx == nil {
-		errStart = cfg.db.View(ctx, func(tx ethdb.Tx) error {
+		errStart = cfg.db.View(ctx, func(tx kv.Tx) error {
 			prevStageProgress, errStart = stages.GetStageProgress(tx, stages.Execution)
 			return errStart
 		})
@@ -94,7 +95,7 @@ func SpawnTranspileStage(s *StageState, tx ethdb.RwTx, toBlock uint64, cfg Trans
 	return nil
 }
 
-func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg TranspileCfg, tx ethdb.RwTx, observedAddresses map[common.Address]struct{}, observedCodeHashes map[common.Hash]struct{}, quitCh <-chan struct{}) (uint64, error) {
+func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg TranspileCfg, tx kv.RwTx, observedAddresses map[common.Address]struct{}, observedCodeHashes map[common.Hash]struct{}, quitCh <-chan struct{}) (uint64, error) {
 	useExternalTx := tx != nil
 	var err error
 	if !useExternalTx {
@@ -105,11 +106,11 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		defer tx.Rollback()
 	}
 
-	batch := kv.NewBatch(tx, quitCh)
+	batch := olddb.NewBatch(tx, quitCh)
 	defer batch.Rollback()
 
 	// read contracts pending for translation
-	c, err := tx.CursorDupSort(dbutils.CallTraceSet)
+	c, err := tx.CursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return 0, err
 	}
@@ -197,7 +198,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		observedCodeHashes[codeHash] = struct{}{}
 
 		// check if we already have TEVM code
-		ok, err = batch.Has(dbutils.ContractTEVMCodeBucket, codeHashBytes)
+		ok, err = batch.Has(kv.ContractTEVMCodeBucket, codeHashBytes)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return 0, fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
 		}
@@ -207,7 +208,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		}
 
 		// load the contract code
-		evmContract, err = batch.GetOne(dbutils.CodeBucket, codeHashBytes)
+		evmContract, err = batch.GetOne(kv.CodeBucket, codeHashBytes)
 		if err != nil {
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
@@ -229,7 +230,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		}
 
 		// store TEVM contract code
-		err = batch.Put(dbutils.ContractTEVMCodeBucket, codeHashBytes, transpiledCode)
+		err = batch.Put(kv.ContractTEVMCodeBucket, codeHashBytes, transpiledCode)
 		if err != nil {
 			return 0, fmt.Errorf("cannot store TEVM code %q: %w", codeHash, err)
 		}
@@ -268,7 +269,7 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 	return currentContract, currentTime
 }
 
-func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TranspileCfg, ctx context.Context) (err error) {
+func UnwindTranspileStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg TranspileCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -279,7 +280,7 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Tran
 	}
 
 	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
-	c, err := tx.CursorDupSort(dbutils.CallTraceSet)
+	c, err := tx.CursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err
 	}
@@ -326,7 +327,7 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Tran
 		codeHashBytes = codeHash.Bytes()
 
 		// check if we already have TEVM code
-		ok, err = tx.Has(dbutils.ContractTEVMCodeBucket, codeHashBytes)
+		ok, err = tx.Has(kv.ContractTEVMCodeBucket, codeHashBytes)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
 		}
@@ -335,7 +336,7 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg Tran
 			continue
 		}
 
-		err = tx.Delete(dbutils.ContractTEVMCodeBucket, codeHashBytes, nil)
+		err = tx.Delete(kv.ContractTEVMCodeBucket, codeHashBytes, nil)
 		if err != nil {
 			return fmt.Errorf("can't delete TEVM code by hash %q: %w", codeHash, err)
 		}
@@ -357,7 +358,7 @@ func transpileCode(code []byte) ([]byte, error) {
 	return append(make([]byte, 0, len(code)), code...), nil
 }
 
-func PruneTranspileStage(p *PruneState, tx ethdb.RwTx, cfg TranspileCfg, initialCycle bool, ctx context.Context) (err error) {
+func PruneTranspileStage(p *PruneState, tx kv.RwTx, cfg TranspileCfg, initialCycle bool, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

@@ -7,12 +7,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, db ethdb.RoKV, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+func APIList(ctx context.Context, db kv.RoKV, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
 	base := NewBaseApi(filters)

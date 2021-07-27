@@ -3,16 +3,16 @@ package node
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 //nolint
-func prepareBuckets(customBuckets dbutils.BucketsCfg) {
+func prepareBuckets(customBuckets kv.BucketsCfg) {
 	if len(customBuckets) == 0 {
 		return
 	}
 
-	currentBuckets := dbutils.DefaultBuckets()
+	currentBuckets := kv.DefaultBuckets()
 
 	for k, v := range customBuckets {
 		if _, ok := currentBuckets[k]; ok {
@@ -21,5 +21,5 @@ func prepareBuckets(customBuckets dbutils.BucketsCfg) {
 		currentBuckets[k] = v
 	}
 
-	dbutils.UpdateBucketsList(currentBuckets)
+	kv.UpdateBucketsList(currentBuckets)
 }

@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -28,7 +28,7 @@ import (
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
-	db ethdb.RwKV,
+	db kv.RwKV,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *stagedsync.Notifications,
@@ -80,17 +80,17 @@ func StageLoop(
 
 func StageLoopStep(
 	ctx context.Context,
-	db ethdb.RwKV,
+	db kv.RwKV,
 	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
 	notifications *stagedsync.Notifications,
 	initialCycle bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
-	snapshotMigratorFinal func(tx ethdb.Tx) error,
+	snapshotMigratorFinal func(tx kv.Tx) error,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
 	var origin, hashStateStageProgress, finishProgressBefore uint64
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
+	if err := db.View(ctx, func(tx kv.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
 			return err
@@ -114,7 +114,7 @@ func StageLoopStep(
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
-	var tx ethdb.RwTx // on this variable will run sync cycle.
+	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
 		tx, err = db.BeginRw(context.Background())
 		if err != nil {
@@ -135,7 +135,7 @@ func StageLoopStep(
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
-	var rotx ethdb.Tx
+	var rotx kv.Tx
 	if rotx, err = db.BeginRo(ctx); err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func StageLoopStep(
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync) (err error) {
+func MiningStep(ctx context.Context, kv kv.RwKV, mining *stagedsync.Sync) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
@@ -194,7 +194,7 @@ func MiningStep(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync) (er
 
 func NewStagedSync2(
 	ctx context.Context,
-	db ethdb.RwKV,
+	db kv.RwKV,
 	cfg ethconfig.Config,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,

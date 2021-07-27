@@ -13,12 +13,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 type MiningExecCfg struct {
-	db          ethdb.RwKV
+	db          kv.RwKV
 	miningState MiningState
 	notifier    ChainEventNotifier
 	chainConfig params.ChainConfig
@@ -28,7 +29,7 @@ type MiningExecCfg struct {
 }
 
 func StageMiningExecCfg(
-	db ethdb.RwKV,
+	db kv.RwKV,
 	miningState MiningState,
 	notifier ChainEventNotifier,
 	chainConfig params.ChainConfig,
@@ -50,7 +51,7 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
 	cfg.vmConfig.NoReceipts = false
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock

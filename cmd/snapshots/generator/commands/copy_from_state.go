@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +32,7 @@ var copyFromStateSnapshotCmd = &cobra.Command{
 }
 
 func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, block uint64, snapshotDir, snapshotMode string) error {
-	db, err := kv.Open(dbpath, true)
+	db, err := olddb.Open(dbpath, true)
 	if err != nil {
 		return err
 	}
@@ -48,11 +48,11 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	if err != nil {
 		return err
 	}
-	snkv := kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-			dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+	snkv := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+		return kv.BucketsCfg{
+			kv.PlainStateBucket:        kv.BucketsConfigs[kv.PlainStateBucket],
+			kv.PlainContractCodeBucket: kv.BucketsConfigs[kv.PlainContractCodeBucket],
+			kv.CodeBucket:              kv.BucketsConfigs[kv.CodeBucket],
 		}
 	}).Path(snapshotPath).MustOpen()
 	log.Info("Create snapshot db", "path", snapshotPath)
@@ -61,15 +61,15 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	defer logEvery.Stop()
 
 	tt := time.Now()
-	if err = snkv.Update(ctx, func(snTx ethdb.RwTx) error {
-		return tx.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
-			innerErr := snTx.Put(dbutils.PlainStateBucket, k, v)
+	if err = snkv.Update(ctx, func(snTx kv.RwTx) error {
+		return tx.ForEach(kv.PlainStateBucket, []byte{}, func(k, v []byte) error {
+			innerErr := snTx.Put(kv.PlainStateBucket, k, v)
 			if innerErr != nil {
 				return fmt.Errorf("put state err: %w", innerErr)
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("progress", "bucket", dbutils.PlainStateBucket, "key", fmt.Sprintf("%x", k))
+				log.Info("progress", "bucket", kv.PlainStateBucket, "key", fmt.Sprintf("%x", k))
 			default:
 			}
 
@@ -82,15 +82,15 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 
 	log.Info("Copy plain state end", "t", time.Since(tt))
 	tt = time.Now()
-	if err = snkv.Update(ctx, func(sntx ethdb.RwTx) error {
-		return tx.ForEach(dbutils.PlainContractCodeBucket, []byte{}, func(k, v []byte) error {
-			innerErr := sntx.Put(dbutils.PlainContractCodeBucket, k, v)
+	if err = snkv.Update(ctx, func(sntx kv.RwTx) error {
+		return tx.ForEach(kv.PlainContractCodeBucket, []byte{}, func(k, v []byte) error {
+			innerErr := sntx.Put(kv.PlainContractCodeBucket, k, v)
 			if innerErr != nil {
 				return fmt.Errorf("put contract code err: %w", innerErr)
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("progress", "bucket", dbutils.PlainContractCodeBucket, "key", fmt.Sprintf("%x", k))
+				log.Info("progress", "bucket", kv.PlainContractCodeBucket, "key", fmt.Sprintf("%x", k))
 			default:
 			}
 			return nil
@@ -101,15 +101,15 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	log.Info("Copy contract code end", "t", time.Since(tt))
 
 	tt = time.Now()
-	if err = snkv.Update(ctx, func(sntx ethdb.RwTx) error {
-		return tx.ForEach(dbutils.CodeBucket, []byte{}, func(k, v []byte) error {
-			innerErr := sntx.Put(dbutils.CodeBucket, k, v)
+	if err = snkv.Update(ctx, func(sntx kv.RwTx) error {
+		return tx.ForEach(kv.CodeBucket, []byte{}, func(k, v []byte) error {
+			innerErr := sntx.Put(kv.CodeBucket, k, v)
 			if innerErr != nil {
 				return fmt.Errorf("put code err: %w", innerErr)
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("progress", "bucket", dbutils.CodeBucket, "key", fmt.Sprintf("%x", k))
+				log.Info("progress", "bucket", kv.CodeBucket, "key", fmt.Sprintf("%x", k))
 			default:
 			}
 			return nil

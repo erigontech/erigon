@@ -28,8 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
@@ -49,7 +49,7 @@ type MockSentry struct {
 	Ctx             context.Context
 	t               *testing.T
 	cancel          context.CancelFunc
-	DB              ethdb.RwKV
+	DB              kv.RwKV
 	tmpdir          string
 	Engine          consensus.Engine
 	ChainConfig     *params.ChainConfig
@@ -164,9 +164,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
 	}
 	if t != nil {
-		mock.DB = kv.NewTestKV(t)
+		mock.DB = memdb.NewTestKV(t)
 	} else {
-		mock.DB = kv.NewMemKV()
+		mock.DB = memdb.NewMemKV()
 	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -416,7 +416,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return err
 	}
 	// Check if the latest header was imported or rolled back
-	if err = ms.DB.View(ms.Ctx, func(tx ethdb.Tx) error {
+	if err = ms.DB.View(ms.Ctx, func(tx kv.Tx) error {
 		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 		}

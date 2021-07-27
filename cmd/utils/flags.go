@@ -31,6 +31,7 @@ import (
 	"text/template"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -42,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -1285,8 +1285,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(cfg *node.Config) ethdb.RwKV {
-	chainDb, err := node.OpenDatabase(cfg, ethdb.Chain)
+func MakeChainDatabase(cfg *node.Config) kv.RwKV {
+	chainDb, err := node.OpenDatabase(cfg, kv.Chain)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}

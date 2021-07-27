@@ -9,8 +9,9 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -18,16 +19,16 @@ import (
 
 func TestHeadersGenerateIndex(t *testing.T) {
 	snPath := t.TempDir()
-	snKV := kv.NewMDBX().Path(snPath).MustOpen()
+	snKV := mdbx2.NewMDBX().Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers := generateHeaders(10)
-	err := snKV.Update(context.Background(), func(tx ethdb.RwTx) error {
+	err := snKV.Update(context.Background(), func(tx kv.RwTx) error {
 		for _, header := range headers {
 			headerBytes, innerErr := rlp.EncodeToBytes(header)
 			if innerErr != nil {
 				panic(innerErr)
 			}
-			innerErr = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
+			innerErr = tx.Put(kv.HeadersBucket, dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if innerErr != nil {
 				panic(innerErr)
 			}
@@ -39,20 +40,20 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 	snKV.Close()
 
-	db := kv.NewMDBX().InMem().WithBucketsConfig(kv.DefaultBucketConfigs).MustOpen()
+	db := mdbx2.NewMDBX().InMem().WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
 	defer db.Close()
 	//we need genesis
-	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		return rawdb.WriteCanonicalHash(tx, headers[0].Hash(), headers[0].Number.Uint64())
 
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	snKV = kv.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(kv.DefaultBucketConfigs).MustOpen()
+	snKV = mdbx2.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
 	defer snKV.Close()
 
-	snKV = kv.NewSnapshotKV().HeadersSnapshot(snKV).DB(db).Open()
+	snKV = snapshotdb.NewSnapshotKV().HeadersSnapshot(snKV).DB(db).Open()
 	snTx, err := snKV.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer snTx.Rollback()

@@ -1,4 +1,4 @@
-package kv
+package remotedb
 
 import (
 	"bytes"
@@ -15,8 +15,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 	"github.com/ledgerwatch/erigon/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -28,7 +28,7 @@ import (
 
 // generate the messages and services
 type remoteOpts struct {
-	bucketsCfg  BucketConfigsFunc
+	bucketsCfg  mdbx.BucketConfigsFunc
 	inMemConn   *bufconn.Listener // for tests
 	DialAddress string
 	version     gointerfaces.Version
@@ -38,7 +38,7 @@ type RemoteKV struct {
 	conn     *grpc.ClientConn
 	remoteKV remote.KVClient
 	log      log.Logger
-	buckets  dbutils.BucketsCfg
+	buckets  kv.BucketsCfg
 	opts     remoteOpts
 }
 
@@ -48,7 +48,7 @@ type remoteTx struct {
 	streamCancelFn     context.CancelFunc
 	db                 *RemoteKV
 	cursors            []*remoteCursor
-	statelessCursors   map[string]ethdb.Cursor
+	statelessCursors   map[string]kv.Cursor
 	streamingRequested bool
 }
 
@@ -57,7 +57,7 @@ type remoteCursor struct {
 	stream     remote.KV_TxClient
 	tx         *remoteTx
 	bucketName string
-	bucketCfg  dbutils.BucketConfigItem
+	bucketCfg  kv.BucketConfigItem
 	id         uint32
 }
 
@@ -74,7 +74,7 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) WithBucketsConfig(f BucketConfigsFunc) remoteOpts {
+func (opts remoteOpts) WithBucketsConfig(f mdbx.BucketConfigsFunc) remoteOpts {
 	opts.bucketsCfg = f
 	return opts
 }
@@ -152,9 +152,9 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 		conn:     conn,
 		remoteKV: kvClient,
 		log:      log.New("remote_db", opts.DialAddress),
-		buckets:  dbutils.BucketsCfg{},
+		buckets:  kv.BucketsCfg{},
 	}
-	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	customBuckets := opts.bucketsCfg(kv.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}
@@ -162,7 +162,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 	return db, nil
 }
 
-func (opts remoteOpts) MustOpen() ethdb.RwKV {
+func (opts remoteOpts) MustOpen() kv.RwKV {
 	db, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)
@@ -174,10 +174,10 @@ func (opts remoteOpts) MustOpen() ethdb.RwKV {
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
 func NewRemote(v gointerfaces.Version) remoteOpts {
-	return remoteOpts{bucketsCfg: DefaultBucketConfigs, version: v}
+	return remoteOpts{bucketsCfg: mdbx.DefaultBucketConfigs, version: v}
 }
 
-func (db *RemoteKV) AllBuckets() dbutils.BucketsCfg {
+func (db *RemoteKV) AllBuckets() kv.BucketsCfg {
 	return db.buckets
 }
 
@@ -212,7 +212,7 @@ func (db *RemoteKV) Close() {
 	}
 }
 
-func (db *RemoteKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
+func (db *RemoteKV) BeginRo(ctx context.Context) (kv.Tx, error) {
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {
@@ -222,11 +222,11 @@ func (db *RemoteKV) BeginRo(ctx context.Context) (ethdb.Tx, error) {
 	return &remoteTx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn}, nil
 }
 
-func (db *RemoteKV) BeginRw(ctx context.Context) (ethdb.RwTx, error) {
+func (db *RemoteKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return nil, fmt.Errorf("remote db provider doesn't support .BeginRw method")
 }
 
-func (db *RemoteKV) View(ctx context.Context, f func(tx ethdb.Tx) error) (err error) {
+func (db *RemoteKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -236,7 +236,7 @@ func (db *RemoteKV) View(ctx context.Context, f func(tx ethdb.Tx) error) (err er
 	return f(tx)
 }
 
-func (db *RemoteKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) (err error) {
+func (db *RemoteKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
@@ -261,9 +261,9 @@ func (tx *remoteTx) Rollback() {
 	tx.closeGrpcStream()
 }
 
-func (tx *remoteTx) statelessCursor(bucket string) (ethdb.Cursor, error) {
+func (tx *remoteTx) statelessCursor(bucket string) (kv.Cursor, error) {
 	if tx.statelessCursors == nil {
-		tx.statelessCursors = make(map[string]ethdb.Cursor)
+		tx.statelessCursors = make(map[string]kv.Cursor)
 	}
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
@@ -368,7 +368,7 @@ func (c *remoteCursor) Prev() ([]byte, []byte, error) {
 	return c.prev()
 }
 
-func (tx *remoteTx) Cursor(bucket string) (ethdb.Cursor, error) {
+func (tx *remoteTx) Cursor(bucket string) (kv.Cursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &remoteCursor{tx: tx, ctx: tx.ctx, bucketName: bucket, bucketCfg: b, stream: tx.stream}
 	tx.cursors = append(tx.cursors, c)
@@ -605,7 +605,7 @@ func (c *remoteCursor) Close() {
 	}
 }
 
-func (tx *remoteTx) CursorDupSort(bucket string) (ethdb.CursorDupSort, error) {
+func (tx *remoteTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	c, err := tx.Cursor(bucket)
 	if err != nil {
 		return nil, err

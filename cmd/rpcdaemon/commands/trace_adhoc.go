@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -860,7 +860,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	return api.doCallMany(ctx, dbtx, msgs, callParams, parentNrOrHash, nil, true /* gasBailout */, -1 /* all tx indices */)
 }
 
-func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx ethdb.Tx, msgs []types.Message, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
+func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []types.Message, callParams []TraceCallParam, parentNrOrHash *rpc.BlockNumberOrHash, header *types.Header,
 	gasBailout bool, txIndexNeeded int) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {

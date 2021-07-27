@@ -30,7 +30,7 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"gopkg.in/check.v1"
 
@@ -217,7 +217,7 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
-	db := kv.NewMemKV()
+	db := memdb.NewMemKV()
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -348,7 +348,7 @@ func TestAccessList(t *testing.T) {
 	addr := common.HexToAddress
 	slot := common.HexToHash
 
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	state := New(NewPlainState(tx, 0))
 	state.accessList = newAccessList()
 

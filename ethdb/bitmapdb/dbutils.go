@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 const ChunkLimit = uint64(1950 * datasize.B) // threshold beyond which MDBX overflow pages appear: 4096 / 2 - (keySize + 8)
@@ -76,7 +77,7 @@ func WalkChunkWithKeys(k []byte, m *roaring.Bitmap, sizeLimit uint64, f func(chu
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
 // starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
-func TruncateRange(db ethdb.RwTx, bucket string, key []byte, to uint32) error {
+func TruncateRange(db kv.RwTx, bucket string, key []byte, to uint32) error {
 	chunkKey := make([]byte, len(key)+4)
 	copy(chunkKey, key)
 	binary.BigEndian.PutUint32(chunkKey[len(chunkKey)-4:], to)
@@ -118,7 +119,7 @@ func TruncateRange(db ethdb.RwTx, bucket string, key []byte, to uint32) error {
 
 // Get - reading as much chunks as needed to satisfy [from, to] condition
 // join all chunks to 1 bitmap by Or operator
-func Get(db ethdb.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap, error) {
+func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap, error) {
 	var chunks []*roaring.Bitmap
 
 	fromKey := make([]byte, len(key)+4)
@@ -223,7 +224,7 @@ func WalkChunkWithKeys64(k []byte, m *roaring64.Bitmap, sizeLimit uint64, f func
 // TruncateRange - gets existing bitmap in db and call RemoveRange operator on it.
 // starts from hot shard, stops when shard not overlap with [from-to)
 // !Important: [from, to)
-func TruncateRange64(db ethdb.RwTx, bucket string, key []byte, to uint64) error {
+func TruncateRange64(db kv.RwTx, bucket string, key []byte, to uint64) error {
 	chunkKey := make([]byte, len(key)+8)
 	copy(chunkKey, key)
 	binary.BigEndian.PutUint64(chunkKey[len(chunkKey)-8:], to)
@@ -270,7 +271,7 @@ func TruncateRange64(db ethdb.RwTx, bucket string, key []byte, to uint64) error 
 
 // Get - reading as much chunks as needed to satisfy [from, to] condition
 // join all chunks to 1 bitmap by Or operator
-func Get64(db ethdb.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bitmap, error) {
+func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bitmap, error) {
 	var chunks []*roaring64.Bitmap
 
 	fromKey := make([]byte, len(key)+8)

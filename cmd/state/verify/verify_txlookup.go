@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 func ValidateTxLookups(chaindata string) error {
-	db := kv.MustOpen(chaindata)
+	db := olddb.MustOpen(chaindata)
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
@@ -58,7 +58,7 @@ func ValidateTxLookups(chaindata string) error {
 		bn := blockBytes.Bytes()
 
 		for _, txn := range body.Transactions {
-			val, err := tx.GetOne(dbutils.TxLookupPrefix, txn.Hash().Bytes())
+			val, err := tx.GetOne(kv.TxLookupPrefix, txn.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
 				log.Info("Validated", "entries", iterations, "number", blockNum)

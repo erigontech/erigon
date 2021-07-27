@@ -20,8 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
@@ -74,29 +73,29 @@ var AllStages = []SyncStage{
 }
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
-func GetStageProgress(db ethdb.KVGetter, stage SyncStage) (uint64, error) {
-	v, err := db.GetOne(dbutils.SyncStageProgress, []byte(stage))
+func GetStageProgress(db kv.KVGetter, stage SyncStage) (uint64, error) {
+	v, err := db.GetOne(kv.SyncStageProgress, []byte(stage))
 	if err != nil {
 		return 0, err
 	}
 	return unmarshalData(v)
 }
 
-func SaveStageProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
-	return db.Put(dbutils.SyncStageProgress, []byte(stage), marshalData(progress))
+func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
+	return db.Put(kv.SyncStageProgress, []byte(stage), marshalData(progress))
 }
 
 // GetStagePruneProgress retrieves saved progress of given sync stage from the database
-func GetStagePruneProgress(db ethdb.KVGetter, stage SyncStage) (uint64, error) {
-	v, err := db.GetOne(dbutils.SyncStageProgress, []byte("prune_"+stage))
+func GetStagePruneProgress(db kv.KVGetter, stage SyncStage) (uint64, error) {
+	v, err := db.GetOne(kv.SyncStageProgress, []byte("prune_"+stage))
 	if err != nil {
 		return 0, err
 	}
 	return unmarshalData(v)
 }
 
-func SaveStagePruneProgress(db ethdb.Putter, stage SyncStage, progress uint64) error {
-	return db.Put(dbutils.SyncStageProgress, []byte("prune_"+stage), marshalData(progress))
+func SaveStagePruneProgress(db kv.Putter, stage SyncStage, progress uint64) error {
+	return db.Put(kv.SyncStageProgress, []byte("prune_"+stage), marshalData(progress))
 }
 
 func marshalData(blockNumber uint64) []byte {

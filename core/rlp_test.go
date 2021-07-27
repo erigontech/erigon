@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -34,7 +34,7 @@ import (
 )
 
 func getBlock(transactions int, uncles int, dataSize int) *types.Block {
-	db := kv.NewMemKV()
+	db := memdb.NewMemKV()
 	defer db.Close()
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")

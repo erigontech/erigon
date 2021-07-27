@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -61,7 +61,7 @@ type Handler func(peer *Peer) error
 // Backend defines the data retrieval methods t,o serve remote requests and the
 // callback methods to invoke on remote deliveries.
 type Backend interface {
-	DB() ethdb.RwKV
+	DB() kv.RwKV
 
 	// TxPool retrieves the transaction pool object to serve data.
 	TxPool() TxPool
@@ -133,7 +133,7 @@ type NodeInfo struct {
 }
 
 // ReadNodeInfo retrieves some `eth` protocol metadata about the running host node.
-func ReadNodeInfo(getter ethdb.KVGetter, config *params.ChainConfig, genesisHash common.Hash, network uint64) *NodeInfo {
+func ReadNodeInfo(getter kv.KVGetter, config *params.ChainConfig, genesisHash common.Hash, network uint64) *NodeInfo {
 	head := rawdb.ReadCurrentHeader(getter)
 	td, _ := rawdb.ReadTd(getter, head.Hash(), head.Number.Uint64())
 	return &NodeInfo{

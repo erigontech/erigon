@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -69,7 +70,7 @@ func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, ac
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	if err := dsw.db.Put(dbutils.HashedAccountsBucket, addrHash[:], value); err != nil {
+	if err := dsw.db.Put(kv.HashedAccountsBucket, addrHash[:], value); err != nil {
 		return err
 	}
 	return nil
@@ -83,13 +84,13 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accoun
 	if err != nil {
 		return err
 	}
-	if err := dsw.db.Delete(dbutils.HashedAccountsBucket, addrHash[:], nil); err != nil {
+	if err := dsw.db.Delete(kv.HashedAccountsBucket, addrHash[:], nil); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		if err := dsw.db.Put(dbutils.IncarnationMapBucket, address[:], b[:]); err != nil {
+		if err := dsw.db.Put(kv.IncarnationMapBucket, address[:], b[:]); err != nil {
 			return err
 		}
 	}
@@ -101,7 +102,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 		return err
 	}
 	//save contract code mapping
-	if err := dsw.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
+	if err := dsw.db.Put(kv.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
 	addrHash, err := common.HashData(address.Bytes())
@@ -109,7 +110,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 		return err
 	}
 	//save contract to codeHash mapping
-	if err := dsw.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
+	if err := dsw.db.Put(kv.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
 		return err
 	}
 	return nil
@@ -135,9 +136,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 
 	v := value.Bytes()
 	if len(v) == 0 {
-		return dsw.db.Delete(dbutils.HashedStorageBucket, compositeKey, nil)
+		return dsw.db.Delete(kv.HashedStorageBucket, compositeKey, nil)
 	}
-	return dsw.db.Put(dbutils.HashedStorageBucket, compositeKey, v)
+	return dsw.db.Put(kv.HashedStorageBucket, compositeKey, v)
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
@@ -158,7 +159,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, accountChanges, dbutils.AccountsHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(ethdb.RwTx))
+	err = writeIndex(dsw.blockNr, accountChanges, kv.AccountsHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}
@@ -167,7 +168,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, storageChanges, dbutils.StorageHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(ethdb.RwTx))
+	err = writeIndex(dsw.blockNr, storageChanges, kv.StorageHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}
@@ -175,7 +176,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	return nil
 }
 
-func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket string, changeDb ethdb.RwTx) error {
+func writeIndex(blocknum uint64, changes *changeset.ChangeSet, bucket string, changeDb kv.RwTx) error {
 	buf := bytes.NewBuffer(nil)
 	for _, change := range changes.Changes {
 		k := dbutils.CompositeKeyWithoutIncarnation(change.Key)

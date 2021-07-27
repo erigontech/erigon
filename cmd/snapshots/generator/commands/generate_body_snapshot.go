@@ -6,13 +6,13 @@ import (
 	"os"
 	"time"
 
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -34,14 +34,14 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 }
 
 func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
-	kv := kv2.NewMDBX().Path(dbPath).MustOpen()
-	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
+	db := kv2.NewMDBX().Path(dbPath).MustOpen()
+	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+		return kv.BucketsCfg{
+			kv.BlockBodyPrefix: kv.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
-	tx, err := kv.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 
 	t := time.Now()
 	var hash common.Hash
-	if err := snKV.Update(ctx, func(sntx ethdb.RwTx) error {
+	if err := snKV.Update(ctx, func(sntx kv.RwTx) error {
 		for i := uint64(1); i <= toBlock; i++ {
 			if common.IsCanceled(ctx) {
 				return common.ErrStopped
@@ -63,12 +63,12 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 				return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
 			}
 			body := rawdb.ReadBodyRLP(tx, hash, i)
-			if err = sntx.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash), body); err != nil {
+			if err = sntx.Put(kv.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash), body); err != nil {
 				return err
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("progress", "bucket", dbutils.BlockBodyPrefix, "block num", i)
+				log.Info("progress", "bucket", kv.BlockBodyPrefix, "block num", i)
 			default:
 			}
 		}

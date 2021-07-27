@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -450,7 +450,7 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 	hd.preverifiedHeight = preverifiedHeight
 }
 
-func (hd *HeaderDownload) RecoverFromDb(db ethdb.RoKV) error {
+func (hd *HeaderDownload) RecoverFromDb(db kv.RoKV) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	// Drain persistedLinksQueue and remove links
@@ -458,8 +458,8 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.RoKV) error {
 		link := heap.Pop(hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
 	}
-	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HeadersBucket)
+	err := db.View(context.Background(), func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.HeadersBucket)
 		if err != nil {
 			return err
 		}
@@ -489,7 +489,7 @@ func (hd *HeaderDownload) RecoverFromDb(db ethdb.RoKV) error {
 // ReadProgressFromDb updates highestInDb field according to the information
 // in the database. It is useful in the situations when transaction was
 // aborted and highestInDb became out-of-sync
-func (hd *HeaderDownload) ReadProgressFromDb(tx ethdb.RwTx) (err error) {
+func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
@@ -692,14 +692,14 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db ethdb.StatelessRwTx) func(header *types.Header, blockHeight uint64) error {
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, blockHeight uint64) error {
 	return func(header *types.Header, blockHeight uint64) error {
 		return hi.FeedHeader(db, header, blockHeight)
 	}
 
 }
 
-func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Header, blockHeight uint64) error {
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, blockHeight uint64) error {
 	hash := header.Hash()
 	if hash == hi.prevHash {
 		// Skip duplicates
@@ -794,7 +794,7 @@ func (hi *HeaderInserter) FeedHeader(db ethdb.StatelessRwTx, header *types.Heade
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	if err = db.Put(dbutils.HeadersBucket, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+	if err = db.Put(kv.HeadersBucket, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 	hi.prevHash = hash

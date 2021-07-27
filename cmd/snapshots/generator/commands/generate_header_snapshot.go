@@ -7,7 +7,8 @@ import (
 	"os"
 	"time"
 
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -41,15 +42,15 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	if err != nil {
 		return err
 	}
-	kv := kv2.NewMDBX().Path(dbPath).MustOpen()
+	db := kv2.NewMDBX().Path(dbPath).MustOpen()
 
-	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
+	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+		return kv.BucketsCfg{
+			kv.HeadersBucket: kv.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
-	tx, err := kv.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -63,7 +64,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	t := time.Now()
 	var hash common.Hash
 	var header []byte
-	c, err := snTx.RwCursor(dbutils.HeadersBucket)
+	c, err := snTx.RwCursor(kv.HeadersBucket)
 	if err != nil {
 		return err
 	}

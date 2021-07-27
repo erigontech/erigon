@@ -4,7 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -12,7 +12,7 @@ import (
 // Implements consensus.ChainReader
 type ChainReader struct {
 	Cfg params.ChainConfig
-	Db  ethdb.KVGetter
+	Db  kv.KVGetter
 }
 
 // Config retrieves the blockchain's chain configuration.

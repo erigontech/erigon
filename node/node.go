@@ -27,8 +27,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -55,7 +56,7 @@ type Node struct {
 
 	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
 
-	databases []ethdb.Closer
+	databases []kv.Closer
 }
 
 const (
@@ -95,7 +96,7 @@ func New(conf *Config) (*Node, error) {
 		inprocHandler: rpc.NewServer(50),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
-		databases:     make([]ethdb.Closer, 0),
+		databases:     make([]kv.Closer, 0),
 	}
 	// Register built-in APIs.
 	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
@@ -490,7 +491,7 @@ func (n *Node) WSEndpoint() string {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (ethdb.RwKV, error) {
+func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwKV, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -500,14 +501,14 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (ethdb.RwKV, erro
 
 	var name string
 	switch label {
-	case ethdb.Chain:
+	case kv.Chain:
 		name = "chaindata"
-	case ethdb.TxPool:
+	case kv.TxPool:
 		name = "txpool"
 	default:
 		name = "test"
 	}
-	var db ethdb.RwKV
+	var db kv.RwKV
 	if n.config.DataDir == "" {
 		db = kv2.NewMemKV()
 		n.databases = append(n.databases, db)
@@ -515,10 +516,10 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (ethdb.RwKV, erro
 	}
 	dbPath := n.config.ResolvePath(name)
 
-	var openFunc func(exclusive bool) (ethdb.RwKV, error)
+	var openFunc func(exclusive bool) (kv.RwKV, error)
 	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (ethdb.RwKV, error) {
-		opts := kv2.NewMDBX().Path(dbPath).Label(label).DBVerbosity(n.config.DatabaseVerbosity)
+	openFunc = func(exclusive bool) (kv.RwKV, error) {
+		opts := mdbx.NewMDBX().Path(dbPath).Label(label).DBVerbosity(n.config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
@@ -559,27 +560,27 @@ func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (ethdb.RwKV, erro
 	return db, nil
 }
 
-func OpenDatabase(config *Config, label ethdb.Label) (ethdb.RwKV, error) {
+func OpenDatabase(config *Config, label kv.Label) (kv.RwKV, error) {
 	var name string
 	switch label {
-	case ethdb.Chain:
+	case kv.Chain:
 		name = "chaindata"
-	case ethdb.TxPool:
+	case kv.TxPool:
 		name = "txpool"
 	default:
 		name = "test"
 	}
-	var db ethdb.RwKV
+	var db kv.RwKV
 	if config.DataDir == "" {
 		db = kv2.NewMemKV()
 		return db, nil
 	}
 	dbPath := config.ResolvePath(name)
 
-	var openFunc func(exclusive bool) (ethdb.RwKV, error)
+	var openFunc func(exclusive bool) (kv.RwKV, error)
 	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (ethdb.RwKV, error) {
-		opts := kv2.NewMDBX().Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
+	openFunc = func(exclusive bool) (kv.RwKV, error) {
+		opts := mdbx.NewMDBX().Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
 		}

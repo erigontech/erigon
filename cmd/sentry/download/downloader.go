@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -253,11 +253,11 @@ type ControlServerImpl struct {
 	forks       []uint64
 	genesisHash common.Hash
 	networkId   uint64
-	db          ethdb.RwKV
+	db          kv.RwKV
 	Engine      consensus.Engine
 }
 
-func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db kv.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -284,7 +284,7 @@ func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainC
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error
-	err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
 		cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(tx)
 		return err
 	})

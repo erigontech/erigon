@@ -8,17 +8,17 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type chainContext struct {
-	tx ethdb.Tx
+	tx kv.Tx
 }
 
-func NewChainContext(tx ethdb.Tx) *chainContext {
+func NewChainContext(tx kv.Tx) *chainContext {
 	return &chainContext{
 		tx: tx,
 	}

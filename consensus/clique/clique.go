@@ -29,6 +29,7 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -40,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -175,7 +175,7 @@ type Clique struct {
 	chainConfig    *params.ChainConfig
 	config         *params.CliqueConfig   // Consensus engine configuration parameters
 	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
-	db             ethdb.RwKV             // Database to store and retrieve snapshot checkpoints
+	db             kv.RwKV                // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
@@ -194,7 +194,7 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB ethdb.RwKV) *Clique {
+func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB kv.RwKV) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -577,7 +577,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	}
 	defer tx.Rollback()
 
-	cur, err1 := tx.Cursor(dbutils.CliqueSeparateBucket)
+	cur, err1 := tx.Cursor(kv.CliqueSeparateBucket)
 	if err1 != nil {
 		return nil, err1
 	}

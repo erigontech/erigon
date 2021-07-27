@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
@@ -25,7 +25,7 @@ import (
 var stageHeadersGauge = metrics.NewRegisteredGauge("stage/headers", nil)
 
 type HeadersCfg struct {
-	db                ethdb.RwKV
+	db                kv.RwKV
 	hd                *headerdownload.HeaderDownload
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
@@ -35,7 +35,7 @@ type HeadersCfg struct {
 }
 
 func StageHeadersCfg(
-	db ethdb.RwKV,
+	db kv.RwKV,
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
@@ -59,7 +59,7 @@ func HeadersForward(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
@@ -204,7 +204,7 @@ func HeadersForward(
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx ethdb.StatelessRwTx) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx) error {
 	if height == 0 {
 		return nil
 	}
@@ -236,7 +236,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) (err error) {
+func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -255,7 +255,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Mark all descendants of bad block as bad too
-		headerCursor, cErr := tx.Cursor(dbutils.HeadersBucket)
+		headerCursor, cErr := tx.Cursor(kv.HeadersBucket)
 		if cErr != nil {
 			return cErr
 		}
@@ -281,7 +281,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 	}
 	if badBlock {
 		// Find header with biggest TD
-		tdCursor, cErr := tx.Cursor(dbutils.HeaderTDBucket)
+		tdCursor, cErr := tx.Cursor(kv.HeaderTDBucket)
 		if cErr != nil {
 			return cErr
 		}
@@ -355,7 +355,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 
 type chainReader struct {
 	config *params.ChainConfig
-	tx     ethdb.RwTx
+	tx     kv.RwTx
 }
 
 func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
@@ -372,7 +372,7 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 }
 
 type epochReader struct {
-	tx ethdb.RwTx
+	tx kv.RwTx
 }
 
 func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
@@ -391,7 +391,7 @@ func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
+func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

@@ -4,18 +4,18 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
-	db             ethdb.RwTx
+	db             kv.RwTx
 	accountChanges map[common.Address][]byte
 	storageChanged map[common.Address]bool
 	storageChanges map[string][]byte
@@ -29,7 +29,7 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		storageChanges: make(map[string][]byte),
 	}
 }
-func NewChangeSetWriterPlain(db ethdb.RwTx, blockNumber uint64) *ChangeSetWriter {
+func NewChangeSetWriterPlain(db kv.RwTx, blockNumber uint64) *ChangeSetWriter {
 	return &ChangeSetWriter{
 		db:             db,
 		accountChanges: make(map[common.Address][]byte),
@@ -121,8 +121,8 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	if err = changeset.Mapper[dbutils.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
-		if err = w.db.AppendDup(dbutils.AccountChangeSetBucket, k, v); err != nil {
+	if err = changeset.Mapper[kv.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+		if err = w.db.AppendDup(kv.AccountChangeSetBucket, k, v); err != nil {
 			return err
 		}
 		return nil
@@ -137,8 +137,8 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
-	if err = changeset.Mapper[dbutils.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
-		if err = w.db.AppendDup(dbutils.StorageChangeSetBucket, k, v); err != nil {
+	if err = changeset.Mapper[kv.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
+		if err = w.db.AppendDup(kv.StorageChangeSetBucket, k, v); err != nil {
 			return err
 		}
 		return nil
@@ -153,7 +153,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, accountChanges, dbutils.AccountsHistoryBucket, w.db)
+	err = writeIndex(w.blockNumber, accountChanges, kv.AccountsHistoryBucket, w.db)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, storageChanges, dbutils.StorageHistoryBucket, w.db)
+	err = writeIndex(w.blockNumber, storageChanges, kv.StorageHistoryBucket, w.db)
 	if err != nil {
 		return err
 	}

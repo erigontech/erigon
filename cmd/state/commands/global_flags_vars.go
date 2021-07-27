@@ -1,8 +1,8 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 )
 
@@ -45,9 +45,9 @@ func withStatsfile(cmd *cobra.Command) {
 }
 
 func withCSBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", dbutils.AccountChangeSetBucket, dbutils.AccountChangeSetBucket+" for account and "+dbutils.StorageChangeSetBucket+" for storage")
+	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", kv.AccountChangeSetBucket, kv.AccountChangeSetBucket+" for account and "+kv.StorageChangeSetBucket+" for storage")
 }
 
 func withIndexBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&indexBucket, "index-bucket", dbutils.AccountsHistoryBucket, dbutils.AccountsHistoryBucket+" for account and "+dbutils.StorageHistoryBucket+" for storage")
+	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.AccountsHistoryBucket, kv.AccountsHistoryBucket+" for account and "+kv.StorageHistoryBucket+" for storage")
 }

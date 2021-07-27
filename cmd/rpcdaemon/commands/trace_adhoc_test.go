@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/require"
 )
@@ -61,7 +61,7 @@ func TestReplayTransaction(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	var txnHash common.Hash
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		b, err := rawdb.ReadBlockByNumber(tx, 6)
 		if err != nil {
 			return err

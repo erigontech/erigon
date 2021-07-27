@@ -5,7 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -31,11 +31,11 @@ type ErigonAPI interface {
 // ErigonImpl is implementation of the ErigonAPI interface
 type ErigonImpl struct {
 	*BaseAPI
-	db ethdb.RoKV
+	db kv.RoKV
 }
 
 // NewErigonAPI returns ErigonImpl instance
-func NewErigonAPI(base *BaseAPI, db ethdb.RoKV) *ErigonImpl {
+func NewErigonAPI(base *BaseAPI, db kv.RoKV) *ErigonImpl {
 	return &ErigonImpl{
 		BaseAPI: base,
 		db:      db,

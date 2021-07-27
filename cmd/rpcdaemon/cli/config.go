@@ -11,11 +11,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/ethdb/remotedb"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -123,16 +123,16 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func checkDbCompatibility(db ethdb.RoKV) error {
+func checkDbCompatibility(db kv.RoKV) error {
 	// DB schema version compatibility check
 	var version []byte
 	var compatErr error
-	var compatTx ethdb.Tx
+	var compatTx kv.Tx
 	if compatTx, compatErr = db.BeginRo(context.Background()); compatErr != nil {
 		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
 	}
 	defer compatTx.Rollback()
-	if version, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionKey); compatErr != nil {
+	if version, compatErr = compatTx.GetOne(kv.DatabaseInfoBucket, kv.DBSchemaVersionKey); compatErr != nil {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
 	if len(version) != 12 {
@@ -142,7 +142,7 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
-	dbSchemaVersion := &dbutils.DBSchemaVersion
+	dbSchemaVersion := &kv.DBSchemaVersion
 	if major != dbSchemaVersion.Major {
 		compatible = false
 	} else if minor != dbSchemaVersion.Minor {
@@ -160,14 +160,14 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	return nil
 }
 
-func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
+func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (db kv.RoKV, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
-		var rwKv ethdb.RwKV
+		var rwKv kv.RwKV
 		rwKv, err = kv2.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, err
@@ -175,20 +175,20 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 		if compatErr := checkDbCompatibility(rwKv); compatErr != nil {
 			return nil, nil, nil, nil, compatErr
 		}
-		kv = rwKv
+		db = rwKv
 	} else {
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 	if cfg.PrivateApiAddr != "" {
-		remoteKv, err := kv2.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 		remoteEth := services.NewRemoteBackend(remoteKv.GrpcConn())
 		mining = services.NewMiningService(remoteKv.GrpcConn())
 		txPool = services.NewTxPoolService(remoteKv.GrpcConn())
-		if kv == nil {
-			kv = remoteKv
+		if db == nil {
+			db = remoteKv
 		}
 		eth = remoteEth
 		go func() {
@@ -206,7 +206,7 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 			}
 		}()
 	}
-	return kv, eth, txPool, mining, err
+	return db, eth, txPool, mining, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {

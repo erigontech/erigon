@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/petar/GoLLRB/llrb"
 )
@@ -40,12 +40,12 @@ func (a *storageItem) Less(b llrb.Item) bool {
 }
 
 type PlainState struct {
-	tx      ethdb.Tx
+	tx      kv.Tx
 	blockNr uint64
 	storage map[common.Address]*llrb.LLRB
 }
 
-func NewPlainState(tx ethdb.Tx, blockNr uint64) *PlainState {
+func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
 	return &PlainState{
 		tx:      tx,
 		blockNr: blockNr,
@@ -150,7 +150,7 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	}
 	//restore codehash
 	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
-		if codeHash, err1 := s.tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
+		if codeHash, err1 := s.tx.GetOne(kv.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 			if len(codeHash) > 0 {
 				a.CodeHash = common.BytesToHash(codeHash)
 			}
@@ -177,7 +177,7 @@ func (s *PlainState) ReadAccountCode(address common.Address, incarnation uint64,
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := s.tx.GetOne(dbutils.CodeBucket, codeHash[:])
+	code, err := s.tx.GetOne(kv.CodeBucket, codeHash[:])
 	if len(code) == 0 {
 		return nil, nil
 	}

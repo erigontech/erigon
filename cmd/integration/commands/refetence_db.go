@@ -11,30 +11,30 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 var stateBuckets = []string{
-	dbutils.HashedAccountsBucket,
-	dbutils.HashedStorageBucket,
-	dbutils.ContractCodeBucket,
-	dbutils.PlainStateBucket,
-	dbutils.AccountChangeSetBucket,
-	dbutils.StorageChangeSetBucket,
-	dbutils.PlainContractCodeBucket,
-	dbutils.IncarnationMapBucket,
-	dbutils.CodeBucket,
-	dbutils.TrieOfAccountsBucket,
-	dbutils.TrieOfStorageBucket,
-	dbutils.AccountsHistoryBucket,
-	dbutils.StorageHistoryBucket,
-	dbutils.TxLookupPrefix,
-	dbutils.ContractTEVMCodeBucket,
+	kv.HashedAccountsBucket,
+	kv.HashedStorageBucket,
+	kv.ContractCodeBucket,
+	kv.PlainStateBucket,
+	kv.AccountChangeSetBucket,
+	kv.StorageChangeSetBucket,
+	kv.PlainContractCodeBucket,
+	kv.IncarnationMapBucket,
+	kv.CodeBucket,
+	kv.TrieOfAccountsBucket,
+	kv.TrieOfStorageBucket,
+	kv.AccountsHistoryBucket,
+	kv.StorageHistoryBucket,
+	kv.TxLookupPrefix,
+	kv.ContractTEVMCodeBucket,
 }
 
 var cmdCompareBucket = &cobra.Command{
@@ -126,14 +126,14 @@ func init() {
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
-	db := kv.MustOpen(chaindata)
+	db := olddb.MustOpen(chaindata)
 	defer db.Close()
 
-	refDB := kv.MustOpen(referenceChaindata)
+	refDB := olddb.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		if err := refDB.View(context.Background(), func(refTX ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		if err := refDB.View(context.Background(), func(refTX kv.Tx) error {
 			for _, bucket := range stateBuckets {
 				fmt.Printf("\nBucket: %s\n", bucket)
 				if err := compareBuckets(ctx, tx, bucket, refTX, bucket); err != nil {
@@ -152,14 +152,14 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 	return nil
 }
 func compareBucketBetweenDatabases(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
-	db := kv.MustOpen(chaindata)
+	db := olddb.MustOpen(chaindata)
 	defer db.Close()
 
-	refDB := kv.MustOpen(referenceChaindata)
+	refDB := olddb.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		return refDB.View(context.Background(), func(refTX ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return refDB.View(context.Background(), func(refTX kv.Tx) error {
 			return compareBuckets(ctx, tx, bucket, refTX, bucket)
 		})
 	}); err != nil {
@@ -169,7 +169,7 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 	return nil
 }
 
-func compareBuckets(ctx context.Context, tx ethdb.Tx, b string, refTx ethdb.Tx, refB string) error {
+func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB string) error {
 	count := 0
 	c, err := tx.Cursor(b)
 	if err != nil {
@@ -250,7 +250,7 @@ func fToMdbx(ctx context.Context, to string) error {
 	}
 	defer file.Close()
 
-	dst := kv.NewMDBX().Path(to).MustOpen()
+	dst := mdbx2.NewMDBX().Path(to).MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
@@ -313,7 +313,7 @@ MainLoop:
 			v := common.CopyBytes(fileScanner.Bytes())
 			v = common.FromHex(string(v[1:]))
 
-			if casted, ok := c.(ethdb.RwCursorDupSort); ok {
+			if casted, ok := c.(kv.RwCursorDupSort); ok {
 				if err = casted.AppendDup(k, v); err != nil {
 					panic(err)
 				}
@@ -345,12 +345,12 @@ MainLoop:
 
 func mdbxToMdbx(ctx context.Context, from, to string) error {
 	_ = os.RemoveAll(to)
-	src := kv.NewMDBX().Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := kv.NewMDBX().Path(to).MustOpen()
+	src := mdbx2.NewMDBX().Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
+	dst := mdbx2.NewMDBX().Path(to).MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 
-func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
+func kv2kv(ctx context.Context, src, dst kv.RwKV) error {
 	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -378,7 +378,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 		if err != nil {
 			return err
 		}
-		casted, isDupsort := c.(ethdb.RwCursorDupSort)
+		casted, isDupsort := c.(kv.RwCursorDupSort)
 
 		for k, v, err := srcC.First(); k != nil; k, v, err = srcC.Next() {
 			if err != nil {
@@ -412,7 +412,7 @@ func kv2kv(ctx context.Context, src, dst ethdb.RwKV) error {
 				if err != nil {
 					return err
 				}
-				casted, isDupsort = c.(ethdb.RwCursorDupSort)
+				casted, isDupsort = c.(kv.RwCursorDupSort)
 			default:
 			}
 		}

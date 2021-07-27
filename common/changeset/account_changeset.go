@@ -7,7 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
@@ -42,7 +42,7 @@ func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	return blockN, k, v
 }
 
-func FindAccount(c ethdb.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error) {
+func FindAccount(c kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error) {
 	k := dbutils.EncodeBlockNumber(blockNumber)
 	v, err := c.SeekBothRange(k, key)
 	if err != nil {
@@ -56,9 +56,9 @@ func FindAccount(c ethdb.CursorDupSort, blockNumber uint64, key []byte) ([]byte,
 }
 
 // GetModifiedAccounts returns a list of addresses that were modified in the block range
-func GetModifiedAccounts(db ethdb.Tx, startNum, endNum uint64) ([]common.Address, error) {
+func GetModifiedAccounts(db kv.Tx, startNum, endNum uint64) ([]common.Address, error) {
 	changedAddrs := make(map[common.Address]struct{})
-	if err := Walk(db, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := Walk(db, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN > endNum {
 			return false, nil
 		}

@@ -1,10 +1,9 @@
-package ethdb
+package kv
 
 import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/metrics"
 )
 
@@ -143,7 +142,7 @@ type RoKV interface {
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
-	AllBuckets() dbutils.BucketsCfg
+	AllBuckets() BucketsCfg
 }
 
 // RwKV low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.

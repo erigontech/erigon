@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 const (
@@ -58,7 +59,7 @@ func DecodeStorage(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	return blockN, k, v
 }
 
-func FindStorage(c ethdb.CursorDupSort, blockNumber uint64, k []byte) ([]byte, error) {
+func FindStorage(c kv.CursorDupSort, blockNumber uint64, k []byte) ([]byte, error) {
 	addWithInc, loc := k[:common.AddressLength+common.IncarnationLength], k[common.AddressLength+common.IncarnationLength:]
 	seek := make([]byte, common.BlockNumberLength+common.AddressLength+common.IncarnationLength)
 	binary.BigEndian.PutUint64(seek, blockNumber)
@@ -75,10 +76,10 @@ func FindStorage(c ethdb.CursorDupSort, blockNumber uint64, k []byte) ([]byte, e
 
 // RewindDataPlain generates rewind data for all plain buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, changes *etl.Collector, quit <-chan struct{}) error {
+func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collector, quit <-chan struct{}) error {
 	if err := walkAndCollect(
 		changes.Collect,
-		db, dbutils.AccountChangeSetBucket,
+		db, kv.AccountChangeSetBucket,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
@@ -87,7 +88,7 @@ func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, changes *etl.Col
 
 	if err := walkAndCollect(
 		changes.Collect,
-		db, dbutils.StorageChangeSetBucket,
+		db, kv.StorageChangeSetBucket,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
@@ -97,7 +98,7 @@ func RewindData(db ethdb.Tx, timestampSrc, timestampDst uint64, changes *etl.Col
 	return nil
 }
 
-func walkAndCollect(collectorFunc func([]byte, []byte) error, db ethdb.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
+func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
 	c, err := db.Cursor(bucket)
 	if err != nil {
 		return err

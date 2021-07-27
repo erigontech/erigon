@@ -3,16 +3,15 @@ package migrations
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 var storageMode = Migration{
 	Name: "storage_mode",
-	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err
@@ -36,7 +35,7 @@ var storageMode = Migration{
 			return math.MaxUint64 // means, prune disabled
 		}
 		{
-			v, err := tx.GetOne(dbutils.DatabaseInfoBucket, StorageModeHistory)
+			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeHistory)
 			if err != nil {
 				return err
 			}
@@ -44,28 +43,28 @@ var storageMode = Migration{
 
 		}
 		{
-			v, err := tx.GetOne(dbutils.DatabaseInfoBucket, StorageModeReceipts)
+			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeReceipts)
 			if err != nil {
 				return err
 			}
 			pm.Receipts = castToPruneDistance(v)
 		}
 		{
-			v, err := tx.GetOne(dbutils.DatabaseInfoBucket, StorageModeTxIndex)
+			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeTxIndex)
 			if err != nil {
 				return err
 			}
 			pm.TxIndex = castToPruneDistance(v)
 		}
 		{
-			v, err := tx.GetOne(dbutils.DatabaseInfoBucket, StorageModeCallTraces)
+			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeCallTraces)
 			if err != nil {
 				return err
 			}
 			pm.CallTraces = castToPruneDistance(v)
 		}
 		{
-			v, err := tx.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeTEVM)
+			v, err := tx.GetOne(kv.DatabaseInfoBucket, kv.StorageModeTEVM)
 			if err != nil {
 				return err
 			}
