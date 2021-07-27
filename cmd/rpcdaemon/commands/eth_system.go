@@ -46,8 +46,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return false, err
 	}
 
-	// Return not syncing if the synchronisation already completed
-	if currentBlock >= highestBlock {
+	if currentBlock > 0 && currentBlock >= highestBlock { // Return not syncing if the synchronisation already completed
 		return false, nil
 	}
 
