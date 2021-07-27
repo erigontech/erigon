@@ -209,9 +209,7 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 				}
 				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
 			} else {
-				if encodedRequest, err = EncodeHashes(unknownHashes, nil); err != nil {
-					return err
-				}
+				encodedRequest = EncodeHashes(unknownHashes, nil)
 				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_65
 			}
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{

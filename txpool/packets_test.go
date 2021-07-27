@@ -91,11 +91,8 @@ func TestEncodeHash(t *testing.T) {
 			if hashes, err = hex.DecodeString(tt.hashesStr); err != nil {
 				t.Fatal(err)
 			}
-			if encodeBuf, err = EncodeHashes(hashes, encodeBuf); err != nil {
-				if !tt.expectedErr {
-					t.Fatal(err)
-				}
-			} else if tt.expectedErr {
+			encodeBuf = EncodeHashes(hashes, encodeBuf)
+			if tt.expectedErr {
 				t.Fatalf("expected error when encoding")
 			}
 			if !bytes.Equal(payload, encodeBuf) {
@@ -141,30 +138,5 @@ func TestEncodeGPT66(t *testing.T) {
 				t.Errorf("encoding expected %x, got %x", payload, encodeBuf)
 			}
 		})
-	}
-}
-
-//func BenchmarkEncHashes(b *testing.B) {
-//	h := make(Hashes, 32*40)
-//	buf := make([]byte, 39*40)
-//	for i := 0; i < b.N; i++ {
-//		buf = buf[:0]
-//		EncodeHashes(h, buf)
-//	}
-//}
-
-func BenchmarkParseTransaction(b *testing.B) {
-	ctx := NewTxParseContext()
-	var payload []byte
-	var err error
-	if payload, err = hex.DecodeString("f86d808459682f0082520894e80d2a018c813577f33f9e69387dc621206fb3a48856bc75e2d63100008082011aa04ae3cae463329a32573f4fbf1bd9b011f93aecf80e4185add4682a03ba4a4919a02b8f05f3f4858b0da24c93c2a65e51b2fbbecf5ffdf97c1f8cc1801f307dc107"); err != nil {
-		b.Fatal(err)
-	}
-	//if tx, parseEnd, err = err != nil {
-	//	t.Fatal(err)
-	//}
-	//payload := make([]byte, 0, 39*40)
-	for i := 0; i < b.N; i++ {
-		ctx.ParseTransaction(payload, 0)
 	}
 }
