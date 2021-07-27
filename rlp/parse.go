@@ -57,7 +57,7 @@ func ParsePrefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool
 	return
 }
 
-func ListPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+func List(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
@@ -68,13 +68,23 @@ func ListPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 	return
 }
 
-func StringPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+func String(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
 	}
 	if isList {
 		return 0, 0, fmt.Errorf("must be a string, instead of a list")
+	}
+	return
+}
+func StringOfLen(payload []byte, pos, expectedLen int) (dataPos int, err error) {
+	dataPos, dataLen, err := String(payload, pos)
+	if err != nil {
+		return 0, err
+	}
+	if dataLen != expectedLen {
+		return 0, fmt.Errorf("expected string of len %d, got %d", expectedLen, dataLen)
 	}
 	return
 }
