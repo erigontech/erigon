@@ -151,7 +151,7 @@ type CliqueServerImpl struct {
 	genesis     *core.Genesis
 	chainConfig *params.ChainConfig
 	c           *clique.Clique
-	db          kv.RwKV
+	db          kv.RwDB
 }
 
 func NewCliqueServer(_ context.Context) *CliqueServerImpl {

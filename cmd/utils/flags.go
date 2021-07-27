@@ -1285,7 +1285,7 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(cfg *node.Config) kv.RwKV {
+func MakeChainDatabase(cfg *node.Config) kv.RwDB {
 	chainDb, err := node.OpenDatabase(cfg, kv.Chain)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)

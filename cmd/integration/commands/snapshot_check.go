@@ -84,7 +84,7 @@ var cmdSnapshotCheck = &cobra.Command{
 		db := snapshotdb.NewSnapshotKV().
 			DB(tmpDb).
 			//broken
-			//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
+			//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwDB()).
 			//SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
 			Open()
 		_ = mainDB
@@ -105,7 +105,7 @@ var cmdSnapshotCheck = &cobra.Command{
 	},
 }
 
-func snapshotCheck(ctx context.Context, db kv.RwKV, isNew bool, tmpDir string) (err error) {
+func snapshotCheck(ctx context.Context, db kv.RwDB, isNew bool, tmpDir string) (err error) {
 	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	var snapshotBlock uint64 = 11_000_000

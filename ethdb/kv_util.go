@@ -32,7 +32,7 @@ func Walk(c kv.Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) 
 }
 
 // todo: return TEVM code and use it
-func GetCheckTEVM(db kv.KVGetter) func(contractHash common.Hash) (bool, error) {
+func GetCheckTEVM(db kv.Getter) func(contractHash common.Hash) (bool, error) {
 	checked := map[common.Hash]struct{}{}
 	var ok bool
 

@@ -12,13 +12,13 @@ import (
 )
 
 type FinishCfg struct {
-	db        kv.RwKV
+	db        kv.RwDB
 	tmpDir    string
 	btClient  *snapshotsync.Client
 	snBuilder *snapshotsync.SnapshotMigrator
 }
 
-func StageFinishCfg(db kv.RwKV, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) FinishCfg {
 	return FinishCfg{
 		db:        db,
 		tmpDir:    tmpDir,
@@ -112,7 +112,7 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db kv.RwKV) error {
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db kv.RwDB) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err

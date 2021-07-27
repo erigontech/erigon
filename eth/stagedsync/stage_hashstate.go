@@ -17,11 +17,11 @@ import (
 )
 
 type HashStateCfg struct {
-	db     kv.RwKV
+	db     kv.RwDB
 	tmpDir string
 }
 
-func StageHashStateCfg(db kv.RwKV, tmpDir string) HashStateCfg {
+func StageHashStateCfg(db kv.RwDB, tmpDir string) HashStateCfg {
 	return HashStateCfg{
 		db:     db,
 		tmpDir: tmpDir,

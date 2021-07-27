@@ -491,7 +491,7 @@ func (n *Node) WSEndpoint() string {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwKV, error) {
+func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwDB, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -508,7 +508,7 @@ func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwKV, error) {
 	default:
 		name = "test"
 	}
-	var db kv.RwKV
+	var db kv.RwDB
 	if n.config.DataDir == "" {
 		db = kv2.NewMemKV()
 		n.databases = append(n.databases, db)
@@ -516,9 +516,9 @@ func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwKV, error) {
 	}
 	dbPath := n.config.ResolvePath(name)
 
-	var openFunc func(exclusive bool) (kv.RwKV, error)
+	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (kv.RwKV, error) {
+	openFunc = func(exclusive bool) (kv.RwDB, error) {
 		opts := mdbx.NewMDBX().Path(dbPath).Label(label).DBVerbosity(n.config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
@@ -560,7 +560,7 @@ func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwKV, error) {
 	return db, nil
 }
 
-func OpenDatabase(config *Config, label kv.Label) (kv.RwKV, error) {
+func OpenDatabase(config *Config, label kv.Label) (kv.RwDB, error) {
 	var name string
 	switch label {
 	case kv.Chain:
@@ -570,16 +570,16 @@ func OpenDatabase(config *Config, label kv.Label) (kv.RwKV, error) {
 	default:
 		name = "test"
 	}
-	var db kv.RwKV
+	var db kv.RwDB
 	if config.DataDir == "" {
 		db = kv2.NewMemKV()
 		return db, nil
 	}
 	dbPath := config.ResolvePath(name)
 
-	var openFunc func(exclusive bool) (kv.RwKV, error)
+	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (kv.RwKV, error) {
+	openFunc = func(exclusive bool) (kv.RwDB, error) {
 		opts := mdbx.NewMDBX().Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()

@@ -17,7 +17,7 @@ func TestApplyWithInit(t *testing.T) {
 	m := []Migration{
 		{
 			"one",
-			func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				tx, err := db.BeginRw(context.Background())
 				if err != nil {
 					return err
@@ -32,7 +32,7 @@ func TestApplyWithInit(t *testing.T) {
 		},
 		{
 			"two",
-			func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				tx, err := db.BeginRw(context.Background())
 				if err != nil {
 					return err
@@ -81,14 +81,14 @@ func TestApplyWithoutInit(t *testing.T) {
 	m := []Migration{
 		{
 			"one",
-			func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
 			"two",
-			func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				tx, err := db.BeginRw(context.Background())
 				if err != nil {
 					return err
@@ -145,7 +145,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	m := []Migration{
 		{
 			"one",
-			func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				tx, err := db.BeginRw(context.Background())
 				if err != nil {
 					return err
@@ -160,7 +160,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 		},
 		{
 			"two",
-			func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
@@ -226,7 +226,7 @@ func TestValidation(t *testing.T) {
 	m := []Migration{
 		{
 			Name: "repeated_name",
-			Up: func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				tx, err := db.BeginRw(context.Background())
 				if err != nil {
 					return err
@@ -241,7 +241,7 @@ func TestValidation(t *testing.T) {
 		},
 		{
 			Name: "repeated_name",
-			Up: func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				tx, err := db.BeginRw(context.Background())
 				if err != nil {
 					return err
@@ -275,7 +275,7 @@ func TestCommitCallRequired(t *testing.T) {
 	m := []Migration{
 		{
 			Name: "one",
-			Up: func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+			Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 				//don't call BeforeCommit
 				return nil
 			},

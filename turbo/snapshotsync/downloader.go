@@ -378,7 +378,7 @@ func GetInfo() {
 
 }
 
-func SnapshotSeeding(chainDB kv.RwKV, cli *Client, name string, snapshotsDir string) error {
+func SnapshotSeeding(chainDB kv.RwDB, cli *Client, name string, snapshotsDir string) error {
 	var snapshotBlock uint64
 	var hasSnapshotBlock bool
 	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {

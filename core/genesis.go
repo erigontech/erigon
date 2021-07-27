@@ -169,7 +169,7 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db kv.RwKV, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -186,7 +186,7 @@ func CommitGenesisBlock(db kv.RwKV, genesis *Genesis) (*params.ChainConfig, *typ
 	return c, b, nil
 }
 
-func MustCommitGenesisBlock(db kv.RwKV, genesis *Genesis) (*params.ChainConfig, *types.Block) {
+func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block) {
 	c, b, err := CommitGenesisBlock(db, genesis)
 	if err != nil {
 		panic(err)
@@ -486,7 +486,7 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 
 // MustCommit writes the genesis block and state to db, panicking on error.
 // The block is committed as the canonical head block.
-func (g *Genesis) MustCommit(db kv.RwKV) *types.Block {
+func (g *Genesis) MustCommit(db kv.RwDB) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
@@ -501,7 +501,7 @@ func (g *Genesis) MustCommit(db kv.RwKV) *types.Block {
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwKV, addr common.Address, balance *big.Int) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int) *types.Block {
 	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
 	block := g.MustCommit(db)
 	return block
@@ -512,7 +512,7 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-func GenesisWithAccounts(db kv.RwKV, accs []GenAccount) *types.Block {
+func GenesisWithAccounts(db kv.RwDB, accs []GenAccount) *types.Block {
 	g := Genesis{Config: params.TestChainConfig}
 	allocs := make(map[common.Address]GenesisAccount)
 	for _, acc := range accs {

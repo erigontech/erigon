@@ -120,7 +120,7 @@ func (m *TxDb) begin(ctx context.Context, flags ethdb.TxFlags) error {
 	return nil
 }
 
-func (m *TxDb) RwKV() kv.RwKV {
+func (m *TxDb) RwKV() kv.RwDB {
 	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 

@@ -350,7 +350,7 @@ func mdbxToMdbx(ctx context.Context, from, to string) error {
 	return kv2kv(ctx, src, dst)
 }
 
-func kv2kv(ctx context.Context, src, dst kv.RwKV) error {
+func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1

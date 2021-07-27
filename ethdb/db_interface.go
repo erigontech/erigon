@@ -35,9 +35,9 @@ const (
 	RO TxFlags = 0x02
 )
 
-// Getter wraps the database read operations.
-type Getter interface {
-	kv.KVGetter
+// DBGetter wraps the database read operations.
+type DBGetter interface {
+	kv.Getter
 
 	// Get returns the value for a given key if it's present.
 	Get(bucket string, key []byte) ([]byte, error)
@@ -45,7 +45,7 @@ type Getter interface {
 
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
-	Getter
+	DBGetter
 	kv.Putter
 	kv.Deleter
 	kv.Closer
@@ -55,7 +55,7 @@ type Database interface {
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
 	ReadSequence(bucket string) (uint64, error)
-	RwKV() kv.RwKV
+	RwKV() kv.RwDB
 }
 
 // MinDatabase is a minimalistic version of the Database interface.
@@ -87,8 +87,8 @@ type DbWithPendingMutations interface {
 }
 
 type HasRwKV interface {
-	RwKV() kv.RwKV
-	SetRwKV(kv kv.RwKV)
+	RwKV() kv.RwDB
+	SetRwKV(kv kv.RwDB)
 }
 
 type HasTx interface {

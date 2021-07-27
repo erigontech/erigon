@@ -50,7 +50,7 @@ func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 type SNDownloaderServer struct {
 	DownloaderServer
 	t  *Client
-	db kv.RwKV
+	db kv.RwDB
 }
 
 func (s *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnapshotRequest) (*empty.Empty, error) {

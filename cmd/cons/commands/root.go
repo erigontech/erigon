@@ -62,11 +62,11 @@ func withConfig(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&config, "config", "", "`file:<path>` to specify config file in file system, `embed:<path>` to use embedded file, `test` to register test interface and receive config from test driver")
 }
 
-func openDatabase(path string) kv.RwKV {
+func openDatabase(path string) kv.RwDB {
 	return openKV(path, false)
 }
 
-func openKV(path string, exclusive bool) kv.RwKV {
+func openKV(path string, exclusive bool) kv.RwDB {
 	opts := mdbx.NewMDBX().Path(path)
 	if exclusive {
 		opts = opts.Exclusive()

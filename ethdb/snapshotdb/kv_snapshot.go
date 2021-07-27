@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	_ kv.RwKV           = &SnapshotKV{}
-	_ kv.RoKV           = &SnapshotKV{}
+	_ kv.RwDB           = &SnapshotKV{}
+	_ kv.RoDB           = &SnapshotKV{}
 	_ kv.Tx             = &snTX{}
 	_ kv.BucketMigrator = &snTX{}
 	_ kv.RwCursor       = &snCursor{}
@@ -23,14 +23,14 @@ var (
 )
 
 type SnapshotUpdater interface {
-	UpdateSnapshots(tp string, snapshotKV kv.RoKV, done chan struct{})
-	HeadersSnapshot() kv.RoKV
-	BodiesSnapshot() kv.RoKV
-	StateSnapshot() kv.RoKV
+	UpdateSnapshots(tp string, snapshotKV kv.RoDB, done chan struct{})
+	HeadersSnapshot() kv.RoDB
+	BodiesSnapshot() kv.RoDB
+	StateSnapshot() kv.RoDB
 }
 
 type WriteDB interface {
-	WriteDB() kv.RwKV
+	WriteDB() kv.RwDB
 }
 
 func NewSnapshotKV() snapshotOpts {
@@ -39,26 +39,26 @@ func NewSnapshotKV() snapshotOpts {
 }
 
 type snapshotOpts struct {
-	db              kv.RwKV
-	headersSnapshot kv.RoKV
-	bodiesSnapshot  kv.RoKV
-	stateSnapshot   kv.RoKV
+	db              kv.RwDB
+	headersSnapshot kv.RoDB
+	bodiesSnapshot  kv.RoDB
+	stateSnapshot   kv.RoDB
 }
 
-func (opts snapshotOpts) HeadersSnapshot(kv kv.RoKV) snapshotOpts {
+func (opts snapshotOpts) HeadersSnapshot(kv kv.RoDB) snapshotOpts {
 	opts.headersSnapshot = kv
 	return opts
 }
-func (opts snapshotOpts) BodiesSnapshot(kv kv.RoKV) snapshotOpts {
+func (opts snapshotOpts) BodiesSnapshot(kv kv.RoDB) snapshotOpts {
 	opts.bodiesSnapshot = kv
 	return opts
 }
-func (opts snapshotOpts) StateSnapshot(kv kv.RoKV) snapshotOpts {
+func (opts snapshotOpts) StateSnapshot(kv kv.RoDB) snapshotOpts {
 	opts.stateSnapshot = kv
 	return opts
 }
 
-func (opts snapshotOpts) DB(db kv.RwKV) snapshotOpts {
+func (opts snapshotOpts) DB(db kv.RwDB) snapshotOpts {
 	opts.db = db
 	return opts
 }
@@ -73,13 +73,13 @@ func (opts snapshotOpts) Open() *SnapshotKV {
 }
 
 type SnapshotKV struct {
-	db              kv.RwKV
-	headersSnapshot kv.RoKV
-	bodiesSnapshot  kv.RoKV
-	stateSnapshot   kv.RoKV
+	db              kv.RwDB
+	headersSnapshot kv.RoDB
+	bodiesSnapshot  kv.RoDB
+	stateSnapshot   kv.RoDB
 	mtx             sync.RWMutex
 
-	tmpDB        kv.RwKV
+	tmpDB        kv.RwDB
 	tmpDBBuckets map[string]struct{}
 }
 
@@ -121,8 +121,8 @@ func (s *SnapshotKV) Close() {
 	}
 }
 
-func (s *SnapshotKV) UpdateSnapshots(tp string, snapshotKV kv.RoKV, done chan struct{}) {
-	var toClose kv.RoKV
+func (s *SnapshotKV) UpdateSnapshots(tp string, snapshotKV kv.RoDB, done chan struct{}) {
+	var toClose kv.RoDB
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	switch {
@@ -148,15 +148,15 @@ func (s *SnapshotKV) UpdateSnapshots(tp string, snapshotKV kv.RoKV, done chan st
 	}()
 }
 
-func (s *SnapshotKV) WriteDB() kv.RwKV {
+func (s *SnapshotKV) WriteDB() kv.RwDB {
 	return s.db
 }
 
-func (s *SnapshotKV) TempDB() kv.RwKV {
+func (s *SnapshotKV) TempDB() kv.RwDB {
 	return s.tmpDB
 }
 
-func (s *SnapshotKV) SetTempDB(kv kv.RwKV, buckets []string) {
+func (s *SnapshotKV) SetTempDB(kv kv.RwDB, buckets []string) {
 	bucketsMap := make(map[string]struct{}, len(buckets))
 	for _, bucket := range buckets {
 		bucketsMap[bucket] = struct{}{}
@@ -166,13 +166,13 @@ func (s *SnapshotKV) SetTempDB(kv kv.RwKV, buckets []string) {
 }
 
 //todo
-func (s *SnapshotKV) HeadersSnapshot() kv.RoKV {
+func (s *SnapshotKV) HeadersSnapshot() kv.RoDB {
 	return s.headersSnapshot
 }
-func (s *SnapshotKV) BodiesSnapshot() kv.RoKV {
+func (s *SnapshotKV) BodiesSnapshot() kv.RoDB {
 	return s.bodiesSnapshot
 }
-func (s *SnapshotKV) StateSnapshot() kv.RoKV {
+func (s *SnapshotKV) StateSnapshot() kv.RoDB {
 	return s.stateSnapshot
 }
 

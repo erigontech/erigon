@@ -22,11 +22,11 @@ type TxPoolAPI interface {
 type TxPoolAPIImpl struct {
 	*BaseAPI
 	pool proto_txpool.TxpoolClient
-	db   kv.RoKV
+	db   kv.RoDB
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db kv.RoKV, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
 		BaseAPI: base,
 		pool:    pool,

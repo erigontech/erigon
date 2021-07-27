@@ -18,13 +18,13 @@ import (
 )
 
 type TxLookupCfg struct {
-	db     kv.RwKV
+	db     kv.RwDB
 	prune  prune.Mode
 	tmpdir string
 }
 
 func StageTxLookupCfg(
-	db kv.RwKV,
+	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
 ) TxLookupCfg {

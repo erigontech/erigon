@@ -138,7 +138,7 @@ func init() {
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db kv.RwKV, miningConfig params.MiningConfig, ctx context.Context) error {
+func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context) error {
 	pm, engine, chainConfig, vmConfig, txPool, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 
 	tx, err := db.BeginRw(ctx)
@@ -410,7 +410,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 	}
 }
 
-func loopIh(db kv.RwKV, ctx context.Context, unwind uint64) error {
+func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	_, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	tx, err := db.BeginRw(ctx)
@@ -475,7 +475,7 @@ func loopIh(db kv.RwKV, ctx context.Context, unwind uint64) error {
 	}
 }
 
-func loopExec(db kv.RwKV, ctx context.Context, unwind uint64) error {
+func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	tx, err := db.BeginRw(ctx)

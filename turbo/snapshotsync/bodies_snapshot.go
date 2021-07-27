@@ -122,7 +122,7 @@ func CreateBodySnapshot(readTx kv.Tx, lastBlock uint64, snapshotPath string) err
 	return writeTX.Commit()
 }
 
-func OpenBodiesSnapshot(dbPath string) (kv.RoKV, error) {
+func OpenBodiesSnapshot(dbPath string) (kv.RoDB, error) {
 	return mdbx.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
 			kv.BlockBodyPrefix: kv.BucketsConfigs[kv.BlockBodyPrefix],
@@ -131,7 +131,7 @@ func OpenBodiesSnapshot(dbPath string) (kv.RoKV, error) {
 	}).Readonly().Open()
 }
 
-func RemoveBlocksData(db kv.RoKV, tx kv.RwTx, newSnapshot uint64) (err error) {
+func RemoveBlocksData(db kv.RoDB, tx kv.RwTx, newSnapshot uint64) (err error) {
 	log.Info("Remove blocks data", "to", newSnapshot)
 	if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")

@@ -33,7 +33,7 @@ import (
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
-func ReadCanonicalHash(db kv.KVGetter, number uint64) (common.Hash, error) {
+func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
 	data, err := db.GetOne(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(number))
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed ReadCanonicalHash: %w, number=%d", err, number)
@@ -61,7 +61,7 @@ func DeleteCanonicalHash(db kv.Deleter, number uint64) error {
 }
 
 // ReadHeaderNumber returns the header number assigned to a hash.
-func ReadHeaderNumber(db kv.KVGetter, hash common.Hash) *uint64 {
+func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 	data, err := db.GetOne(kv.HeaderNumberBucket, hash.Bytes())
 	if err != nil {
 		log.Error("ReadHeaderNumber failed", "err", err)
@@ -93,7 +93,7 @@ func DeleteHeaderNumber(db kv.Deleter, hash common.Hash) {
 }
 
 // ReadHeadHeaderHash retrieves the hash of the current canonical head header.
-func ReadHeadHeaderHash(db kv.KVGetter) common.Hash {
+func ReadHeadHeaderHash(db kv.Getter) common.Hash {
 	data, err := db.GetOne(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey))
 	if err != nil {
 		log.Error("ReadHeadHeaderHash failed", "err", err)
@@ -113,7 +113,7 @@ func WriteHeadHeaderHash(db kv.Putter, hash common.Hash) error {
 }
 
 // ReadHeadBlockHash retrieves the hash of the current canonical head block.
-func ReadHeadBlockHash(db kv.KVGetter) common.Hash {
+func ReadHeadBlockHash(db kv.Getter) common.Hash {
 	data, err := db.GetOne(kv.HeadBlockKey, []byte(kv.HeadBlockKey))
 	if err != nil {
 		log.Error("ReadHeadBlockHash failed", "err", err)
@@ -132,7 +132,7 @@ func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 }
 
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
-func ReadHeaderRLP(db kv.KVGetter, hash common.Hash, number uint64) rlp.RawValue {
+func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(kv.HeadersBucket, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		log.Error("ReadHeaderRLP failed", "err", err)
@@ -149,7 +149,7 @@ func HasHeader(db kv.Has, hash common.Hash, number uint64) bool {
 }
 
 // ReadHeader retrieves the block header corresponding to the hash.
-func ReadHeader(db kv.KVGetter, hash common.Hash, number uint64) *types.Header {
+func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 	data := ReadHeaderRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
@@ -162,12 +162,12 @@ func ReadHeader(db kv.KVGetter, hash common.Hash, number uint64) *types.Header {
 	return header
 }
 
-func ReadCurrentBlockNumber(db kv.KVGetter) *uint64 {
+func ReadCurrentBlockNumber(db kv.Getter) *uint64 {
 	headHash := ReadHeadHeaderHash(db)
 	return ReadHeaderNumber(db, headHash)
 }
 
-func ReadCurrentHeader(db kv.KVGetter) *types.Header {
+func ReadCurrentHeader(db kv.Getter) *types.Header {
 	headHash := ReadHeadHeaderHash(db)
 	headNumber := ReadHeaderNumber(db, headHash)
 	if headNumber == nil {
@@ -251,7 +251,7 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 	return bodyRlp
 }
 
-func ReadStorageBodyRLP(db kv.KVGetter, hash common.Hash, number uint64) rlp.RawValue {
+func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -259,7 +259,7 @@ func ReadStorageBodyRLP(db kv.KVGetter, hash common.Hash, number uint64) rlp.Raw
 	return bodyRlp
 }
 
-func ReadTransactions(db kv.KVGetter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+func ReadTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
@@ -360,7 +360,7 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	return body, baseTxId, txAmount, nil
 }
 
-func ReadBody(db kv.KVGetter, hash common.Hash, number uint64) *types.Body {
+func ReadBody(db kv.Getter, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
 	if body == nil {
 		return nil
@@ -374,7 +374,7 @@ func ReadBody(db kv.KVGetter, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func ReadBodyWithoutTransactions(db kv.KVGetter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+func ReadBodyWithoutTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil, 0, 0
@@ -390,7 +390,7 @@ func ReadBodyWithoutTransactions(db kv.KVGetter, hash common.Hash, number uint64
 	return body, bodyForStorage.BaseTxId, bodyForStorage.TxAmount
 }
 
-func ReadSenders(db kv.KVGetter, hash common.Hash, number uint64) ([]common.Address, error) {
+func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Address, error) {
 	data, err := db.GetOne(kv.Senders, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
 		return nil, fmt.Errorf("readSenders failed: %w", err)
@@ -465,7 +465,7 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
-func ReadTd(db kv.KVGetter, hash common.Hash, number uint64) (*big.Int, error) {
+func ReadTd(db kv.Getter, hash common.Hash, number uint64) (*big.Int, error) {
 	data, err := db.GetOne(kv.HeaderTDBucket, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadTd: %w", err)
@@ -480,7 +480,7 @@ func ReadTd(db kv.KVGetter, hash common.Hash, number uint64) (*big.Int, error) {
 	return td, nil
 }
 
-func ReadTdByHash(db kv.KVGetter, hash common.Hash) (*big.Int, error) {
+func ReadTdByHash(db kv.Getter, hash common.Hash) (*big.Int, error) {
 	headNumber := ReadHeaderNumber(db, hash)
 	if headNumber == nil {
 		return nil, nil
@@ -711,7 +711,7 @@ func ReceiptsAvailableFrom(tx kv.Tx) (uint64, error) {
 //
 // Note, due to concurrent download of header and block body the header and thus
 // canonical hash can be stored in the database but the body data not (yet).
-func ReadBlock(tx kv.KVGetter, hash common.Hash, number uint64) *types.Block {
+func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
 		return nil
@@ -726,7 +726,7 @@ func ReadBlock(tx kv.KVGetter, hash common.Hash, number uint64) *types.Block {
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
 // It's is not equivalent of HasHeader because headers and bodies written by different stages
-func HasBlock(db kv.KVGetter, hash common.Hash, number uint64) bool {
+func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 	body := ReadStorageBodyRLP(db, hash, number)
 	return len(body) > 0
 }
@@ -809,7 +809,7 @@ func ReadBlockByHashWithSenders(db kv.Tx, hash common.Hash) (*types.Block, []com
 	return ReadBlockWithSenders(db, hash, *number)
 }
 
-func ReadHeaderByNumber(db kv.KVGetter, number uint64) *types.Header {
+func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		log.Error("ReadCanonicalHash failed", "err", err)
@@ -822,7 +822,7 @@ func ReadHeaderByNumber(db kv.KVGetter, number uint64) *types.Header {
 	return ReadHeader(db, hash, number)
 }
 
-func ReadHeaderByHash(db kv.KVGetter, hash common.Hash) (*types.Header, error) {
+func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {
 		return nil, nil
@@ -830,7 +830,7 @@ func ReadHeaderByHash(db kv.KVGetter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
-func ReadAncestor(db kv.KVGetter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}

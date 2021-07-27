@@ -70,7 +70,7 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 	return mode, nil
 }
 
-func Get(db kv.KVGetter) (Mode, error) {
+func Get(db kv.Getter) (Mode, error) {
 	prune := DefaultMode
 	prune.Initialised = true
 

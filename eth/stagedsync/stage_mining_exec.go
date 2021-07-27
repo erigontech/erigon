@@ -19,7 +19,7 @@ import (
 )
 
 type MiningExecCfg struct {
-	db          kv.RwKV
+	db          kv.RwDB
 	miningState MiningState
 	notifier    ChainEventNotifier
 	chainConfig params.ChainConfig
@@ -29,7 +29,7 @@ type MiningExecCfg struct {
 }
 
 func StageMiningExecCfg(
-	db kv.RwKV,
+	db kv.RwDB,
 	miningState MiningState,
 	notifier ChainEventNotifier,
 	chainConfig params.ChainConfig,

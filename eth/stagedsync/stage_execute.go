@@ -45,7 +45,7 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type ExecuteBlockCfg struct {
-	db            kv.RwKV
+	db            kv.RwDB
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
 	changeSetHook ChangeSetHook
@@ -58,7 +58,7 @@ type ExecuteBlockCfg struct {
 }
 
 func StageExecuteBlocksCfg(
-	kv kv.RwKV,
+	kv kv.RwDB,
 	prune prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,

@@ -38,7 +38,7 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 	return &UnwindState{id, unwindPoint, currentProgress, common.Hash{}, s}
 }
 
-func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwKV) (*PruneState, error) {
+func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB) (*PruneState, error) {
 	var pruneProgress uint64
 	var err error
 	useExternalTx := tx != nil
@@ -158,7 +158,7 @@ func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder) *S
 	}
 }
 
-func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoKV) (*StageState, error) {
+func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB) (*StageState, error) {
 	var blockNum uint64
 	var err error
 	useExternalTx := tx != nil
@@ -182,7 +182,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoKV) (*StageS
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *Sync) Run(db kv.RwKV, tx kv.RwTx, firstCycle bool) error {
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 	for !s.IsDone() {
@@ -296,7 +296,7 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 	return nil
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwKV, tx kv.RwTx, firstCycle bool) (err error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool) (err error) {
 	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
@@ -315,7 +315,7 @@ func (s *Sync) runStage(stage *Stage, db kv.RwKV, tx kv.RwTx, firstCycle bool) (
 	return nil
 }
 
-func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwKV, tx kv.RwTx) error {
+func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	t := time.Now()
 	log.Debug("Unwind...", "stage", stage.ID)
 	stageState, err := s.StageState(stage.ID, tx, db)
@@ -348,7 +348,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwKV, tx kv.RwTx
 	return nil
 }
 
-func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwKV, tx kv.RwTx) error {
+func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	t := time.Now()
 	log.Debug("Prune...", "stage", stage.ID)
 

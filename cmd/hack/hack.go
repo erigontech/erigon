@@ -854,7 +854,7 @@ func ValidateTxLookups2(chaindata string) {
 	log.Info("All done", "duration", time.Since(startTime))
 }
 
-func validateTxLookups2(db kv.RwKV, startBlock uint64, interruptCh chan bool) {
+func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		panic(err)

@@ -162,7 +162,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 	return db, nil
 }
 
-func (opts remoteOpts) MustOpen() kv.RwKV {
+func (opts remoteOpts) MustOpen() kv.RwDB {
 	db, err := opts.Open("", "", "")
 	if err != nil {
 		panic(err)

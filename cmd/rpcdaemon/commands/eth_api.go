@@ -164,12 +164,12 @@ type APIImpl struct {
 	ethBackend services.ApiBackend
 	txPool     txpool.TxpoolClient
 	mining     txpool.MiningClient
-	db         kv.RoKV
+	db         kv.RoDB
 	GasCap     uint64
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoKV, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}

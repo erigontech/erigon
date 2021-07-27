@@ -45,7 +45,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	if err != nil {
 		return err
 	}
-	var db, snkv kv.RwKV
+	var db, snkv kv.RwDB
 
 	db = kv2.NewMDBX().Path(dbPath).MustOpen()
 	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {

@@ -11,7 +11,7 @@ import (
 )
 
 type MiningFinishCfg struct {
-	db          kv.RwKV
+	db          kv.RwDB
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
 	sealCancel  <-chan struct{}
@@ -19,7 +19,7 @@ type MiningFinishCfg struct {
 }
 
 func StageMiningFinishCfg(
-	db kv.RwKV,
+	db kv.RwDB,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
 	miningState MiningState,

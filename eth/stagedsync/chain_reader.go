@@ -12,7 +12,7 @@ import (
 // Implements consensus.ChainReader
 type ChainReader struct {
 	Cfg params.ChainConfig
-	Db  kv.KVGetter
+	Db  kv.Getter
 }
 
 // Config retrieves the blockchain's chain configuration.

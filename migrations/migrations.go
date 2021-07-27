@@ -68,7 +68,7 @@ var migrations = map[kv.Label][]Migration{
 type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
 type Migration struct {
 	Name string
-	Up   func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) error
+	Up   func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) error
 }
 
 var (
@@ -103,7 +103,7 @@ func AppliedMigrations(tx kv.Tx, withPayload bool) (map[string][]byte, error) {
 	return applied, err
 }
 
-func (m *Migrator) HasPendingMigrations(db kv.RwKV) (bool, error) {
+func (m *Migrator) HasPendingMigrations(db kv.RwDB) (bool, error) {
 	var has bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		pending, err := m.PendingMigrations(tx)
@@ -144,7 +144,7 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db kv.RwKV, datadir string) error {
+func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
@@ -237,7 +237,7 @@ func (m *Migrator) Apply(db kv.RwKV, datadir string) error {
 	return nil
 }
 
-func MarshalMigrationPayload(db kv.KVGetter) ([]byte, error) {
+func MarshalMigrationPayload(db kv.Getter) ([]byte, error) {
 	s := map[string][]byte{}
 
 	buf := bytes.NewBuffer(nil)

@@ -72,7 +72,7 @@ func TestMatreshkaStream(t *testing.T) {
 
 	snkv := snapshotdb.NewSnapshotKV().DB(db).
 		//broken
-		//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwKV()).
+		//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.HeaderNumberBucket, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwDB()).
 		Open()
 	_ = chaindata
 	defer snkv.Close()

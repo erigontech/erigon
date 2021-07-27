@@ -73,7 +73,7 @@ var AllStages = []SyncStage{
 }
 
 // GetStageProgress retrieves saved progress of given sync stage from the database
-func GetStageProgress(db kv.KVGetter, stage SyncStage) (uint64, error) {
+func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.GetOne(kv.SyncStageProgress, []byte(stage))
 	if err != nil {
 		return 0, err
@@ -86,7 +86,7 @@ func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
 }
 
 // GetStagePruneProgress retrieves saved progress of given sync stage from the database
-func GetStagePruneProgress(db kv.KVGetter, stage SyncStage) (uint64, error) {
+func GetStagePruneProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 	v, err := db.GetOne(kv.SyncStageProgress, []byte("prune_"+stage))
 	if err != nil {
 		return 0, err

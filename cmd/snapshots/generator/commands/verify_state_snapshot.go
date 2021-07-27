@@ -34,7 +34,7 @@ var verifyStateSnapshotCmd = &cobra.Command{
 }
 
 func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
-	var snkv, tmpDB kv.RwKV
+	var snkv, tmpDB kv.RwDB
 	tmpPath, err := ioutil.TempDir(os.TempDir(), "vrf*")
 	if err != nil {
 		return err

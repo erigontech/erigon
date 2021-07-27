@@ -13,14 +13,14 @@ import (
 
 // Implements StateReader by wrapping database only, without trie
 type DbStateReader struct {
-	db            kv.KVGetter
+	db            kv.Getter
 	accountCache  *fastcache.Cache
 	storageCache  *fastcache.Cache
 	codeCache     *fastcache.Cache
 	codeSizeCache *fastcache.Cache
 }
 
-func NewDbStateReader(db kv.KVGetter) *DbStateReader {
+func NewDbStateReader(db kv.Getter) *DbStateReader {
 	return &DbStateReader{
 		db: db,
 	}

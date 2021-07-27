@@ -46,7 +46,7 @@ type SnapshotMigrator struct {
 	replaced                   uint64
 }
 
-func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwKV, rwTX kv.Tx, bittorrent *Client, async bool) error {
+func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX kv.Tx, bittorrent *Client, async bool) error {
 	if atomic.LoadUint64(&sm.started) > 0 {
 		return nil
 	}
@@ -73,14 +73,14 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwKV, rwTX
 	}
 	atomic.StoreUint64(&sm.replaced, 0)
 
-	var initialStages []func(db kv.RoKV, tx kv.Tx, toBlock uint64) error
+	var initialStages []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error
 	switch sm.snapshotType {
 	case "headers":
-		initialStages = []func(db kv.RoKV, tx kv.Tx, toBlock uint64) error{
-			func(db kv.RoKV, tx kv.Tx, toBlock uint64) error {
+		initialStages = []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error{
+			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 				return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath)
 			},
-			func(db kv.RoKV, tx kv.Tx, toBlock uint64) error {
+			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 				//replace snapshot
 				if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
@@ -95,11 +95,11 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwKV, rwTX
 			},
 		}
 	case "bodies":
-		initialStages = []func(db kv.RoKV, tx kv.Tx, toBlock uint64) error{
-			func(db kv.RoKV, tx kv.Tx, toBlock uint64) error {
+		initialStages = []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error{
+			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 				return CreateBodySnapshot(tx, toBlock, snapshotPath)
 			},
-			func(db kv.RoKV, tx kv.Tx, toBlock uint64) error {
+			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 				//replace snapshot
 				if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
@@ -115,9 +115,9 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwKV, rwTX
 		}
 	}
 
-	btStages := func(shapshotHashKey []byte) []func(db kv.RoKV, tx kv.Tx, toBlock uint64) error {
-		return []func(db kv.RoKV, tx kv.Tx, toBlock uint64) error{
-			func(db kv.RoKV, tx kv.Tx, toBlock uint64) error {
+	btStages := func(shapshotHashKey []byte) []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
+		return []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error{
+			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 				//todo headers infohash
 				var infohash []byte
 				var err error
@@ -142,7 +142,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwKV, rwTX
 				}
 				return nil
 			},
-			func(db kv.RoKV, tx kv.Tx, toBlock uint64) error {
+			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 				log.Info("Start seeding snapshot", "type", snapshotName)
 				seedingInfoHash, err := bittorrent.SeedSnapshot(snapshotName, snapshotPath)
 				if err != nil {
@@ -223,19 +223,19 @@ func (sm *SnapshotMigrator) Replaced() bool {
 	return atomic.LoadUint64(&sm.replaced) == 1
 }
 
-func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi kv.RwKV, rwTX kv.RwTx) error {
+func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX kv.RwTx) error {
 	log.Info("SyncStages", "started", atomic.LoadUint64(&sm.started))
 
 	if atomic.LoadUint64(&sm.started) == 2 && sm.Replaced() {
-		var syncStages []func(db kv.RoKV, tx kv.RwTx, toBlock uint64) error
+		var syncStages []func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error
 		switch sm.snapshotType {
 		case "bodies":
-			syncStages = []func(db kv.RoKV, tx kv.RwTx, toBlock uint64) error{
-				func(db kv.RoKV, tx kv.RwTx, toBlock uint64) error {
+			syncStages = []func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error{
+				func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error {
 					log.Info("Prune db", "new", atomic.LoadUint64(&sm.BodiesNewSnapshot))
 					return RemoveBlocksData(db, tx, atomic.LoadUint64(&sm.BodiesNewSnapshot))
 				},
-				func(db kv.RoKV, tx kv.RwTx, toBlock uint64) error {
+				func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error {
 					log.Info("Save bodies snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
 					c, err := tx.RwCursor(kv.BittorrentInfoBucket)
 					if err != nil {
@@ -251,12 +251,12 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi kv.RwKV, rwTX 
 				},
 			}
 		case "headers":
-			syncStages = []func(db kv.RoKV, tx kv.RwTx, toBlock uint64) error{
-				func(db kv.RoKV, tx kv.RwTx, toBlock uint64) error {
+			syncStages = []func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error{
+				func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error {
 					log.Info("Prune headers db", "current", sm.HeadersCurrentSnapshot, "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
 					return RemoveHeadersData(db, tx, sm.HeadersCurrentSnapshot, atomic.LoadUint64(&sm.HeadersNewSnapshot))
 				},
-				func(db kv.RoKV, tx kv.RwTx, toBlock uint64) error {
+				func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error {
 					log.Info("Save headers snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
 					c, err := tx.RwCursor(kv.BittorrentInfoBucket)
 					if err != nil {
@@ -361,7 +361,7 @@ func SnapshotName(baseDir, name string, blockNum uint64) string {
 	return filepath.Join(baseDir, name) + strconv.FormatUint(blockNum, 10)
 }
 
-func GetSnapshotInfo(db kv.RwKV) (uint64, []byte, error) {
+func GetSnapshotInfo(db kv.RwDB) (uint64, []byte, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return 0, nil, err

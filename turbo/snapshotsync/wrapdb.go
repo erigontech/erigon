@@ -36,12 +36,12 @@ var (
 )
 
 //nolint
-func WrapBySnapshotsFromDir(kv kv.RwKV, snapshotDir string, mode SnapshotMode) (kv.RwKV, error) {
+func WrapBySnapshotsFromDir(kv kv.RwDB, snapshotDir string, mode SnapshotMode) (kv.RwDB, error) {
 	//todo remove it
 	return nil, errors.New("deprecated") //nolint
 }
 
-func WrapBySnapshotsFromDownloader(db kv.RwKV, snapshots map[SnapshotType]*SnapshotsInfo) (kv.RwKV, error) {
+func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*SnapshotsInfo) (kv.RwDB, error) {
 	snKV := snapshotdb.NewSnapshotKV().DB(db)
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
@@ -68,7 +68,7 @@ func WrapBySnapshotsFromDownloader(db kv.RwKV, snapshots map[SnapshotType]*Snaps
 	return snKV.Open(), nil
 }
 
-func WrapSnapshots(chainDb kv.RwKV, snapshotsDir string) (kv.RwKV, error) {
+func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 	var snapshotBlock uint64
 	var hasSnapshotBlock bool
 	if err := chainDb.View(context.Background(), func(tx kv.Tx) error {

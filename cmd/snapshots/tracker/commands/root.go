@@ -145,7 +145,7 @@ var rootCmd = &cobra.Command{
 }
 
 type Tracker struct {
-	db kv.RwKV
+	db kv.RwDB
 }
 
 /*

@@ -52,7 +52,7 @@ func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
 }
 
 // ExecutionAt gets the current state of the "Execution" stage, which block is currently executed.
-func (s *StageState) ExecutionAt(db kv.KVGetter) (uint64, error) {
+func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	execution, err := stages.GetStageProgress(db, stages.Execution)
 	return execution, err
 }

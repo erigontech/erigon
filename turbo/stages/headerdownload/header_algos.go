@@ -450,7 +450,7 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 	hd.preverifiedHeight = preverifiedHeight
 }
 
-func (hd *HeaderDownload) RecoverFromDb(db kv.RoKV) error {
+func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	// Drain persistedLinksQueue and remove links

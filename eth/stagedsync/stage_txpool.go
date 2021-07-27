@@ -15,12 +15,12 @@ import (
 )
 
 type TxPoolCfg struct {
-	db        kv.RwKV
+	db        kv.RwDB
 	pool      *core.TxPool
 	startFunc func()
 }
 
-func StageTxPoolCfg(db kv.RwKV, pool *core.TxPool, startFunc func()) TxPoolCfg {
+func StageTxPoolCfg(db kv.RwDB, pool *core.TxPool, startFunc func()) TxPoolCfg {
 	return TxPoolCfg{
 		db:        db,
 		pool:      pool,

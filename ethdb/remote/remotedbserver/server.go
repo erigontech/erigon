@@ -34,7 +34,7 @@ var KvServiceAPIVersion = &types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv kv.RwKV
+	kv kv.RwDB
 }
 
 func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, miningServer *MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
@@ -96,7 +96,7 @@ func StartGrpc(kv *KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPo
 	return grpcServer, nil
 }
 
-func NewKvServer(kv kv.RwKV) *KvServer {
+func NewKvServer(kv kv.RwDB) *KvServer {
 	return &KvServer{kv: kv}
 }
 

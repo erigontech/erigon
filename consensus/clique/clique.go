@@ -175,7 +175,7 @@ type Clique struct {
 	chainConfig    *params.ChainConfig
 	config         *params.CliqueConfig   // Consensus engine configuration parameters
 	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
-	db             kv.RwKV                // Database to store and retrieve snapshot checkpoints
+	db             kv.RwDB                // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
@@ -194,7 +194,7 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB kv.RwKV) *Clique {
+func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB kv.RwDB) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults

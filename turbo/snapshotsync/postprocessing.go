@@ -41,7 +41,7 @@ var (
 	Snapshot11kkTD             = []byte{138, 3, 199, 118, 5, 203, 95, 162, 81, 64, 161}
 )
 
-func PostProcessing(db kv.RwKV, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
+func PostProcessing(db kv.RwDB, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
 	if _, ok := downloadedSnapshots[SnapshotType_headers]; ok {
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			return GenerateHeaderIndexes(context.Background(), tx)

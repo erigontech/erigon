@@ -351,7 +351,7 @@ func init() {
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
-func stageBodies(db kv.RwKV, ctx context.Context) error {
+func stageBodies(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if unwind > 0 {
 			progress, err := stages.GetStageProgress(tx, stages.Bodies)
@@ -376,7 +376,7 @@ func stageBodies(db kv.RwKV, ctx context.Context) error {
 	})
 }
 
-func stageSenders(db kv.RwKV, ctx context.Context) error {
+func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	_, _, chainConfig, _, _, sync, _, _ := newSync(ctx, db, nil)
 
@@ -414,7 +414,7 @@ func stageSenders(db kv.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageExec(db kv.RwKV, ctx context.Context) error {
+func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	if reset {
@@ -472,7 +472,7 @@ func stageExec(db kv.RwKV, ctx context.Context) error {
 	return nil
 }
 
-func stageTrie(db kv.RwKV, ctx context.Context) error {
+func stageTrie(db kv.RwDB, ctx context.Context) error {
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
@@ -522,7 +522,7 @@ func stageTrie(db kv.RwKV, ctx context.Context) error {
 	return nil
 }
 
-func stageHashState(db kv.RwKV, ctx context.Context) error {
+func stageHashState(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
@@ -575,7 +575,7 @@ func stageHashState(db kv.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageLogIndex(db kv.RwKV, ctx context.Context) error {
+func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
@@ -629,7 +629,7 @@ func stageLogIndex(db kv.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageCallTraces(kv kv.RwKV, ctx context.Context) error {
+func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
@@ -689,7 +689,7 @@ func stageCallTraces(kv kv.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageHistory(db kv.RwKV, ctx context.Context) error {
+func stageHistory(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	tx, err := db.BeginRw(ctx)
@@ -756,7 +756,7 @@ func stageHistory(db kv.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageTxLookup(db kv.RwKV, ctx context.Context) error {
+func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
@@ -808,11 +808,11 @@ func stageTxLookup(db kv.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func printAllStages(db kv.RoKV, ctx context.Context) error {
+func printAllStages(db kv.RoDB, ctx context.Context) error {
 	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx) })
 }
 
-func printAppliedMigrations(db kv.RwKV, ctx context.Context) error {
+func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
 	return db.View(ctx, func(tx kv.Tx) error {
 		applied, err := migrations.AppliedMigrations(tx, false /* withPayload */)
 		if err != nil {
@@ -830,7 +830,7 @@ func printAppliedMigrations(db kv.RwKV, ctx context.Context) error {
 	})
 }
 
-func removeMigration(db kv.RwKV, ctx context.Context) error {
+func removeMigration(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Delete(kv.Migrations, []byte(migration), nil)
 	})
@@ -863,7 +863,7 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	return genesis, chainConfig
 }
 
-func newSync(ctx context.Context, db kv.RwKV, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
+func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	snapshotDir = path.Join(datadir, "erigon", "snapshot")
 
@@ -952,7 +952,7 @@ func newSync(ctx context.Context, db kv.RwKV, miningConfig *params.MiningConfig)
 	return pm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
 }
 
-func progress(tx kv.KVGetter, stage stages.SyncStage) uint64 {
+func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
 	res, err := stages.GetStageProgress(tx, stage)
 	if err != nil {
 		panic(err)
@@ -960,7 +960,7 @@ func progress(tx kv.KVGetter, stage stages.SyncStage) uint64 {
 	return res
 }
 
-func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoKV, stage stages.SyncStage) *stagedsync.StageState {
+func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *stagedsync.StageState {
 	res, err := st.StageState(stage, tx, db)
 	if err != nil {
 		panic(err)
@@ -968,7 +968,7 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoKV, stage stages.SyncStage) *s
 	return res
 }
 
-func overrideStorageMode(db kv.RwKV) error {
+func overrideStorageMode(db kv.RwDB) error {
 	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC, experiments)
 	if err != nil {
 		return err

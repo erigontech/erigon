@@ -88,10 +88,10 @@ type Has interface {
 	Has(bucket string, key []byte) (bool, error)
 }
 type GetPut interface {
-	KVGetter
+	Getter
 	Putter
 }
-type KVGetter interface {
+type Getter interface {
 	Has
 
 	GetOne(bucket string, key []byte) (val []byte, err error)
@@ -122,8 +122,8 @@ type Closer interface {
 	Close()
 }
 
-// RoKV - Read-only version of KV.
-type RoKV interface {
+// RoDB - Read-only version of KV.
+type RoDB interface {
 	Closer
 
 	View(ctx context.Context, f func(tx Tx) error) error
@@ -145,7 +145,7 @@ type RoKV interface {
 	AllBuckets() BucketsCfg
 }
 
-// RwKV low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
+// RwDB low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
 //
 // Common pattern for short-living transactions:
 //
@@ -169,8 +169,8 @@ type RoKV interface {
 //		return err
 //	}
 //
-type RwKV interface {
-	RoKV
+type RwDB interface {
+	RoDB
 
 	Update(ctx context.Context, f func(tx RwTx) error) error
 
@@ -178,7 +178,7 @@ type RwKV interface {
 }
 
 type StatelessReadTx interface {
-	KVGetter
+	Getter
 
 	Commit() error // Commit all the operations of a transaction into the database.
 	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.

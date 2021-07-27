@@ -22,11 +22,11 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 }
 
 type BlockHashesCfg struct {
-	db     kv.RwKV
+	db     kv.RwDB
 	tmpDir string
 }
 
-func StageBlockHashesCfg(db kv.RwKV, tmpDir string) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string) BlockHashesCfg {
 	return BlockHashesCfg{
 		db:     db,
 		tmpDir: tmpDir,

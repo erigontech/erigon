@@ -28,7 +28,7 @@ import (
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
-	db kv.RwKV,
+	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *stagedsync.Notifications,
@@ -80,7 +80,7 @@ func StageLoop(
 
 func StageLoopStep(
 	ctx context.Context,
-	db kv.RwKV,
+	db kv.RwDB,
 	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
 	notifications *stagedsync.Notifications,
@@ -177,7 +177,7 @@ func StageLoopStep(
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv kv.RwKV, mining *stagedsync.Sync) (err error) {
+func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
 
 	tx, err := kv.BeginRw(ctx)
@@ -194,7 +194,7 @@ func MiningStep(ctx context.Context, kv kv.RwKV, mining *stagedsync.Sync) (err e
 
 func NewStagedSync2(
 	ctx context.Context,
-	db kv.RwKV,
+	db kv.RwDB,
 	cfg ethconfig.Config,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,

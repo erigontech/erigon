@@ -253,11 +253,11 @@ type ControlServerImpl struct {
 	forks       []uint64
 	genesisHash common.Hash
 	networkId   uint64
-	db          kv.RwKV
+	db          kv.RwDB
 	Engine      consensus.Engine
 }
 
-func NewControlServer(db kv.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */

@@ -31,14 +31,14 @@ type TraceAPI interface {
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access
 type TraceAPIImpl struct {
 	*BaseAPI
-	kv            kv.RoKV
+	kv            kv.RoDB
 	maxTraces     uint64
 	gasCap        uint64
 	compatibility bool // Bug for bug compatiblity with OpenEthereum
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(base *BaseAPI, kv kv.RoKV, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(base *BaseAPI, kv kv.RoDB, cfg *cli.Flags) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		BaseAPI:       base,
 		kv:            kv,

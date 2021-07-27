@@ -9,14 +9,14 @@ import (
 )
 
 type SnapshotStateCfg struct {
-	db               kv.RwKV
+	db               kv.RwDB
 	snapshotDir      string
 	tmpDir           string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
-func StageSnapshotStateCfg(db kv.RwKV, snapshot ethconfig.Snapshot, tmpDir string, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotStateCfg {
+func StageSnapshotStateCfg(db kv.RwDB, snapshot ethconfig.Snapshot, tmpDir string, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotStateCfg {
 	return SnapshotStateCfg{
 		db:               db,
 		snapshotDir:      snapshot.Dir,

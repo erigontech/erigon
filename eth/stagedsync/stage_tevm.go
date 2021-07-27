@@ -24,13 +24,13 @@ import (
 var stageTranspileGauge = metrics.NewRegisteredGauge("stage/tevm", nil)
 
 type TranspileCfg struct {
-	db          kv.RwKV
+	db          kv.RwDB
 	batchSize   datasize.ByteSize
 	chainConfig *params.ChainConfig
 }
 
 func StageTranspileCfg(
-	kv kv.RwKV,
+	kv kv.RwDB,
 	batchSize datasize.ByteSize,
 	chainConfig *params.ChainConfig,
 ) TranspileCfg {

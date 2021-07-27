@@ -14,6 +14,6 @@ func RmTmpFiles(snapshotPath string) error {
 	return os.Remove(snapshotPath + "/mdbx.lck")
 }
 
-func OpenSnapshotKV(configsFunc mdbx.BucketConfigsFunc, path string) kv.RwKV {
+func OpenSnapshotKV(configsFunc mdbx.BucketConfigsFunc, path string) kv.RwDB {
 	return mdbx.NewMDBX().WithBucketsConfig(configsFunc).Path(path).MustOpen()
 }

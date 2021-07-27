@@ -24,14 +24,14 @@ import (
 )
 
 type HistoryCfg struct {
-	db         kv.RwKV
+	db         kv.RwDB
 	bufLimit   datasize.ByteSize
 	prune      prune.Mode
 	flushEvery time.Duration
 	tmpdir     string
 }
 
-func StageHistoryCfg(db kv.RwKV, prune prune.Mode, tmpDir string) HistoryCfg {
+func StageHistoryCfg(db kv.RwDB, prune prune.Mode, tmpDir string) HistoryCfg {
 	return HistoryCfg{
 		db:         db,
 		prune:      prune,

@@ -41,7 +41,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func resetState(db kv.RwKV, ctx context.Context) error {
+func resetState(db kv.RwDB, ctx context.Context) error {
 	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func resetFinish(tx kv.RwTx) error {
 	return nil
 }
 
-func printStages(db kv.KVGetter) error {
+func printStages(db kv.Getter) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)

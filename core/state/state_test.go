@@ -35,7 +35,7 @@ import (
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {
-	kv    kv.RwKV
+	kv    kv.RwDB
 	tx    kv.RwTx
 	state *IntraBlockState
 	r     StateReader

@@ -27,7 +27,7 @@ import (
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db kv.KVGetter, hash common.Hash) (*params.ChainConfig, error) {
+func ReadChainConfig(db kv.Getter, hash common.Hash) (*params.ChainConfig, error) {
 	data, err := db.GetOne(kv.ConfigPrefix, hash[:])
 	if err != nil {
 		return nil, err

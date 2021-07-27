@@ -25,7 +25,7 @@ import (
 var stageHeadersGauge = metrics.NewRegisteredGauge("stage/headers", nil)
 
 type HeadersCfg struct {
-	db                kv.RwKV
+	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
@@ -35,7 +35,7 @@ type HeadersCfg struct {
 }
 
 func StageHeadersCfg(
-	db kv.RwKV,
+	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,

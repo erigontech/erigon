@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testSentryServer(db kv.KVGetter, genesis *core.Genesis, genesisHash common.Hash) *SentryServerImpl {
+func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash common.Hash) *SentryServerImpl {
 	s := &SentryServerImpl{
 		ctx: context.Background(),
 	}

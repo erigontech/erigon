@@ -14,13 +14,13 @@ import (
 )
 
 type SnapshotHeadersCfg struct {
-	db               kv.RwKV
+	db               kv.RwDB
 	snapshotDir      string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
-func StageSnapshotHeadersCfg(db kv.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotHeadersCfg {
+func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotHeadersCfg {
 	return SnapshotHeadersCfg{
 		db:               db,
 		snapshotDir:      snapshot.Dir,

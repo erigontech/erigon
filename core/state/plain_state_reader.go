@@ -16,10 +16,10 @@ var _ StateReader = (*PlainStateReader)(nil)
 // Data in the plain state is stored using un-hashed account/storage items
 // as opposed to the "normal" state that uses hashes of merkle paths to store items.
 type PlainStateReader struct {
-	db kv.KVGetter
+	db kv.Getter
 }
 
-func NewPlainStateReader(db kv.KVGetter) *PlainStateReader {
+func NewPlainStateReader(db kv.Getter) *PlainStateReader {
 	return &PlainStateReader{
 		db: db,
 	}

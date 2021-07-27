@@ -119,7 +119,7 @@ func hexPalette() error {
 	return nil
 }
 
-func stateDatabaseComparison(first kv.RwKV, second kv.RwKV, number int) error {
+func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {

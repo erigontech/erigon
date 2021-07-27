@@ -47,7 +47,7 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 }
 
 type MiningCreateBlockCfg struct {
-	db          kv.RwKV
+	db          kv.RwDB
 	miner       MiningState
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
@@ -56,7 +56,7 @@ type MiningCreateBlockCfg struct {
 }
 
 func StageMiningCreateBlockCfg(
-	db kv.RwKV,
+	db kv.RwDB,
 	miner MiningState,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,

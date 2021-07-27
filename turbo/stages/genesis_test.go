@@ -133,14 +133,14 @@ func TestSetupGenesis(t *testing.T) {
 	oldcustomg.Config = &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
 		wantErr    error
-		fn         func(kv.RwKV) (*params.ChainConfig, *types.Block, error)
+		fn         func(kv.RwDB) (*params.ChainConfig, *types.Block, error)
 		wantConfig *params.ChainConfig
 		name       string
 		wantHash   common.Hash
 	}{
 		{
 			name: "genesis without ChainConfig",
-			fn: func(db kv.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				return core.CommitGenesisBlock(db, new(core.Genesis))
 			},
 			wantErr:    core.ErrGenesisNoConfig,
@@ -148,7 +148,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "no block in DB, genesis == nil",
-			fn: func(db kv.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -156,7 +156,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "mainnet block in DB, genesis == nil",
-			fn: func(db kv.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -164,7 +164,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == nil",
-			fn: func(db kv.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
 				return core.CommitGenesisBlock(db, nil)
 			},
@@ -173,7 +173,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == ropsten",
-			fn: func(db kv.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
 				return core.CommitGenesisBlock(db, core.DefaultRopstenGenesisBlock())
 			},
@@ -183,7 +183,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "compatible config in DB",
-			fn: func(db kv.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				oldcustomg.MustCommit(db)
 				return core.CommitGenesisBlock(db, &customg)
 			},
@@ -192,7 +192,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "incompatible config in DB",
-			fn: func(db kv.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

@@ -65,7 +65,7 @@ func (mi *MutationItem) Less(than btree.Item) bool {
 	return bytes.Compare(mi.key, i.key) < 0
 }
 
-func (m *mutation) RwKV() kv.RwKV {
+func (m *mutation) RwKV() kv.RwDB {
 	if casted, ok := m.db.(ethdb.HasRwKV); ok {
 		return casted.RwKV()
 	}
@@ -339,6 +339,6 @@ func (m *mutation) panicOnEmptyDB() {
 	}
 }
 
-func (m *mutation) SetRwKV(kv kv.RwKV) {
+func (m *mutation) SetRwKV(kv kv.RwDB) {
 	m.db.(ethdb.HasRwKV).SetRwKV(kv)
 }

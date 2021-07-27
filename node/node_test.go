@@ -197,7 +197,7 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	stack, _ := New(testNodeConfig())
 	defer stack.Close()
 
-	var db kv.RwKV
+	var db kv.RwDB
 	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {

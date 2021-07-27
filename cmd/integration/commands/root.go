@@ -36,7 +36,7 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDB(path string, applyMigrations bool) kv.RwKV {
+func openDB(path string, applyMigrations bool) kv.RwDB {
 	label := kv.Chain
 	db := openKV(label, path, false)
 	if applyMigrations {
@@ -58,7 +58,7 @@ func openDB(path string, applyMigrations bool) kv.RwKV {
 	return db
 }
 
-func openKV(label kv.Label, path string, exclusive bool) kv.RwKV {
+func openKV(label kv.Label, path string, exclusive bool) kv.RwDB {
 	opts := kv2.NewMDBX().Path(path).Label(label)
 	if exclusive {
 		opts = opts.Exclusive()

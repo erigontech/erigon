@@ -18,8 +18,8 @@ func TestGetAndPut(t *testing.T) {
 
 type getPutkvMachine struct {
 	bucket       string
-	snKV         kv.RwKV
-	modelKV      kv.RwKV
+	snKV         kv.RwDB
+	modelKV      kv.RwDB
 	snapshotKeys [][20]byte
 	newKeys      [][20]byte
 	allKeys      [][20]byte
@@ -166,8 +166,8 @@ func (m *getPutkvMachine) Commit(t *rapid.T) {
 
 type getKVMachine struct {
 	bucket        string
-	snKV          kv.RwKV
-	modelKV       kv.RwKV
+	snKV          kv.RwDB
+	modelKV       kv.RwDB
 	overWriteKeys [][20]byte
 	snKeys        [][20]byte
 	newKeys       [][20]byte
@@ -268,8 +268,8 @@ func TestCursorWithTX(t *testing.T) {
 
 type cursorKVMachine struct {
 	bucket  string
-	snKV    kv.RwKV
-	modelKV kv.RwKV
+	snKV    kv.RwDB
+	modelKV kv.RwDB
 
 	snTX    kv.RwTx
 	modelTX kv.RwTx

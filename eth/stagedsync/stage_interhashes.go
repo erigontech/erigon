@@ -21,13 +21,13 @@ import (
 )
 
 type TrieCfg struct {
-	db                kv.RwKV
+	db                kv.RwDB
 	checkRoot         bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 }
 
-func StageTrieCfg(db kv.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,

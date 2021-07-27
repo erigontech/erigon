@@ -107,7 +107,7 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) Open() (kv.RwKV, error) {
+func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
 		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
 	}
@@ -281,7 +281,7 @@ func (opts MdbxOpts) Open() (kv.RwKV, error) {
 	return db, nil
 }
 
-func (opts MdbxOpts) MustOpen() kv.RwKV {
+func (opts MdbxOpts) MustOpen() kv.RwDB {
 	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))

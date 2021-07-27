@@ -49,7 +49,7 @@ type MockSentry struct {
 	Ctx             context.Context
 	t               *testing.T
 	cancel          context.CancelFunc
-	DB              kv.RwKV
+	DB              kv.RwDB
 	tmpdir          string
 	Engine          consensus.Engine
 	ChainConfig     *params.ChainConfig

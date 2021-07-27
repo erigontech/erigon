@@ -120,7 +120,7 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 	return b
 }
 
-func (b *SimulatedBackend) DB() kv.RwKV {
+func (b *SimulatedBackend) DB() kv.RwDB {
 	return b.m.DB
 }
 
@@ -847,7 +847,7 @@ func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
 type filterBackend struct {
-	db kv.RwKV
+	db kv.RwDB
 	b  *SimulatedBackend
 }
 

@@ -476,7 +476,7 @@ func (n *mdbx_node) getKV() (key string, value string) {
 /* ----------------------- DB generator functions ----------------------- */
 
 // Generates an empty database and returns the file name
-func nothing(kv kv.RwKV, _ kv.RwTx) (bool, error) {
+func nothing(kv kv.RwDB, _ kv.RwTx) (bool, error) {
 	return true, nil
 }
 
@@ -497,7 +497,7 @@ func generate2(tx kv.RwTx, entries int) error {
 }
 
 // Generates a database with 100 (maximum) of DBIs to produce branches in MAIN_DBI
-func generate3(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func generate3(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 61; i++ {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := tx.(kv.BucketMigrator).CreateBucket(k); err != nil {
@@ -508,7 +508,7 @@ func generate3(_ kv.RwKV, tx kv.RwTx) (bool, error) {
 }
 
 // Generates a database with one table, containing 1 short and 1 long (more than one page) values
-func generate4(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func generate4(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	c, err := tx.RwCursor("t")
 	if err != nil {
 		return false, err
@@ -524,7 +524,7 @@ func generate4(_ kv.RwKV, tx kv.RwTx) (bool, error) {
 }
 
 // Generates a database with one table, containing some DupSort values
-func generate5(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func generate5(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	c, err := tx.RwCursorDupSort("t")
 	if err != nil {
 		return false, err
@@ -552,7 +552,7 @@ func generate5(_ kv.RwKV, tx kv.RwTx) (bool, error) {
 }
 
 // Generate a database with one table, containing lots of dupsort values
-func generate6(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func generate6(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	c, err := tx.RwCursorDupSort("t")
 	if err != nil {
 		return false, err
@@ -576,14 +576,14 @@ func generate6(_ kv.RwKV, tx kv.RwTx) (bool, error) {
 	return true, nil
 }
 
-func dropT(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func dropT(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	if err := tx.(kv.BucketMigrator).ClearBucket("t"); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func generate7(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func generate7(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	c1, err := tx.RwCursor("t1")
 	if err != nil {
 		return false, err
@@ -606,14 +606,14 @@ func generate7(_ kv.RwKV, tx kv.RwTx) (bool, error) {
 	return true, nil
 }
 
-func dropT1(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func dropT1(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	if err := tx.(kv.BucketMigrator).ClearBucket("t1"); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func dropT2(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func dropT2(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	if err := tx.(kv.BucketMigrator).ClearBucket("t2"); err != nil {
 		return false, err
 	}
@@ -621,7 +621,7 @@ func dropT2(_ kv.RwKV, tx kv.RwTx) (bool, error) {
 }
 
 // Generates a database with 100 (maximum) of DBIs to produce branches in MAIN_DBI
-func generate8(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func generate8(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := tx.(kv.BucketMigrator).CreateBucket(k); err != nil {
@@ -653,7 +653,7 @@ func generate9(tx kv.RwTx, entries int) error {
 	return nil
 }
 
-func dropAll(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+func dropAll(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
 		if err := tx.(kv.BucketMigrator).DropBucket(k); err != nil {
@@ -664,7 +664,7 @@ func dropAll(_ kv.RwKV, tx kv.RwTx) (bool, error) {
 }
 
 // dropGradually drops every other table in its own transaction
-func dropGradually(db kv.RwKV, tx kv.RwTx) (bool, error) {
+func dropGradually(db kv.RwDB, tx kv.RwTx) (bool, error) {
 	tx.Rollback()
 	for i := 0; i < 100; i += 2 {
 		k := fmt.Sprintf("table_%05d", i)
@@ -722,7 +722,7 @@ func change3(tx kv.RwTx) (bool, error) {
 	return true, nil
 }
 
-func launchReader(kv kv.RwKV, tx kv.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
+func launchReader(kv kv.RwDB, tx kv.Tx, expectVal string, startCh chan struct{}, errorCh chan error) (bool, error) {
 	tx.Rollback()
 	tx1, err1 := kv.BeginRo(context.Background())
 	if err1 != nil {
@@ -770,13 +770,13 @@ func checkReader(tx kv.Tx, errorCh chan error) (bool, error) {
 	return false, nil
 }
 
-func defragSteps(filename string, bucketsCfg kv.BucketsCfg, generateFs ...func(kv.RwKV, kv.RwTx) (bool, error)) error {
+func defragSteps(filename string, bucketsCfg kv.BucketsCfg, generateFs ...func(kv.RwDB, kv.RwTx) (bool, error)) error {
 	dir, err := ioutil.TempDir(".", "db-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
 	defer os.RemoveAll(dir)
-	var db kv.RwKV
+	var db kv.RwDB
 	db, err = kv2.NewMDBX().Path(dir).WithBucketsConfig(func(kv.BucketsCfg) kv.BucketsCfg {
 		return bucketsCfg
 	}).Open()
@@ -832,7 +832,7 @@ func Defrag() error {
 	oneBucketCfg := make(kv.BucketsCfg)
 	oneBucketCfg["t"] = kv.BucketConfigItem{}
 	fmt.Println("------------------- 2 -------------------")
-	if err := defragSteps("vis2", oneBucketCfg, func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return true, generate2(tx, 2) }); err != nil {
+	if err := defragSteps("vis2", oneBucketCfg, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 2) }); err != nil {
 		return err
 	}
 	fmt.Println("------------------- 3 -------------------")
@@ -840,7 +840,7 @@ func Defrag() error {
 		return err
 	}
 	fmt.Println("------------------- 4 -------------------")
-	if err := defragSteps("vis4", oneBucketCfg, func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return true, generate2(tx, 200) }); err != nil {
+	if err := defragSteps("vis4", oneBucketCfg, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 200) }); err != nil {
 		return err
 	}
 	fmt.Println("------------------- 5 -------------------")
@@ -858,7 +858,7 @@ func Defrag() error {
 		return err
 	}
 	fmt.Println("------------------- 8 -------------------")
-	if err := defragSteps("vis8", oneDupSortCfg, func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) }, dropT); err != nil {
+	if err := defragSteps("vis8", oneDupSortCfg, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) }, dropT); err != nil {
 		return err
 	}
 
@@ -883,27 +883,27 @@ func Defrag() error {
 		manyBucketCfg[k] = kv.BucketConfigItem{IsDeprecated: true}
 	}
 	fmt.Println("------------------- 12 -------------------")
-	if err := defragSteps("vis12", manyBucketCfg, generate8, func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return true, generate9(tx, 1000) }, dropGradually); err != nil {
+	if err := defragSteps("vis12", manyBucketCfg, generate8, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate9(tx, 1000) }, dropGradually); err != nil {
 		return err
 	}
 	fmt.Println("------------------- 13 -------------------")
-	if err := defragSteps("vis13", manyBucketCfg, generate8, func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return false, generate9(tx, 10000) }, dropAll); err != nil {
+	if err := defragSteps("vis13", manyBucketCfg, generate8, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return false, generate9(tx, 10000) }, dropAll); err != nil {
 		return err
 	}
 	fmt.Println("------------------- 14 -------------------")
-	if err := defragSteps("vis14", manyBucketCfg, generate8, func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return false, generate9(tx, 300000) }, dropGradually); err != nil {
+	if err := defragSteps("vis14", manyBucketCfg, generate8, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return false, generate9(tx, 300000) }, dropGradually); err != nil {
 		return err
 	}
 	fmt.Println("------------------- 15 -------------------")
 	if err := defragSteps("vis15", oneBucketCfg,
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change1(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change2(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change3(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change2(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change3(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change2(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change3(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change1(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change2(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change3(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change2(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change3(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change2(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change3(tx) },
 	); err != nil {
 		return err
 	}
@@ -913,21 +913,21 @@ func Defrag() error {
 
 	fmt.Println("------------------- 16 -------------------")
 	if err := defragSteps("vis16", oneBucketCfg,
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change1(tx) },
-		func(kv kv.RwKV, tx kv.RwTx) (bool, error) {
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 1000) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change1(tx) },
+		func(kv kv.RwDB, tx kv.RwTx) (bool, error) {
 			return launchReader(kv, tx, "another_short_value_1", readerStartCh, readerErrorCh)
 		},
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change2(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change3(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change2(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change3(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change2(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) { return change3(tx) },
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change2(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change3(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change2(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change3(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change2(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return change3(tx) },
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 			return startReader(tx, readerStartCh)
 		},
-		func(_ kv.RwKV, tx kv.RwTx) (bool, error) {
+		func(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 			return checkReader(tx, readerErrorCh)
 		},
 	); err != nil {

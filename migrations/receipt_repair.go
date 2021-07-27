@@ -40,7 +40,7 @@ func availableReceiptFrom(tx kv.Tx) (uint64, error) {
 
 var ReceiptRepair = Migration{
 	Name: "receipt_repair",
-	Up: func(db kv.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err

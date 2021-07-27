@@ -2039,7 +2039,7 @@ func TestEIP1559Transition(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func current(kv kv.RwKV) *types.Block {
+func current(kv kv.RwDB) *types.Block {
 	tx, err := kv.BeginRo(context.Background())
 	if err != nil {
 		panic(err)

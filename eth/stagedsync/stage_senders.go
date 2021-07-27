@@ -23,7 +23,7 @@ import (
 )
 
 type SendersCfg struct {
-	db              kv.RwKV
+	db              kv.RwDB
 	batchSize       int
 	blockSize       int
 	bufferSize      int
@@ -34,7 +34,7 @@ type SendersCfg struct {
 	chainConfig *params.ChainConfig
 }
 
-func StageSendersCfg(db kv.RwKV, chainCfg *params.ChainConfig, tmpdir string) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 

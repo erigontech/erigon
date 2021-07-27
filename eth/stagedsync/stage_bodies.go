@@ -22,7 +22,7 @@ import (
 var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
 
 type BodiesCfg struct {
-	db              kv.RwKV
+	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
@@ -33,7 +33,7 @@ type BodiesCfg struct {
 }
 
 func StageBodiesCfg(
-	db kv.RwKV,
+	db kv.RwDB,
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []headerdownload.PenaltyItem),

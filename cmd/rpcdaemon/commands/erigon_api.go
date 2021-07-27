@@ -31,11 +31,11 @@ type ErigonAPI interface {
 // ErigonImpl is implementation of the ErigonAPI interface
 type ErigonImpl struct {
 	*BaseAPI
-	db kv.RoKV
+	db kv.RoDB
 }
 
 // NewErigonAPI returns ErigonImpl instance
-func NewErigonAPI(base *BaseAPI, db kv.RoKV) *ErigonImpl {
+func NewErigonAPI(base *BaseAPI, db kv.RoDB) *ErigonImpl {
 	return &ErigonImpl{
 		BaseAPI: base,
 		db:      db,

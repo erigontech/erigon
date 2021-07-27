@@ -31,18 +31,18 @@ import (
 
 // ObjectDatabase - is an object-style interface of DB accessing
 type ObjectDatabase struct {
-	kv kv.RwKV
+	kv kv.RwDB
 }
 
 // NewObjectDatabase returns a AbstractDB wrapper.
 //Deprecated
-func NewObjectDatabase(kv kv.RwKV) *ObjectDatabase {
+func NewObjectDatabase(kv kv.RwDB) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv: kv,
 	}
 }
 
-func MustOpen(path string) kv.RwKV {
+func MustOpen(path string) kv.RwDB {
 	db, err := Open(path, false)
 	if err != nil {
 		panic(err)
@@ -51,8 +51,8 @@ func MustOpen(path string) kv.RwKV {
 }
 
 // Open - main method to open database.
-func Open(path string, readOnly bool) (kv.RwKV, error) {
-	var db kv.RwKV
+func Open(path string, readOnly bool) (kv.RwDB, error) {
+	var db kv.RwDB
 	var err error
 	opts := mdbx2.NewMDBX().Path(path)
 	if readOnly {
@@ -268,11 +268,11 @@ func (db *ObjectDatabase) Close() {
 	db.kv.Close()
 }
 
-func (db *ObjectDatabase) RwKV() kv.RwKV {
+func (db *ObjectDatabase) RwKV() kv.RwDB {
 	return db.kv
 }
 
-func (db *ObjectDatabase) SetRwKV(kv kv.RwKV) {
+func (db *ObjectDatabase) SetRwKV(kv kv.RwDB) {
 	db.kv = kv
 }
 

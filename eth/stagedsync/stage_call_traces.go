@@ -27,14 +27,14 @@ import (
 )
 
 type CallTracesCfg struct {
-	db      kv.RwKV
+	db      kv.RwDB
 	prune   prune.Mode
 	ToBlock uint64 // not setting this params means no limit
 	tmpdir  string
 }
 
 func StageCallTracesCfg(
-	db kv.RwKV,
+	db kv.RwDB,
 	prune prune.Mode,
 	toBlock uint64,
 	tmpdir string,

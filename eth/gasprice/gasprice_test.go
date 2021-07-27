@@ -36,7 +36,7 @@ import (
 )
 
 type testBackend struct {
-	db  kv.RwKV
+	db  kv.RwDB
 	cfg *params.ChainConfig
 }
 

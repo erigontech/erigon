@@ -52,7 +52,7 @@ var (
 // purpose is to allow testing the request/reply workflows and wire serialization
 // in the `eth` protocol without actually doing any data processing.
 type testBackend struct {
-	db          kv.RwKV
+	db          kv.RwDB
 	txpool      *core.TxPool
 	headBlock   *types.Block
 	genesis     *types.Block
@@ -98,7 +98,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	return b
 }
 
-func (b *testBackend) DB() kv.RwKV        { return b.db }
+func (b *testBackend) DB() kv.RwDB        { return b.db }
 func (b *testBackend) TxPool() eth.TxPool { return b.txpool }
 func (b *testBackend) RunPeer(peer *eth.Peer, handler eth.Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that

@@ -87,7 +87,7 @@ func GenerateHeadersSnapshot(ctx context.Context, db kv.Tx, sntx kv.RwTx, toBloc
 	return nil
 }
 
-func OpenHeadersSnapshot(dbPath string) (kv.RoKV, error) {
+func OpenHeadersSnapshot(dbPath string) (kv.RoDB, error) {
 	return mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
 			kv.HeadersBucket: kv.BucketsConfigs[kv.HeadersBucket],
@@ -95,7 +95,7 @@ func OpenHeadersSnapshot(dbPath string) (kv.RoKV, error) {
 	}).Readonly().Path(dbPath).Open()
 }
 
-func RemoveHeadersData(db kv.RoKV, tx kv.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
+func RemoveHeadersData(db kv.RoDB, tx kv.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
 	log.Info("Remove data", "from", currentSnapshot, "to", newSnapshot)
 	if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")

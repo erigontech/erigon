@@ -177,8 +177,8 @@ func TestRemoteKvVersion(t *testing.T) {
 	require.False(t, a.EnsureVersionCompatibility())
 }
 
-func setupDatabases(t *testing.T, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwKV, readDBs []kv.RwKV) {
-	writeDBs = []kv.RwKV{
+func setupDatabases(t *testing.T, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+	writeDBs = []kv.RwDB{
 		mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
 		mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
@@ -194,7 +194,7 @@ func setupDatabases(t *testing.T, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwKV,
 	}()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
 	rdb := remotedb.NewRemote(v).InMem(conn).MustOpen()
-	readDBs = []kv.RwKV{
+	readDBs = []kv.RwDB{
 		writeDBs[0],
 		writeDBs[1],
 		rdb,
@@ -219,7 +219,7 @@ func setupDatabases(t *testing.T, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwKV,
 	return writeDBs, readDBs
 }
 
-func testCtxCancel(t *testing.T, db kv.RwKV, bucket1 string) {
+func testCtxCancel(t *testing.T, db kv.RwDB, bucket1 string) {
 	assert := assert.New(t)
 	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
@@ -241,7 +241,7 @@ func testCtxCancel(t *testing.T, db kv.RwKV, bucket1 string) {
 	}
 }
 
-func testMultiCursor(t *testing.T, db kv.RwKV, bucket1, bucket2 string) {
+func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx kv.Tx) error {

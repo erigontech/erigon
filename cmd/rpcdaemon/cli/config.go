@@ -123,7 +123,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func checkDbCompatibility(db kv.RoKV) error {
+func checkDbCompatibility(db kv.RoDB) error {
 	// DB schema version compatibility check
 	var version []byte
 	var compatErr error
@@ -160,14 +160,14 @@ func checkDbCompatibility(db kv.RoKV) error {
 	return nil
 }
 
-func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (db kv.RoKV, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
+func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
-		var rwKv kv.RwKV
+		var rwKv kv.RwDB
 		rwKv, err = kv2.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, err

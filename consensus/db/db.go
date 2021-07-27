@@ -5,7 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
 )
 
-func OpenDatabase(path string, inmem bool) kv.RwKV {
+func OpenDatabase(path string, inmem bool) kv.RwDB {
 	opts := mdbx.NewMDBX()
 	if inmem {
 		opts = opts.InMem()

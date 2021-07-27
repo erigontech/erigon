@@ -29,13 +29,13 @@ const (
 
 type LogIndexCfg struct {
 	tmpdir     string
-	db         kv.RwKV
+	db         kv.RwDB
 	prune      prune.Mode
 	bufLimit   datasize.ByteSize
 	flushEvery time.Duration
 }
 
-func StageLogIndexCfg(db kv.RwKV, prune prune.Mode, tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string) LogIndexCfg {
 	return LogIndexCfg{
 		db:         db,
 		prune:      prune,

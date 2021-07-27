@@ -73,7 +73,7 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	kv     kv.RwKV       // Interface to the database itself
+	kv     kv.RwDB       // Interface to the database itself
 	runner sync.Once     // Ensures we can start at most one expirer
 	quit   chan struct{} // Channel to signal the expiring thread to stop
 }
@@ -107,7 +107,7 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	var db kv.RwKV
+	var db kv.RwDB
 	var err error
 	db, err = mdbx.NewMDBX().Path(path).Label(kv.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
@@ -337,7 +337,7 @@ func (db *DB) DeleteNode(id ID) {
 	deleteRange(db.kv, nodeKey(id))
 }
 
-func deleteRange(db kv.RwKV, prefix []byte) {
+func deleteRange(db kv.RwDB, prefix []byte) {
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		c, err := tx.RwCursor(kv.InodesBucket)
 		if err != nil {

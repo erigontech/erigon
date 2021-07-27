@@ -82,7 +82,7 @@ type Ethereum struct {
 	txPool *core.TxPool
 
 	// DB interfaces
-	chainKV    kv.RwKV
+	chainKV    kv.RwDB
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -548,7 +548,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwKV, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -632,7 +632,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwKV, mining *stagedsy
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
 func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
-func (s *Ethereum) ChainKV() kv.RwKV            { return s.chainKV }
+func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
@@ -716,7 +716,7 @@ func (s *Ethereum) Stop() error {
 //Deprecated - use stages.StageLoop
 func Loop(
 	ctx context.Context,
-	db kv.RwKV, sync *stagedsync.Sync,
+	db kv.RwDB, sync *stagedsync.Sync,
 	controlServer *download.ControlServerImpl,
 	notifications *stagedsync.Notifications,
 	waitForDone chan struct{},

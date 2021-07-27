@@ -1217,7 +1217,7 @@ func TestPlainStateProxy(t *testing.T) {
 
 }
 
-func printBucket(db kv.RoKV, bucket string) {
+func printBucket(db kv.RoDB, bucket string) {
 	fmt.Println("+Print bucket", bucket)
 	defer func() {
 		fmt.Println("-Print bucket", bucket)
@@ -1275,7 +1275,7 @@ type KvData struct {
 	V []byte
 }
 
-func GenStateData(data []KvData) (kv.RwKV, error) {
+func GenStateData(data []KvData) (kv.RwDB, error) {
 	snapshot := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
 			kv.PlainStateBucket: kv.BucketConfigItem{},
