@@ -26,8 +26,10 @@ import (
 //      - rlp has 2 data types: List and String (bytes array), and low-level funcs are operate with this types.
 //      - but for convenience and performance - provided higher-level functions (for example for EncodeHash - for []byte of len 32)
 //      - rlp package doesn't manage memory - and Caller must ensure buffers are big enough.
-//      - each Encode method does write to given buffer and return written len
-//      - each Parse method does write to given buffer and return written len
+//
+// Composition:
+//     - each Encode method does write to given buffer and return written len
+//     - each Parse accept position in payload and return new position
 //
 // General rules:
 //      - functions to calculate prefix len are fast (and pure). it's ok to call them multiple times during encoding of large object for readability.
