@@ -259,11 +259,11 @@ func printLogs(tx ethdb.RwTx, timings []Timing) error {
 			break
 		}
 		if timings[i].isUnwind {
-			logCtx = append(logCtx, "Unwind "+string(timings[i].stage), timings[i].took.String())
+			logCtx = append(logCtx, "Unwind "+string(timings[i].stage), timings[i].took.Truncate(time.Millisecond).String())
 		} else if timings[i].isPrune {
-			logCtx = append(logCtx, "Prune "+string(timings[i].stage), timings[i].took.String())
+			logCtx = append(logCtx, "Prune "+string(timings[i].stage), timings[i].took.Truncate(time.Millisecond).String())
 		} else {
-			logCtx = append(logCtx, string(timings[i].stage), timings[i].took.String())
+			logCtx = append(logCtx, string(timings[i].stage), timings[i].took.Truncate(time.Millisecond).String())
 		}
 	}
 	if len(logCtx) > 0 {
