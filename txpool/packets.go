@@ -22,57 +22,24 @@ import (
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
-const ParseHashErrorPrefix = "parse hash payload"
-
 type NewPooledTransactionHashesPacket [][32]byte
 
-// ParseHash extracts the next hash from the RLP encoding (payload) from a given position.
-// It appends the hash to the given slice, reusing the space if there is enough capacity
-// The first returned value is the slice where hash is appended to.
-// The second returned value is the new position in the RLP payload after the extraction
-// of the hash.
-func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
-	payloadLen := len(payload)
-	dataPos, dataLen, list, err := prefix(payload, pos)
-	if err != nil {
-		return nil, 0, fmt.Errorf("%s: hash len: %w", ParseHashErrorPrefix, err)
-	}
-	if list {
-		return nil, 0, fmt.Errorf("%s: hash must be a string, not list", ParseHashErrorPrefix)
-	}
-	if dataPos+dataLen > payloadLen {
-		return nil, 0, fmt.Errorf("%s: unexpected end of payload after hash", ParseHashErrorPrefix)
-	}
-	if dataLen != 32 {
-		return nil, 0, fmt.Errorf("%s: hash must be 32 bytes long", ParseHashErrorPrefix)
-	}
-	var hash []byte
-	if total := len(hashbuf) + 32; cap(hashbuf) >= total {
-		hash = hashbuf[:32] // Reuse the space in pkbuf, is it has enough capacity
-	} else {
-		hash = make([]byte, total)
-		copy(hash, hashbuf)
-	}
-	copy(hash, payload[dataPos:dataPos+dataLen])
-	return hash, dataPos + dataLen, nil
-}
-
-// ParseHashesCount looks at the RLP length prefix for list of 32-byte hashes
+// ParseHashesCount looks at the RLP length ParsePrefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
-func ParseHashesCount(payload []byte, pos int) (int, int, error) {
+func ParseHashesCount(payload Hashes, pos int) (int, int, error) {
 	payloadLen := len(payload)
-	dataPos, dataLen, list, err := prefix(payload, pos)
+	dataPos, dataLen, list, err := rlp.ParsePrefix(payload, pos)
 	if err != nil {
-		return 0, 0, fmt.Errorf("%s: hashes len: %w", ParseHashErrorPrefix, err)
+		return 0, 0, fmt.Errorf("%s: hashes len: %w", rlp.ParseHashErrorPrefix, err)
 	}
 	if !list {
-		return 0, 0, fmt.Errorf("%s: hashes must be a list, not string", ParseHashErrorPrefix)
+		return 0, 0, fmt.Errorf("%s: hashes must be a list, not string", rlp.ParseHashErrorPrefix)
 	}
 	if dataPos+dataLen > payloadLen {
-		return 0, 0, fmt.Errorf("%s: unexpected end of payload after hashes", ParseHashErrorPrefix)
+		return 0, 0, fmt.Errorf("%s: unexpected end of payload after hashes", rlp.ParseHashErrorPrefix)
 	}
 	if dataLen%33 != 0 {
-		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", ParseHashErrorPrefix)
+		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", rlp.ParseHashErrorPrefix)
 	}
 	return dataLen / 33, dataPos, nil
 }
@@ -85,20 +52,21 @@ func EncodeHashes(hashes Hashes, encodeBuf []byte) ([]byte, error) {
 	hashesLen := len(hashes) / 32 * 33
 	dataLen := hashesLen
 	prefixLen := rlp.ListPrefixLen(hashesLen)
-	var encoding []byte
-	if total := prefixLen + dataLen; cap(encodeBuf) >= total {
-		encoding = encodeBuf[:total] // Reuse the space in pkbuf, is it has enough capacity
-	} else {
-		encoding = make([]byte, total)
-		copy(encoding, encodeBuf)
-	}
-	rlp.ListPrefix(hashesLen, encoding)
+	encodeBuf = ensureEnoughSize(encodeBuf, prefixLen+dataLen)
+	rlp.ListPrefix(hashesLen, encodeBuf)
 	pos := prefixLen
 	for i := 0; i < len(hashes); i += 32 {
-		rlp.EncodeHash(hashes[i:i+32], encoding[pos:])
+		rlp.EncodeHash(hashes[i:i+32], encodeBuf[pos:])
 		pos += 33
 	}
-	return encoding, nil
+	return encodeBuf, nil
+}
+
+func ensureEnoughSize(in []byte, size int) []byte {
+	if cap(in) < size {
+		return make([]byte, size)
+	}
+	return in[:size] // Reuse the space in pkbuf, is it has enough capacity
 }
 
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
@@ -106,26 +74,20 @@ func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []
 	hashesLen := len(hashes) / 32 * 33
 	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestId)
 	prefixLen := rlp.ListPrefixLen(dataLen)
-	var encoding []byte
-	if total := dataLen + prefixLen; cap(encodeBuf) >= total {
-		encoding = encodeBuf[:total] // Reuse the space in pkbuf, is it has enough capacity
-	} else {
-		encoding = make([]byte, total)
-		copy(encoding, encodeBuf)
-	}
-	// Length prefix for the entire structure
-	rlp.ListPrefix(dataLen, encoding)
+	encodeBuf = ensureEnoughSize(encodeBuf, prefixLen+dataLen)
+	// Length ParsePrefix for the entire structure
+	rlp.ListPrefix(dataLen, encodeBuf)
 	pos := prefixLen
 	// encode requestId
-	rlp.U64(requestId, encoding[pos:])
+	rlp.U64(requestId, encodeBuf[pos:])
 	pos += rlp.U64Len(requestId)
-	// Encode length prefix for hashes
-	rlp.ListPrefix(hashesLen, encoding[pos:])
+	// Encode length ParsePrefix for hashes
+	rlp.ListPrefix(hashesLen, encodeBuf[pos:])
 	pos += rlp.ListPrefixLen(hashesLen)
 
 	for i := 0; i < len(hashes); i += 32 {
-		rlp.EncodeHash(hashes[i:i+32], encoding[pos:pos+33])
+		rlp.EncodeHash(hashes[i:i+32], encodeBuf[pos:pos+33])
 		pos += 33
 	}
-	return encoding, nil
+	return encodeBuf, nil
 }

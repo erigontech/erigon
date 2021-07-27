@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/erigon-lib/rlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -191,7 +192,7 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 		var hashbuf [32]byte
 		var unknownHashes Hashes
 		for i := 0; i < hashCount; i++ {
-			_, pos, err = ParseHash(req.Data, pos, hashbuf[:0])
+			_, pos, err = rlp.ParseHash(req.Data, pos, hashbuf[:0])
 			if err != nil {
 				return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 			}
