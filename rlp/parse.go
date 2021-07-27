@@ -57,6 +57,28 @@ func ParsePrefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool
 	return
 }
 
+func ParseListPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
+	if err != nil {
+		return 0, 0, err
+	}
+	if !isList {
+		return 0, 0, fmt.Errorf("must be a list")
+	}
+	return
+}
+
+func ParseStringPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
+	if err != nil {
+		return 0, 0, err
+	}
+	if isList {
+		return 0, 0, fmt.Errorf("must be a string, instead of a list")
+	}
+	return
+}
+
 // U64 parses uint64 number from given payload at given position
 func U64(payload []byte, pos int) (int, uint64, error) {
 	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
