@@ -17,9 +17,9 @@
 package txpool
 
 import (
-	"encoding/binary"
 	"fmt"
-	"math/bits"
+
+	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
 const ParseHashErrorPrefix = "parse hash payload"
@@ -84,7 +84,7 @@ func ParseHashesCount(payload []byte, pos int) (int, int, error) {
 func EncodeHashes(hashes Hashes, encodeBuf []byte) ([]byte, error) {
 	hashesLen := len(hashes) / 32 * 33
 	dataLen := hashesLen
-	prefixLen := rlpListPrefixLen(hashesLen)
+	prefixLen := rlp.ListPrefixLen(hashesLen)
 	var encoding []byte
 	if total := prefixLen + dataLen; cap(encodeBuf) >= total {
 		encoding = encodeBuf[:total] // Reuse the space in pkbuf, is it has enough capacity
@@ -92,91 +92,20 @@ func EncodeHashes(hashes Hashes, encodeBuf []byte) ([]byte, error) {
 		encoding = make([]byte, total)
 		copy(encoding, encodeBuf)
 	}
-	rlpListPrefix(hashesLen, encoding)
+	rlp.ListPrefix(hashesLen, encoding)
 	pos := prefixLen
 	for i := 0; i < len(hashes); i += 32 {
-		rlpEncodeHash(hashes[i:i+32], encoding[pos:])
+		rlp.EncodeHash(hashes[i:i+32], encoding[pos:])
 		pos += 33
 	}
 	return encoding, nil
 }
 
-func rlpListPrefixLen(dataLen int) int {
-	if dataLen >= 56 {
-		return 1 + (bits.Len64(uint64(dataLen))+7)/8
-	}
-	return 1
-}
-func rlpListPrefix(dataLen int, to []byte) {
-	if dataLen >= 56 {
-		_ = to[9]
-		beLen := (bits.Len64(uint64(dataLen)) + 7) / 8
-		binary.BigEndian.PutUint64(to[1:], uint64(dataLen))
-		to[8-beLen] = 247 + byte(beLen)
-		copy(to, to[8-beLen:9])
-		return
-	}
-	to[0] = 192 + byte(dataLen)
-}
-func rlpU64Len(i uint64) int {
-	if i > 128 {
-		return 1 + (bits.Len64(i)+7)/8
-	}
-	return 1
-}
-
-func rlpU64(i uint64, to []byte) {
-	if i > 128 {
-		l := (bits.Len64(i) + 7) / 8
-		to[0] = 128 + byte(l)
-		binary.BigEndian.PutUint64(to[1:], i)
-		copy(to[1:], to[1+8-l:1+8])
-		return
-	}
-	if i == 0 {
-		to[0] = 128
-		return
-	}
-	to[0] = byte(i)
-}
-
-func rlpEncodeString(s []byte, to []byte) {
-	switch {
-	case len(s) > 56:
-		beLen := (bits.Len(uint(len(s))) + 7) / 8
-		binary.BigEndian.PutUint64(to[1:], uint64(len(s)))
-		_ = to[beLen+len(s)]
-
-		to[8-beLen] = byte(beLen) + 183
-		copy(to, to[8-beLen:9])
-		copy(to[1+beLen:], s)
-	case len(s) == 0:
-		to[0] = 128
-	case len(s) == 1:
-		_ = to[1]
-		if s[0] >= 128 {
-			to[0] = 129
-		}
-		copy(to[1:], s)
-	default: // 1<s<56
-		_ = to[len(s)]
-		to[0] = byte(len(s)) + 128
-		copy(to[1:], s)
-	}
-}
-
-// we know that it's 32bytes long, and we know that we have enough space
-func rlpEncodeHash(h, to []byte) {
-	_ = to[32] // early bounds check to guarantee safety of writes below
-	to[0] = 128 + 32
-	copy(to[1:33], h)
-}
-
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
 func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []byte) ([]byte, error) {
 	hashesLen := len(hashes) / 32 * 33
-	dataLen := rlpListPrefixLen(hashesLen) + hashesLen + rlpU64Len(requestId)
-	prefixLen := rlpListPrefixLen(dataLen)
+	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestId)
+	prefixLen := rlp.ListPrefixLen(dataLen)
 	var encoding []byte
 	if total := dataLen + prefixLen; cap(encodeBuf) >= total {
 		encoding = encodeBuf[:total] // Reuse the space in pkbuf, is it has enough capacity
@@ -185,17 +114,17 @@ func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []
 		copy(encoding, encodeBuf)
 	}
 	// Length prefix for the entire structure
-	rlpListPrefix(dataLen, encoding)
+	rlp.ListPrefix(dataLen, encoding)
 	pos := prefixLen
 	// encode requestId
-	rlpU64(requestId, encoding[pos:])
-	pos += rlpU64Len(requestId)
+	rlp.U64(requestId, encoding[pos:])
+	pos += rlp.U64Len(requestId)
 	// Encode length prefix for hashes
-	rlpListPrefix(hashesLen, encoding[pos:])
-	pos += rlpListPrefixLen(hashesLen)
+	rlp.ListPrefix(hashesLen, encoding[pos:])
+	pos += rlp.ListPrefixLen(hashesLen)
 
 	for i := 0; i < len(hashes); i += 32 {
-		rlpEncodeHash(hashes[i:i+32], encoding[pos:pos+33])
+		rlp.EncodeHash(hashes[i:i+32], encoding[pos:pos+33])
 		pos += 33
 	}
 	return encoding, nil
