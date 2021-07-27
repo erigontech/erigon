@@ -113,12 +113,9 @@ func U64(payload []byte, pos int) (int, uint64, error) {
 
 // U256 parses uint256 number from given payload at given position
 func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
-	dataPos, dataLen, list, err := ParsePrefix(payload, pos)
+	dataPos, dataLen, err := String(payload, pos)
 	if err != nil {
 		return 0, err
-	}
-	if list {
-		return 0, fmt.Errorf("uint256 must be a string, not list")
 	}
 	if dataLen > 32 {
 		return 0, fmt.Errorf("uint256 must not be more than 8 bytes long, got %d", dataLen)
@@ -136,19 +133,13 @@ func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
 // The second returned value is the new position in the RLP payload after the extraction
 // of the hash.
 func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
-	dataPos, dataLen, list, err := ParsePrefix(payload, pos)
+	dataPos, err := StringOfLen(payload, pos, 32)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: hash len: %w", ParseHashErrorPrefix, err)
 	}
-	if list {
-		return nil, 0, fmt.Errorf("%s: hash must be a string, not list", ParseHashErrorPrefix)
-	}
-	if dataLen != 32 {
-		return nil, 0, fmt.Errorf("%s: hash must be 32 bytes long", ParseHashErrorPrefix)
-	}
 	hashbuf = ensureEnoughSize(hashbuf, 32)
-	copy(hashbuf, payload[dataPos:dataPos+dataLen])
-	return hashbuf, dataPos + dataLen, nil
+	copy(hashbuf, payload[dataPos:dataPos+32])
+	return hashbuf, dataPos + 32, nil
 }
 
 func ensureEnoughSize(in []byte, size int) []byte {
