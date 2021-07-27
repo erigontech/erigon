@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -27,13 +26,9 @@ var (
 			dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
 		},
 	}
+	StateSnapshotBuckets = []string{dbutils.PlainStateBucket, dbutils.PlainContractCodeBucket, dbutils.CodeBucket}
 )
 
-//nolint
-func WrapBySnapshotsFromDir(kv ethdb.RwKV, snapshotDir string, mode SnapshotMode) (ethdb.RwKV, error) {
-	//todo remove it
-	return nil, errors.New("deprecated") //nolint
-}
 
 func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.RwKV, error) {
 	snKV := kv2.NewSnapshotKV().DB(kv)

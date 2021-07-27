@@ -304,7 +304,7 @@ Loop:
 				log.Error("Unexpected tmp db")
 			}
 
-			tmpDB, err := snapshotsync.CreateStateSnapshotTmpDB(ctx, cfg.tmpdir, block.Hash())
+			tmpDB, err := snapshotsync.CreateStateSnapshot(ctx, cfg.tmpdir+"tmpdb")
 			if err != nil {
 				return err
 			}
@@ -566,6 +566,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 			return err
 		}
 	} else {
+		//commit snapshot tx to be able to close temp db
 		err := tx.Commit()
 		if err != nil {
 			return err

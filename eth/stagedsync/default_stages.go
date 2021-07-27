@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -146,7 +147,7 @@ func DefaultStages(ctx context.Context,
 			Disabled:            snapshotState.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx ethdb.RwTx) error {
-				return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, ctx)
+				return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, ctx, firstCycle, snapshotsync.EpochSize)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error {
 				return UnwindStateSnapshotGenerationStage(u, tx, snapshotState, ctx)
