@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 )
 
 func NewMemKV() kv.RwDB {

@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/require"
 )

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	mdbx "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	mdbx "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/require"
 )

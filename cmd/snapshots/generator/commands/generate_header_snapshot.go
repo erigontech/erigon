@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"

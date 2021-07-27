@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )

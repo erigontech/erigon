@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbxdb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 )
 
 var ErrUnsupported error = errors.New("unsupported KV type")
