@@ -57,7 +57,7 @@ func ParsePrefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool
 	return
 }
 
-func ParseListPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+func ListPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
@@ -68,7 +68,7 @@ func ParseListPrefix(payload []byte, pos int) (dataPos int, dataLen int, err err
 	return
 }
 
-func ParseStringPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+func StringPrefix(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
 	if err != nil {
 		return 0, 0, err

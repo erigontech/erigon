@@ -122,7 +122,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		if p >= len(payload) {
 			return nil, 0, fmt.Errorf("%s: unexpected end of payload after txType", ParseTransactionErrorPrefix)
 		}
-		dataPos, dataLen, err = rlp.ParseListPrefix(payload, p)
+		dataPos, dataLen, err = rlp.ListPrefix(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: envelope ParsePrefix: %v", ParseTransactionErrorPrefix, err)
 		}
@@ -136,7 +136,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	sigHashPos := p
 	// If it is non-legacy tx, chainId follows, but we skip it
 	if !legacy {
-		dataPos, dataLen, err = rlp.ParseStringPrefix(payload, p)
+		dataPos, dataLen, err = rlp.StringPrefix(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: chainId len: %w", ParseTransactionErrorPrefix, err)
 		}
@@ -170,7 +170,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		return nil, 0, fmt.Errorf("%s: gas: %w", ParseTransactionErrorPrefix, err)
 	}
 	// Next follows the destrination address (if present)
-	dataPos, dataLen, err = rlp.ParseStringPrefix(payload, p)
+	dataPos, dataLen, err = rlp.StringPrefix(payload, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: to len: %w", ParseTransactionErrorPrefix, err)
 	}
@@ -186,7 +186,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		return nil, 0, fmt.Errorf("%s: value: %w", ParseTransactionErrorPrefix, err)
 	}
 	// Next goes data, but we are only interesting in its length
-	dataPos, dataLen, err = rlp.ParseStringPrefix(payload, p)
+	dataPos, dataLen, err = rlp.StringPrefix(payload, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: data len: %w", ParseTransactionErrorPrefix, err)
 	}
@@ -194,19 +194,19 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	p = dataPos + dataLen
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
 	if !legacy {
-		dataPos, dataLen, err = rlp.ParseListPrefix(payload, p)
+		dataPos, dataLen, err = rlp.ListPrefix(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: access list len: %w", ParseTransactionErrorPrefix, err)
 		}
 		tuplePos := dataPos
 		var tupleLen int
 		for tuplePos < dataPos+dataLen {
-			tuplePos, tupleLen, err = rlp.ParseListPrefix(payload, tuplePos)
+			tuplePos, tupleLen, err = rlp.ListPrefix(payload, tuplePos)
 			if err != nil {
 				return nil, 0, fmt.Errorf("%s: tuple len: %w", ParseTransactionErrorPrefix, err)
 			}
 			var addrPos, addrLen int
-			addrPos, addrLen, err = rlp.ParseStringPrefix(payload, tuplePos)
+			addrPos, addrLen, err = rlp.StringPrefix(payload, tuplePos)
 			if err != nil {
 				return nil, 0, fmt.Errorf("%s: tuple addr len: %w", ParseTransactionErrorPrefix, err)
 			}
@@ -215,14 +215,14 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 			}
 			slot.alAddrCount++
 			var storagePos, storageLen int
-			storagePos, storageLen, err = rlp.ParseListPrefix(payload, addrPos+addrLen)
+			storagePos, storageLen, err = rlp.ListPrefix(payload, addrPos+addrLen)
 			if err != nil {
 				return nil, 0, fmt.Errorf("%s: storage key list len: %w", ParseTransactionErrorPrefix, err)
 			}
 			skeyPos := storagePos
 			var skeyLen int
 			for skeyPos < storagePos+storageLen {
-				skeyPos, skeyLen, err = rlp.ParseStringPrefix(payload, skeyPos)
+				skeyPos, skeyLen, err = rlp.StringPrefix(payload, skeyPos)
 				if err != nil {
 					return nil, 0, fmt.Errorf("%s: tuple storage key len: %w", ParseTransactionErrorPrefix, err)
 				}
