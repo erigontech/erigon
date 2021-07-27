@@ -109,7 +109,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	p := dataPos
 
 	var txType int
-	var list bool
+	var isList bool
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
 		txType = int(payload[p])
@@ -123,15 +123,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		if p >= len(payload) {
 			return nil, 0, fmt.Errorf("%s: unexpected end of payload after txType", ParseTransactionErrorPrefix)
 		}
-		dataPos, dataLen, list, err = rlp.ParsePrefix(payload, p)
+		dataPos, dataLen, isList, err = rlp.ParsePrefix(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: envelope ParsePrefix: %v", ParseTransactionErrorPrefix, err)
 		}
-		if !list {
+		if !isList {
 			return nil, 0, fmt.Errorf("%s: envelope must be a list, not string", ParseTransactionErrorPrefix)
-		}
-		if dataPos+dataLen > len(payload) {
-			return nil, 0, fmt.Errorf("%s: unexpected end of payload after envelope", ParseTransactionErrorPrefix)
 		}
 		// Hash the envelope, not the full payload
 		if _, err = ctx.keccak1.Write(payload[p : dataPos+dataLen]); err != nil {
@@ -143,15 +140,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	sigHashPos := p
 	// If it is non-legacy tx, chainId follows, but we skip it
 	if !legacy {
-		dataPos, dataLen, list, err = rlp.ParsePrefix(payload, p)
+		dataPos, dataLen, isList, err = rlp.ParsePrefix(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: chainId len: %w", ParseTransactionErrorPrefix, err)
 		}
-		if list {
+		if isList {
 			return nil, 0, fmt.Errorf("%s: chainId must be a string, not list", ParseTransactionErrorPrefix)
-		}
-		if dataPos+dataLen >= len(payload) {
-			return nil, 0, fmt.Errorf("%s: unexpected end of payload after chainId", ParseTransactionErrorPrefix)
 		}
 		p = dataPos + dataLen
 	}
@@ -183,15 +177,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		return nil, 0, fmt.Errorf("%s: gas: %w", ParseTransactionErrorPrefix, err)
 	}
 	// Next follows the destrination address (if present)
-	dataPos, dataLen, list, err = rlp.ParsePrefix(payload, p)
+	dataPos, dataLen, isList, err = rlp.ParsePrefix(payload, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: to len: %w", ParseTransactionErrorPrefix, err)
 	}
-	if list {
+	if isList {
 		return nil, 0, fmt.Errorf("%s: to must be a string, not list", ParseTransactionErrorPrefix)
-	}
-	if dataPos+dataLen >= len(payload) {
-		return nil, 0, fmt.Errorf("%s: unexpected end of payload after to", ParseTransactionErrorPrefix)
 	}
 	if dataLen != 0 && dataLen != 20 {
 		return nil, 0, fmt.Errorf("%s: unexpected length of to field: %d", ParseTransactionErrorPrefix, dataLen)
@@ -205,81 +196,63 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		return nil, 0, fmt.Errorf("%s: value: %w", ParseTransactionErrorPrefix, err)
 	}
 	// Next goes data, but we are only interesting in its length
-	dataPos, dataLen, list, err = rlp.ParsePrefix(payload, p)
+	dataPos, dataLen, isList, err = rlp.ParsePrefix(payload, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: data len: %w", ParseTransactionErrorPrefix, err)
 	}
-	if list {
+	if isList {
 		return nil, 0, fmt.Errorf("%s: data must be a string, not list", ParseTransactionErrorPrefix)
-	}
-	if dataPos+dataLen >= len(payload) {
-		return nil, 0, fmt.Errorf("%s: unexpected end of payload after data", ParseTransactionErrorPrefix)
 	}
 	slot.dataLen = dataLen
 	p = dataPos + dataLen
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
 	if !legacy {
-		dataPos, dataLen, list, err = rlp.ParsePrefix(payload, p)
+		dataPos, dataLen, isList, err = rlp.ParsePrefix(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: access list len: %w", ParseTransactionErrorPrefix, err)
 		}
-		if !list {
+		if !isList {
 			return nil, 0, fmt.Errorf("%s: access list must be a list, not string", ParseTransactionErrorPrefix)
-		}
-		if dataPos+dataLen >= len(payload) {
-			return nil, 0, fmt.Errorf("%s: unexpected end of payload after access list", ParseTransactionErrorPrefix)
 		}
 		tuplePos := dataPos
 		var tupleLen int
 		for tuplePos < dataPos+dataLen {
-			tuplePos, tupleLen, list, err = rlp.ParsePrefix(payload, tuplePos)
+			tuplePos, tupleLen, isList, err = rlp.ParsePrefix(payload, tuplePos)
 			if err != nil {
 				return nil, 0, fmt.Errorf("%s: tuple len: %w", ParseTransactionErrorPrefix, err)
 			}
-			if !list {
+			if !isList {
 				return nil, 0, fmt.Errorf("%s: tuple must be a list, not string", ParseTransactionErrorPrefix)
 			}
-			if tuplePos+tupleLen > dataPos+dataLen {
-				return nil, 0, fmt.Errorf("%s: unexpected end of access list after tuple", ParseTransactionErrorPrefix)
-			}
 			var addrPos, addrLen int
-			addrPos, addrLen, list, err = rlp.ParsePrefix(payload, tuplePos)
+			addrPos, addrLen, isList, err = rlp.ParsePrefix(payload, tuplePos)
 			if err != nil {
 				return nil, 0, fmt.Errorf("%s: tuple addr len: %w", ParseTransactionErrorPrefix, err)
 			}
-			if list {
+			if isList {
 				return nil, 0, fmt.Errorf("%s: tuple addr must be a string, not list", ParseTransactionErrorPrefix)
-			}
-			if addrPos+addrLen > tuplePos+tupleLen {
-				return nil, 0, fmt.Errorf("%s: unexpected end of tuple after address ", ParseTransactionErrorPrefix)
 			}
 			if addrLen != 20 {
 				return nil, 0, fmt.Errorf("%s: unexpected length of tuple address: %d", ParseTransactionErrorPrefix, addrLen)
 			}
 			slot.alAddrCount++
 			var storagePos, storageLen int
-			storagePos, storageLen, list, err = rlp.ParsePrefix(payload, addrPos+addrLen)
+			storagePos, storageLen, isList, err = rlp.ParsePrefix(payload, addrPos+addrLen)
 			if err != nil {
 				return nil, 0, fmt.Errorf("%s: storage key list len: %w", ParseTransactionErrorPrefix, err)
 			}
-			if !list {
+			if !isList {
 				return nil, 0, fmt.Errorf("%s: storage key list must be a list, not string", ParseTransactionErrorPrefix)
-			}
-			if storagePos+storageLen > tuplePos+tupleLen {
-				return nil, 0, fmt.Errorf("%s: unexpected end of tuple after storage key list", ParseTransactionErrorPrefix)
 			}
 			skeyPos := storagePos
 			var skeyLen int
 			for skeyPos < storagePos+storageLen {
-				skeyPos, skeyLen, list, err = rlp.ParsePrefix(payload, skeyPos)
+				skeyPos, skeyLen, isList, err = rlp.ParsePrefix(payload, skeyPos)
 				if err != nil {
 					return nil, 0, fmt.Errorf("%s: tuple storage key len: %w", ParseTransactionErrorPrefix, err)
 				}
-				if list {
+				if isList {
 					return nil, 0, fmt.Errorf("%s: tuple storage key must be a string, not list", ParseTransactionErrorPrefix)
-				}
-				if skeyPos+skeyLen > storagePos+storageLen {
-					return nil, 0, fmt.Errorf("%s: unexpected end of tuple after storage key", ParseTransactionErrorPrefix)
 				}
 				if skeyLen != 32 {
 					return nil, 0, fmt.Errorf("%s: unexpected length of tuple storage key: %d", ParseTransactionErrorPrefix, skeyLen)

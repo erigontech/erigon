@@ -27,16 +27,12 @@ type NewPooledTransactionHashesPacket [][32]byte
 // ParseHashesCount looks at the RLP length ParsePrefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
 func ParseHashesCount(payload Hashes, pos int) (int, int, error) {
-	payloadLen := len(payload)
 	dataPos, dataLen, list, err := rlp.ParsePrefix(payload, pos)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: hashes len: %w", rlp.ParseHashErrorPrefix, err)
 	}
 	if !list {
 		return 0, 0, fmt.Errorf("%s: hashes must be a list, not string", rlp.ParseHashErrorPrefix)
-	}
-	if dataPos+dataLen > payloadLen {
-		return 0, 0, fmt.Errorf("%s: unexpected end of payload after hashes", rlp.ParseHashErrorPrefix)
 	}
 	if dataLen%33 != 0 {
 		return 0, 0, fmt.Errorf("%s: hashes len must be multiple of 33", rlp.ParseHashErrorPrefix)
