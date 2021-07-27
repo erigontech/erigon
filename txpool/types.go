@@ -103,8 +103,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: size ParsePrefix: %v", ParseTransactionErrorPrefix, err)
 	}
-	payloadLen := len(payload)
-	if dataPos+dataLen != payloadLen {
+	if dataPos+dataLen != len(payload) {
 		return nil, 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
 	}
 	p := dataPos
@@ -121,7 +120,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 			return nil, 0, fmt.Errorf("%s: computing signHash (hashing type ParsePrefix): %w", ParseTransactionErrorPrefix, err)
 		}
 		p++
-		if p >= payloadLen {
+		if p >= len(payload) {
 			return nil, 0, fmt.Errorf("%s: unexpected end of payload after txType", ParseTransactionErrorPrefix)
 		}
 		dataPos, dataLen, list, err = rlp.ParsePrefix(payload, p)
@@ -131,7 +130,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		if !list {
 			return nil, 0, fmt.Errorf("%s: envelope must be a list, not string", ParseTransactionErrorPrefix)
 		}
-		if dataPos+dataLen > payloadLen {
+		if dataPos+dataLen > len(payload) {
 			return nil, 0, fmt.Errorf("%s: unexpected end of payload after envelope", ParseTransactionErrorPrefix)
 		}
 		// Hash the envelope, not the full payload
@@ -151,19 +150,19 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		if list {
 			return nil, 0, fmt.Errorf("%s: chainId must be a string, not list", ParseTransactionErrorPrefix)
 		}
-		if dataPos+dataLen >= payloadLen {
+		if dataPos+dataLen >= len(payload) {
 			return nil, 0, fmt.Errorf("%s: unexpected end of payload after chainId", ParseTransactionErrorPrefix)
 		}
 		p = dataPos + dataLen
 	}
 	// Next follows the nonce, which we need to parse
-	p, slot.nonce, err = rlp.ParseUint64(payload, p)
+	p, slot.nonce, err = rlp.U64(payload, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: nonce: %w", ParseTransactionErrorPrefix, err)
 	}
 	// Next follows gas price or tip
 	// Although consensus rules specify that tip can be up to 256 bit long, we narrow it to 64 bit
-	p, slot.tip, err = rlp.ParseUint64(payload, p)
+	p, slot.tip, err = rlp.U64(payload, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: tip: %w", ParseTransactionErrorPrefix, err)
 	}
@@ -173,13 +172,13 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		slot.feeCap = slot.tip
 	} else {
 		// Although consensus rules specify that feeCap can be up to 256 bit long, we narrow it to 64 bit
-		p, slot.feeCap, err = rlp.ParseUint64(payload, p)
+		p, slot.feeCap, err = rlp.U64(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: feeCap: %w", ParseTransactionErrorPrefix, err)
 		}
 	}
 	// Next follows gas
-	p, slot.gas, err = rlp.ParseUint64(payload, p)
+	p, slot.gas, err = rlp.U64(payload, p)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: gas: %w", ParseTransactionErrorPrefix, err)
 	}
@@ -191,7 +190,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	if list {
 		return nil, 0, fmt.Errorf("%s: to must be a string, not list", ParseTransactionErrorPrefix)
 	}
-	if dataPos+dataLen >= payloadLen {
+	if dataPos+dataLen >= len(payload) {
 		return nil, 0, fmt.Errorf("%s: unexpected end of payload after to", ParseTransactionErrorPrefix)
 	}
 	if dataLen != 0 && dataLen != 20 {
@@ -201,7 +200,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	slot.creation = dataLen == 0
 	p = dataPos + dataLen
 	// Next follows value
-	p, err = rlp.ParseUint256(payload, p, &slot.value)
+	p, err = rlp.U256(payload, p, &slot.value)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: value: %w", ParseTransactionErrorPrefix, err)
 	}
@@ -213,7 +212,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	if list {
 		return nil, 0, fmt.Errorf("%s: data must be a string, not list", ParseTransactionErrorPrefix)
 	}
-	if dataPos+dataLen >= payloadLen {
+	if dataPos+dataLen >= len(payload) {
 		return nil, 0, fmt.Errorf("%s: unexpected end of payload after data", ParseTransactionErrorPrefix)
 	}
 	slot.dataLen = dataLen
@@ -227,7 +226,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		if !list {
 			return nil, 0, fmt.Errorf("%s: access list must be a list, not string", ParseTransactionErrorPrefix)
 		}
-		if dataPos+dataLen >= payloadLen {
+		if dataPos+dataLen >= len(payload) {
 			return nil, 0, fmt.Errorf("%s: unexpected end of payload after access list", ParseTransactionErrorPrefix)
 		}
 		tuplePos := dataPos
@@ -305,7 +304,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	sigHashLen := uint(sigHashEnd - sigHashPos)
 	var chainIdBits, chainIdLen int
 	if legacy {
-		p, err = rlp.ParseUint256(payload, p, &ctx.chainId)
+		p, err = rlp.U256(payload, p, &ctx.chainId)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: V: %w", ParseTransactionErrorPrefix, err)
 		}
@@ -329,7 +328,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		}
 	} else {
 		var v uint64
-		p, v, err = rlp.ParseUint64(payload, p)
+		p, v, err = rlp.U64(payload, p)
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: V: %w", ParseTransactionErrorPrefix, err)
 		}
@@ -339,12 +338,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		vByte = byte(v)
 	}
 	// Next follows R of the signature
-	p, err = rlp.ParseUint256(payload, p, &ctx.r)
+	p, err = rlp.U256(payload, p, &ctx.r)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: R: %w", ParseTransactionErrorPrefix, err)
 	}
 	// New follows S of the signature
-	p, err = rlp.ParseUint256(payload, p, &ctx.s)
+	p, err = rlp.U256(payload, p, &ctx.s)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: S: %w", ParseTransactionErrorPrefix, err)
 	}

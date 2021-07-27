@@ -18,7 +18,7 @@ func ListPrefixLen(dataLen int) int {
 	}
 	return 1
 }
-func ListPrefix(dataLen int, to []byte) {
+func EncodeListPrefix(dataLen int, to []byte) {
 	if dataLen >= 56 {
 		_ = to[9]
 		beLen := (bits.Len64(uint64(dataLen)) + 7) / 8
@@ -36,7 +36,7 @@ func U64Len(i uint64) int {
 	return 1
 }
 
-func U64(i uint64, to []byte) {
+func EncodeU64(i uint64, to []byte) {
 	if i > 128 {
 		l := (bits.Len64(i) + 7) / 8
 		to[0] = 128 + byte(l)
@@ -76,7 +76,7 @@ func EncodeString(s []byte, to []byte) {
 	}
 }
 
-// we know that it's 32bytes long, and we know that we have enough space
+// EncodeHash assumes that `to` buffer is already 32bytes long
 func EncodeHash(h, to []byte) {
 	_ = to[32] // early bounds check to guarantee safety of writes below
 	to[0] = 128 + 32

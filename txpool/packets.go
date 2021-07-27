@@ -53,7 +53,7 @@ func EncodeHashes(hashes Hashes, encodeBuf []byte) ([]byte, error) {
 	dataLen := hashesLen
 	prefixLen := rlp.ListPrefixLen(hashesLen)
 	encodeBuf = ensureEnoughSize(encodeBuf, prefixLen+dataLen)
-	rlp.ListPrefix(hashesLen, encodeBuf)
+	rlp.EncodeListPrefix(hashesLen, encodeBuf)
 	pos := prefixLen
 	for i := 0; i < len(hashes); i += 32 {
 		rlp.EncodeHash(hashes[i:i+32], encodeBuf[pos:])
@@ -76,13 +76,13 @@ func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []
 	prefixLen := rlp.ListPrefixLen(dataLen)
 	encodeBuf = ensureEnoughSize(encodeBuf, prefixLen+dataLen)
 	// Length ParsePrefix for the entire structure
-	rlp.ListPrefix(dataLen, encodeBuf)
+	rlp.EncodeListPrefix(dataLen, encodeBuf)
 	pos := prefixLen
 	// encode requestId
-	rlp.U64(requestId, encodeBuf[pos:])
+	rlp.EncodeU64(requestId, encodeBuf[pos:])
 	pos += rlp.U64Len(requestId)
 	// Encode length ParsePrefix for hashes
-	rlp.ListPrefix(hashesLen, encodeBuf[pos:])
+	rlp.EncodeListPrefix(hashesLen, encodeBuf[pos:])
 	pos += rlp.ListPrefixLen(hashesLen)
 
 	for i := 0; i < len(hashes); i += 32 {
