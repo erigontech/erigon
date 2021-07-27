@@ -6,10 +6,12 @@ import (
 )
 
 // General design:
-//      - no io.Writer, because it's incompatible with binary.BigEndian functions and can't be used as temporary buffer
+//      - no io.Writer, because it's incompatible with binary.BigEndian functions and Writer can't be used as temporary buffer
+//      - rlp has 2 data types: List and String (bytes array), and low-level funcs are operate with this types.
+//      - but for convenience and performance - provided higher-level functions (for example for EncodeHash - for []byte of len 32)
 //
 // General rules:
-//      - pure functions (to calculate prefix len) are fast. it's ok to call them multiple times during encoding of large object for readability.
+//      - functions to calculate prefix len are fast (and pure). it's ok to call them multiple times during encoding of large object for readability.
 //      -
 
 func ListPrefixLen(dataLen int) int {
