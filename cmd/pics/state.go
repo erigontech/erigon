@@ -136,14 +136,10 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
 			for bucketName := range bucketLabels {
 				bucketName := bucketName
-				c, err := readTx.Cursor(bucketName)
-				if err != nil {
-					return err
-				}
-				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+				if err := readTx.ForEach(bucketName, nil, func(k, v []byte) error {
 					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db
-						return true, nil
+						return nil
 					}
 					// Produce pair of nodes
 					keyKeyBytes := &trie.Keybytes{
@@ -163,7 +159,7 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 					if f1, ok = perBucketFiles[bucketName]; !ok {
 						f1, err = os.Create(fmt.Sprintf("changes_%d_%s.dot", number, strings.ReplaceAll(bucketLabels[bucketName], " ", "")))
 						if err != nil {
-							return false, err
+							return err
 						}
 						visual.StartGraph(f1, true)
 						var clusterLabel string
@@ -202,9 +198,9 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 					lst = append(lst, i)
 					m[bucketName] = lst
 					i++
-					return true, nil
-				}); err2 != nil {
-					return err2
+					return nil
+				}); err != nil {
+					return err
 				}
 			}
 			return nil

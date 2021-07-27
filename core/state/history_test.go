@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -91,11 +90,6 @@ func TestMutationCommit(t *testing.T) {
 
 	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, NewPlainStateWriter(tx, tx, 2), numOfAccounts, numOfStateKeys)
 
-	plainState, err := tx.Cursor(dbutils.PlainStateBucket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer plainState.Close()
 	for i, addr := range addrs {
 		acc, err := NewPlainStateReader(tx).ReadAccountData(addr)
 
@@ -122,9 +116,9 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]uint256.Int)
-		err = ethdb.Walk(plainState, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), 8*(common.AddressLength+8), func(k, v []byte) (b bool, e error) {
+		err = tx.ForPrefix(dbutils.PlainStateBucket, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), func(k, v []byte) error {
 			resAccStorage[common.BytesToHash(k[common.AddressLength+8:])] = *uint256.NewInt(0).SetBytes(v)
-			return true, nil
+			return nil
 		})
 		if err != nil {
 			t.Fatal("error on get account storage", i, err)
@@ -150,7 +144,7 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	changeSetInDB := changeset.NewAccountChangeSet()
-	err = changeset.Walk(tx, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(tx, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err := changeSetInDB.Add(k, v); err != nil {
 			return false, err
 		}

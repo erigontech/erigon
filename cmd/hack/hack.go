@@ -802,13 +802,9 @@ func dumpStorage() {
 	db := kv2.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.StorageHistoryBucket)
-		if err != nil {
-			return err
-		}
-		return ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+		return tx.ForEach(dbutils.StorageHistoryBucket, nil, func(k, v []byte) error {
 			fmt.Printf("%x %x\n", k, v)
-			return true, nil
+			return nil
 		})
 	}); err != nil {
 		panic(err)
@@ -1026,7 +1022,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 
-	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
@@ -1056,7 +1052,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	storageMap := make(map[string][]byte)
-	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.StorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, dbutils.StorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
@@ -1125,14 +1121,14 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
 		panic(err)
 	}
-	_, err = loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx(), nil, nil)
+	_, err = loader.CalcTrieRoot(tx, nil, nil)
 	if err != nil {
 		return err
 	}
 	r := &Receiver{defaultReceiver: trie.NewRootHashAggregator(), unfurlList: unfurlList, accountMap: accountMap, storageMap: storageMap}
 	r.defaultReceiver.Reset(nil, nil /* HashCollector */, false)
 	loader.SetStreamReceiver(r)
-	root, err := loader.CalcTrieRoot(tx.(ethdb.HasTx).Tx(), nil, nil)
+	root, err := loader.CalcTrieRoot(tx, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -1251,7 +1247,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	}
 
 	storage := make(map[string]struct{})
-	if err := changeset.Walk(tx.(ethdb.HasTx).Tx(), dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= block2 {
 			return false, nil
 		}

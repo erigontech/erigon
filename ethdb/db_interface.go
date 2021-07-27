@@ -114,10 +114,6 @@ type HasTx interface {
 	Tx() Tx
 }
 
-type HasNetInterface interface {
-	DB() Database
-}
-
 type BucketsMigrator interface {
 	BucketExists(bucket string) (bool, error) // makes them empty
 	ClearBuckets(buckets ...string) error     // makes them empty
@@ -133,5 +129,3 @@ func GetOneWrapper(dat []byte, err error) ([]byte, error) {
 	}
 	return dat, nil
 }
-
-var ErrNotSupported = errors.New("not supported")

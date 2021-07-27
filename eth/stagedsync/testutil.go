@@ -34,26 +34,16 @@ func compareBucket(t *testing.T, db1, db2 ethdb.Tx, bucketName string) {
 	var err error
 
 	bucket1 := make(map[string][]byte)
-	c1, err := db1.Cursor(bucketName)
-	if err != nil {
-		assert.NoError(t, err)
-	}
-	defer c1.Close()
-	err = ethdb.ForEach(c1, func(k, v []byte) (bool, error) {
+	err = db1.ForEach(bucketName, nil, func(k, v []byte) error {
 		bucket1[string(k)] = v
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 
 	bucket2 := make(map[string][]byte)
-	c2, err := db2.Cursor(bucketName)
-	if err != nil {
-		assert.NoError(t, err)
-	}
-	defer c2.Close()
-	err = ethdb.ForEach(c2, func(k, v []byte) (bool, error) {
+	err = db2.ForEach(bucketName, nil, func(k, v []byte) error {
 		bucket2[string(k)] = v
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 

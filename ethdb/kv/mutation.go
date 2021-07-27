@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,7 +19,7 @@ import (
 
 type mutation struct {
 	puts       *btree.BTree
-	db         ethdb.Database
+	db         ethdb.RwTx
 	quit       <-chan struct{}
 	clean      func()
 	searchItem MutationItem
@@ -50,7 +49,7 @@ func NewBatch(tx ethdb.RwTx, quit <-chan struct{}) *mutation {
 		quit = ch
 	}
 	return &mutation{
-		db:    &TxDb{tx: tx, cursors: map[string]ethdb.Cursor{}},
+		db:    tx,
 		puts:  btree.New(32),
 		quit:  quit,
 		clean: clean,
@@ -88,11 +87,12 @@ func (m *mutation) getMem(table string, key []byte) ([]byte, bool) {
 func (m *mutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
-		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		v, err = m.db.GetOne(dbutils.Sequence, []byte(bucket))
+		if err != nil {
 			return 0, err
 		}
 	}
+
 	var currentV uint64 = 0
 	if len(v) > 0 {
 		currentV = binary.BigEndian.Uint64(v)
@@ -109,8 +109,8 @@ func (m *mutation) IncrementSequence(bucket string, amount uint64) (res uint64, 
 func (m *mutation) ReadSequence(bucket string) (res uint64, err error) {
 	v, ok := m.getMem(dbutils.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
-		v, err = m.db.Get(dbutils.Sequence, []byte(bucket))
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		v, err = m.db.GetOne(dbutils.Sequence, []byte(bucket))
+		if err != nil {
 			return 0, err
 		}
 	}
@@ -132,8 +132,8 @@ func (m *mutation) GetOne(table string, key []byte) ([]byte, error) {
 	}
 	if m.db != nil {
 		// TODO: simplify when tx can no longer be parent of mutation
-		value, err := m.db.Get(table, key)
-		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+		value, err := m.db.GetOne(table, key)
+		if err != nil {
 			return nil, err
 		}
 
@@ -157,7 +157,12 @@ func (m *mutation) Get(table string, key []byte) ([]byte, error) {
 }
 
 func (m *mutation) Last(table string) ([]byte, []byte, error) {
-	return m.db.Last(table)
+	c, err := m.db.Cursor(table)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer c.Close()
+	return c.Last()
 }
 
 func (m *mutation) hasMem(table string, key []byte) bool {
@@ -328,16 +333,8 @@ func (m *mutation) Commit() error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if tx, ok := m.db.(ethdb.HasTx); ok {
-		if err := m.doCommit(tx.Tx().(ethdb.RwTx)); err != nil {
-			return err
-		}
-	} else {
-		if err := m.db.(ethdb.HasRwKV).RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
-			return m.doCommit(tx)
-		}); err != nil {
-			return err
-		}
+	if err := m.doCommit(m.db); err != nil {
+		return err
 	}
 
 	m.puts.Clear(false /* addNodesToFreelist */)
@@ -359,7 +356,7 @@ func (m *mutation) Close() {
 }
 
 func (m *mutation) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPendingMutations, error) {
-	return m.db.Begin(ctx, flags)
+	panic("mutation can't start transaction, because doesn't own it")
 }
 
 func (m *mutation) panicOnEmptyDB() {

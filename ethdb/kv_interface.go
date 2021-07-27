@@ -310,7 +310,4 @@ type RwCursorDupSort interface {
 	AppendDup(key, value []byte) error // AppendDup - same as Append, but for sorted dup data
 }
 
-type HasStats interface {
-	BucketSize(name string) (uint64, error)
-	DiskSize(context.Context) (uint64, error) // db size
-}
+var ErrNotSupported = errors.New("not supported")
