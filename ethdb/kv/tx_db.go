@@ -21,6 +21,7 @@ type TxDb struct {
 	len     uint64
 }
 
+//nolint
 func WrapIntoTxDB(tx ethdb.RwTx) *TxDb {
 	return &TxDb{tx: tx, cursors: map[string]ethdb.Cursor{}}
 }

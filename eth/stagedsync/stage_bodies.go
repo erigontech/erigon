@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
@@ -149,7 +148,7 @@ Loop:
 		}
 		d4 += time.Since(start)
 		start = time.Now()
-		cr := ChainReader{Cfg: cfg.chanConfig, Db: kv.WrapIntoTxDB(tx)}
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
 		for i, header := range headers {
 			rawBody := rawBodies[i]
 			blockHeight := header.Number.Uint64()
