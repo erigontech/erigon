@@ -49,11 +49,27 @@ func EncodeHashes(hashes []byte, encodeBuf []byte) []byte {
 	return encodeBuf
 }
 
+// ParseHash extracts the next hash from the RLP encoding (payload) from a given position.
+// It appends the hash to the given slice, reusing the space if there is enough capacity
+// The first returned value is the slice where hash is appended to.
+// The second returned value is the new position in the RLP payload after the extraction
+// of the hash.
+func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
+	hashbuf = ensureEnoughSize(hashbuf, 32)
+	pos, err := rlp.ParseHash(payload, pos, hashbuf)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%s: hash len: %w", rlp.ParseHashErrorPrefix, err)
+	}
+	return hashbuf, pos, nil
+}
+
 func ensureEnoughSize(in []byte, size int) []byte {
 	if cap(in) < size {
-		return make([]byte, size)
+		newBuf := make([]byte, size)
+		copy(newBuf, in)
+		return newBuf
 	}
-	return in[:size] // Reuse the space in pkbuf, is it has enough capacity
+	return in[:size] // Reuse the space if it has enough capacity
 }
 
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet

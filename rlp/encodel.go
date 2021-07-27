@@ -22,10 +22,8 @@ import (
 )
 
 // General design:
-//      - no io.Writer, because it's incompatible with binary.BigEndian functions and Writer can't be used as temporary buffer
-//      - rlp has 2 data types: List and String (bytes array), and low-level funcs are operate with this types.
-//      - but for convenience and performance - provided higher-level functions (for example for EncodeHash - for []byte of len 32)
 //      - rlp package doesn't manage memory - and Caller must ensure buffers are big enough.
+//      - no io.Writer, because it's incompatible with binary.BigEndian functions and Writer can't be used as temporary buffer
 //
 // Composition:
 //     - each Encode method does write to given buffer and return written len
@@ -33,6 +31,8 @@ import (
 //
 // General rules:
 //      - functions to calculate prefix len are fast (and pure). it's ok to call them multiple times during encoding of large object for readability.
+//      - rlp has 2 data types: List and String (bytes array), and low-level funcs are operate with this types.
+//      - but for convenience and performance - provided higher-level functions (for example for EncodeHash - for []byte of len 32)
 //      - functions to Parse (Decode) data - using data type as name (without any prefix): rlp.String(), rlp.List, rlp.U64(), rlp.U256()
 //
 

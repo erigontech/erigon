@@ -21,8 +21,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"testing"
-
-	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
 var hashParseTests = []struct {
@@ -43,7 +41,7 @@ func TestParseHash(t *testing.T) {
 			if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
 				t.Fatal(err)
 			}
-			if _, parseEnd, err = rlp.ParseHash(payload, 0, hashBuf[:0]); err != nil {
+			if _, parseEnd, err = ParseHash(payload, 0, hashBuf[:0]); err != nil {
 				if !tt.expectedErr {
 					t.Fatal(err)
 				}

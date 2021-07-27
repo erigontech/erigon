@@ -143,26 +143,13 @@ func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
 	return dataPos + dataLen, nil
 }
 
-// ParseHash extracts the next hash from the RLP encoding (payload) from a given position.
-// It appends the hash to the given slice, reusing the space if there is enough capacity
-// The first returned value is the slice where hash is appended to.
-// The second returned value is the new position in the RLP payload after the extraction
-// of the hash.
-func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
-	dataPos, err := StringOfLen(payload, pos, 32)
+func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {
+	pos, err := StringOfLen(payload, pos, 32)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: hash len: %w", ParseHashErrorPrefix, err)
+		return 0, fmt.Errorf("%s: hash len: %w", ParseHashErrorPrefix, err)
 	}
-	hashbuf = ensureEnoughSize(hashbuf, 32)
-	copy(hashbuf, payload[dataPos:dataPos+32])
-	return hashbuf, dataPos + 32, nil
-}
-
-func ensureEnoughSize(in []byte, size int) []byte {
-	if cap(in) < size {
-		return make([]byte, size)
-	}
-	return in[:size] // Reuse the space if it has enough capacity
+	copy(hashbuf, payload[pos:pos+32])
+	return pos + 32, nil
 }
 
 const ParseHashErrorPrefix = "parse hash payload"
