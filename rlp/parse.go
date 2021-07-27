@@ -18,9 +18,9 @@ func BeInt(payload []byte, pos, length int) (int, error) {
 	return r, nil
 }
 
-// ParsePrefix parses RLP ParsePrefix from given payload at given position. It returns the offset and length of the RLP element
+// Prefix parses RLP Prefix from given payload at given position. It returns the offset and length of the RLP element
 // as well as the indication of whether it is a list of string
-func ParsePrefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err error) {
+func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err error) {
 	switch first := payload[pos]; {
 	case first < 128:
 		dataPos = pos
@@ -58,7 +58,7 @@ func ParsePrefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool
 }
 
 func List(payload []byte, pos int) (dataPos int, dataLen int, err error) {
-	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
+	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -69,7 +69,7 @@ func List(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 }
 
 func String(payload []byte, pos int) (dataPos int, dataLen int, err error) {
-	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
+	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -91,7 +91,7 @@ func StringOfLen(payload []byte, pos, expectedLen int) (dataPos int, err error) 
 
 // U64 parses uint64 number from given payload at given position
 func U64(payload []byte, pos int) (int, uint64, error) {
-	dataPos, dataLen, isList, err := ParsePrefix(payload, pos)
+	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
 	}

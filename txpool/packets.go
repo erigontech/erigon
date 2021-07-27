@@ -24,10 +24,10 @@ import (
 
 type NewPooledTransactionHashesPacket [][32]byte
 
-// ParseHashesCount looks at the RLP length ParsePrefix for list of 32-byte hashes
+// ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
 func ParseHashesCount(payload Hashes, pos int) (int, int, error) {
-	dataPos, dataLen, list, err := rlp.ParsePrefix(payload, pos)
+	dataPos, dataLen, list, err := rlp.Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: hashes len: %w", rlp.ParseHashErrorPrefix, err)
 	}
@@ -71,13 +71,13 @@ func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []
 	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestId)
 	prefixLen := rlp.ListPrefixLen(dataLen)
 	encodeBuf = ensureEnoughSize(encodeBuf, prefixLen+dataLen)
-	// Length ParsePrefix for the entire structure
+	// Length Prefix for the entire structure
 	rlp.EncodeListPrefix(dataLen, encodeBuf)
 	pos := prefixLen
 	// encode requestId
 	rlp.EncodeU64(requestId, encodeBuf[pos:])
 	pos += rlp.U64Len(requestId)
-	// Encode length ParsePrefix for hashes
+	// Encode length Prefix for hashes
 	rlp.EncodeListPrefix(hashesLen, encodeBuf[pos:])
 	pos += rlp.ListPrefixLen(hashesLen)
 

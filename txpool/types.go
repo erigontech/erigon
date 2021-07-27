@@ -97,11 +97,11 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	ctx.keccak1.Reset()
 	ctx.keccak2.Reset()
 	var slot TxSlot
-	// Legacy transations have list ParsePrefix, whereas EIP-2718 transactions have string ParsePrefix
-	// therefore we assign the first returned value of ParsePrefix function (list) to legacy variable
-	dataPos, dataLen, legacy, err := rlp.ParsePrefix(payload, pos)
+	// Legacy transations have list Prefix, whereas EIP-2718 transactions have string Prefix
+	// therefore we assign the first returned value of Prefix function (list) to legacy variable
+	dataPos, dataLen, legacy, err := rlp.Prefix(payload, pos)
 	if err != nil {
-		return nil, 0, fmt.Errorf("%s: size ParsePrefix: %v", ParseTransactionErrorPrefix, err)
+		return nil, 0, fmt.Errorf("%s: size Prefix: %v", ParseTransactionErrorPrefix, err)
 	}
 	if dataPos+dataLen != len(payload) {
 		return nil, 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
@@ -113,10 +113,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	if !legacy {
 		txType = int(payload[p])
 		if _, err = ctx.keccak1.Write(payload[p : p+1]); err != nil {
-			return nil, 0, fmt.Errorf("%s: computing idHash (hashing type ParsePrefix): %w", ParseTransactionErrorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: computing idHash (hashing type Prefix): %w", ParseTransactionErrorPrefix, err)
 		}
 		if _, err = ctx.keccak2.Write(payload[p : p+1]); err != nil {
-			return nil, 0, fmt.Errorf("%s: computing signHash (hashing type ParsePrefix): %w", ParseTransactionErrorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: computing signHash (hashing type Prefix): %w", ParseTransactionErrorPrefix, err)
 		}
 		p++
 		if p >= len(payload) {
@@ -124,7 +124,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
-			return nil, 0, fmt.Errorf("%s: envelope ParsePrefix: %v", ParseTransactionErrorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: envelope Prefix: %v", ParseTransactionErrorPrefix, err)
 		}
 		// Hash the envelope, not the full payload
 		if _, err = ctx.keccak1.Write(payload[p : dataPos+dataLen]); err != nil {
@@ -259,7 +259,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 				chainIdLen = 1
 			} else {
 				chainIdLen = (chainIdBits + 7) / 8 // It is always < 56 bytes
-				sigHashLen++                       // For chainId len ParsePrefix
+				sigHashLen++                       // For chainId len Prefix
 			}
 			sigHashLen += uint(chainIdLen) // For chainId
 			sigHashLen += 2                // For two extra zeros
@@ -294,18 +294,18 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 	ctx.keccak1.Sum(slot.idHash[:0])
 	//ctx.keccak1.(io.Reader).Read(slot.idHash[:32])
 	// Computing sigHash (hash used to recover sender from the signature)
-	// Write len ParsePrefix to the sighash
+	// Write len Prefix to the sighash
 	if sigHashLen < 56 {
 		ctx.buf[0] = byte(sigHashLen) + 192
 		if _, err := ctx.keccak2.Write(ctx.buf[:1]); err != nil {
-			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len ParsePrefix): %w", ParseTransactionErrorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len Prefix): %w", ParseTransactionErrorPrefix, err)
 		}
 	} else {
 		beLen := (bits.Len(uint(sigHashLen)) + 7) / 8
 		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
 		ctx.buf[8-beLen] = byte(beLen) + 247
 		if _, err := ctx.keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {
-			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len ParsePrefix): %w", ParseTransactionErrorPrefix, err)
+			return nil, 0, fmt.Errorf("%s: computing signHash (hashing len Prefix): %w", ParseTransactionErrorPrefix, err)
 		}
 	}
 	if _, err = ctx.keccak2.Write(payload[sigHashPos:sigHashEnd]); err != nil {
