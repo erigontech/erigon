@@ -50,10 +50,10 @@ func TestMatreshkaStream(t *testing.T) {
 	//tmpDb:=ethdb.NewMemDatabase()
 	os.RemoveAll(tmpDbDir)
 
-	db, err := mdbx.NewMDBX(log.New()).Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		defaultBuckets[AccountDiff] = kv.TableConfigItem{}
-		defaultBuckets[StorageDiff] = kv.TableConfigItem{}
-		defaultBuckets[ContractDiff] = kv.TableConfigItem{}
+	db, err := mdbx.NewMDBX(log.New()).Path(tmpDbDir).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		defaultBuckets[AccountDiff] = kv.TableCfgItem{}
+		defaultBuckets[StorageDiff] = kv.TableCfgItem{}
+		defaultBuckets[ContractDiff] = kv.TableCfgItem{}
 		return defaultBuckets
 	}).Open()
 	if err != nil {
@@ -87,7 +87,7 @@ func TestMatreshkaStream(t *testing.T) {
 	//if err != nil {
 	//	t.Fatal(err)
 	//}
-	psCursor, err := tx.Cursor(kv.PlainStateBucket)
+	psCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		t.Fatal(err)
 	}

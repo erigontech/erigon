@@ -10,8 +10,8 @@ import (
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
 var (
-	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
-	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ErigonTables")
+	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ChaindataTables")
 
 	DbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
 	TxLimit   = metrics.GetOrRegisterGauge("tx/limit", metrics.DefaultRegistry)   //nolint
@@ -214,7 +214,7 @@ type Tx interface {
 	// Otherwise - object of interface Cursor created
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
-	// long keys into DupSort key/values. See docs for `bucket.go:TableConfigItem`
+	// long keys into DupSort key/values. See docs for `bucket.go:TableCfgItem`
 	Cursor(bucket string) (Cursor, error)
 	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 

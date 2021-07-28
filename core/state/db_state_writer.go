@@ -102,7 +102,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 		return err
 	}
 	//save contract code mapping
-	if err := dsw.db.Put(kv.CodeBucket, codeHash[:], code); err != nil {
+	if err := dsw.db.Put(kv.Code, codeHash[:], code); err != nil {
 		return err
 	}
 	addrHash, err := common.HashData(address.Bytes())

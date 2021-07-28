@@ -106,7 +106,7 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, incarnation ui
 			return code, nil
 		}
 	}
-	code, err := dbr.db.GetOne(kv.CodeBucket, codeHash[:])
+	code, err := dbr.db.GetOne(kv.Code, codeHash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 		}
 	}
 	var code []byte
-	code, err = dbr.db.GetOne(kv.CodeBucket, codeHash[:])
+	code, err = dbr.db.GetOne(kv.Code, codeHash[:])
 	if err != nil {
 		return 0, err
 	}

@@ -125,7 +125,7 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 	err := etl.Transform(
 		logPrefix,
 		db,
-		kv.PlainStateBucket,
+		kv.PlainState,
 		kv.HashedAccounts,
 		cfg.tmpDir,
 		keyTransformExtractAcc(transformPlainStateKey),
@@ -141,7 +141,7 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 	err = etl.Transform(
 		logPrefix,
 		db,
-		kv.PlainStateBucket,
+		kv.PlainState,
 		kv.HashedStorage,
 		cfg.tmpDir,
 		keyTransformExtractStorage(transformPlainStateKey),
@@ -279,8 +279,8 @@ func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, _ := decode(dbKey, dbValue)
-		// ignoring value un purpose, we want the latest one and it is in PlainStateBucket
-		value, err := db.GetOne(kv.PlainStateBucket, k)
+		// ignoring value un purpose, we want the latest one and it is in PlainState
+		value, err := db.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
 		}
@@ -297,7 +297,7 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, _ := decode(dbKey, dbValue)
-		value, err := db.GetOne(kv.PlainStateBucket, k)
+		value, err := db.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
 		}

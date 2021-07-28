@@ -1382,7 +1382,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
-	assert.NoError(t, tx.Delete(kv.CodeBucket, codeHash[:], nil), nil)
+	assert.NoError(t, tx.Delete(kv.Code, codeHash[:], nil), nil)
 
 	codeSize2, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")

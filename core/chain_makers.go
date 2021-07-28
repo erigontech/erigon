@@ -295,7 +295,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
 				return nil, nil, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
 			}
-			c, err := tx.Cursor(kv.PlainStateBucket)
+			c, err := tx.Cursor(kv.PlainState)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -117,7 +117,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]uint256.Int)
-		err = tx.ForPrefix(kv.PlainStateBucket, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), func(k, v []byte) error {
+		err = tx.ForPrefix(kv.PlainState, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), func(k, v []byte) error {
 			resAccStorage[common.BytesToHash(k[common.AddressLength+8:])] = *uint256.NewInt(0).SetBytes(v)
 			return nil
 		})

@@ -78,9 +78,9 @@ var bucketLabels = map[string]string{
 	kv.BlockBody:         "Block Bodies",
 	kv.HeaderNumber:      "Header Numbers",
 	kv.TxLookup:          "Transaction Index",
-	kv.CodeBucket:        "Code Of Contracts",
+	kv.Code:              "Code Of Contracts",
 	kv.SyncStageProgress: "Sync Progress",
-	kv.PlainStateBucket:  "Plain State",
+	kv.PlainState:        "Plain State",
 	kv.HashedAccounts:    "Hashed Accounts",
 	kv.HashedStorage:     "Hashed Storage",
 	kv.TrieOfAccounts:    "Intermediate Hashes Of Accounts",
@@ -93,7 +93,7 @@ var bucketLabels = map[string]string{
 }
 
 /*dbutils.PlainContractCode,
-dbutils.CodeBucket,
+dbutils.Code,
 dbutils.AccountsHistory,
 dbutils.StorageHistory,
 dbutils.TxLookup,*/

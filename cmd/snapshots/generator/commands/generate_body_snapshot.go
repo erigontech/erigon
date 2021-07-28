@@ -35,9 +35,9 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 
 func BodySnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	db := kv2.NewMDBX(logger).Path(dbPath).MustOpen()
-	snKV := kv2.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	snKV := kv2.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.BlockBody: kv.TableConfigItem{},
+			kv.BlockBody: kv.TableCfgItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 

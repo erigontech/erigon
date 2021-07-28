@@ -45,7 +45,7 @@ func (r *StateReader) ReadAccountCode(address common.Address, incarnation uint64
 		return nil, nil
 	}
 	var val []byte
-	v, err := r.tx.GetOne(kv.CodeBucket, codeHash[:])
+	v, err := r.tx.GetOne(kv.Code, codeHash[:])
 	if err != nil {
 		return nil, err
 	}

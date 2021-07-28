@@ -15,7 +15,7 @@ var removeCliqueBucket = Migration{
 		}
 		defer tx.Rollback()
 
-		if exists, err := tx.ExistsBucket(kv.CliqueBucket); err != nil {
+		if exists, err := tx.ExistsBucket(kv.Clique); err != nil {
 			return err
 		} else if !exists {
 			if err := BeforeCommit(tx, nil, true); err != nil {
@@ -24,7 +24,7 @@ var removeCliqueBucket = Migration{
 			return tx.Commit()
 		}
 
-		if err := tx.DropBucket(kv.CliqueBucket); err != nil {
+		if err := tx.DropBucket(kv.Clique); err != nil {
 			return err
 		}
 

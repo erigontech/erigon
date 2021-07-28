@@ -433,7 +433,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 
 func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	logPrefix := s.LogPrefix()
-	stateBucket := kv.PlainStateBucket
+	stateBucket := kv.PlainState
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
 	var accumulator *shards.Accumulator

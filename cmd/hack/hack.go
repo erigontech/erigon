@@ -718,7 +718,7 @@ func readAccount(chaindata string, account common.Address) error {
 	}
 	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
 
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}
@@ -1160,7 +1160,7 @@ func dumpState(chaindata string) error {
 	stStorage := 0
 	var varintBuf [10]byte // Buffer for varint number
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainStateBucket)
+		c, err := tx.Cursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
@@ -1207,7 +1207,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	stAccounts := 0
 	stStorage := 0
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainStateBucket)
+		c, err := tx.Cursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
@@ -1315,7 +1315,7 @@ func supply(chaindata string) error {
 	supply := uint256.NewInt(0)
 	var a accounts.Account
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainStateBucket)
+		c, err := tx.Cursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
@@ -1348,7 +1348,7 @@ func extractCode(chaindata string) error {
 	defer db.Close()
 	var contractCount int
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.CodeBucket)
+		c, err := tx.Cursor(kv.Code)
 		if err != nil {
 			return err
 		}
@@ -1389,7 +1389,7 @@ func iterateOverCode(chaindata string) error {
 			contractKeyTotalLength += len(k)
 			contractValTotalLength += len(v)
 		}
-		c, err = tx.Cursor(kv.CodeBucket)
+		c, err = tx.Cursor(kv.Code)
 		if err != nil {
 			return err
 		}

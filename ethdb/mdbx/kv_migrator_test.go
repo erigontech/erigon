@@ -22,8 +22,8 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	normalBucket := kv.ErigonTables[15]
-	deprecatedBucket := kv.DeprecatedBuckets[0]
+	normalBucket := kv.ChaindataTables[15]
+	deprecatedBucket := kv.ChaindataDeprecatedTables[0]
 	migrator, ok := tx.(kv.BucketMigrator)
 	if !ok {
 		return
@@ -84,16 +84,16 @@ func TestBucketCRUD(t *testing.T) {
 func TestReadOnlyMode(t *testing.T) {
 	path := t.TempDir()
 	logger := log.New()
-	db1 := mdbx.NewMDBX(logger).Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db1 := mdbx.NewMDBX(logger).Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
-	db2 := mdbx.NewMDBX(logger).Readonly().Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db2 := mdbx.NewMDBX(logger).Readonly().Path(path).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	defer db2.Close()

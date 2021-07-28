@@ -81,7 +81,7 @@ func TestNextKeyErr(t *testing.T) {
 func TestFileDataProviders(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
 	_, tx := memdb.NewTestTx(t)
-	sourceBucket := kv.ErigonTables[0]
+	sourceBucket := kv.ChaindataTables[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
 
@@ -112,7 +112,7 @@ func TestFileDataProviders(t *testing.T) {
 func TestRAMDataProviders(t *testing.T) {
 	// test invariant when we go through memory (1 buffer)
 	_, tx := memdb.NewTestTx(t)
-	sourceBucket := kv.ErigonTables[0]
+	sourceBucket := kv.ChaindataTables[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
@@ -132,8 +132,8 @@ func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	_, tx := memdb.NewTestTx(t)
 
-	sourceBucket := kv.ErigonTables[0]
-	destBucket := kv.ErigonTables[1]
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 20)
 	err := Transform(
 		"logPrefix",
@@ -151,8 +151,8 @@ func TestTransformRAMOnly(t *testing.T) {
 
 func TestEmptySourceBucket(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
-	sourceBucket := kv.ErigonTables[0]
-	destBucket := kv.ErigonTables[1]
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	err := Transform(
 		"logPrefix",
 		tx,
@@ -170,8 +170,8 @@ func TestEmptySourceBucket(t *testing.T) {
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
 	_, tx := memdb.NewTestTx(t)
-	sourceBucket := kv.ErigonTables[0]
-	destBucket := kv.ErigonTables[1]
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
@@ -190,8 +190,8 @@ func TestTransformExtractStartKey(t *testing.T) {
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
 	_, tx := memdb.NewTestTx(t)
-	sourceBucket := kv.ErigonTables[0]
-	destBucket := kv.ErigonTables[1]
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
@@ -212,8 +212,8 @@ func TestTransformThroughFiles(t *testing.T) {
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
 	_, tx := memdb.NewTestTx(t)
-	sourceBucket := kv.ErigonTables[0]
-	destBucket := kv.ErigonTables[1]
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
@@ -232,8 +232,8 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
 	_, tx := memdb.NewTestTx(t)
-	sourceBucket := kv.ErigonTables[0]
-	destBucket := kv.ErigonTables[1]
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
