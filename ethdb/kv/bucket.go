@@ -10,14 +10,14 @@ import (
 // DBSchemaVersion
 var DBSchemaVersion = types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
-// ErigonTables
+// ChaindataTables
 
 // Dictionary:
 // "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
 // "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
 /*
-PlainStateBucket logical layout:
+PlainState logical layout:
 	Contains Accounts:
 	  key - address (unhashed)
 	  value - account encoded for storage
@@ -26,7 +26,7 @@ PlainStateBucket logical layout:
 	  value - storage value(common.hash)
 
 Physical layout:
-	PlainStateBucket and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
+	PlainState and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
 -------------------------------------------------------------
 	   key              |            value
 -------------------------------------------------------------
@@ -40,7 +40,7 @@ Physical layout:
 [acc2_hash]             | [acc2_value]
 						...
 */
-const PlainStateBucket = "PlainState"
+const PlainState = "PlainState"
 
 //PlainContractCode -
 //key - address+incarnation
@@ -56,7 +56,7 @@ Logical format:
 
 Example: If block N changed account A from value X to Y. Then:
 	AccountChangeSet has record: bigEndian(N) + A -> X
-	PlainStateBucket has record: A -> Y
+	PlainState has record: A -> Y
 
 See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
 
@@ -125,7 +125,7 @@ const (
 
 	//key - contract code hash
 	//value - contract code
-	CodeBucket = "Code"
+	Code = "Code"
 
 	//key - addressHash+incarnation
 	//value - code hash
@@ -136,7 +136,7 @@ const (
 	//value - incarnation of account when it was last deleted
 	IncarnationMap = "IncarnationMap"
 
-	//TEVMCodeBucket -
+	//TEVMCode -
 	//key - contract code hash
 	//value - contract TEVM code
 	ContractTEVMCode = "TEVMCode"
@@ -231,13 +231,13 @@ const (
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
 
-	CliqueBucket       = "Clique"
+	Clique             = "Clique"
 	CliqueSeparate     = "CliqueSeparate"
 	CliqueSnapshot     = "CliqueSnapshot"
 	CliqueLastSnapshot = "CliqueLastSnapshot"
 
 	// this bucket stored in separated database
-	InodesBucket = "Inode"
+	Inodes = "Inode"
 
 	// Transaction senders - stored separately from the block bodies
 	Senders = "TxSender" // block_num_u64 + blockHash -> sendersList (no serialization format, every 20 bytes is new sender)
@@ -276,13 +276,13 @@ var (
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 )
 
-// ErigonTables - list of all buckets. App will panic if some bucket is not in this list.
+// ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsConfigs - can be used to find index in sorted version of ErigonTables list by name
-var ErigonTables = []string{
+// ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
+var ChaindataTables = []string{
 	AccountsHistory,
 	StorageHistory,
-	CodeBucket,
+	Code,
 	ContractCode,
 	HeaderNumber,
 	BlockBody,
@@ -296,7 +296,7 @@ var ErigonTables = []string{
 	CliqueLastSnapshot,
 	CliqueSnapshot,
 	SyncStageProgress,
-	PlainStateBucket,
+	PlainState,
 	PlainContractCode,
 	AccountChangeSet,
 	StorageChangeSet,
@@ -328,15 +328,15 @@ var ErigonTables = []string{
 var TxPoolTables = []string{}
 var SentryTables = []string{}
 
-// DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
-var DeprecatedBuckets = []string{
+// ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
+var ChaindataDeprecatedTables = []string{
 	HeaderPrefixOld,
-	CliqueBucket,
+	Clique,
 }
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type TableCfg map[string]TableConfigItem
+type TableCfg map[string]TableCfgItem
 type Bucket string
 
 type DBI uint
@@ -351,7 +351,7 @@ const (
 	ReverseDup TableFlags = 0x40
 )
 
-type TableConfigItem struct {
+type TableCfgItem struct {
 	Flags TableFlags
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
 	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
@@ -368,7 +368,7 @@ type TableConfigItem struct {
 	DupToLen   int
 }
 
-var BucketsConfigs = TableCfg{
+var ChaindataTablesCfg = TableCfg{
 	HashedStorage: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
@@ -381,7 +381,7 @@ var BucketsConfigs = TableCfg{
 	StorageChangeSet: {
 		Flags: DupSort,
 	},
-	PlainStateBucket: {
+	PlainState: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                60,
@@ -393,8 +393,8 @@ var BucketsConfigs = TableCfg{
 }
 
 func sortBuckets() {
-	sort.SliceStable(ErigonTables, func(i, j int) bool {
-		return strings.Compare(ErigonTables[i], ErigonTables[j]) < 0
+	sort.SliceStable(ChaindataTables, func(i, j int) bool {
+		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
 	})
 }
 
@@ -405,20 +405,20 @@ func init() {
 func reinit() {
 	sortBuckets()
 
-	for _, name := range ErigonTables {
-		_, ok := BucketsConfigs[name]
+	for _, name := range ChaindataTables {
+		_, ok := ChaindataTablesCfg[name]
 		if !ok {
-			BucketsConfigs[name] = TableConfigItem{}
+			ChaindataTablesCfg[name] = TableCfgItem{}
 		}
 	}
 
-	for _, name := range DeprecatedBuckets {
-		_, ok := BucketsConfigs[name]
+	for _, name := range ChaindataDeprecatedTables {
+		_, ok := ChaindataTablesCfg[name]
 		if !ok {
-			BucketsConfigs[name] = TableConfigItem{}
+			ChaindataTablesCfg[name] = TableCfgItem{}
 		}
-		tmp := BucketsConfigs[name]
+		tmp := ChaindataTablesCfg[name]
 		tmp.IsDeprecated = true
-		BucketsConfigs[name] = tmp
+		ChaindataTablesCfg[name] = tmp
 	}
 }

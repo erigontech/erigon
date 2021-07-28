@@ -24,7 +24,7 @@ func GetAsOf(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, erro
 	if !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
-	return tx.GetOne(kv.PlainStateBucket, key)
+	return tx.GetOne(kv.PlainState, key)
 }
 
 func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
@@ -124,7 +124,7 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 	copy(startkeyNoInc[common.AddressLength:], startLocation.Bytes())
 
 	//for storage
-	mCursor, err := tx.Cursor(kv.PlainStateBucket)
+	mCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 }
 
 func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	mainCursor, err := tx.Cursor(kv.PlainStateBucket)
+	mainCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}

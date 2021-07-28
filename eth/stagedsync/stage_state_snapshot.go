@@ -88,13 +88,13 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 	plainStateCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	contractCodeBucketCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	err = mainDBTX.ForEach(kv.PlainStateBucket, []byte{}, func(k, v []byte) error {
+	err = mainDBTX.ForEach(kv.PlainState, []byte{}, func(k, v []byte) error {
 		return plainStateCollector.Collect(k, v)
 	})
 	if err != nil {
 		return err
 	}
-	err = mainDBTX.ForEach(kv.CodeBucket, []byte{}, func(k, v []byte) error {
+	err = mainDBTX.ForEach(kv.Code, []byte{}, func(k, v []byte) error {
 		return codeCollector.Collect(k, v)
 	})
 	if err != nil {
@@ -119,14 +119,14 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 		return err
 	}
 
-	err = plainStateCollector.Load("plain state", snRwTX, kv.PlainStateBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+	err = plainStateCollector.Load("plain state", snRwTX, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
 	if err != nil {
 		return err
 	}
 
-	err = codeCollector.Load("codes", snRwTX, kv.CodeBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+	err = codeCollector.Load("codes", snRwTX, kv.Code, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
 	if err != nil {
@@ -147,11 +147,11 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 	snKV.Close()
 	//snapshot creation finished
 
-	err = mainDBTX.ClearBucket(kv.PlainStateBucket)
+	err = mainDBTX.ClearBucket(kv.PlainState)
 	if err != nil {
 		return err
 	}
-	err = mainDBTX.ClearBucket(kv.CodeBucket)
+	err = mainDBTX.ClearBucket(kv.Code)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 			})
 		}
 
-		err = migrateBucket(tmpDBRoTX, mainDBTX, kv.PlainStateBucket)
+		err = migrateBucket(tmpDBRoTX, mainDBTX, kv.PlainState)
 		if err != nil {
 			return err
 		}

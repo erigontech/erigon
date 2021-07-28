@@ -20,9 +20,9 @@ import (
 
 func TestSnapshot2Get(t *testing.T) {
 	logger := log.New()
-	sn1 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	sn1 := mdbx.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
@@ -46,9 +46,9 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sn2 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	sn2 := mdbx.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.BlockBody: kv.TableConfigItem{},
+			kv.BlockBody: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn2.Close()
@@ -199,9 +199,9 @@ func TestSnapshot2Get(t *testing.T) {
 
 func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	logger := log.New()
-	sn1 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	sn1 := mdbx.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
@@ -226,9 +226,9 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		}
 	}
 
-	sn2 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	sn2 := mdbx.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.BlockBody: kv.TableConfigItem{},
+			kv.BlockBody: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn2.Close()
@@ -369,7 +369,7 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	c, err := tx.RwCursor(kv.PlainStateBucket)
+	c, err := tx.RwCursor(kv.PlainState)
 	require.NoError(t, err)
 	replaceKey := dbutils.PlainGenerateCompositeStorageKey([]byte{2}, 1, []byte{4})
 	replaceValue := []byte{2, 4, 4}
@@ -439,9 +439,9 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	require.NoError(t, err)
-	deleteCursor, err := tx.RwCursor(kv.PlainStateBucket)
+	deleteCursor, err := tx.RwCursor(kv.PlainState)
 	require.NoError(t, err)
 
 	//get first correct k&v
@@ -515,9 +515,9 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	require.NoError(t, err)
-	deleteCursor, err := tx.RwCursor(kv.PlainStateBucket)
+	deleteCursor, err := tx.RwCursor(kv.PlainState)
 	require.NoError(t, err)
 
 	//get first correct k&v
@@ -622,7 +622,7 @@ func TestSnapshot2WritableTxWalkLastElementIsSnapshot(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	require.NoError(t, err)
 	//get first correct k&v
 	k, v, err := c.First()
@@ -707,7 +707,7 @@ func TestSnapshot2WritableTxWalkForwardAndBackward(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	require.NoError(t, err)
 	//get first correct k&v
 	k, v, err := c.First()
@@ -804,7 +804,7 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	require.NoError(t, err)
 
 	i := 0
@@ -839,13 +839,13 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	require.NoError(t, err)
 
 	//get first correct k&v
 	k, v, err := c.First()
 	if err != nil {
-		printBucket(db, kv.PlainStateBucket)
+		printBucket(db, kv.PlainState)
 		t.Fatal(err)
 	}
 	checkKV(t, k, v, data[0].K, data[0].V)
@@ -902,9 +902,9 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	require.NoError(t, err)
-	deleteCursor, err := tx.RwCursor(kv.PlainStateBucket)
+	deleteCursor, err := tx.RwCursor(kv.PlainState)
 	require.NoError(t, err)
 
 	//get first correct k&v
@@ -1004,7 +1004,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	c, err := tx.Cursor(kv.PlainStateBucket)
+	c, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1024,7 +1024,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 	}
 	defer tx2.Rollback()
 
-	c2, err := tx2.Cursor(kv.PlainStateBucket)
+	c2, err := tx2.Cursor(kv.PlainState)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1103,7 +1103,7 @@ func TestTempDBForState(t *testing.T) {
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.PlainStateBucket)
+		c, err := tx.RwCursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
@@ -1120,7 +1120,7 @@ func TestTempDBForState(t *testing.T) {
 	}
 
 	tmpDB := kv2.NewTestDB(t)
-	db.SetTempDB(tmpDB, []string{kv.PlainStateBucket})
+	db.SetTempDB(tmpDB, []string{kv.PlainState})
 
 	nonStateKey := []byte{11}
 	nonStateValue := []byte{99}
@@ -1131,7 +1131,7 @@ func TestTempDBForState(t *testing.T) {
 			return err
 		}
 
-		c, err := tx.RwCursor(kv.PlainStateBucket)
+		c, err := tx.RwCursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
@@ -1158,7 +1158,7 @@ func TestTempDBForState(t *testing.T) {
 			t.Error(v, nonStateValue)
 		}
 
-		return tx.ForEach(kv.PlainStateBucket, []byte{}, func(k, v []byte) error {
+		return tx.ForEach(kv.PlainState, []byte{}, func(k, v []byte) error {
 			fullStateResult = append(fullStateResult, KvData{
 				K: k,
 				V: v,
@@ -1182,7 +1182,7 @@ func TestTempDBForState(t *testing.T) {
 			t.Error(v)
 		}
 
-		return tx.ForEach(kv.PlainStateBucket, []byte{}, func(k, v []byte) error {
+		return tx.ForEach(kv.PlainState, []byte{}, func(k, v []byte) error {
 			tmpDBResult = append(tmpDBResult, KvData{
 				K: k,
 				V: v,
@@ -1205,7 +1205,7 @@ func TestTempDBForState(t *testing.T) {
 			t.Error(v, nonStateValue)
 		}
 
-		return tx.ForEach(kv.PlainStateBucket, []byte{}, func(k, v []byte) error {
+		return tx.ForEach(kv.PlainState, []byte{}, func(k, v []byte) error {
 			writeDBResult = append(writeDBResult, KvData{
 				K: k,
 				V: v,
@@ -1245,7 +1245,7 @@ func TestTempDBReplace(t *testing.T) {
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.PlainStateBucket)
+		c, err := tx.RwCursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
@@ -1262,7 +1262,7 @@ func TestTempDBReplace(t *testing.T) {
 	}
 
 	tmpDB := kv2.NewTestDB(t)
-	db.SetTempDB(tmpDB, []string{kv.PlainStateBucket})
+	db.SetTempDB(tmpDB, []string{kv.PlainState})
 
 	nonStateKey := []byte{11}
 	nonStateValue := []byte{99}
@@ -1273,7 +1273,7 @@ func TestTempDBReplace(t *testing.T) {
 			return err
 		}
 
-		c, err := tx.RwCursor(kv.PlainStateBucket)
+		c, err := tx.RwCursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
@@ -1319,7 +1319,7 @@ func TestTempDBReplace(t *testing.T) {
 			t.Error(v, nonStateValue)
 		}
 
-		return tx.ForEach(kv.PlainStateBucket, []byte{}, func(k, v []byte) error {
+		return tx.ForEach(kv.PlainState, []byte{}, func(k, v []byte) error {
 			fullStateResult = append(fullStateResult, KvData{
 				K: k,
 				V: v,
@@ -1391,14 +1391,14 @@ type KvData struct {
 }
 
 func GenStateData(data []KvData) (kv.RwDB, error) {
-	snapshot := mdbx.NewMDBX(log.New()).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	snapshot := mdbx.NewMDBX(log.New()).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.PlainStateBucket: kv.TableConfigItem{},
+			kv.PlainState: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 
 	err := snapshot.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.PlainStateBucket)
+		c, err := tx.RwCursor(kv.PlainState)
 		if err != nil {
 			return err
 		}

@@ -519,7 +519,7 @@ func (s *snTX) getSnapshotTX(bucket string) (kv.Tx, error) {
 		tx = s.headersTX
 	case kv.BlockBody, kv.EthTx:
 		tx = s.bodiesTX
-	case kv.PlainStateBucket, kv.PlainContractCode, kv.CodeBucket:
+	case kv.PlainState, kv.PlainContractCode, kv.Code:
 		tx = s.stateTX
 	}
 	if tx == nil {
@@ -1044,5 +1044,5 @@ func IsBodiesSnapshotSnapshotBucket(bucket string) bool {
 	return bucket == kv.BlockBody || bucket == kv.EthTx
 }
 func IsStateSnapshotSnapshotBucket(bucket string) bool {
-	return bucket == kv.PlainStateBucket || bucket == kv.PlainContractCode || bucket == kv.CodeBucket
+	return bucket == kv.PlainState || bucket == kv.PlainContractCode || bucket == kv.Code
 }

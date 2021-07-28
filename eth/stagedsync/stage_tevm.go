@@ -208,7 +208,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		}
 
 		// load the contract code
-		evmContract, err = batch.GetOne(kv.CodeBucket, codeHashBytes)
+		evmContract, err = batch.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue

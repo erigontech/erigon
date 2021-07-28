@@ -191,7 +191,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
-				if code, err = d.db.GetOne(kv.CodeBucket, codeHash); err != nil {
+				if code, err = d.db.GetOne(kv.Code, codeHash); err != nil {
 					return nil, err
 				}
 				account.Code = code

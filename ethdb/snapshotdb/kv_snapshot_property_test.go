@@ -29,7 +29,7 @@ type getPutkvMachine struct {
 }
 
 func (m *getPutkvMachine) Init(t *rapid.T) {
-	m.bucket = kv.PlainStateBucket
+	m.bucket = kv.PlainState
 	m.snKV = memdb.New()
 	m.modelKV = memdb.New()
 	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
@@ -175,7 +175,7 @@ type getKVMachine struct {
 }
 
 func (m *getKVMachine) Init(t *rapid.T) {
-	m.bucket = kv.PlainStateBucket
+	m.bucket = kv.PlainState
 	m.snKV = memdb.New()
 	m.modelKV = memdb.New()
 	m.snKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
@@ -283,7 +283,7 @@ type cursorKVMachine struct {
 }
 
 func (m *cursorKVMachine) Init(t *rapid.T) {
-	m.bucket = kv.PlainStateBucket
+	m.bucket = kv.PlainState
 	m.snKV = memdb.New()
 	m.modelKV = memdb.New()
 	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {

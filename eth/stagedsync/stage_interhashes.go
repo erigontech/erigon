@@ -183,7 +183,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			return err
 		}
 		if !storage {
-			newValue, err := p.db.GetOne(kv.PlainStateBucket, k)
+			newValue, err := p.db.GetOne(kv.PlainState, k)
 			if err != nil {
 				return err
 			}
@@ -270,7 +270,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 			return err
 		}
 		// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
-		value, err := p.db.GetOne(kv.PlainStateBucket, k)
+		value, err := p.db.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
 		}

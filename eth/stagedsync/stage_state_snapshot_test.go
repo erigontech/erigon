@@ -56,11 +56,11 @@ func TestSnapshotGeneration(t *testing.T) {
 	stateSnapshotTX, err := db.(*snapshotdb.SnapshotKV).StateSnapshot().BeginRo(ctx)
 	assert.NoError(err)
 	defer stateSnapshotTX.Rollback()
-	compareCurrentState(t, stateSnapshotTX, tx2, kv.PlainStateBucket, kv.PlainContractCode)
+	compareCurrentState(t, stateSnapshotTX, tx2, kv.PlainState, kv.PlainContractCode)
 
 	tx1, err = db.(*snapshotdb.SnapshotKV).WriteDB().BeginRw(ctx)
 	assert.NoError(err)
 	defer tx1.Rollback()
 
-	compareCurrentState(t, tx1, tx3, kv.PlainStateBucket)
+	compareCurrentState(t, tx1, tx3, kv.PlainState)
 }

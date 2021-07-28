@@ -28,7 +28,7 @@ func TestUnwindExecutionStagePlainStatic(t *testing.T) {
 	err = UnwindExecutionStage(u, s, tx2, ctx, ExecuteBlockCfg{}, false)
 	assert.NoError(err)
 
-	compareCurrentState(t, tx1, tx2, kv.PlainStateBucket, kv.PlainContractCode, kv.ContractTEVMCode)
+	compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
 }
 
 func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
@@ -47,7 +47,7 @@ func TestUnwindExecutionStagePlainWithIncarnationChanges(t *testing.T) {
 	err = UnwindExecutionStage(u, s, tx2, ctx, ExecuteBlockCfg{}, false)
 	assert.NoError(err)
 
-	compareCurrentState(t, tx1, tx2, kv.PlainStateBucket, kv.PlainContractCode)
+	compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
 }
 
 func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
@@ -70,7 +70,7 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 		t.Errorf("error while unwinding state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, kv.PlainStateBucket, kv.PlainContractCode)
+	compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
 }
 
 func TestPruneExecution(t *testing.T) {

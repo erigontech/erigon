@@ -177,7 +177,7 @@ func (s *PlainState) ReadAccountCode(address common.Address, incarnation uint64,
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := s.tx.GetOne(kv.CodeBucket, codeHash[:])
+	code, err := s.tx.GetOne(kv.Code, codeHash[:])
 	if len(code) == 0 {
 		return nil, nil
 	}

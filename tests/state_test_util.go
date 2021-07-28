@@ -244,7 +244,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 		return nil, common.Hash{}, err
 	}
 	// Generate hashed state
-	c, err := tx.RwCursor(kv.PlainStateBucket)
+	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
 		return nil, common.Hash{}, err
 	}

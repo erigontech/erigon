@@ -15,19 +15,19 @@ import (
 var (
 	BucketConfigs = map[SnapshotType]kv.TableCfg{
 		SnapshotType_bodies: {
-			kv.BlockBody: kv.BucketsConfigs[kv.BlockBody],
-			kv.EthTx:     kv.BucketsConfigs[kv.EthTx],
+			kv.BlockBody: kv.ChaindataTablesCfg[kv.BlockBody],
+			kv.EthTx:     kv.ChaindataTablesCfg[kv.EthTx],
 		},
 		SnapshotType_headers: {
-			kv.Headers: kv.BucketsConfigs[kv.Headers],
+			kv.Headers: kv.ChaindataTablesCfg[kv.Headers],
 		},
 		SnapshotType_state: {
-			kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
-			kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
-			kv.CodeBucket:        kv.BucketsConfigs[kv.CodeBucket],
+			kv.PlainState:        kv.ChaindataTablesCfg[kv.PlainState],
+			kv.PlainContractCode: kv.ChaindataTablesCfg[kv.PlainContractCode],
+			kv.Code:              kv.ChaindataTablesCfg[kv.Code],
 		},
 	}
-	StateSnapshotBuckets = []string{kv.PlainStateBucket, kv.PlainContractCode, kv.CodeBucket}
+	StateSnapshotBuckets = []string{kv.PlainState, kv.PlainContractCode, kv.Code}
 )
 
 func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*SnapshotsInfo) (kv.RwDB, error) {
@@ -35,7 +35,7 @@ func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*Snaps
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
 		cfg := BucketConfigs[k]
-		snapshotKV, err := kv2.NewMDBX(log.New()).Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		snapshotKV, err := kv2.NewMDBX(log.New()).Readonly().Path(v.Dbpath).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return cfg
 		}).Open()
 
