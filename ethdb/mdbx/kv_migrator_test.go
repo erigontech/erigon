@@ -86,14 +86,14 @@ func TestReadOnlyMode(t *testing.T) {
 	logger := log.New()
 	db1 := mdbx.NewMDBX(logger).Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
 	db2 := mdbx.NewMDBX(logger).Readonly().Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	defer db2.Close()

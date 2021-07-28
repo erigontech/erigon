@@ -37,7 +37,7 @@ func BodySnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath s
 	db := kv2.NewMDBX(logger).Path(dbPath).MustOpen()
 	snKV := kv2.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.BlockBody: kv.TableConfigItem{},
+			kv.BlockBody: kv.TableCfgItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 

@@ -336,7 +336,7 @@ var DeprecatedBuckets = []string{
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type TableCfg map[string]TableConfigItem
+type TableCfg map[string]TableCfgItem
 type Bucket string
 
 type DBI uint
@@ -351,7 +351,7 @@ const (
 	ReverseDup TableFlags = 0x40
 )
 
-type TableConfigItem struct {
+type TableCfgItem struct {
 	Flags TableFlags
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
 	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
@@ -408,14 +408,14 @@ func reinit() {
 	for _, name := range ErigonTables {
 		_, ok := BucketsConfigs[name]
 		if !ok {
-			BucketsConfigs[name] = TableConfigItem{}
+			BucketsConfigs[name] = TableCfgItem{}
 		}
 	}
 
 	for _, name := range DeprecatedBuckets {
 		_, ok := BucketsConfigs[name]
 		if !ok {
-			BucketsConfigs[name] = TableConfigItem{}
+			BucketsConfigs[name] = TableCfgItem{}
 		}
 		tmp := BucketsConfigs[name]
 		tmp.IsDeprecated = true

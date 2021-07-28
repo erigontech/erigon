@@ -71,7 +71,7 @@ func TestManagedTx(t *testing.T) {
 	bucket1 := kv.ErigonTables[bucketID]
 	bucket2 := kv.ErigonTables[bucketID+1]
 	writeDBs, readDBs := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return map[string]kv.TableConfigItem{
+		return map[string]kv.TableCfgItem{
 			bucket1: {
 				Flags:                     kv.DupSort,
 				AutoDupSortKeysConversion: true,

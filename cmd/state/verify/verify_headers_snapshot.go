@@ -14,7 +14,7 @@ import (
 func HeadersSnapshot(logger log.Logger, snapshotPath string) error {
 	snKV := mdbx.NewMDBX(logger).Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	var prevHeader *types.Header

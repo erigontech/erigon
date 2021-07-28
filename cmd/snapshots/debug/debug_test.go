@@ -51,9 +51,9 @@ func TestMatreshkaStream(t *testing.T) {
 	os.RemoveAll(tmpDbDir)
 
 	db, err := mdbx.NewMDBX(log.New()).Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		defaultBuckets[AccountDiff] = kv.TableConfigItem{}
-		defaultBuckets[StorageDiff] = kv.TableConfigItem{}
-		defaultBuckets[ContractDiff] = kv.TableConfigItem{}
+		defaultBuckets[AccountDiff] = kv.TableCfgItem{}
+		defaultBuckets[StorageDiff] = kv.TableCfgItem{}
+		defaultBuckets[ContractDiff] = kv.TableCfgItem{}
 		return defaultBuckets
 	}).Open()
 	if err != nil {

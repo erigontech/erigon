@@ -46,7 +46,7 @@ func HeaderSnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath
 
 	snKV := kv2.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 

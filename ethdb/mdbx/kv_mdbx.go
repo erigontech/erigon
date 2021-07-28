@@ -378,7 +378,7 @@ type MdbxCursor struct {
 	tx         *MdbxTx
 	c          *mdbx.Cursor
 	bucketName string
-	bucketCfg  kv.TableConfigItem
+	bucketCfg  kv.TableCfgItem
 	dbi        mdbx.DBI
 	id         uint64
 }

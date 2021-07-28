@@ -51,9 +51,9 @@ func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snaps
 	db = kv2.NewMDBX(logger).Path(dbPath).MustOpen()
 	snkv = kv2.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.PlainState:        kv.TableConfigItem{},
-			kv.PlainContractCode: kv.TableConfigItem{},
-			kv.Code:              kv.TableConfigItem{},
+			kv.PlainState:        kv.TableCfgItem{},
+			kv.PlainContractCode: kv.TableCfgItem{},
+			kv.Code:              kv.TableCfgItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 

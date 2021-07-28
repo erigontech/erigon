@@ -21,7 +21,7 @@ func TestSnapshot2Get(t *testing.T) {
 	logger := log.New()
 	sn1 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
@@ -47,7 +47,7 @@ func TestSnapshot2Get(t *testing.T) {
 
 	sn2 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.BlockBody: kv.TableConfigItem{},
+			kv.BlockBody: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn2.Close()
@@ -200,7 +200,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	logger := log.New()
 	sn1 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.TableConfigItem{},
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
@@ -227,7 +227,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 
 	sn2 := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.BlockBody: kv.TableConfigItem{},
+			kv.BlockBody: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn2.Close()
@@ -1281,7 +1281,7 @@ type KvData struct {
 func GenStateData(data []KvData) (kv.RwDB, error) {
 	snapshot := mdbx.NewMDBX(log.New()).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.PlainState: kv.TableConfigItem{},
+			kv.PlainState: kv.TableCfgItem{},
 		}
 	}).InMem().MustOpen()
 

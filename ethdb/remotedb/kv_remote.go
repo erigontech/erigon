@@ -58,7 +58,7 @@ type remoteCursor struct {
 	stream     remote.KV_TxClient
 	tx         *remoteTx
 	bucketName string
-	bucketCfg  kv.TableConfigItem
+	bucketCfg  kv.TableCfgItem
 	id         uint32
 }
 
