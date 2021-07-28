@@ -4,15 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"runtime"
 	"sort"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -26,10 +22,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var stageExecutionGauge = metrics.NewRegisteredGauge("stage/execution", nil)
@@ -45,7 +46,7 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type ExecuteBlockCfg struct {
-	db                      ethdb.RwKV
+	db                      kv.RwDB
 	batchSize               datasize.ByteSize
 	prune                   prune.Mode
 	changeSetHook           ChangeSetHook
@@ -59,7 +60,7 @@ type ExecuteBlockCfg struct {
 }
 
 func StageExecuteBlocksCfg(
-	kv ethdb.RwKV,
+	kv kv.RwDB,
 	prune prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
@@ -86,7 +87,7 @@ func StageExecuteBlocksCfg(
 	}
 }
 
-func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
+func readBlock(blockNum uint64, tx kv.Tx) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -97,7 +98,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 
 func executeBlock(
 	block *types.Block,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	batch ethdb.Database,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
@@ -173,11 +174,11 @@ func executeBlock(
 				}
 			}
 			if j == 0 {
-				if err = tx.Append(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+				if err = tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			} else {
-				if err = tx.AppendDup(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+				if err = tx.AppendDup(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			}
@@ -190,7 +191,7 @@ func executeBlock(
 
 func newStateReaderWriter(
 	batch ethdb.Database,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	blockNum uint64,
 	blockHash common.Hash,
 	writeChangesets bool,
@@ -218,7 +219,7 @@ func newStateReaderWriter(
 	return stateReader, stateWriter
 }
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -252,7 +253,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	}
 
 	var batch ethdb.DbWithPendingMutations
-	batch = kv.NewBatch(tx, quit)
+	batch = olddb.NewBatch(tx, quit)
 	defer batch.Rollback()
 
 	logEvery := time.NewTicker(logInterval)
@@ -300,16 +301,16 @@ Loop:
 			if err = tx.Commit(); err != nil {
 				return err
 			}
-			if cfg.db.(*kv.SnapshotKV).TempDB() != nil {
+			if cfg.db.(*snapshotdb.SnapshotKV).TempDB() != nil {
 				log.Error("Unexpected tmp db")
 			}
 
-			tmpDB, err := snapshotsync.CreateStateSnapshot(ctx, cfg.tmpdir+"tmpdb")
+			tmpDB, err := snapshotsync.CreateStateSnapshot(ctx, cfg.tmpdir+"tmpdb", log.New())
 			if err != nil {
 				return err
 			}
 			//todo[Boris]: remove PlainContractCodeBucket
-			cfg.db.(*kv.SnapshotKV).SetTempDB(tmpDB, []string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket})
+			cfg.db.(*snapshotdb.SnapshotKV).SetTempDB(tmpDB, []string{kv.PlainStateBucket, kv.CodeBucket, kv.PlainContractCode})
 			tx, err = cfg.db.BeginRw(context.Background())
 			if err != nil {
 				return err
@@ -318,7 +319,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = kv.NewBatch(tx, quit)
+			batch = olddb.NewBatch(tx, quit)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
@@ -353,7 +354,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = kv.NewBatch(tx, quit)
+			batch = olddb.NewBatch(tx, quit)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
@@ -387,7 +388,7 @@ Loop:
 	return stoppedErr
 }
 
-func pruneChangeSets(tx ethdb.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+func pruneChangeSets(tx kv.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
 	c, err := tx.RwCursorDupSort(table)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
@@ -439,7 +440,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTx, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	quit := ctx.Done()
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
@@ -470,9 +471,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx cont
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	logPrefix := s.LogPrefix()
-	stateBucket := dbutils.PlainStateBucket
+	stateBucket := kv.PlainStateBucket
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
 	var accumulator *shards.Accumulator
@@ -508,7 +509,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 				if original != nil {
 					// clean up all the code incarnations original incarnation and the new one
 					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-						err = tx.Delete(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), nil)
+						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), nil)
 						if err != nil {
 							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
 						}
@@ -572,10 +573,10 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 			return err
 		}
 		go func() {
-			cfg.db.(*kv.SnapshotKV).TempDB().Close()
+			cfg.db.(*snapshotdb.SnapshotKV).TempDB().Close()
 			log.Info("Temp database closed")
 		}()
-		cfg.db.(*kv.SnapshotKV).SetTempDB(nil, nil)
+		cfg.db.(*snapshotdb.SnapshotKV).SetTempDB(nil, nil)
 		//todo[Boris] Add stateStream support
 		errRewind := changeset.RewindData(tx, snapshotBlock, u.UnwindPoint, changes, quit)
 		if errRewind != nil {
@@ -599,7 +600,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 
 	// Truncate CallTraceSet
 	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
-	c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err
 	}
@@ -617,11 +618,11 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	return nil
 }
 
-func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Tx, key []byte) {
+func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 	var address common.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
+		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}
@@ -634,7 +635,7 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -649,10 +650,10 @@ func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
-		if err = pruneChangeSets(tx, logPrefix, dbutils.AccountChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, kv.AccountChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
-		if err = pruneChangeSets(tx, logPrefix, dbutils.StorageChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, kv.StorageChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
@@ -679,8 +680,8 @@ func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	return nil
 }
 
-func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursor(dbutils.Receipts)
+func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursor(kv.Receipts)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -697,7 +698,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Receipts, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Receipts, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -707,7 +708,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 	}
 
-	c, err = tx.RwCursor(dbutils.Log)
+	c, err = tx.RwCursor(kv.Log)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -723,7 +724,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Log, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Log, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -735,8 +736,8 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 	return nil
 }
 
-func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+func pruneCallTracesSet(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -752,7 +753,7 @@ func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEver
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.CallTraceSet, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
