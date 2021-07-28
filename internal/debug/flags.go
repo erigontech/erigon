@@ -240,10 +240,10 @@ func Setup(ctx *cli.Context) error {
 	//var ostream log.Handler
 	//output := io.Writer(os.Stderr)
 	if ctx.GlobalBool(logjsonFlag.Name) {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.JsonFormat())))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.GlobalInt(verbosityFlag.Name)), log.StreamHandler(os.Stderr, log.JsonFormat())))
 		//ostream = log.StreamHandler(output, log.JsonFormat())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.GlobalInt(verbosityFlag.Name)), log.StderrHandler))
 	}
 	//log.Root().SetHandler(ostream)
 
