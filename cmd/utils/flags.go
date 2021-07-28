@@ -1251,7 +1251,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
 	default:
-		Fatalf("Chain name is not recognized: %s", chain)
+		Fatalf("ChainDB name is not recognized: %s", chain)
 	}
 }
 
@@ -1286,7 +1286,7 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(cfg *node.Config) kv.RwDB {
-	chainDb, err := node.OpenDatabase(cfg, kv.Chain)
+	chainDb, err := node.OpenDatabase(cfg, kv.ChainDB)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}

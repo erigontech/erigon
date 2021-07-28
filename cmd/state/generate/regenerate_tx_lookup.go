@@ -10,13 +10,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 func RegenerateTxLookup(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

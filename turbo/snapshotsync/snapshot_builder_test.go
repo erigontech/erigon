@@ -23,8 +23,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
 )
@@ -44,6 +45,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -69,7 +71,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	defer btCli.Close()
 	btCli.trackers = [][]string{}
 
-	db := snapshotdb.NewSnapshotKV().DB(olddb.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -113,7 +115,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 
 		}
 
-		err = sb.AsyncStages(currentSnapshotBlock, db, tx, btCli, true)
+		err = sb.AsyncStages(currentSnapshotBlock, logger, db, tx, btCli, true)
 		if err != nil {
 			t.Error(err)
 		}
@@ -382,6 +384,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -407,7 +410,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	btCli.trackers = [][]string{}
 	defer btCli.Close()
 
-	db := snapshotdb.NewSnapshotKV().DB(olddb.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 
 	sb := &SnapshotMigrator{
@@ -458,7 +461,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		}
 		defer rotx.Rollback()
 
-		err = sb.AsyncStages(currentSnapshotBlock, db, rotx, btCli, false)
+		err = sb.AsyncStages(currentSnapshotBlock, logger, db, rotx, btCli, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1021,6 +1024,7 @@ func TestPruneBlocks(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -1045,7 +1049,7 @@ func TestPruneBlocks(t *testing.T) {
 	btCli.trackers = [][]string{}
 	defer btCli.Close()
 
-	db := snapshotdb.NewSnapshotKV().DB(olddb.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1072,12 +1076,12 @@ func TestPruneBlocks(t *testing.T) {
 	defer readTX.Rollback()
 
 	bodySnapshotPath := filepath.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	err = CreateBodySnapshot(readTX, logger, snapshotTo, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	readTX.Rollback()
-	kvSnapshot, err := OpenBodiesSnapshot(bodySnapshotPath)
+	kvSnapshot, err := OpenBodiesSnapshot(logger, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1178,13 +1182,13 @@ func TestPruneBlocks(t *testing.T) {
 	}
 	defer readTX.Rollback()
 
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	err = CreateBodySnapshot(readTX, logger, snapshotTo, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	readTX.Rollback()
 
-	kvSnapshot, err = OpenBodiesSnapshot(bodySnapshotPath)
+	kvSnapshot, err = OpenBodiesSnapshot(logger, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1289,6 +1293,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -1318,7 +1323,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		replaceChan:  make(chan struct{}),
 	}
 
-	db := snapshotdb.NewSnapshotKV().DB(olddb.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -1363,7 +1368,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		}
 		defer rotx.Rollback()
 
-		err = sb.AsyncStages(currentSnapshotBlock, db, rotx, btCli, false)
+		err = sb.AsyncStages(currentSnapshotBlock, logger, db, rotx, btCli, false)
 		if err != nil {
 			t.Fatal(err)
 		}

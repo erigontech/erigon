@@ -8,7 +8,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 )
 
 var (
@@ -20,7 +20,7 @@ var (
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
-	db := olddb.MustOpen(dir + "/db")
+	db := mdbx.MustOpen(dir + "/db")
 	sn := &SNDownloaderServer{
 		db: db,
 	}

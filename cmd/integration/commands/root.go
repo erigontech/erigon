@@ -36,9 +36,9 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDB(path string, applyMigrations bool) kv.RwDB {
-	label := kv.Chain
-	db := openKV(label, path, false)
+func openDB(path string, logger log.Logger, applyMigrations bool) kv.RwDB {
+	label := kv.ChainDB
+	db := openKV(label, logger, path, false)
 	if applyMigrations {
 		has, err := migrations.NewMigrator(label).HasPendingMigrations(db)
 		if err != nil {
@@ -47,25 +47,24 @@ func openDB(path string, applyMigrations bool) kv.RwDB {
 		if has {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
-			db = openKV(label, path, true)
+			db = openKV(label, logger, path, true)
 			if err := migrations.NewMigrator(label).Apply(db, datadir); err != nil {
 				panic(err)
 			}
 			db.Close()
-			db = openKV(label, path, false)
+			db = openKV(label, logger, path, false)
 		}
 	}
 	return db
 }
 
-func openKV(label kv.Label, path string, exclusive bool) kv.RwDB {
-	opts := kv2.NewMDBX().Path(path).Label(label)
+func openKV(label kv.Label, logger log.Logger, path string, exclusive bool) kv.RwDB {
+	opts := kv2.NewMDBX(logger).Path(path).Label(label)
 	if exclusive {
 		opts = opts.Exclusive()
 	}
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}
-	kv := opts.MustOpen()
-	return kv
+	return opts.MustOpen()
 }

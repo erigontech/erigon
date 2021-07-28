@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/spf13/cobra"
 )
@@ -32,11 +33,11 @@ var generateStateSnapshotCmd = &cobra.Command{
 	Short:   "Generate state snapshot",
 	Example: "go run ./cmd/state/main.go stateSnapshot --block 11000000 --datadir /media/b00ris/nvme/tgstaged/ --snapshot /media/b00ris/nvme/snapshots/state",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return GenerateStateSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+		return GenerateStateSnapshot(cmd.Context(), log.New(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
 }
 
-func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
+func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	if snapshotPath == "" {
 		return errors.New("empty snapshot path")
 	}
@@ -47,8 +48,8 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	}
 	var db, snkv kv.RwDB
 
-	db = kv2.NewMDBX().Path(dbPath).MustOpen()
-	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db = kv2.NewMDBX(logger).Path(dbPath).MustOpen()
+	snkv = kv2.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.PlainStateBucket:  kv.TableConfigItem{},
 			kv.PlainContractCode: kv.TableConfigItem{},
@@ -158,5 +159,5 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	}
 	fmt.Println("took", time.Since(t))
 
-	return VerifyStateSnapshot(ctx, dbPath, snapshotFile, block)
+	return VerifyStateSnapshot(ctx, logger, dbPath, snapshotFile, block)
 }

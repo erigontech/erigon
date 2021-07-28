@@ -14,11 +14,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 )
 
 func IndexStats(chaindata string, indexBucket string, statsFile string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	startTime := time.Now()
 	lenOfKey := common.AddressLength
 	if strings.HasPrefix(indexBucket, kv.StorageHistory) {

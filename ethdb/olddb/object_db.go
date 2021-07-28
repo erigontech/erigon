@@ -24,9 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 // ObjectDatabase - is an object-style interface of DB accessing
@@ -40,30 +38,6 @@ func NewObjectDatabase(kv kv.RwDB) *ObjectDatabase {
 	return &ObjectDatabase{
 		kv: kv,
 	}
-}
-
-func MustOpen(path string) kv.RwDB {
-	db, err := Open(path, false)
-	if err != nil {
-		panic(err)
-	}
-	return db
-}
-
-// Open - main method to open database.
-func Open(path string, readOnly bool) (kv.RwDB, error) {
-	var db kv.RwDB
-	var err error
-	opts := mdbx2.NewMDBX().Path(path)
-	if readOnly {
-		opts = opts.Flags(func(flags uint) uint { return flags | mdbx.Readonly })
-	}
-	db, err = opts.Open()
-
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
 }
 
 // Put inserts or updates a single entry.

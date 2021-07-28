@@ -53,7 +53,7 @@ import (
 // - if you need migrate multiple buckets - create separate migration for each bucket
 // - write test where apply migration twice
 var migrations = map[kv.Label][]Migration{
-	kv.Chain: {
+	kv.ChainDB: {
 		headerPrefixToSeparateBuckets,
 		removeCliqueBucket,
 		dbSchemaVersion,
@@ -61,8 +61,8 @@ var migrations = map[kv.Label][]Migration{
 		fixSequences,
 		storageMode,
 	},
-	kv.TxPool: {},
-	kv.Sentry: {},
+	kv.TxPoolDB: {},
+	kv.SentryDB: {},
 }
 
 type Callback func(tx kv.RwTx, progress []byte, isDone bool) error

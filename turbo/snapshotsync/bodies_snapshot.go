@@ -98,8 +98,8 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX kv.Tx, writeTX kv.RwTx, 
 	return nil
 }
 
-func CreateBodySnapshot(readTx kv.Tx, lastBlock uint64, snapshotPath string) error {
-	kv, err := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+func CreateBodySnapshot(readTx kv.Tx, logger log.Logger, lastBlock uint64, snapshotPath string) error {
+	db, err := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.BlockBody: kv.BucketsConfigs[kv.BlockBody],
 			kv.EthTx:     kv.BucketsConfigs[kv.EthTx],
@@ -109,8 +109,8 @@ func CreateBodySnapshot(readTx kv.Tx, lastBlock uint64, snapshotPath string) err
 		return err
 	}
 
-	defer kv.Close()
-	writeTX, err := kv.BeginRw(context.Background())
+	defer db.Close()
+	writeTX, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -122,8 +122,8 @@ func CreateBodySnapshot(readTx kv.Tx, lastBlock uint64, snapshotPath string) err
 	return writeTX.Commit()
 }
 
-func OpenBodiesSnapshot(dbPath string) (kv.RoDB, error) {
-	return mdbx.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+func OpenBodiesSnapshot(logger log.Logger, dbPath string) (kv.RoDB, error) {
+	return mdbx.NewMDBX(logger).Path(dbPath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.BlockBody: kv.BucketsConfigs[kv.BlockBody],
 			kv.EthTx:     kv.BucketsConfigs[kv.EthTx],

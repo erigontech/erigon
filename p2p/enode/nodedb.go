@@ -81,10 +81,11 @@ type DB struct {
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
 func OpenDB(path string) (*DB, error) {
+	logger := log.New() //TODO: move higher
 	if path == "" {
-		return newMemoryDB()
+		return newMemoryDB(logger)
 	}
-	return newPersistentDB(path)
+	return newPersistentDB(logger, path)
 }
 
 var bucketsConfig = func(defaultBuckets kv.TableCfg) kv.TableCfg {
@@ -94,10 +95,10 @@ var bucketsConfig = func(defaultBuckets kv.TableCfg) kv.TableCfg {
 }
 
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
-func newMemoryDB() (*DB, error) {
+func newMemoryDB(logger log.Logger) (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	db.kv, err = mdbx.NewMDBX().InMem().Label(kv.Sentry).WithBucketsConfig(bucketsConfig).Open()
+	db.kv, err = mdbx.NewMDBX(logger).InMem().Label(kv.SentryDB).WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -106,10 +107,10 @@ func newMemoryDB() (*DB, error) {
 
 // newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
-func newPersistentDB(path string) (*DB, error) {
+func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	var db kv.RwDB
 	var err error
-	db, err = mdbx.NewMDBX().Path(path).Label(kv.Sentry).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
+	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(64 * datasize.MB).WithBucketsConfig(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +144,7 @@ func newPersistentDB(path string) (*DB, error) {
 		if err := os.Remove(path); err != nil {
 			return nil, err
 		}
-		return newPersistentDB(path)
+		return newPersistentDB(logger, path)
 	}
 	return &DB{kv: db, quit: make(chan struct{})}, nil
 }

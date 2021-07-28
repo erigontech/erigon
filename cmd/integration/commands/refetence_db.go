@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -76,7 +75,8 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		err := mdbxToMdbx(ctx, chaindata, toChaindata)
+		logger := log.New()
+		err := mdbxToMdbx(ctx, logger, chaindata, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -90,7 +90,8 @@ var cmdFToMdbx = &cobra.Command{
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		err := fToMdbx(ctx, toChaindata)
+		logger := log.New()
+		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -126,10 +127,10 @@ func init() {
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx2.MustOpen(chaindata)
 	defer db.Close()
 
-	refDB := olddb.MustOpen(referenceChaindata)
+	refDB := mdbx2.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -152,10 +153,10 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 	return nil
 }
 func compareBucketBetweenDatabases(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx2.MustOpen(chaindata)
 	defer db.Close()
 
-	refDB := olddb.MustOpen(referenceChaindata)
+	refDB := mdbx2.MustOpen(referenceChaindata)
 	defer refDB.Close()
 
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -243,14 +244,14 @@ func compareBuckets(ctx context.Context, tx kv.Tx, b string, refTx kv.Tx, refB s
 	return nil
 }
 
-func fToMdbx(ctx context.Context, to string) error {
+func fToMdbx(ctx context.Context, logger log.Logger, to string) error {
 	file, err := os.Open(file)
 	if err != nil {
 		panic(err)
 	}
 	defer file.Close()
 
-	dst := mdbx2.NewMDBX().Path(to).MustOpen()
+	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
 	dstTx, err1 := dst.BeginRw(ctx)
 	if err1 != nil {
 		return err1
@@ -343,10 +344,10 @@ MainLoop:
 	return nil
 }
 
-func mdbxToMdbx(ctx context.Context, from, to string) error {
+func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	_ = os.RemoveAll(to)
-	src := mdbx2.NewMDBX().Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
-	dst := mdbx2.NewMDBX().Path(to).MustOpen()
+	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
+	dst := mdbx2.NewMDBX(logger).Path(to).MustOpen()
 	return kv2kv(ctx, src, dst)
 }
 

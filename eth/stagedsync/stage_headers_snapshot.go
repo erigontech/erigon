@@ -18,14 +18,16 @@ type SnapshotHeadersCfg struct {
 	snapshotDir      string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
+	log              log.Logger
 }
 
-func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotHeadersCfg {
+func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, logger log.Logger) SnapshotHeadersCfg {
 	return SnapshotHeadersCfg{
 		db:               db,
 		snapshotDir:      snapshot.Dir,
 		client:           client,
 		snapshotMigrator: snapshotMigrator,
+		log:              logger,
 	}
 }
 
@@ -64,7 +66,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 		return nil
 	}
 
-	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.db, readTX, cfg.client, false)
+	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.log, cfg.db, readTX, cfg.client, false)
 	if err != nil {
 		return err
 	}

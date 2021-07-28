@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 
@@ -29,25 +30,26 @@ var verifyStateSnapshotCmd = &cobra.Command{
 	Short:   "Verify state snapshot",
 	Example: "go run cmd/snapshots/generator/main.go verify_state --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state/ --datadir /media/b00ris/nvme/backup/snapshotsync/",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return VerifyStateSnapshot(cmd.Context(), chaindata, snapshotFile, block)
+		logger := log.New()
+		return VerifyStateSnapshot(cmd.Context(), logger, chaindata, snapshotFile, block)
 	},
 }
 
-func VerifyStateSnapshot(ctx context.Context, dbPath, snapshotPath string, block uint64) error {
+func VerifyStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath string, block uint64) error {
 	var snkv, tmpDB kv.RwDB
 	tmpPath, err := ioutil.TempDir(os.TempDir(), "vrf*")
 	if err != nil {
 		return err
 	}
 
-	snkv = mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	snkv = mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
 			kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
 			kv.CodeBucket:        kv.BucketsConfigs[kv.CodeBucket],
 		}
 	}).Path(snapshotPath).Readonly().MustOpen()
-	tmpDB = mdbx.NewMDBX().Path(tmpPath).MustOpen()
+	tmpDB = mdbx.NewMDBX(logger).Path(tmpPath).MustOpen()
 
 	defer os.RemoveAll(tmpPath)
 	defer tmpDB.Close()

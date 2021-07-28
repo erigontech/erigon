@@ -38,7 +38,7 @@ func TestHeaderPrefix(t *testing.T) {
 	})
 	require.NoError(err)
 
-	migrator := NewMigrator(kv.Chain)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = []Migration{headerPrefixToSeparateBuckets}
 	err = migrator.Apply(db, t.TempDir())
 	require.NoError(err)

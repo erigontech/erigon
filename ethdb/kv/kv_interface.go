@@ -65,18 +65,18 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	Chain  Label = 0
-	TxPool Label = 1
-	Sentry Label = 2
+	ChainDB  Label = 0
+	TxPoolDB Label = 1
+	SentryDB Label = 2
 )
 
 func (l Label) String() string {
 	switch l {
-	case Chain:
+	case ChainDB:
 		return "chaindata"
-	case TxPool:
+	case TxPoolDB:
 		return "txpool"
-	case Sentry:
+	case SentryDB:
 		return "sentry"
 	default:
 		return "unknown"

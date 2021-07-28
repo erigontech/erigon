@@ -46,7 +46,7 @@ type SnapshotMigrator struct {
 	replaced                   uint64
 }
 
-func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX kv.Tx, bittorrent *Client, async bool) error {
+func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, logger log.Logger, dbi kv.RwDB, rwTX kv.Tx, bittorrent *Client, async bool) error {
 	if atomic.LoadUint64(&sm.started) > 0 {
 		return nil
 	}
@@ -97,14 +97,14 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX
 	case "bodies":
 		initialStages = []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error{
 			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
-				return CreateBodySnapshot(tx, toBlock, snapshotPath)
+				return CreateBodySnapshot(tx, logger, toBlock, snapshotPath)
 			},
 			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 				//replace snapshot
 				if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
 				}
-				snapshotKV, err := OpenBodiesSnapshot(snapshotPath)
+				snapshotKV, err := OpenBodiesSnapshot(logger, snapshotPath)
 				if err != nil {
 					return err
 				}

@@ -11,7 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -21,7 +21,7 @@ type Walker interface {
 }
 
 func CheckEnc(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	var (
 		currentSize uint64

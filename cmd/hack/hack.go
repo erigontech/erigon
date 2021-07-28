@@ -25,8 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	mdbx "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
@@ -306,7 +305,7 @@ func mychart() {
 }
 
 func bucketStats(chaindata string) error {
-	ethDb := olddb.MustOpen(chaindata)
+	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 
 	var bucketList []string
@@ -324,7 +323,7 @@ func bucketStats(chaindata string) error {
 
 	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 	switch db := ethDb.(type) {
-	case *kv2.MdbxKV:
+	case *mdbx.MdbxKV:
 		type MdbxStat interface {
 			BucketStat(name string) (*mdbx.Stat, error)
 		}
@@ -556,7 +555,7 @@ func trieChart() {
 }
 
 func dbSlice(chaindata string, bucket string, prefix []byte) {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(bucket)
@@ -626,7 +625,7 @@ func printFullNodeRLPs() {
 
 // Searches 1000 blocks from the given one to try to find the one with the given state root hash
 func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
-	ethDb := olddb.MustOpen(chaindata)
+	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
 		blocksToSearch := 10000000
@@ -648,7 +647,7 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 }
 
 func printCurrentBlockNumber(chaindata string) {
-	ethDb := olddb.MustOpen(chaindata)
+	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 	ethDb.View(context.Background(), func(tx kv.Tx) error {
 		hash := rawdb.ReadHeadBlockHash(tx)
@@ -659,7 +658,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func printTxHashes() {
-	db := olddb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
+	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		for b := uint64(0); b < uint64(100000); b++ {
@@ -702,7 +701,7 @@ func invTree(wrong, right, diff string, name string) {
 }
 
 func readAccount(chaindata string, account common.Address) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 
 	tx, txErr := db.BeginRo(context.Background())
@@ -736,7 +735,7 @@ func readAccount(chaindata string, account common.Address) error {
 }
 
 func nextIncarnation(chaindata string, addrHash common.Hash) {
-	ethDb := olddb.MustOpen(chaindata)
+	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 	var found bool
 	var incarnationBytes [common.IncarnationLength]byte
@@ -764,9 +763,9 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 }
 
 func repairCurrent() {
-	historyDb := olddb.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
+	historyDb := mdbx.MustOpen("/Volumes/tb4/erigon/ropsten/geth/chaindata")
 	defer historyDb.Close()
-	currentDb := olddb.MustOpen("statedb")
+	currentDb := mdbx.MustOpen("statedb")
 	defer currentDb.Close()
 	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
 		return tx.ClearBucket(kv.HashedStorage)
@@ -801,7 +800,7 @@ func repairCurrent() {
 }
 
 func dumpStorage() {
-	db := olddb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
+	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		return tx.ForEach(kv.StorageHistory, nil, func(k, v []byte) error {
@@ -814,7 +813,7 @@ func dumpStorage() {
 }
 
 func printBucket(chaindata string) {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	f, err := os.Create("bucket.txt")
 	tool.Check(err)
@@ -839,7 +838,7 @@ func printBucket(chaindata string) {
 }
 
 func ValidateTxLookups2(chaindata string) {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -900,7 +899,7 @@ func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 func getModifiedAccounts(chaindata string) {
 	// TODO(tjayrush): The call to GetModifiedAccounts needs a database tx
 	fmt.Println("hack - getModiiedAccounts is temporarily disabled.")
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tool.Check(db.View(context.Background(), func(tx kv.Tx) error {
 		addrs, err := changeset.GetModifiedAccounts(tx, 49300, 49400)
@@ -973,7 +972,7 @@ func (r *Receiver) Result() trie.SubTries {
 }
 
 func regenerate(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1007,7 +1006,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	storageKeys := []string{}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err1 := db.BeginRo(context.Background())
 	if err1 != nil {
@@ -1148,7 +1147,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 }
 
 func dumpState(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	f, err := os.Create("statedump")
 	if err != nil {
@@ -1201,7 +1200,7 @@ func dumpState(chaindata string) error {
 }
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 
 	fmt.Printf("State stats\n")
@@ -1268,7 +1267,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 
 func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching changesets\n")
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err1 := db.BeginRw(context.Background())
 	if err1 != nil {
@@ -1289,7 +1288,7 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 
 func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 	fmt.Printf("Searching storage changesets\n")
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err1 := db.BeginRw(context.Background())
 	if err1 != nil {
@@ -1310,7 +1309,7 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 
 func supply(chaindata string) error {
 	startTime := time.Now()
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	count := 0
 	supply := uint256.NewInt(0)
@@ -1345,7 +1344,7 @@ func supply(chaindata string) error {
 }
 
 func extractCode(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	var contractCount int
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
@@ -1370,7 +1369,7 @@ func extractCode(chaindata string) error {
 }
 
 func iterateOverCode(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	var contractCount int
 	var contractKeyTotalLength int
@@ -1420,7 +1419,7 @@ func mint(chaindata string, block uint64) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1504,7 +1503,7 @@ func mint(chaindata string, block uint64) error {
 }
 
 func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 
 	f, err := os.Create(fmt.Sprintf("preverified_hashes_%s.go", name))
@@ -1545,7 +1544,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 }
 
 func extractHeaders(chaindata string, block uint64) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -1574,7 +1573,7 @@ func extractHeaders(chaindata string, block uint64) error {
 }
 
 func extractBodies(chaindata string, block uint64) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -1601,7 +1600,7 @@ func extractBodies(chaindata string, block uint64) error {
 
 func fixUnwind(chaindata string) error {
 	contractAddr := common.HexToAddress("0x577a32aa9c40cf4266e49fc1e44c749c356309bd")
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tool.Check(db.Update(context.Background(), func(tx kv.RwTx) error {
 		i, err := tx.GetOne(kv.IncarnationMap, contractAddr[:])
@@ -1623,7 +1622,7 @@ func fixUnwind(chaindata string) error {
 }
 
 func snapSizes(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 
 	tx, err := db.BeginRo(context.Background())
@@ -1672,7 +1671,7 @@ func snapSizes(chaindata string) error {
 }
 
 func readCallTraces(chaindata string, block uint64) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1718,7 +1717,7 @@ func readCallTraces(chaindata string, block uint64) error {
 }
 
 func fixTd(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1774,7 +1773,7 @@ func fixTd(chaindata string) error {
 }
 
 func advanceExec(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1802,7 +1801,7 @@ func advanceExec(chaindata string) error {
 }
 
 func backExec(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1830,7 +1829,7 @@ func backExec(chaindata string) error {
 }
 
 func fixState(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1876,7 +1875,7 @@ func fixState(chaindata string) error {
 }
 
 func trimTxs(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1969,7 +1968,7 @@ func trimTxs(chaindata string) error {
 }
 
 func scanTxs(chaindata string) error {
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -2007,7 +2006,7 @@ func scanTxs(chaindata string) error {
 }
 
 func scanReceipts3(chaindata string, block uint64) error {
-	dbdb := olddb.MustOpen(chaindata)
+	dbdb := mdbx.MustOpen(chaindata)
 	defer dbdb.Close()
 	tx, err := dbdb.BeginRw(context.Background())
 	if err != nil {
@@ -2032,7 +2031,7 @@ func scanReceipts2(chaindata string) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	dbdb := olddb.MustOpen(chaindata)
+	dbdb := mdbx.MustOpen(chaindata)
 	defer dbdb.Close()
 	tx, err := dbdb.BeginRw(context.Background())
 	if err != nil {
@@ -2097,7 +2096,7 @@ func scanReceipts(chaindata string, block uint64) error {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	db := olddb.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -19,7 +20,7 @@ import (
 
 func TestHeadersGenerateIndex(t *testing.T) {
 	snPath := t.TempDir()
-	snKV := mdbx2.NewMDBX().Path(snPath).MustOpen()
+	snKV := mdbx2.NewMDBX(log.New()).Path(snPath).MustOpen()
 	defer os.RemoveAll(snPath)
 	headers := generateHeaders(10)
 	err := snKV.Update(context.Background(), func(tx kv.RwTx) error {
@@ -40,7 +41,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 	snKV.Close()
 
-	db := mdbx2.NewMDBX().InMem().WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
+	db := mdbx2.NewMDBX(log.New()).InMem().WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
 	defer db.Close()
 	//we need genesis
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
@@ -50,7 +51,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snKV = mdbx2.NewMDBX().Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
+	snKV = mdbx2.NewMDBX(log.New()).Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
 	defer snKV.Close()
 
 	snKV = snapshotdb.NewSnapshotKV().HeadersSnapshot(snKV).DB(db).Open()

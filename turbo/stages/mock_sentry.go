@@ -143,6 +143,7 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 }
 
 func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine) *MockSentry {
+	logger := log.New()
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -241,7 +242,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				cfg.BatchSize,
 			),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
+			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil, logger),
 			stagedsync.StageBodiesCfg(
 				mock.DB,
 				mock.downloader.Bd,
@@ -295,7 +296,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.StreamWg.Wait()
 				mock.TxPoolP2PServer.TxFetcher.Start()
 			}),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil, logger),
 			true, /* test */
 		),
 		stagedsync.DefaultUnwindOrder,

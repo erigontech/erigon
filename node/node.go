@@ -488,84 +488,12 @@ func (n *Node) WSEndpoint() string {
 	return "ws://" + n.ws.listenAddr() + n.ws.wsConfig.prefix
 }
 
-// OpenDatabase opens an existing database with the given name (or creates one if no
-// previous can be found) from within the node's instance directory. If the node is
-// ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwDB, error) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state == closedState {
-		return nil, ErrNodeStopped
-	}
-
+func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
 	var name string
 	switch label {
-	case kv.Chain:
+	case kv.ChainDB:
 		name = "chaindata"
-	case kv.TxPool:
-		name = "txpool"
-	default:
-		name = "test"
-	}
-	var db kv.RwDB
-	if n.config.DataDir == "" {
-		db = memdb.New()
-		n.databases = append(n.databases, db)
-		return db, nil
-	}
-	dbPath := n.config.ResolvePath(name)
-
-	var openFunc func(exclusive bool) (kv.RwDB, error)
-	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (kv.RwDB, error) {
-		opts := mdbx.NewMDBX().Path(dbPath).Label(label).DBVerbosity(n.config.DatabaseVerbosity)
-		if exclusive {
-			opts = opts.Exclusive()
-		}
-		mdbxDB, err1 := opts.Open()
-		if err1 != nil {
-			return nil, err1
-		}
-		return mdbxDB, nil
-	}
-	var err error
-	db, err = openFunc(false)
-	if err != nil {
-		return nil, err
-	}
-	migrator := migrations.NewMigrator(label)
-	has, err := migrator.HasPendingMigrations(db)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		log.Info("Re-Opening DB in exclusive mode to apply migrations")
-		db.Close()
-		db, err = openFunc(true)
-		if err != nil {
-			return nil, err
-		}
-		if err = migrator.Apply(db, datadir); err != nil {
-			return nil, err
-		}
-		db.Close()
-		db, err = openFunc(false)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	n.databases = append(n.databases, db)
-	return db, nil
-}
-
-func OpenDatabase(config *Config, label kv.Label) (kv.RwDB, error) {
-	var name string
-	switch label {
-	case kv.Chain:
-		name = "chaindata"
-	case kv.TxPool:
+	case kv.TxPoolDB:
 		name = "txpool"
 	default:
 		name = "test"
@@ -580,15 +508,11 @@ func OpenDatabase(config *Config, label kv.Label) (kv.RwDB, error) {
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
-		opts := mdbx.NewMDBX().Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
+		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
-		kv, err1 := opts.Open()
-		if err1 != nil {
-			return nil, err1
-		}
-		return kv, nil
+		return opts.Open()
 	}
 	var err error
 	db, err = openFunc(false)

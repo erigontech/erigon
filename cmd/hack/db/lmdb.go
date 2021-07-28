@@ -21,6 +21,8 @@ import (
 	"github.com/ledgerwatch/erigon/log"
 )
 
+var logger = log.New()
+
 const (
 	PageSize               = 4096
 	MdbxMagic       uint64 = 0x59659DBDEF4C11
@@ -777,7 +779,7 @@ func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.
 	}
 	defer os.RemoveAll(dir)
 	var db kv.RwDB
-	db, err = kv2.NewMDBX().Path(dir).WithBucketsConfig(func(kv.TableCfg) kv.TableCfg {
+	db, err = kv2.NewMDBX(logger).Path(dir).WithBucketsConfig(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
 	}).Open()
 	if err != nil {

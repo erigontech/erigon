@@ -22,10 +22,12 @@ import (
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 func New() kv.RwDB {
-	return mdbx.NewMDBX().InMem().MustOpen()
+	logger := log.New() //TODO: move higher
+	return mdbx.NewMDBX(logger).InMem().MustOpen()
 }
 
 func NewTestDB(t testing.TB) kv.RwDB {

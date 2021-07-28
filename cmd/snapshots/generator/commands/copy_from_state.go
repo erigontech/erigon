@@ -8,7 +8,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -27,12 +26,12 @@ var copyFromStateSnapshotCmd = &cobra.Command{
 	Short:   "Copy from state snapshot",
 	Example: "go run cmd/snapshots/generator/main.go state_copy --block 11000000 --snapshot /media/b00ris/nvme/snapshots/state --datadir /media/b00ris/nvme/backup/snapshotsync",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return CopyFromState(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+		return CopyFromState(cmd.Context(), log.New(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
 }
 
-func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, block uint64, snapshotDir, snapshotMode string) error {
-	db, err := olddb.Open(dbpath, true)
+func CopyFromState(ctx context.Context, logger log.Logger, dbpath string, snapshotPath string, block uint64, snapshotDir, snapshotMode string) error {
+	db, err := mdbx.Open(dbpath, true)
 	if err != nil {
 		return err
 	}
@@ -48,7 +47,7 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	if err != nil {
 		return err
 	}
-	snkv := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	snkv := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
 			kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
@@ -125,5 +124,5 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	defer func() {
 		log.Info("Verify end", "t", time.Since(tt))
 	}()
-	return VerifyStateSnapshot(ctx, dbpath, snapshotPath, block)
+	return VerifyStateSnapshot(ctx, logger, dbpath, snapshotPath, block)
 }

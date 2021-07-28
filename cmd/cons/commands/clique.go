@@ -50,11 +50,12 @@ var cliqueCmd = &cobra.Command{
 	Short: "Run clique consensus engine",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		return cliqueEngine(ctx)
+		logger := log.New()
+		return cliqueEngine(ctx, logger)
 	},
 }
 
-func cliqueEngine(ctx context.Context) error {
+func cliqueEngine(ctx context.Context, logger log.Logger) error {
 	var server *CliqueServerImpl
 	var err error
 	if config == "test" {
@@ -85,7 +86,7 @@ func cliqueEngine(ctx context.Context) error {
 			return err
 		}
 	}
-	server.db = openDatabase(filepath.Join(datadir, "clique", "db"))
+	server.db = openDB(filepath.Join(datadir, "clique", "db"), logger)
 	server.c = clique.New(server.chainConfig, &params.SnapshotConfig{}, server.db)
 	<-ctx.Done()
 	return nil

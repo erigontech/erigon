@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
@@ -45,13 +44,14 @@ var checkChangeSetsCmd = &cobra.Command{
 	Use:   "checkChangeSets",
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return CheckChangeSets(genesis, block, chaindata, historyfile, nocheck, writeReceipts)
+		logger := log.New()
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, writeReceipts)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool, writeReceipts bool) error {
+func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, writeReceipts bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -66,7 +66,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		interruptCh <- true
 	}()
 
-	db, err := kv2.NewMDBX().Path(chaindata).Open()
+	db, err := kv2.NewMDBX(logger).Path(chaindata).Open()
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 	defer chainDb.Close()
 	historyDb := chainDb
 	if chaindata != historyfile {
-		historyDb = olddb.MustOpen(historyfile)
+		historyDb = kv2.MustOpen(historyfile)
 	}
 	historyTx, err1 := historyDb.BeginRo(context.Background())
 	if err1 != nil {

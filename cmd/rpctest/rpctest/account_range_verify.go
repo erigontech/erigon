@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -16,22 +15,25 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/log"
 )
 
-func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
+func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 
 	if !notRegenerateGethData {
 		err = os.RemoveAll(gethDataDir)
 		if err != nil {
-			log.Fatal(err)
+			log.Error(err.Error())
+			return
 		}
 	}
-	resultsKV := mdbx.NewMDBX().Path(tmpDataDir).MustOpen()
-	gethKV := mdbx.NewMDBX().Path(gethDataDir).MustOpen()
+	resultsKV := mdbx.NewMDBX(logger).Path(tmpDataDir).MustOpen()
+	gethKV := mdbx.NewMDBX(logger).Path(gethDataDir).MustOpen()
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,
@@ -98,7 +100,9 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 		return f(erigonURL, tx)
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
+
 	}
 
 	if !notRegenerateGethData {
@@ -106,37 +110,44 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 			return f(erigonURL, tx)
 		})
 		if err != nil {
-			log.Fatal(err)
+			log.Error(err.Error())
+			return
 		}
 	}
 
 	tgTx, err := resultsKV.BeginRo(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 	gethTx, err := gethKV.BeginRo(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 	tgCursor, err := tgTx.Cursor(kv.AccountsHistory)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 	defer tgCursor.Close()
 	gethCursor, err := gethTx.Cursor(kv.AccountsHistory)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 	defer gethCursor.Close()
 
 	tgKey, tgVal, err1 := tgCursor.Next()
 	if err1 != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 
 	gethKey, gethVal, err2 := gethCursor.Next()
 	if err2 != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 
 	i := 0
@@ -158,23 +169,31 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 
 			tgKey, tgVal, err1 = tgCursor.Next()
 			if err1 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 			gethKey, gethVal, err2 = gethCursor.Next()
 			if err2 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 		} else if cmp < 0 {
 			gethMissed++
 			tgKey, tgVal, err1 = tgCursor.Next()
 			if err1 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 		} else if cmp > 0 {
 			tgMissed++
 			gethKey, gethVal, err2 = gethCursor.Next()
 			if err2 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 		}
 		i++

@@ -47,7 +47,7 @@ func TestApplyWithInit(t *testing.T) {
 		},
 	}
 
-	migrator := NewMigrator(kv.Chain)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	err := migrator.Apply(db, "")
 	require.NoError(err)
@@ -107,7 +107,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	})
 	require.NoError(err)
 
-	migrator := NewMigrator(kv.Chain)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	err = migrator.Apply(db, "")
 	require.NoError(err)
@@ -171,7 +171,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	})
 	require.NoError(err)
 
-	migrator := NewMigrator(kv.Chain)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	err = migrator.Apply(db, "")
 	require.NoError(err)
@@ -255,7 +255,7 @@ func TestValidation(t *testing.T) {
 			},
 		},
 	}
-	migrator := NewMigrator(kv.Chain)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	err := migrator.Apply(db, "")
 	require.True(errors.Is(err, ErrMigrationNonUniqueName))
@@ -281,7 +281,7 @@ func TestCommitCallRequired(t *testing.T) {
 			},
 		},
 	}
-	migrator := NewMigrator(kv.Chain)
+	migrator := NewMigrator(kv.ChainDB)
 	migrator.Migrations = m
 	err := migrator.Apply(db, "")
 	require.True(errors.Is(err, ErrMigrationCommitNotCalled))

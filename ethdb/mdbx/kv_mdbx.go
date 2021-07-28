@@ -41,6 +41,7 @@ type MdbxOpts struct {
 	verbosity  kv.DBVerbosityLvl
 	mapSize    datasize.ByteSize
 	flags      uint
+	log        log.Logger
 }
 
 func testKVPath() string {
@@ -51,10 +52,11 @@ func testKVPath() string {
 	return dir
 }
 
-func NewMDBX() MdbxOpts {
+func NewMDBX(log log.Logger) MdbxOpts {
 	return MdbxOpts{
 		bucketsCfg: DefaultBucketConfigs,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
+		log:        log,
 	}
 }
 
@@ -111,7 +113,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
 		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
 	}
-	logger := log.New("mdbx", opts.label.String(), "exclusive", opts.flags&mdbx.Exclusive != 0)
+
 	var err error
 	if opts.inMem {
 		opts.path = testKVPath()
@@ -200,7 +202,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	db := &MdbxKV{
 		opts:    opts,
 		env:     env,
-		log:     logger,
+		log:     opts.log,
 		wg:      &sync.WaitGroup{},
 		buckets: kv.TableCfg{},
 		txSize:  dirtyPagesLimit * pageSize,
@@ -455,7 +457,7 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 }
 
 func (tx *MdbxTx) CollectMetrics() {
-	if tx.db.opts.label != kv.Chain {
+	if tx.db.opts.label != kv.ChainDB {
 		return
 	}
 
@@ -715,7 +717,7 @@ func (tx *MdbxTx) Commit() error {
 		return err
 	}
 
-	if tx.db.opts.label == kv.Chain {
+	if tx.db.opts.label == kv.ChainDB {
 		kv.DbCommitPreparation.Update(latency.Preparation)
 		kv.DbCommitGc.Update(latency.GC)
 		kv.DbCommitAudit.Update(latency.Audit)

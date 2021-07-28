@@ -20,9 +20,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -43,14 +43,14 @@ func TestMatreshkaStream(t *testing.T) {
 	chaindataDir := "/media/b00ris/nvme/fresh_sync/tg/chaindata"
 	tmpDbDir := "/home/b00ris/event_stream"
 
-	chaindata, err := olddb.Open(chaindataDir, true)
+	chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	//tmpDb:=ethdb.NewMemDatabase()
 	os.RemoveAll(tmpDbDir)
 
-	db, err := kv2.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db, err := mdbx.NewMDBX(log.New()).Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		defaultBuckets[AccountDiff] = kv.TableConfigItem{}
 		defaultBuckets[StorageDiff] = kv.TableConfigItem{}
 		defaultBuckets[ContractDiff] = kv.TableConfigItem{}

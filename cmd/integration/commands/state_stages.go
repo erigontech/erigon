@@ -56,7 +56,8 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		db := openDB(path.Join(cfg.DataDir, "erigon", "chaindata"), true)
+		logger := log.New()
+		db := openDB(path.Join(cfg.DataDir, "erigon", "chaindata"), logger, true)
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
@@ -78,7 +79,8 @@ var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if unwind == 0 {
@@ -97,7 +99,8 @@ var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 		if unwind == 0 {
 			unwind = 1
@@ -178,7 +181,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		stages.CreateHeadersSnapshot,
 		stages.CreateBodiesSnapshot,
 		stages.CreateStateSnapshot,
-		stages.TxPool, // TODO: enable TxPool stage
+		stages.TxPool, // TODO: enable TxPoolDB stage
 		stages.Finish)
 
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir)

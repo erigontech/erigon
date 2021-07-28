@@ -16,11 +16,13 @@ type FinishCfg struct {
 	tmpDir    string
 	btClient  *snapshotsync.Client
 	snBuilder *snapshotsync.SnapshotMigrator
+	log       log.Logger
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator, logger log.Logger) FinishCfg {
 	return FinishCfg{
 		db:        db,
+		log:       logger,
 		tmpDir:    tmpDir,
 		btClient:  btClient,
 		snBuilder: snBuilder,
@@ -49,7 +51,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 
 	if cfg.snBuilder != nil && useExternalTx {
 		snBlock := snapshotsync.CalculateEpoch(executionAt, snapshotsync.EpochSize)
-		err = cfg.snBuilder.AsyncStages(snBlock, cfg.db, tx, cfg.btClient, true)
+		err = cfg.snBuilder.AsyncStages(snBlock, cfg.log, cfg.db, tx, cfg.btClient, true)
 		if err != nil {
 			return err
 		}

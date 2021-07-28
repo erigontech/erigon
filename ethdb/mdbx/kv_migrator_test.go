@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,14 +83,15 @@ func TestBucketCRUD(t *testing.T) {
 
 func TestReadOnlyMode(t *testing.T) {
 	path := t.TempDir()
-	db1 := mdbx.NewMDBX().Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	logger := log.New()
+	db1 := mdbx.NewMDBX(logger).Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.Headers: kv.TableConfigItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
-	db2 := mdbx.NewMDBX().Readonly().Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db2 := mdbx.NewMDBX(logger).Readonly().Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			kv.Headers: kv.TableConfigItem{},
 		}

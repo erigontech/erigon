@@ -21,7 +21,7 @@ import (
 )
 
 func TestSequence(t *testing.T) {
-	writeDBs, _ := setupDatabases(t, func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	writeDBs, _ := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
 	})
 	ctx := context.Background()
@@ -70,7 +70,7 @@ func TestManagedTx(t *testing.T) {
 	bucketID := 0
 	bucket1 := kv.ErigonTables[bucketID]
 	bucket2 := kv.ErigonTables[bucketID+1]
-	writeDBs, readDBs := setupDatabases(t, func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	writeDBs, readDBs := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return map[string]kv.TableConfigItem{
 			bucket1: {
 				Flags:                     kv.DupSort,
@@ -137,10 +137,11 @@ func TestManagedTx(t *testing.T) {
 }
 
 func TestRemoteKvVersion(t *testing.T) {
+	logger := log.New()
 	f := func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
 	}
-	writeDb := mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen()
+	writeDb := mdbx.NewMDBX(logger).InMem().WithBucketsConfig(f).MustOpen()
 	defer writeDb.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -154,7 +155,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Major versions
 	v1 := v
 	v1.Major++
-	a, err := remotedb.NewRemote(v1).InMem(conn).Open("", "", "")
+	a, err := remotedb.NewRemote(v1, logger).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -162,7 +163,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Minor versions
 	v2 := v
 	v2.Minor++
-	_, err = remotedb.NewRemote(v2).InMem(conn).Open("", "", "")
+	_, err = remotedb.NewRemote(v2, logger).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -170,17 +171,17 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Patch versions
 	v3 := v
 	v3.Patch++
-	_, err = remotedb.NewRemote(v3).InMem(conn).Open("", "", "")
+	_, err = remotedb.NewRemote(v3, logger).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	require.False(t, a.EnsureVersionCompatibility())
 }
 
-func setupDatabases(t *testing.T, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+func setupDatabases(t *testing.T, logger log.Logger, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
 	writeDBs = []kv.RwDB{
-		mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
-		mdbx.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
+		mdbx.NewMDBX(logger).InMem().WithBucketsConfig(f).MustOpen(),
+		mdbx.NewMDBX(logger).InMem().WithBucketsConfig(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
@@ -193,7 +194,7 @@ func setupDatabases(t *testing.T, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwDB,
 		}
 	}()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
-	rdb := remotedb.NewRemote(v).InMem(conn).MustOpen()
+	rdb := remotedb.NewRemote(v, logger).InMem(conn).MustOpen()
 	readDBs = []kv.RwDB{
 		writeDBs[0],
 		writeDBs[1],

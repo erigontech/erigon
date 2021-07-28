@@ -32,6 +32,7 @@ type remoteOpts struct {
 	inMemConn   *bufconn.Listener // for tests
 	DialAddress string
 	version     gointerfaces.Version
+	log         log.Logger
 }
 
 type RemoteKV struct {
@@ -173,8 +174,8 @@ func (opts remoteOpts) MustOpen() kv.RwDB {
 // NewRemote defines new remove KV connection (without actually opening it)
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
-func NewRemote(v gointerfaces.Version) remoteOpts {
-	return remoteOpts{bucketsCfg: mdbx.DefaultBucketConfigs, version: v}
+func NewRemote(v gointerfaces.Version, logger log.Logger) remoteOpts {
+	return remoteOpts{bucketsCfg: mdbx.DefaultBucketConfigs, version: v, log: logger}
 }
 
 func (db *RemoteKV) AllBuckets() kv.TableCfg {

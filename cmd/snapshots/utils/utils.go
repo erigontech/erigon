@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 var ErrUnsupported error = errors.New("unsupported KV type")
@@ -15,5 +16,5 @@ func RmTmpFiles(snapshotPath string) error {
 }
 
 func OpenSnapshotKV(configsFunc mdbx.BucketConfigsFunc, path string) kv.RwDB {
-	return mdbx.NewMDBX().WithBucketsConfig(configsFunc).Path(path).MustOpen()
+	return mdbx.NewMDBX(log.New()).WithBucketsConfig(configsFunc).Path(path).MustOpen()
 }
