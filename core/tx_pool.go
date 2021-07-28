@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -96,29 +96,29 @@ var (
 
 var (
 	// Metrics for the pending pool
-	pendingDiscardMeter   = metrics2.GetOrCreateCounter("txpool_pending_discard")
-	pendingReplaceMeter   = metrics2.GetOrCreateCounter("txpool_pending_replace")
-	pendingRateLimitMeter = metrics2.GetOrCreateCounter("txpool_pending_ratelimit") // Dropped due to rate limiting
-	pendingNofundsMeter   = metrics2.GetOrCreateCounter("txpool_pending_nofunds")   // Dropped due to out-of-funds
+	pendingDiscardMeter   = metrics.GetOrCreateCounter("txpool_pending_discard")
+	pendingReplaceMeter   = metrics.GetOrCreateCounter("txpool_pending_replace")
+	pendingRateLimitMeter = metrics.GetOrCreateCounter("txpool_pending_ratelimit") // Dropped due to rate limiting
+	pendingNofundsMeter   = metrics.GetOrCreateCounter("txpool_pending_nofunds")   // Dropped due to out-of-funds
 
 	// Metrics for the queued pool
-	queuedDiscardMeter   = metrics2.GetOrCreateCounter("txpool_queued_discard")
-	queuedReplaceMeter   = metrics2.GetOrCreateCounter("txpool_queued_replace")
-	queuedRateLimitMeter = metrics2.GetOrCreateCounter("txpool_queued_ratelimit") // Dropped due to rate limiting
-	queuedNofundsMeter   = metrics2.GetOrCreateCounter("txpool_queued_nofunds")   // Dropped due to out-of-funds
-	queuedEvictionMeter  = metrics2.GetOrCreateCounter("txpool_queued_eviction")  // Dropped due to lifetime
+	queuedDiscardMeter   = metrics.GetOrCreateCounter("txpool_queued_discard")
+	queuedReplaceMeter   = metrics.GetOrCreateCounter("txpool_queued_replace")
+	queuedRateLimitMeter = metrics.GetOrCreateCounter("txpool_queued_ratelimit") // Dropped due to rate limiting
+	queuedNofundsMeter   = metrics.GetOrCreateCounter("txpool_queued_nofunds")   // Dropped due to out-of-funds
+	queuedEvictionMeter  = metrics.GetOrCreateCounter("txpool_queued_eviction")  // Dropped due to lifetime
 
 	// General tx metrics
-	knownTxMeter       = metrics2.GetOrCreateCounter("txpool_known")
-	validTxMeter       = metrics2.GetOrCreateCounter("txpool_valid")
-	invalidTxMeter     = metrics2.GetOrCreateCounter("txpool_invalid")
-	underpricedTxMeter = metrics2.GetOrCreateCounter("txpool_underpriced")
-	overflowedTxMeter  = metrics2.GetOrCreateCounter("txpool_overflowed")
+	knownTxMeter       = metrics.GetOrCreateCounter("txpool_known")
+	validTxMeter       = metrics.GetOrCreateCounter("txpool_valid")
+	invalidTxMeter     = metrics.GetOrCreateCounter("txpool_invalid")
+	underpricedTxMeter = metrics.GetOrCreateCounter("txpool_underpriced")
+	overflowedTxMeter  = metrics.GetOrCreateCounter("txpool_overflowed")
 
-	pendingGauge = metrics2.GetOrCreateCounter("txpool_pending")
-	queuedGauge  = metrics2.GetOrCreateCounter("txpool_queued")
-	localGauge   = metrics2.GetOrCreateCounter("txpool_local")
-	slotsGauge   = metrics2.GetOrCreateCounter("txpool_slots")
+	pendingGauge = metrics.GetOrCreateCounter("txpool_pending")
+	queuedGauge  = metrics.GetOrCreateCounter("txpool_queued")
+	localGauge   = metrics.GetOrCreateCounter("txpool_local")
+	slotsGauge   = metrics.GetOrCreateCounter("txpool_slots")
 )
 
 // TxStatus is the current status of a transaction as seen by the pool.
