@@ -7,7 +7,8 @@ import (
 	"os"
 	"time"
 
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -29,11 +30,11 @@ var generateHeadersSnapshotCmd = &cobra.Command{
 	Short:   "Generate headers snapshot",
 	Example: "go run cmd/snapshots/generator/main.go headers --block 11000000 --datadir /media/b00ris/nvme/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/headers_test",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return HeaderSnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+		return HeaderSnapshot(cmd.Context(), log.New(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
 }
 
-func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
+func HeaderSnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	if snapshotPath == "" {
 		return errors.New("empty snapshot path")
 	}
@@ -41,15 +42,15 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	if err != nil {
 		return err
 	}
-	kv := kv2.NewMDBX().Path(dbPath).MustOpen()
+	db := kv2.NewMDBX(logger).Path(dbPath).MustOpen()
 
-	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
+	snKV := kv2.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
-	tx, err := kv.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -63,7 +64,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	t := time.Now()
 	var hash common.Hash
 	var header []byte
-	c, err := snTx.RwCursor(dbutils.HeadersBucket)
+	c, err := snTx.RwCursor(kv.Headers)
 	if err != nil {
 		return err
 	}

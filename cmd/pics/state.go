@@ -16,12 +16,11 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/pics/contracts"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -69,35 +68,35 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	dbutils.Receipts:               "Receipts",
-	dbutils.Log:                    "Event Logs",
-	dbutils.AccountsHistoryBucket:  "History Of Accounts",
-	dbutils.StorageHistoryBucket:   "History Of Storage",
-	dbutils.HeadersBucket:          "Headers",
-	dbutils.HeaderCanonicalBucket:  "Canonical headers",
-	dbutils.HeaderTDBucket:         "Headers TD",
-	dbutils.BlockBodyPrefix:        "Block Bodies",
-	dbutils.HeaderNumberBucket:     "Header Numbers",
-	dbutils.TxLookupPrefix:         "Transaction Index",
-	dbutils.CodeBucket:             "Code Of Contracts",
-	dbutils.SyncStageProgress:      "Sync Progress",
-	dbutils.PlainStateBucket:       "Plain State",
-	dbutils.HashedAccountsBucket:   "Hashed Accounts",
-	dbutils.HashedStorageBucket:    "Hashed Storage",
-	dbutils.TrieOfAccountsBucket:   "Intermediate Hashes Of Accounts",
-	dbutils.TrieOfStorageBucket:    "Intermediate Hashes Of Storage",
-	dbutils.AccountChangeSetBucket: "Account Changes",
-	dbutils.StorageChangeSetBucket: "Storage Changes",
-	dbutils.IncarnationMapBucket:   "Incarnations",
-	dbutils.Senders:                "Transaction Senders",
-	dbutils.ContractTEVMCodeBucket: "Contract TEVM code",
+	kv.Receipts:          "Receipts",
+	kv.Log:               "Event Logs",
+	kv.AccountsHistory:   "History Of Accounts",
+	kv.StorageHistory:    "History Of Storage",
+	kv.Headers:           "Headers",
+	kv.HeaderCanonical:   "Canonical headers",
+	kv.HeaderTD:          "Headers TD",
+	kv.BlockBody:         "Block Bodies",
+	kv.HeaderNumber:      "Header Numbers",
+	kv.TxLookup:          "Transaction Index",
+	kv.CodeBucket:        "Code Of Contracts",
+	kv.SyncStageProgress: "Sync Progress",
+	kv.PlainStateBucket:  "Plain State",
+	kv.HashedAccounts:    "Hashed Accounts",
+	kv.HashedStorage:     "Hashed Storage",
+	kv.TrieOfAccounts:    "Intermediate Hashes Of Accounts",
+	kv.TrieOfStorage:     "Intermediate Hashes Of Storage",
+	kv.AccountChangeSet:  "Account Changes",
+	kv.StorageChangeSet:  "Storage Changes",
+	kv.IncarnationMap:    "Incarnations",
+	kv.Senders:           "Transaction Senders",
+	kv.ContractTEVMCode:  "Contract TEVM code",
 }
 
-/*dbutils.PlainContractCodeBucket,
+/*dbutils.PlainContractCode,
 dbutils.CodeBucket,
-dbutils.AccountsHistoryBucket,
-dbutils.StorageHistoryBucket,
-dbutils.TxLookupPrefix,*/
+dbutils.AccountsHistory,
+dbutils.StorageHistory,
+dbutils.TxLookup,*/
 
 func hexPalette() error {
 	filename := "hex_palette.dot"
@@ -120,7 +119,7 @@ func hexPalette() error {
 	return nil
 }
 
-func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) error {
+func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -132,18 +131,14 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 	noValues := make(map[int]struct{})
 	perBucketFiles := make(map[string]*os.File)
 
-	if err = second.View(context.Background(), func(readTx ethdb.Tx) error {
-		return first.View(context.Background(), func(firstTx ethdb.Tx) error {
+	if err = second.View(context.Background(), func(readTx kv.Tx) error {
+		return first.View(context.Background(), func(firstTx kv.Tx) error {
 			for bucketName := range bucketLabels {
 				bucketName := bucketName
-				c, err := readTx.Cursor(bucketName)
-				if err != nil {
-					return err
-				}
-				if err2 := ethdb.ForEach(c, func(k, v []byte) (bool, error) {
+				if err := readTx.ForEach(bucketName, nil, func(k, v []byte) error {
 					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db
-						return true, nil
+						return nil
 					}
 					// Produce pair of nodes
 					keyKeyBytes := &trie.Keybytes{
@@ -163,7 +158,7 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 					if f1, ok = perBucketFiles[bucketName]; !ok {
 						f1, err = os.Create(fmt.Sprintf("changes_%d_%s.dot", number, strings.ReplaceAll(bucketLabels[bucketName], " ", "")))
 						if err != nil {
-							return false, err
+							return err
 						}
 						visual.StartGraph(f1, true)
 						var clusterLabel string
@@ -202,9 +197,9 @@ func stateDatabaseComparison(first ethdb.RwKV, second ethdb.RwKV, number int) er
 					lst = append(lst, i)
 					m[bucketName] = lst
 					i++
-					return true, nil
-				}); err2 != nil {
-					return err2
+					return nil
+				}); err != nil {
+					return err
 				}
 			}
 			return nil
@@ -415,7 +410,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := kv.NewMemKV()
+	emptyKv := memdb.New()
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

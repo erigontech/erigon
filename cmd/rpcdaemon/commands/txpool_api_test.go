@@ -53,7 +53,7 @@ func TestTxPoolContent(t *testing.T) {
 
 		initialCycle := true
 		highestSeenHeader := chain.TopBlock.NumberU64()
-		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+		if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

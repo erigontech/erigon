@@ -35,7 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -192,7 +192,7 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 				canonical, cErr := rawdb.ReadCanonicalHash(tx, cb.NumberU64())
 				if cErr != nil {
 					return cErr
@@ -292,7 +292,7 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (t *BlockTest) validateImportedHeaders(tx ethdb.Tx, validBlocks []btBlock) error {
+func (t *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(t.json.Blocks))
 	for _, b := range validBlocks {

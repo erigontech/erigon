@@ -8,19 +8,19 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 // Implements StateReader by wrapping database only, without trie
 type DbStateReader struct {
-	db            ethdb.KVGetter
+	db            kv.Getter
 	accountCache  *fastcache.Cache
 	storageCache  *fastcache.Cache
 	codeCache     *fastcache.Cache
 	codeSizeCache *fastcache.Cache
 }
 
-func NewDbStateReader(db ethdb.KVGetter) *DbStateReader {
+func NewDbStateReader(db kv.Getter) *DbStateReader {
 	return &DbStateReader{
 		db: db,
 	}
@@ -51,7 +51,7 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 	if !ok {
 		var err error
 		if addrHash, err1 := common.HashData(address[:]); err1 == nil {
-			enc, err = dbr.db.GetOne(dbutils.HashedAccountsBucket, addrHash[:])
+			enc, err = dbr.db.GetOne(kv.HashedAccounts, addrHash[:])
 		} else {
 			return nil, err1
 		}
@@ -87,7 +87,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 			return enc, nil
 		}
 	}
-	enc, err2 := dbr.db.GetOne(dbutils.HashedStorageBucket, compositeKey)
+	enc, err2 := dbr.db.GetOne(kv.HashedStorage, compositeKey)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -106,7 +106,7 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, incarnation ui
 			return code, nil
 		}
 	}
-	code, err := dbr.db.GetOne(dbutils.CodeBucket, codeHash[:])
+	code, err := dbr.db.GetOne(kv.CodeBucket, codeHash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 		}
 	}
 	var code []byte
-	code, err = dbr.db.GetOne(dbutils.CodeBucket, codeHash[:])
+	code, err = dbr.db.GetOne(kv.CodeBucket, codeHash[:])
 	if err != nil {
 		return 0, err
 	}
@@ -144,7 +144,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 }
 
 func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	b, err := dbr.db.GetOne(dbutils.IncarnationMapBucket, address[:])
+	b, err := dbr.db.GetOne(kv.IncarnationMap, address[:])
 	if err != nil {
 		return 0, err
 	}

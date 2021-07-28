@@ -1,10 +1,9 @@
-package ethdb
+package kv
 
 import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/metrics"
 )
 
@@ -12,7 +11,7 @@ const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
-	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.Buckets")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ErigonTables")
 
 	DbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
 	TxLimit   = metrics.GetOrRegisterGauge("tx/limit", metrics.DefaultRegistry)   //nolint
@@ -66,18 +65,18 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	Chain  Label = 0
-	TxPool Label = 1
-	Sentry Label = 2
+	ChainDB  Label = 0
+	TxPoolDB Label = 1
+	SentryDB Label = 2
 )
 
 func (l Label) String() string {
 	switch l {
-	case Chain:
+	case ChainDB:
 		return "chaindata"
-	case TxPool:
+	case TxPoolDB:
 		return "txpool"
-	case Sentry:
+	case SentryDB:
 		return "sentry"
 	default:
 		return "unknown"
@@ -89,10 +88,10 @@ type Has interface {
 	Has(bucket string, key []byte) (bool, error)
 }
 type GetPut interface {
-	KVGetter
+	Getter
 	Putter
 }
-type KVGetter interface {
+type Getter interface {
 	Has
 
 	GetOne(bucket string, key []byte) (val []byte, err error)
@@ -123,8 +122,8 @@ type Closer interface {
 	Close()
 }
 
-// RoKV - Read-only version of KV.
-type RoKV interface {
+// RoDB - Read-only version of KV.
+type RoDB interface {
 	Closer
 
 	View(ctx context.Context, f func(tx Tx) error) error
@@ -143,10 +142,10 @@ type RoKV interface {
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
-	AllBuckets() dbutils.BucketsCfg
+	AllBuckets() TableCfg
 }
 
-// RwKV low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
+// RwDB low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
 //
 // Common pattern for short-living transactions:
 //
@@ -170,8 +169,8 @@ type RoKV interface {
 //		return err
 //	}
 //
-type RwKV interface {
-	RoKV
+type RwDB interface {
+	RoDB
 
 	Update(ctx context.Context, f func(tx RwTx) error) error
 
@@ -179,7 +178,7 @@ type RwKV interface {
 }
 
 type StatelessReadTx interface {
-	KVGetter
+	Getter
 
 	Commit() error // Commit all the operations of a transaction into the database.
 	Rollback()     // Rollback - abandon all the operations of the transaction instead of saving them.
@@ -215,7 +214,7 @@ type Tx interface {
 	// Otherwise - object of interface Cursor created
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
-	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
+	// long keys into DupSort key/values. See docs for `bucket.go:TableConfigItem`
 	Cursor(bucket string) (Cursor, error)
 	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
@@ -310,7 +309,4 @@ type RwCursorDupSort interface {
 	AppendDup(key, value []byte) error // AppendDup - same as Append, but for sorted dup data
 }
 
-type HasStats interface {
-	BucketSize(name string) (uint64, error)
-	DiskSize(context.Context) (uint64, error) // db size
-}
+var ErrNotSupported = errors.New("not supported")

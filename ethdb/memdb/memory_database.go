@@ -14,29 +14,32 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package kv
+package memdb
 
 import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/log"
 )
 
-func NewMemKV() ethdb.RwKV {
-	return NewMDBX().InMem().MustOpen()
+func New() kv.RwDB {
+	logger := log.New() //TODO: move higher
+	return mdbx.NewMDBX(logger).InMem().MustOpen()
 }
 
-func NewTestKV(t testing.TB) ethdb.RwKV {
-	kv := NewMemKV()
-	t.Cleanup(kv.Close)
-	return kv
+func NewTestDB(t testing.TB) kv.RwDB {
+	db := New()
+	t.Cleanup(db.Close)
+	return db
 }
 
-func NewTestTx(t testing.TB) (ethdb.RwKV, ethdb.RwTx) {
-	kv := NewMemKV()
-	t.Cleanup(kv.Close)
-	tx, err := kv.BeginRw(context.Background()) //nolint
+func NewTestTx(t testing.TB) (kv.RwDB, kv.RwTx) {
+	db := New()
+	t.Cleanup(db.Close)
+	tx, err := db.BeginRw(context.Background()) //nolint
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,5 +49,5 @@ func NewTestTx(t testing.TB) (ethdb.RwKV, ethdb.RwTx) {
 			tt.Cleanup(tx.Rollback)
 		}
 	}
-	return kv, tx
+	return db, tx
 }

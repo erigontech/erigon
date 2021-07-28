@@ -10,13 +10,13 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
@@ -38,8 +38,9 @@ var cmdSnapshotCheck = &cobra.Command{
 	Example: "go run cmd/integration/main.go snapshot_check --block 11400000 --datadir /media/b00ris/nvme/backup/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshots/ --snapshotMode s --tmp_db /media/b00ris/nvme/tmp/debug",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
+		logger := log.New()
 		//db to provide headers, blocks, senders ...
-		mainDB, err := kv2.Open(chaindata, true)
+		mainDB, err := kv2.Open(chaindata, logger, true)
 		if err != nil {
 			return err
 		}
@@ -53,11 +54,11 @@ var cmdSnapshotCheck = &cobra.Command{
 		}
 
 		stateSnapshotPath := filepath.Join(snapshotDir, "state")
-		stateSnapshot := kv2.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-			return dbutils.BucketsCfg{
-				dbutils.PlainStateBucket:        dbutils.BucketsConfigs[dbutils.PlainStateBucket],
-				dbutils.PlainContractCodeBucket: dbutils.BucketsConfigs[dbutils.PlainContractCodeBucket],
-				dbutils.CodeBucket:              dbutils.BucketsConfigs[dbutils.CodeBucket],
+		stateSnapshot := kv2.NewMDBX(logger).Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{
+				kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
+				kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
+				kv.CodeBucket:        kv.BucketsConfigs[kv.CodeBucket],
 			}
 		}).Readonly().MustOpen()
 		isNew := true
@@ -79,24 +80,24 @@ var cmdSnapshotCheck = &cobra.Command{
 				log.Info("Temp database", "path", path)
 			}
 		}()
-		tmpDb := kv2.NewMDBX().Path(path).MustOpen()
-		kv := kv2.NewSnapshotKV().
+		tmpDb := kv2.NewMDBX(logger).Path(path).MustOpen()
+		db := snapshotdb.NewSnapshotKV().
 			DB(tmpDb).
 			//broken
-			//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwKV()).
-			//SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
+			//SnapshotDB([]string{dbutils.Headers, dbutils.HeaderCanonical, dbutils.HeaderTD, dbutils.BlockBody, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumber}, mainDB.RwDB()).
+			//SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCode}, stateSnapshot).
 			Open()
 		_ = mainDB
 		_ = stateSnapshot
 
 		if isNew {
-			if err := kv.Update(ctx, func(tx ethdb.RwTx) error {
+			if err := db.Update(ctx, func(tx kv.RwTx) error {
 				return prune.SetIfNotExist(tx, prune.DefaultMode)
 			}); err != nil {
 				return err
 			}
 		}
-		if err := snapshotCheck(ctx, kv, isNew, os.TempDir()); err != nil {
+		if err := snapshotCheck(ctx, db, isNew, os.TempDir()); err != nil {
 			log.Error("snapshotCheck error", "err", err)
 			return err
 		}
@@ -104,12 +105,12 @@ var cmdSnapshotCheck = &cobra.Command{
 	},
 }
 
-func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string) (err error) {
+func snapshotCheck(ctx context.Context, db kv.RwDB, isNew bool, tmpDir string) (err error) {
 	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	var snapshotBlock uint64 = 11_000_000
 	var lastBlockHeaderNumber, blockNum uint64
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
+	if err := db.View(ctx, func(tx kv.Tx) error {
 		blockNum, err = stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return err
@@ -142,7 +143,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 
 	if isNew {
 		log.Info("New tmp db. We need to promote hash state.")
-		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
 
 			tt := time.Now()
 			err = stagedsync.PromoteHashedStateCleanly("", tx, stagedsync.StageHashStateCfg(db, tmpDir), ctx.Done())
@@ -164,7 +165,7 @@ func snapshotCheck(ctx context.Context, db ethdb.RwKV, isNew bool, tmpDir string
 
 	if isNew {
 		log.Info("Regenerate IH")
-		if err := db.Update(ctx, func(tx ethdb.RwTx) error {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			hash, innerErr := rawdb.ReadCanonicalHash(tx, snapshotBlock)
 			if innerErr != nil {
 				return innerErr

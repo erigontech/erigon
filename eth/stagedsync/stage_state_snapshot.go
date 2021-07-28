@@ -3,26 +3,27 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type SnapshotStateCfg struct {
 	enabled          bool
-	db               ethdb.RwKV
+	db               kv.RwDB
 	snapshotDir      string
 	tmpDir           string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
+	log              log.Logger
 }
 
-func StageSnapshotStateCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, tmpDir string, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotStateCfg {
+func StageSnapshotStateCfg(db kv.RwDB, snapshot ethconfig.Snapshot, tmpDir string, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, logger log.Logger) SnapshotStateCfg {
 	return SnapshotStateCfg{
 		enabled:          snapshot.Enabled && snapshot.Mode.State,
 		db:               db,
@@ -30,10 +31,11 @@ func StageSnapshotStateCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, tmpDir st
 		client:           client,
 		snapshotMigrator: snapshotMigrator,
 		tmpDir:           tmpDir,
+		log:              logger,
 	}
 }
 
-func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotStateCfg, ctx context.Context, initialSync bool, epochSize uint64) (err error) {
+func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context, initialSync bool, epochSize uint64) (err error) {
 	if !initialSync {
 		return nil
 	}
@@ -63,19 +65,19 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	roTX.Rollback()
 
 	//prelimary checks finished. we can start migration.
-	tmpDB := cfg.db.(*kv.SnapshotKV).TempDB()
+	tmpDB := cfg.db.(*snapshotdb.SnapshotKV).TempDB()
 	if tmpDB != nil {
 		log.Error("Empty tmp db")
 		defer func() {
 			//recover tmp db in case of error
 			if err != nil {
-				cfg.db.(*kv.SnapshotKV).SetTempDB(tmpDB, snapshotsync.StateSnapshotBuckets)
+				cfg.db.(*snapshotdb.SnapshotKV).SetTempDB(tmpDB, snapshotsync.StateSnapshotBuckets)
 			}
 		}()
 	}
 
 	//get rid of block after epoch block
-	cfg.db.(*kv.SnapshotKV).SetTempDB(nil, nil)
+	cfg.db.(*snapshotdb.SnapshotKV).SetTempDB(nil, nil)
 	mainDBTX, err := cfg.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -86,19 +88,19 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	plainStateCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	codeCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	contractCodeBucketCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	err = mainDBTX.ForEach(dbutils.PlainStateBucket, []byte{}, func(k, v []byte) error {
+	err = mainDBTX.ForEach(kv.PlainStateBucket, []byte{}, func(k, v []byte) error {
 		return plainStateCollector.Collect(k, v)
 	})
 	if err != nil {
 		return err
 	}
-	err = mainDBTX.ForEach(dbutils.CodeBucket, []byte{}, func(k, v []byte) error {
+	err = mainDBTX.ForEach(kv.CodeBucket, []byte{}, func(k, v []byte) error {
 		return codeCollector.Collect(k, v)
 	})
 	if err != nil {
 		return err
 	}
-	err = mainDBTX.ForEach(dbutils.PlainContractCodeBucket, []byte{}, func(k, v []byte) error {
+	err = mainDBTX.ForEach(kv.PlainContractCode, []byte{}, func(k, v []byte) error {
 		return contractCodeBucketCollector.Collect(k, v)
 	})
 	if err != nil {
@@ -107,7 +109,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 
 	snapshotPath := snapshotsync.SnapshotName(cfg.tmpDir, "state", snapshotBlock)
 	//todo change tmp dir to snapshots folder
-	snKV, err := snapshotsync.CreateStateSnapshot(ctx, snapshotPath)
+	snKV, err := snapshotsync.CreateStateSnapshot(ctx, snapshotPath, cfg.log)
 	if err != nil {
 		return err
 	}
@@ -117,21 +119,21 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 		return err
 	}
 
-	err = plainStateCollector.Load("plain state", snRwTX, dbutils.PlainStateBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+	err = plainStateCollector.Load("plain state", snRwTX, kv.PlainStateBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
 	if err != nil {
 		return err
 	}
 
-	err = codeCollector.Load("codes", snRwTX, dbutils.CodeBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+	err = codeCollector.Load("codes", snRwTX, kv.CodeBucket, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
 	if err != nil {
 		return err
 	}
 
-	err = contractCodeBucketCollector.Load("code hashes", snRwTX, dbutils.PlainContractCodeBucket, etl.IdentityLoadFunc, etl.TransformArgs{
+	err = contractCodeBucketCollector.Load("code hashes", snRwTX, kv.PlainContractCode, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
 	})
 	if err != nil {
@@ -145,15 +147,15 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	snKV.Close()
 	//snapshot creation finished
 
-	err = mainDBTX.ClearBucket(dbutils.PlainStateBucket)
+	err = mainDBTX.ClearBucket(kv.PlainStateBucket)
 	if err != nil {
 		return err
 	}
-	err = mainDBTX.ClearBucket(dbutils.CodeBucket)
+	err = mainDBTX.ClearBucket(kv.CodeBucket)
 	if err != nil {
 		return err
 	}
-	err = mainDBTX.ClearBucket(dbutils.PlainContractCodeBucket)
+	err = mainDBTX.ClearBucket(kv.PlainContractCode)
 	if err != nil {
 		return err
 	}
@@ -164,23 +166,23 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 			return err
 		}
 		defer tmpDBRoTX.Rollback()
-		migrateBucket := func(from ethdb.Tx, to ethdb.RwTx, bucket string) error {
+		migrateBucket := func(from kv.Tx, to kv.RwTx, bucket string) error {
 			return from.ForEach(bucket, []byte{}, func(k, v []byte) error {
 				return to.Put(bucket, k, v)
 			})
 		}
 
-		err = migrateBucket(tmpDBRoTX, mainDBTX, dbutils.PlainStateBucket)
+		err = migrateBucket(tmpDBRoTX, mainDBTX, kv.PlainStateBucket)
 		if err != nil {
 			return err
 		}
 
-		err = migrateBucket(tmpDBRoTX, mainDBTX, dbutils.PlainContractCodeBucket)
+		err = migrateBucket(tmpDBRoTX, mainDBTX, kv.PlainContractCode)
 		if err != nil {
 			return err
 		}
 
-		err = migrateBucket(tmpDBRoTX, mainDBTX, dbutils.ContractCodeBucket)
+		err = migrateBucket(tmpDBRoTX, mainDBTX, kv.ContractCode)
 		if err != nil {
 			return err
 		}
@@ -189,7 +191,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	if err = s.Update(mainDBTX, snapshotBlock); err != nil {
 		return err
 	}
-	stateSnapshot, err := snapshotsync.OpenStateSnapshot(snapshotPath)
+	stateSnapshot, err := snapshotsync.OpenStateSnapshot(snapshotPath, cfg.log)
 	if err != nil {
 		return err
 	}
@@ -198,7 +200,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 		return err
 	}
 
-	cfg.db.(*kv.SnapshotKV).UpdateSnapshots("state", stateSnapshot, make(chan struct{}))
+	cfg.db.(*snapshotdb.SnapshotKV).UpdateSnapshots("state", stateSnapshot, make(chan struct{}))
 
 	if tmpDB != nil {
 		go func() {
@@ -210,7 +212,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	return nil
 }
 
-func UnwindStateSnapshotGenerationStage(s *UnwindState, tx ethdb.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
+func UnwindStateSnapshotGenerationStage(s *UnwindState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -231,7 +233,7 @@ func UnwindStateSnapshotGenerationStage(s *UnwindState, tx ethdb.RwTx, cfg Snaps
 	return nil
 }
 
-func PruneStateSnapshotGenerationStage(s *PruneState, tx ethdb.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
+func PruneStateSnapshotGenerationStage(s *PruneState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

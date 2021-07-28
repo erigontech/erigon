@@ -317,6 +317,8 @@ type Tracer struct {
 
 	interrupt uint32 // Atomic flag to signal execution interruption
 	reason    error  // Textual reason for the interruption
+
+	activePrecompiles []common.Address // Updated on CaptureStart based on given rules
 }
 
 // New instantiates a new tracer instance. code specifies a Javascript snippet,
@@ -407,6 +409,15 @@ func New(code string, txCtx vm.TxContext) (*Tracer, error) {
 		return 1
 	})
 	tracer.vm.PushGlobalGoFunction("isPrecompiled", func(ctx *duktape.Context) int {
+		addr := common.BytesToAddress(popSlice(ctx))
+		for _, p := range tracer.activePrecompiles {
+			if p == addr {
+				ctx.PushBoolean(true)
+				return 1
+			}
+		}
+		ctx.PushBoolean(false)
+
 		_, ok := vm.PrecompiledContractsIstanbul[common.BytesToAddress(popSlice(ctx))]
 		ctx.PushBoolean(ok)
 		return 1
@@ -556,6 +567,10 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 	if jst.err == nil {
 		// Initialize the context if it wasn't done yet
 		if !jst.inited {
+			// Update list of precompiles based on current block
+			rules := env.ChainConfig().Rules(env.Context.BlockNumber)
+			jst.activePrecompiles = vm.ActivePrecompiles(rules)
+
 			jst.ctx["block"] = env.Context.BlockNumber
 			// Compute intrinsic gas
 			isHomestead := env.ChainRules.IsHomestead
@@ -666,6 +681,13 @@ func (jst *Tracer) GetResult() (json.RawMessage, error) {
 
 		case *big.Int:
 			pushBigInt(val, jst.vm)
+
+		case int:
+			jst.vm.PushInt(val)
+
+		case common.Hash:
+			ptr := jst.vm.PushFixedBuffer(32)
+			copy(makeSlice(ptr, 32), val[:])
 
 		default:
 			panic(fmt.Sprintf("unsupported type: %T", val))

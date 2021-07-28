@@ -18,9 +18,9 @@ import (
 	"github.com/anacrolix/torrent/tracker"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
@@ -74,7 +74,7 @@ var rootCmd = &cobra.Command{
 	Args:       cobra.ExactArgs(1),
 	ArgAliases: []string{"snapshots dir"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := kv.MustOpen(args[0])
+		db := mdbx.MustOpen(args[0])
 		m := http.NewServeMux()
 		m.Handle("/announce", &Tracker{db: db})
 		m.HandleFunc("/scrape", func(writer http.ResponseWriter, request *http.Request) {
@@ -89,8 +89,8 @@ var rootCmd = &cobra.Command{
 				ih: {},
 			}}
 
-			err := db.View(context.Background(), func(tx ethdb.Tx) error {
-				c, err := tx.Cursor(dbutils.SnapshotInfoBucket)
+			err := db.View(context.Background(), func(tx kv.Tx) error {
+				c, err := tx.Cursor(kv.SnapshotInfo)
 				if err != nil {
 					return err
 				}
@@ -145,7 +145,7 @@ var rootCmd = &cobra.Command{
 }
 
 type Tracker struct {
-	db ethdb.RwKV
+	db kv.RwDB
 }
 
 /*
@@ -210,8 +210,8 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	key := append(req.InfoHash, req.PeerID...)
 	if req.Event == tracker.Stopped.String() {
-		err = t.db.Update(context.Background(), func(tx ethdb.RwTx) error {
-			return tx.Delete(dbutils.SnapshotInfoBucket, key, nil)
+		err = t.db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Delete(kv.SnapshotInfo, key, nil)
 		})
 		if err != nil {
 			log.Error("Json marshal", "err", err)
@@ -220,8 +220,8 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		var prevBytes []byte
-		err = t.db.View(context.Background(), func(tx ethdb.Tx) error {
-			prevBytes, err = tx.GetOne(dbutils.SnapshotInfoBucket, key)
+		err = t.db.View(context.Background(), func(tx kv.Tx) error {
+			prevBytes, err = tx.GetOne(kv.SnapshotInfo, key)
 			return err
 		})
 		if err != nil {
@@ -244,8 +244,8 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 
 		}
-		if err = t.db.Update(context.Background(), func(tx ethdb.RwTx) error {
-			return tx.Put(dbutils.SnapshotInfoBucket, key, peerBytes)
+		if err = t.db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Put(kv.SnapshotInfo, key, peerBytes)
 		}); err != nil {
 			log.Error("db.Put", "err", err)
 			WriteResp(w, ErrResponse{FailureReason: err.Error()}, req.Compact)
@@ -258,8 +258,8 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		TrackerId: trackerID,
 	}
 
-	if err := t.db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForPrefix(dbutils.SnapshotInfoBucket, append(req.InfoHash, make([]byte, 20)...), func(k, v []byte) error {
+	if err := t.db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForPrefix(kv.SnapshotInfo, append(req.InfoHash, make([]byte, 20)...), func(k, v []byte) error {
 			a := AnnounceReqWithTime{}
 			err = json.Unmarshal(v, &a)
 			if err != nil {

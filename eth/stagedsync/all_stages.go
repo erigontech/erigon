@@ -2,12 +2,12 @@ package stagedsync
 
 import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
 // need to fix it in future
-func UpdateMetrics(tx ethdb.Tx) error {
+func UpdateMetrics(tx kv.Tx) error {
 	var progress uint64
 	var err error
 	progress, err = stages.GetStageProgress(tx, stages.Headers)

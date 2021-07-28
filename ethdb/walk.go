@@ -18,6 +18,8 @@ package ethdb
 
 import (
 	"bytes"
+
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 // splitCursor implements cursor with two keys
@@ -28,8 +30,8 @@ import (
 // functions `Seek` and `Next` deliver both
 // parts as well as the corresponding value
 type splitCursor struct {
-	c          Cursor // Unlerlying cursor
-	startkey   []byte // Starting key (also contains bits that need to be preserved)
+	c          kv.Cursor // Unlerlying cursor
+	startkey   []byte    // Starting key (also contains bits that need to be preserved)
 	matchBytes int
 	mask       uint8
 	part1end   int // Position in the key where the first part ends
@@ -37,7 +39,7 @@ type splitCursor struct {
 	part3start int // Position in the key where the third part starts
 }
 
-func NewSplitCursor(c Cursor, startkey []byte, matchBits int, part1end, part2start, part3start int) *splitCursor {
+func NewSplitCursor(c kv.Cursor, startkey []byte, matchBits int, part1end, part2start, part3start int) *splitCursor {
 	var sc splitCursor
 	sc.c = c
 	sc.startkey = startkey

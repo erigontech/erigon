@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
@@ -95,7 +96,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 		m:            m,
 		prependBlock: m.Genesis,
 		getHeader: func(hash common.Hash, number uint64) (h *types.Header) {
-			if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 				h = rawdb.ReadHeader(tx, hash, number)
 				return nil
 			}); err != nil {
@@ -104,7 +105,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return h
 		},
 	}
-	backend.checkTEVM = ethdb.GetCheckTEVM(kv.NewObjectDatabase(m.DB))
+	backend.checkTEVM = ethdb.GetCheckTEVM(olddb.NewObjectDatabase(m.DB))
 	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
 	backend.emptyPendingBlock()
 	return backend
@@ -119,7 +120,7 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 	return b
 }
 
-func (b *SimulatedBackend) DB() ethdb.RwKV {
+func (b *SimulatedBackend) DB() kv.RwDB {
 	return b.m.DB
 }
 
@@ -166,12 +167,12 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingReader = state.NewPlainStateReader(kv.NewObjectDatabase(b.m.DB))
+	b.pendingReader = state.NewPlainStateReader(olddb.NewObjectDatabase(b.m.DB))
 	b.pendingState = state.New(b.pendingReader)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(db ethdb.Tx, blockNumber *big.Int) *state.IntraBlockState {
+func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
 		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()))
 	}
@@ -490,7 +491,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 		return nil, errBlockNumberUnsupported
 	}
 	var res *core.ExecutionResult
-	if err := b.m.DB.View(context.Background(), func(tx ethdb.Tx) (err error) {
+	if err := b.m.DB.View(context.Background(), func(tx kv.Tx) (err error) {
 		s := state.New(state.NewPlainStateReader(tx))
 		res, err = b.callContract(ctx, call, b.pendingBlock, s)
 		if err != nil {
@@ -846,7 +847,7 @@ func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
 type filterBackend struct {
-	db ethdb.RwKV
+	db kv.RwDB
 	b  *SimulatedBackend
 }
 

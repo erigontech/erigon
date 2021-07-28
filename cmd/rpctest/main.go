@@ -235,7 +235,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.CompareAccountRange(erigonURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData)
+			rpctest.CompareAccountRange(log.New(), erigonURL, gethURL, tmpDataDir, tmpDataDirOrig, blockFrom, notRegenerateGethData)
 		},
 	}
 	with(compareAccountRange, withErigonUrl, withGethUrl, withBlockNum)

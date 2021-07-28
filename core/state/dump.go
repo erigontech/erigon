@@ -26,13 +26,13 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 type Dumper struct {
 	blockNumber uint64
-	db          ethdb.Tx
+	db          kv.Tx
 	hashedState bool
 }
 
@@ -121,7 +121,7 @@ func (d iterativeDump) OnRoot(root common.Hash) {
 	}{root})
 }
 
-func NewDumper(db ethdb.Tx, blockNumber uint64) *Dumper {
+func NewDumper(db kv.Tx, blockNumber uint64) *Dumper {
 	return &Dumper{
 		db:          db,
 		blockNumber: blockNumber,
@@ -179,7 +179,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation)
 		if incarnation > 0 {
-			codeHash, err := d.db.GetOne(dbutils.PlainContractCodeBucket, storagePrefix)
+			codeHash, err := d.db.GetOne(kv.PlainContractCode, storagePrefix)
 			if err != nil {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
 			}
@@ -191,7 +191,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 
 			if !excludeCode && codeHash != nil && !bytes.Equal(codeHash, emptyCodeHash[:]) {
 				var code []byte
-				if code, err = ethdb.Get(d.db, dbutils.CodeBucket, codeHash); err != nil {
+				if code, err = d.db.GetOne(kv.CodeBucket, codeHash); err != nil {
 					return nil, err
 				}
 				account.Code = code

@@ -1,4 +1,4 @@
-package kv
+package mdbx
 
 import (
 	"bytes"
@@ -14,9 +14,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -26,11 +25,11 @@ const expectMdbxVersionMajor = 0
 const expectMdbxVersionMinor = 10
 const pageSize = 4 * 1024
 
-const NonExistingDBI dbutils.DBI = 999_999_999
+const NonExistingDBI kv.DBI = 999_999_999
 
-type BucketConfigsFunc func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg
+type BucketConfigsFunc func(defaultBuckets kv.TableCfg) kv.TableCfg
 
-func DefaultBucketConfigs(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+func DefaultBucketConfigs(defaultBuckets kv.TableCfg) kv.TableCfg {
 	return defaultBuckets
 }
 
@@ -38,10 +37,11 @@ type MdbxOpts struct {
 	bucketsCfg BucketConfigsFunc
 	path       string
 	inMem      bool
-	label      ethdb.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
-	verbosity  ethdb.DBVerbosityLvl
+	label      kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
+	verbosity  kv.DBVerbosityLvl
 	mapSize    datasize.ByteSize
 	flags      uint
+	log        log.Logger
 }
 
 func testKVPath() string {
@@ -52,14 +52,15 @@ func testKVPath() string {
 	return dir
 }
 
-func NewMDBX() MdbxOpts {
+func NewMDBX(log log.Logger) MdbxOpts {
 	return MdbxOpts{
 		bucketsCfg: DefaultBucketConfigs,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
+		log:        log,
 	}
 }
 
-func (opts MdbxOpts) Label(label ethdb.Label) MdbxOpts {
+func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 	opts.label = label
 	return opts
 }
@@ -93,7 +94,7 @@ func (opts MdbxOpts) Readonly() MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) DBVerbosity(v ethdb.DBVerbosityLvl) MdbxOpts {
+func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts {
 	opts.verbosity = v
 	return opts
 }
@@ -108,11 +109,11 @@ func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
+func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
 		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
 	}
-	logger := log.New("mdbx", opts.label.String(), "exclusive", opts.flags&mdbx.Exclusive != 0)
+
 	var err error
 	if opts.inMem {
 		opts.path = testKVPath()
@@ -131,7 +132,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 	if err = env.SetOption(mdbx.OptMaxDB, 100); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptMaxReaders, ethdb.ReadersLimit); err != nil {
+	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
 
@@ -201,12 +202,12 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 	db := &MdbxKV{
 		opts:    opts,
 		env:     env,
-		log:     logger,
+		log:     opts.log,
 		wg:      &sync.WaitGroup{},
-		buckets: dbutils.BucketsCfg{},
+		buckets: kv.TableCfg{},
 		txSize:  dirtyPagesLimit * pageSize,
 	}
-	customBuckets := opts.bucketsCfg(dbutils.BucketsConfigs)
+	customBuckets := opts.bucketsCfg(kv.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}
@@ -222,7 +223,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 			if db.buckets[name].IsDeprecated {
 				continue
 			}
-			if err = tx.(ethdb.BucketMigrator).CreateBucket(name); err != nil {
+			if err = tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
 				return nil, err
 			}
 		}
@@ -231,12 +232,12 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 			return nil, err
 		}
 	} else {
-		if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			for _, name := range buckets {
 				if db.buckets[name].IsDeprecated {
 					continue
 				}
-				if err := tx.(ethdb.BucketMigrator).CreateBucket(name); err != nil {
+				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
 					return err
 				}
 			}
@@ -264,7 +265,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 					return fmt.Errorf("bucket: %s, %w", name, createErr)
 				}
 			}
-			cnfCopy.DBI = dbutils.DBI(dbi)
+			cnfCopy.DBI = kv.DBI(dbi)
 			db.buckets[name] = cnfCopy
 		}
 		return nil
@@ -282,7 +283,7 @@ func (opts MdbxOpts) Open() (ethdb.RwKV, error) {
 	return db, nil
 }
 
-func (opts MdbxOpts) MustOpen() ethdb.RwKV {
+func (opts MdbxOpts) MustOpen() kv.RwDB {
 	db, err := opts.Open()
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
@@ -294,7 +295,7 @@ type MdbxKV struct {
 	env     *mdbx.Env
 	log     log.Logger
 	wg      *sync.WaitGroup
-	buckets dbutils.BucketsCfg
+	buckets kv.TableCfg
 	opts    MdbxOpts
 	txSize  uint64
 }
@@ -319,7 +320,7 @@ func (db *MdbxKV) Close() {
 	}
 }
 
-func (db *MdbxKV) BeginRo(_ context.Context) (txn ethdb.Tx, err error) {
+func (db *MdbxKV) BeginRo(_ context.Context) (txn kv.Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -341,7 +342,7 @@ func (db *MdbxKV) BeginRo(_ context.Context) (txn ethdb.Tx, err error) {
 	}, nil
 }
 
-func (db *MdbxKV) BeginRw(_ context.Context) (txn ethdb.RwTx, err error) {
+func (db *MdbxKV) BeginRw(_ context.Context) (txn kv.RwTx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -368,7 +369,7 @@ type MdbxTx struct {
 	tx               *mdbx.Txn
 	db               *MdbxKV
 	cursors          map[uint64]*mdbx.Cursor
-	statelessCursors map[string]ethdb.Cursor
+	statelessCursors map[string]kv.Cursor
 	readOnly         bool
 	cursorID         uint64
 }
@@ -377,7 +378,7 @@ type MdbxCursor struct {
 	tx         *MdbxTx
 	c          *mdbx.Cursor
 	bucketName string
-	bucketCfg  dbutils.BucketConfigItem
+	bucketCfg  kv.TableConfigItem
 	dbi        mdbx.DBI
 	id         uint64
 }
@@ -386,15 +387,15 @@ func (db *MdbxKV) Env() *mdbx.Env {
 	return db.env
 }
 
-func (db *MdbxKV) AllDBI() map[string]dbutils.DBI {
-	res := map[string]dbutils.DBI{}
+func (db *MdbxKV) AllDBI() map[string]kv.DBI {
+	res := map[string]kv.DBI{}
 	for name, cfg := range db.buckets {
 		res[name] = cfg.DBI
 	}
 	return res
 }
 
-func (db *MdbxKV) AllBuckets() dbutils.BucketsCfg {
+func (db *MdbxKV) AllBuckets() kv.TableCfg {
 	return db.buckets
 }
 
@@ -456,7 +457,7 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 }
 
 func (tx *MdbxTx) CollectMetrics() {
-	if tx.db.opts.label != ethdb.Chain {
+	if tx.db.opts.label != kv.ChainDB {
 		return
 	}
 
@@ -475,75 +476,75 @@ func (tx *MdbxTx) CollectMetrics() {
 	if !metrics.Enabled {
 		return
 	}
-	ethdb.DbSize.Update(int64(info.Geo.Current))
-	ethdb.DbPgopsNewly.Update(int64(info.PageOps.Newly))
-	ethdb.DbPgopsCow.Update(int64(info.PageOps.Cow))
-	ethdb.DbPgopsClone.Update(int64(info.PageOps.Clone))
-	ethdb.DbPgopsSplit.Update(int64(info.PageOps.Split))
-	ethdb.DbPgopsMerge.Update(int64(info.PageOps.Merge))
-	ethdb.DbPgopsSpill.Update(int64(info.PageOps.Spill))
-	ethdb.DbPgopsUnspill.Update(int64(info.PageOps.Unspill))
-	ethdb.DbPgopsWops.Update(int64(info.PageOps.Wops))
+	kv.DbSize.Update(int64(info.Geo.Current))
+	kv.DbPgopsNewly.Update(int64(info.PageOps.Newly))
+	kv.DbPgopsCow.Update(int64(info.PageOps.Cow))
+	kv.DbPgopsClone.Update(int64(info.PageOps.Clone))
+	kv.DbPgopsSplit.Update(int64(info.PageOps.Split))
+	kv.DbPgopsMerge.Update(int64(info.PageOps.Merge))
+	kv.DbPgopsSpill.Update(int64(info.PageOps.Spill))
+	kv.DbPgopsUnspill.Update(int64(info.PageOps.Unspill))
+	kv.DbPgopsWops.Update(int64(info.PageOps.Wops))
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
 		return
 	}
 
-	ethdb.TxDirty.Update(int64(txInfo.SpaceDirty))
-	ethdb.TxLimit.Update(int64(tx.db.txSize))
-	ethdb.TxSpill.Update(int64(txInfo.Spill))
-	ethdb.TxUnspill.Update(int64(txInfo.Unspill))
+	kv.TxDirty.Update(int64(txInfo.SpaceDirty))
+	kv.TxLimit.Update(int64(tx.db.txSize))
+	kv.TxSpill.Update(int64(txInfo.Spill))
+	kv.TxUnspill.Update(int64(txInfo.Unspill))
 
 	gc, err := tx.BucketStat("gc")
 	if err != nil {
 		return
 	}
-	ethdb.GcLeafMetric.Update(int64(gc.LeafPages))
-	ethdb.GcOverflowMetric.Update(int64(gc.OverflowPages))
-	ethdb.GcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * pageSize / 8))
+	kv.GcLeafMetric.Update(int64(gc.LeafPages))
+	kv.GcOverflowMetric.Update(int64(gc.OverflowPages))
+	kv.GcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * pageSize / 8))
 
 	{
-		st, err := tx.BucketStat(dbutils.PlainStateBucket)
+		st, err := tx.BucketStat(kv.PlainStateBucket)
 		if err != nil {
 			return
 		}
-		ethdb.TableStateLeaf.Update(int64(st.LeafPages))
-		ethdb.TableStateBranch.Update(int64(st.BranchPages))
-		ethdb.TableStateEntries.Update(int64(st.Entries))
-		ethdb.TableStateSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+		kv.TableStateLeaf.Update(int64(st.LeafPages))
+		kv.TableStateBranch.Update(int64(st.BranchPages))
+		kv.TableStateEntries.Update(int64(st.Entries))
+		kv.TableStateSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
 	}
 	{
-		st, err := tx.BucketStat(dbutils.StorageChangeSetBucket)
+		st, err := tx.BucketStat(kv.StorageChangeSet)
 		if err != nil {
 			return
 		}
-		ethdb.TableScsLeaf.Update(int64(st.LeafPages))
-		ethdb.TableScsBranch.Update(int64(st.BranchPages))
-		ethdb.TableScsEntries.Update(int64(st.Entries))
-		ethdb.TableScsSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+		kv.TableScsLeaf.Update(int64(st.LeafPages))
+		kv.TableScsBranch.Update(int64(st.BranchPages))
+		kv.TableScsEntries.Update(int64(st.Entries))
+		kv.TableScsSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
 	}
 	{
-		st, err := tx.BucketStat(dbutils.EthTx)
+		st, err := tx.BucketStat(kv.EthTx)
 		if err != nil {
 			return
 		}
-		ethdb.TableTxLeaf.Update(int64(st.LeafPages))
-		ethdb.TableTxBranch.Update(int64(st.BranchPages))
-		ethdb.TableTxOverflow.Update(int64(st.OverflowPages))
-		ethdb.TableTxEntries.Update(int64(st.Entries))
-		ethdb.TableTxSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+		kv.TableTxLeaf.Update(int64(st.LeafPages))
+		kv.TableTxBranch.Update(int64(st.BranchPages))
+		kv.TableTxOverflow.Update(int64(st.OverflowPages))
+		kv.TableTxEntries.Update(int64(st.Entries))
+		kv.TableTxSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
 	}
 	{
-		st, err := tx.BucketStat(dbutils.Log)
+		st, err := tx.BucketStat(kv.Log)
 		if err != nil {
 			return
 		}
-		ethdb.TableLogLeaf.Update(int64(st.LeafPages))
-		ethdb.TableLogBranch.Update(int64(st.BranchPages))
-		ethdb.TableLogOverflow.Update(int64(st.OverflowPages))
-		ethdb.TableLogEntries.Update(int64(st.Entries))
-		ethdb.TableLogSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+		kv.TableLogLeaf.Update(int64(st.LeafPages))
+		kv.TableLogBranch.Update(int64(st.BranchPages))
+		kv.TableLogOverflow.Update(int64(st.OverflowPages))
+		kv.TableLogEntries.Update(int64(st.Entries))
+		kv.TableLogSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
 	}
 }
 
@@ -552,7 +553,7 @@ func (tx *MdbxTx) ListBuckets() ([]string, error) {
 	return tx.tx.ListDBI()
 }
 
-func (db *MdbxKV) View(ctx context.Context, f func(tx ethdb.Tx) error) (err error) {
+func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
@@ -569,7 +570,7 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx ethdb.Tx) error) (err erro
 	return f(tx)
 }
 
-func (db *MdbxKV) Update(ctx context.Context, f func(tx ethdb.RwTx) error) (err error) {
+func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	if db.env == nil {
 		return fmt.Errorf("db closed")
 	}
@@ -599,13 +600,13 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
 	if err == nil {
-		cnfCopy.DBI = dbutils.DBI(dbi)
+		cnfCopy.DBI = kv.DBI(dbi)
 		var flags uint
 		flags, err = tx.tx.Flags(dbi)
 		if err != nil {
 			return err
 		}
-		cnfCopy.Flags = dbutils.BucketFlags(flags)
+		cnfCopy.Flags = kv.TableFlags(flags)
 
 		tx.db.buckets[name] = cnfCopy
 		return nil
@@ -619,9 +620,9 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		nativeFlags |= mdbx.Create
 	}
 
-	if flags&dbutils.DupSort != 0 {
+	if flags&kv.DupSort != 0 {
 		nativeFlags |= mdbx.DupSort
-		flags ^= dbutils.DupSort
+		flags ^= kv.DupSort
 	}
 	if flags != 0 {
 		return fmt.Errorf("some not supported flag provided for bucket")
@@ -632,7 +633,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	if err != nil {
 		return fmt.Errorf("create bucket: %s, %w", name, err)
 	}
-	cnfCopy.DBI = dbutils.DBI(dbi)
+	cnfCopy.DBI = kv.DBI(dbi)
 
 	tx.db.buckets[name] = cnfCopy
 	return nil
@@ -650,7 +651,7 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 			}
 			return fmt.Errorf("bucket: %s, %w", name, err)
 		}
-		dbi = dbutils.DBI(nativeDBI)
+		dbi = kv.DBI(nativeDBI)
 	}
 
 	if err := tx.tx.Drop(mdbx.DBI(dbi), true); err != nil {
@@ -672,7 +673,7 @@ func (tx *MdbxTx) ClearBucket(bucket string) error {
 
 func (tx *MdbxTx) DropBucket(bucket string) error {
 	if cfg, ok := tx.db.buckets[bucket]; !(ok && cfg.IsDeprecated) {
-		return fmt.Errorf("%w, bucket: %s", ethdb.ErrAttemptToDeleteNonDeprecatedBucket, bucket)
+		return fmt.Errorf("%w, bucket: %s", kv.ErrAttemptToDeleteNonDeprecatedBucket, bucket)
 	}
 
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
@@ -716,14 +717,14 @@ func (tx *MdbxTx) Commit() error {
 		return err
 	}
 
-	if tx.db.opts.label == ethdb.Chain {
-		ethdb.DbCommitPreparation.Update(latency.Preparation)
-		ethdb.DbCommitGc.Update(latency.GC)
-		ethdb.DbCommitAudit.Update(latency.Audit)
-		ethdb.DbCommitWrite.Update(latency.Write)
-		ethdb.DbCommitSync.Update(latency.Sync)
-		ethdb.DbCommitEnding.Update(latency.Ending)
-		ethdb.DbCommitBigBatchTimer.Update(latency.Whole)
+	if tx.db.opts.label == kv.ChainDB {
+		kv.DbCommitPreparation.Update(latency.Preparation)
+		kv.DbCommitGc.Update(latency.GC)
+		kv.DbCommitAudit.Update(latency.Audit)
+		kv.DbCommitWrite.Update(latency.Write)
+		kv.DbCommitSync.Update(latency.Sync)
+		kv.DbCommitEnding.Update(latency.Ending)
+		kv.DbCommitBigBatchTimer.Update(latency.Whole)
 	}
 
 	if latency.Whole > slowTx {
@@ -803,9 +804,9 @@ func (tx *MdbxTx) closeCursors() {
 	tx.statelessCursors = nil
 }
 
-func (tx *MdbxTx) statelessCursor(bucket string) (ethdb.RwCursor, error) {
+func (tx *MdbxTx) statelessCursor(bucket string) (kv.RwCursor, error) {
 	if tx.statelessCursors == nil {
-		tx.statelessCursors = make(map[string]ethdb.Cursor)
+		tx.statelessCursors = make(map[string]kv.Cursor)
 	}
 	c, ok := tx.statelessCursors[bucket]
 	if !ok {
@@ -816,7 +817,7 @@ func (tx *MdbxTx) statelessCursor(bucket string) (ethdb.RwCursor, error) {
 		}
 		tx.statelessCursors[bucket] = c
 	}
-	return c.(ethdb.RwCursor), nil
+	return c.(kv.RwCursor), nil
 }
 
 func (tx *MdbxTx) Put(bucket string, k, v []byte) error {
@@ -872,7 +873,7 @@ func (tx *MdbxTx) AppendDup(bucket string, k, v []byte) error {
 }
 
 func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
-	c, err := tx.statelessCursor(dbutils.Sequence)
+	c, err := tx.statelessCursor(kv.Sequence)
 	if err != nil {
 		return 0, err
 	}
@@ -896,7 +897,7 @@ func (tx *MdbxTx) IncrementSequence(bucket string, amount uint64) (uint64, error
 }
 
 func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
-	c, err := tx.statelessCursor(dbutils.Sequence)
+	c, err := tx.statelessCursor(kv.Sequence)
 	if err != nil {
 		return 0, err
 	}
@@ -935,24 +936,24 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 	return st, nil
 }
 
-func (tx *MdbxTx) RwCursor(bucket string) (ethdb.RwCursor, error) {
+func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
 	if b.AutoDupSortKeysConversion {
 		return tx.stdCursor(bucket)
 	}
 
-	if b.Flags&dbutils.DupSort != 0 {
+	if b.Flags&kv.DupSort != 0 {
 		return tx.RwCursorDupSort(bucket)
 	}
 
 	return tx.stdCursor(bucket)
 }
 
-func (tx *MdbxTx) Cursor(bucket string) (ethdb.Cursor, error) {
+func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 	return tx.RwCursor(bucket)
 }
 
-func (tx *MdbxTx) stdCursor(bucket string) (ethdb.RwCursor, error) {
+func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
 	c := &MdbxCursor{bucketName: bucket, tx: tx, bucketCfg: b, dbi: mdbx.DBI(tx.db.buckets[bucket].DBI), id: tx.cursorID}
 	tx.cursorID++
@@ -971,7 +972,7 @@ func (tx *MdbxTx) stdCursor(bucket string) (ethdb.RwCursor, error) {
 	return c, nil
 }
 
-func (tx *MdbxTx) RwCursorDupSort(bucket string) (ethdb.RwCursorDupSort, error) {
+func (tx *MdbxTx) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
 	basicCursor, err := tx.stdCursor(bucket)
 	if err != nil {
 		return nil, err
@@ -979,7 +980,7 @@ func (tx *MdbxTx) RwCursorDupSort(bucket string) (ethdb.RwCursorDupSort, error) 
 	return &MdbxDupSortCursor{MdbxCursor: basicCursor.(*MdbxCursor)}, nil
 }
 
-func (tx *MdbxTx) CursorDupSort(bucket string) (ethdb.CursorDupSort, error) {
+func (tx *MdbxTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	return tx.RwCursorDupSort(bucket)
 }
 
@@ -1547,7 +1548,7 @@ func (c *MdbxDupSortCursor) CountDuplicates() (uint64, error) {
 	return res, nil
 }
 
-func bucketSlice(b dbutils.BucketsCfg) []string {
+func bucketSlice(b kv.TableCfg) []string {
 	buckets := make([]string, 0, len(b))
 	for name := range b {
 		buckets = append(buckets, name)

@@ -4,20 +4,20 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type SnapshotBodiesCfg struct {
 	enabled          bool
-	db               ethdb.RwKV
+	db               kv.RwDB
 	snapshotDir      string
 	tmpDir           string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
-func StageSnapshotBodiesCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, tmpDir string) SnapshotBodiesCfg {
+func StageSnapshotBodiesCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, tmpDir string) SnapshotBodiesCfg {
 	return SnapshotBodiesCfg{
 		enabled:          snapshot.Enabled && snapshot.Mode.Bodies,
 		db:               db,
@@ -28,11 +28,11 @@ func StageSnapshotBodiesCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *
 	}
 }
 
-func SpawnBodiesSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) error {
+func SpawnBodiesSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) error {
 	return nil
 }
 
-func UnwindBodiesSnapshotGenerationStage(s *UnwindState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) (err error) {
+func UnwindBodiesSnapshotGenerationStage(s *UnwindState, tx kv.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -53,7 +53,7 @@ func UnwindBodiesSnapshotGenerationStage(s *UnwindState, tx ethdb.RwTx, cfg Snap
 	return nil
 }
 
-func PruneBodiesSnapshotGenerationStage(s *PruneState, tx ethdb.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) (err error) {
+func PruneBodiesSnapshotGenerationStage(s *PruneState, tx kv.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

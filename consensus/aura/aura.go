@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -322,7 +322,7 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e consensus.EpochRead
 // AuRa
 //nolint
 type AuRa struct {
-	db     ethdb.RwKV // Database to store and retrieve snapshot checkpoints
+	db     kv.RwDB // Database to store and retrieve snapshot checkpoints
 	exitCh chan struct{}
 	lock   sync.RWMutex // Protects the signer fields
 
@@ -389,7 +389,7 @@ func (pb *GasLimitOverride) Add(hash common.Hash, b *uint256.Int) {
 	pb.cache.ContainsOrAdd(hash, b)
 }
 
-func NewAuRa(config *params.AuRaConfig, db ethdb.RwKV, ourSigningAddress common.Address, engineParamsJson []byte) (*AuRa, error) {
+func NewAuRa(config *params.AuRaConfig, db kv.RwDB, ourSigningAddress common.Address, engineParamsJson []byte) (*AuRa, error) {
 	spec := JsonSpec{}
 	err := json.Unmarshal(engineParamsJson, &spec)
 	if err != nil {

@@ -7,9 +7,8 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 )
 
 var (
@@ -21,12 +20,12 @@ var (
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
-	db := kv.MustOpen(dir + "/db")
+	db := mdbx.MustOpen(dir + "/db")
 	sn := &SNDownloaderServer{
 		db: db,
 	}
-	if err := db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		peerID, err := tx.GetOne(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)
 		}
@@ -51,11 +50,11 @@ func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 type SNDownloaderServer struct {
 	DownloaderServer
 	t  *Client
-	db ethdb.RwKV
+	db kv.RwDB
 }
 
 func (s *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnapshotRequest) (*empty.Empty, error) {
-	if err := s.db.Update(ctx, func(tx ethdb.RwTx) error {
+	if err := s.db.Update(ctx, func(tx kv.RwTx) error {
 		return s.t.AddSnapshotsTorrents(ctx, tx, request.NetworkId, FromSnapshotTypes(request.Type))
 	}); err != nil {
 		return nil, err
@@ -63,7 +62,7 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnap
 	return &empty.Empty{}, nil
 }
 func (s *SNDownloaderServer) Load() error {
-	return s.db.View(context.Background(), func(tx ethdb.Tx) error {
+	return s.db.View(context.Background(), func(tx kv.Tx) error {
 		return s.t.Load(tx)
 	})
 }

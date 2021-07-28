@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -271,7 +271,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setPrivateApi(ctx, cfg)
-	cfg.DatabaseVerbosity = ethdb.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
+	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
 }
 
 // setPrivateApi populates configuration fields related to the remote
@@ -279,7 +279,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))
-	maxRateLimit := uint32(ethdb.ReadersLimit - 128) // leave some readers for P2P
+	maxRateLimit := uint32(kv.ReadersLimit - 128) // leave some readers for P2P
 	if cfg.PrivateApiRateLimit > maxRateLimit {
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
 		cfg.PrivateApiRateLimit = maxRateLimit

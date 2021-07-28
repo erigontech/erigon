@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
@@ -24,7 +24,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -136,7 +136,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx ethdb.Tx) (vm.BlockContext, vm.TxContext) {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx) (vm.BlockContext, vm.TxContext) {
 	var baseFee uint256.Int
 	if header.Eip1559 {
 		overflow := baseFee.SetFromBig(header.BaseFee)
@@ -162,7 +162,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 		}
 }
 
-func getHashGetter(requireCanonical bool, tx ethdb.Tx) func(uint64) common.Hash {
+func getHashGetter(requireCanonical bool, tx kv.Tx) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
 		hash, err := rawdb.ReadCanonicalHash(tx, n)
 		if err != nil {

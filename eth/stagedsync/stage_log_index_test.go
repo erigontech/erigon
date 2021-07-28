@@ -7,18 +7,17 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/stretchr/testify/require"
 )
 
-func genReceipts(t *testing.T, tx ethdb.RwTx, blocks uint64) (map[common.Address]uint64, map[common.Hash]uint64) {
+func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[common.Address]uint64, map[common.Hash]uint64) {
 	addrs := []common.Address{{1}, {2}, {3}}
 	topics := []common.Hash{{1}, {2}, {3}}
 
@@ -92,7 +91,7 @@ func genReceipts(t *testing.T, tx ethdb.RwTx, blocks uint64) (map[common.Address
 
 func TestLogIndex(t *testing.T) {
 	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	expectAddrs, expectTopics := genReceipts(t, tx, 10000)
 
@@ -105,12 +104,12 @@ func TestLogIndex(t *testing.T) {
 
 	// Check indices GetCardinality (in how many blocks they meet)
 	for addr, expect := range expectAddrs {
-		m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr[:], 0, 10_000_000)
+		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], 0, 10_000_000)
 		require.NoError(err)
 		require.Equal(expect, m.GetCardinality())
 	}
 	for topic, expect := range expectTopics {
-		m, err := bitmapdb.Get(tx, dbutils.LogTopicIndex, topic[:], 0, 10_000_000)
+		m, err := bitmapdb.Get(tx, kv.LogTopicIndex, topic[:], 0, 10_000_000)
 		require.NoError(err)
 		require.Equal(expect, m.GetCardinality())
 	}
@@ -121,7 +120,7 @@ func TestLogIndex(t *testing.T) {
 
 	{
 		total := 0
-		err = tx.ForEach(dbutils.LogAddressIndex, nil, func(k, v []byte) error {
+		err = tx.ForEach(kv.LogAddressIndex, nil, func(k, v []byte) error {
 			require.True(binary.BigEndian.Uint32(k[common.AddressLength:]) >= 500)
 			total++
 			return nil
@@ -131,7 +130,7 @@ func TestLogIndex(t *testing.T) {
 	}
 	{
 		total := 0
-		err = tx.ForEach(dbutils.LogTopicIndex, nil, func(k, v []byte) error {
+		err = tx.ForEach(kv.LogTopicIndex, nil, func(k, v []byte) error {
 			require.True(binary.BigEndian.Uint32(k[common.HashLength:]) >= 500)
 			total++
 			return nil
@@ -145,12 +144,12 @@ func TestLogIndex(t *testing.T) {
 	require.NoError(err)
 
 	for addr := range expectAddrs {
-		m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr[:], 0, 10_000_000)
+		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], 0, 10_000_000)
 		require.NoError(err)
 		require.True(m.Maximum() <= 700)
 	}
 	for topic := range expectTopics {
-		m, err := bitmapdb.Get(tx, dbutils.LogTopicIndex, topic[:], 0, 10_000_000)
+		m, err := bitmapdb.Get(tx, kv.LogTopicIndex, topic[:], 0, 10_000_000)
 		require.NoError(err)
 		require.True(m.Maximum() <= 700)
 	}
