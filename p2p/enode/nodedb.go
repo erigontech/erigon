@@ -90,7 +90,7 @@ func OpenDB(path string) (*DB, error) {
 
 var bucketsConfig = func(defaultBuckets kv.TableCfg) kv.TableCfg {
 	return kv.TableCfg{
-		kv.InodesBucket: {},
+		kv.Inodes: {},
 	}
 }
 
@@ -121,7 +121,7 @@ func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 
 	var blob []byte
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.InodesBucket)
+		c, err := tx.RwCursor(kv.Inodes)
 		if err != nil {
 			return err
 		}
@@ -217,7 +217,7 @@ func localItemKey(id ID, field string) []byte {
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		blob, errGet := tx.GetOne(kv.InodesBucket, key)
+		blob, errGet := tx.GetOne(kv.Inodes, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -239,7 +239,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.InodesBucket, common.CopyBytes(key), blob)
+		return tx.Put(kv.Inodes, common.CopyBytes(key), blob)
 	})
 }
 
@@ -247,7 +247,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		blob, errGet := tx.GetOne(kv.InodesBucket, key)
+		blob, errGet := tx.GetOne(kv.Inodes, key)
 		if errGet != nil {
 			return errGet
 		}
@@ -266,7 +266,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
 	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.InodesBucket, common.CopyBytes(key), blob)
+		return tx.Put(kv.Inodes, common.CopyBytes(key), blob)
 	})
 }
 
@@ -274,7 +274,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		v, errGet := tx.GetOne(kv.InodesBucket, nodeKey(id))
+		v, errGet := tx.GetOne(kv.Inodes, nodeKey(id))
 		if errGet != nil {
 			return errGet
 		}
@@ -312,7 +312,7 @@ func (db *DB) UpdateNode(node *Node) error {
 		return err
 	}
 	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.InodesBucket, nodeKey(node.ID()), blob)
+		return tx.Put(kv.Inodes, nodeKey(node.ID()), blob)
 	}); err != nil {
 		return err
 	}
@@ -340,7 +340,7 @@ func (db *DB) DeleteNode(id ID) {
 
 func deleteRange(db kv.RwDB, prefix []byte) {
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.InodesBucket)
+		c, err := tx.RwCursor(kv.Inodes)
 		if err != nil {
 			return err
 		}
@@ -395,7 +395,7 @@ func (db *DB) expireNodes() {
 	)
 	var toDelete [][]byte
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.InodesBucket)
+		c, err := tx.Cursor(kv.Inodes)
 		if err != nil {
 			return err
 		}
@@ -528,7 +528,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	)
 
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.InodesBucket)
+		c, err := tx.Cursor(kv.Inodes)
 		if err != nil {
 			return err
 		}
@@ -557,7 +557,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			db.ensureExpirer()
 			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
 			var lastPongReceived int64
-			blob, errGet := tx.GetOne(kv.InodesBucket, pongKey)
+			blob, errGet := tx.GetOne(kv.Inodes, pongKey)
 			if errGet != nil {
 				return errGet
 			}

@@ -24,7 +24,7 @@ import (
 
 func ReadAccount(db kv.Tx, addrHash common.Address, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
-	enc, err := db.GetOne(kv.PlainStateBucket, addrHashBytes)
+	enc, err := db.GetOne(kv.PlainState, addrHashBytes)
 	if err != nil {
 		return false, err
 	}

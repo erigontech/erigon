@@ -52,7 +52,7 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(address, value)
 	}
-	return w.db.Put(kv.PlainStateBucket, address[:], value)
+	return w.db.Put(kv.PlainState, address[:], value)
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
@@ -64,7 +64,7 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 	if w.accumulator != nil {
 		w.accumulator.ChangeCode(address, incarnation, code)
 	}
-	if err := w.db.Put(kv.CodeBucket, codeHash[:], code); err != nil {
+	if err := w.db.Put(kv.Code, codeHash[:], code); err != nil {
 		return err
 	}
 	return w.db.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
@@ -79,7 +79,7 @@ func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accou
 	if w.accumulator != nil {
 		w.accumulator.DeleteAccount(address)
 	}
-	if err := w.db.Delete(kv.PlainStateBucket, address[:], nil); err != nil {
+	if err := w.db.Delete(kv.PlainState, address[:], nil); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
@@ -108,9 +108,9 @@ func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnati
 		w.accumulator.ChangeStorage(address, incarnation, *key, v)
 	}
 	if len(v) == 0 {
-		return w.db.Delete(kv.PlainStateBucket, compositeKey, nil)
+		return w.db.Delete(kv.PlainState, compositeKey, nil)
 	}
-	return w.db.Put(kv.PlainStateBucket, compositeKey, v)
+	return w.db.Put(kv.PlainState, compositeKey, v)
 }
 
 func (w *PlainStateWriter) CreateContract(address common.Address) error {

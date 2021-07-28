@@ -276,7 +276,7 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 	if len(logCtx) > 0 { // also don't print this logs if everything is fast
 		buckets := []string{
 			"freelist",
-			kv.PlainStateBucket,
+			kv.PlainState,
 			kv.AccountChangeSet,
 			kv.StorageChangeSet,
 			kv.EthTx,

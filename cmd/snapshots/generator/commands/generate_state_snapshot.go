@@ -51,9 +51,9 @@ func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snaps
 	db = kv2.NewMDBX(logger).Path(dbPath).MustOpen()
 	snkv = kv2.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.PlainStateBucket:  kv.TableConfigItem{},
+			kv.PlainState:        kv.TableConfigItem{},
 			kv.PlainContractCode: kv.TableConfigItem{},
-			kv.CodeBucket:        kv.TableConfigItem{},
+			kv.Code:              kv.TableConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -106,7 +106,7 @@ func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snaps
 				j := 0
 				innerErr := state.WalkAsOfStorage(tx2, common.BytesToAddress(k), acc.Incarnation, common.Hash{}, toBlock+1, func(k1, k2 []byte, vv []byte) (bool, error) {
 					j++
-					innerErr1 := writeTx.Put(kv.PlainStateBucket, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
+					innerErr1 := writeTx.Put(kv.PlainState, dbutils.PlainGenerateCompositeStorageKey(k1, acc.Incarnation, k2), common.CopyBytes(vv))
 					if innerErr1 != nil {
 						return false, innerErr1
 					}
@@ -128,11 +128,11 @@ func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snaps
 					return false, fmt.Errorf("getting code hash for %x: %v", k, err1)
 				}
 				if len(codeHash) > 0 {
-					code, err1 := tx2.GetOne(kv.CodeBucket, codeHash)
+					code, err1 := tx2.GetOne(kv.Code, codeHash)
 					if err1 != nil {
 						return false, err1
 					}
-					if err1 = writeTx.Put(kv.CodeBucket, codeHash, code); err1 != nil {
+					if err1 = writeTx.Put(kv.Code, codeHash, code); err1 != nil {
 						return false, err1
 					}
 					if err1 = writeTx.Put(kv.PlainContractCode, storagePrefix, codeHash); err1 != nil {
@@ -143,7 +143,7 @@ func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snaps
 		}
 		newAcc := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(newAcc)
-		innerErr := writeTx.Put(kv.PlainStateBucket, common.CopyBytes(k), newAcc)
+		innerErr := writeTx.Put(kv.PlainState, common.CopyBytes(k), newAcc)
 		if innerErr != nil {
 			return false, innerErr
 		}

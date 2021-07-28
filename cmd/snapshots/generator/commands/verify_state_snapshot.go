@@ -44,9 +44,9 @@ func VerifyStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snapsho
 
 	snkv = mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
+			kv.PlainState:        kv.BucketsConfigs[kv.PlainState],
 			kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
-			kv.CodeBucket:        kv.BucketsConfigs[kv.CodeBucket],
+			kv.Code:              kv.BucketsConfigs[kv.Code],
 		}
 	}).Path(snapshotPath).Readonly().MustOpen()
 	tmpDB = mdbx.NewMDBX(logger).Path(tmpPath).MustOpen()

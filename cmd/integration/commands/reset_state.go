@@ -108,7 +108,7 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 	if err := tx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.PlainStateBucket); err != nil {
+	if err := tx.ClearBucket(kv.PlainState); err != nil {
 		return err
 	}
 	if err := tx.ClearBucket(kv.AccountChangeSet); err != nil {
@@ -129,7 +129,7 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 	if err := tx.ClearBucket(kv.IncarnationMap); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.CodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.Code); err != nil {
 		return err
 	}
 	if err := tx.ClearBucket(kv.CallTraceSet); err != nil {

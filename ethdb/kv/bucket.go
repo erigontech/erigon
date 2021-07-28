@@ -17,7 +17,7 @@ var DBSchemaVersion = types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 // "incarnation" - uint64 number - how much times given account was SelfDestruct'ed.
 
 /*
-PlainStateBucket logical layout:
+PlainState logical layout:
 	Contains Accounts:
 	  key - address (unhashed)
 	  value - account encoded for storage
@@ -26,7 +26,7 @@ PlainStateBucket logical layout:
 	  value - storage value(common.hash)
 
 Physical layout:
-	PlainStateBucket and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
+	PlainState and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
 -------------------------------------------------------------
 	   key              |            value
 -------------------------------------------------------------
@@ -40,7 +40,7 @@ Physical layout:
 [acc2_hash]             | [acc2_value]
 						...
 */
-const PlainStateBucket = "PlainState"
+const PlainState = "PlainState"
 
 //PlainContractCode -
 //key - address+incarnation
@@ -56,7 +56,7 @@ Logical format:
 
 Example: If block N changed account A from value X to Y. Then:
 	AccountChangeSet has record: bigEndian(N) + A -> X
-	PlainStateBucket has record: A -> Y
+	PlainState has record: A -> Y
 
 See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
 
@@ -125,7 +125,7 @@ const (
 
 	//key - contract code hash
 	//value - contract code
-	CodeBucket = "Code"
+	Code = "Code"
 
 	//key - addressHash+incarnation
 	//value - code hash
@@ -136,7 +136,7 @@ const (
 	//value - incarnation of account when it was last deleted
 	IncarnationMap = "IncarnationMap"
 
-	//TEVMCodeBucket -
+	//TEVMCode -
 	//key - contract code hash
 	//value - contract TEVM code
 	ContractTEVMCode = "TEVMCode"
@@ -231,13 +231,13 @@ const (
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
 
-	CliqueBucket       = "Clique"
+	Clique             = "Clique"
 	CliqueSeparate     = "CliqueSeparate"
 	CliqueSnapshot     = "CliqueSnapshot"
 	CliqueLastSnapshot = "CliqueLastSnapshot"
 
 	// this bucket stored in separated database
-	InodesBucket = "Inode"
+	Inodes = "Inode"
 
 	// Transaction senders - stored separately from the block bodies
 	Senders = "TxSender" // block_num_u64 + blockHash -> sendersList (no serialization format, every 20 bytes is new sender)
@@ -282,7 +282,7 @@ var (
 var ErigonTables = []string{
 	AccountsHistory,
 	StorageHistory,
-	CodeBucket,
+	Code,
 	ContractCode,
 	HeaderNumber,
 	BlockBody,
@@ -296,7 +296,7 @@ var ErigonTables = []string{
 	CliqueLastSnapshot,
 	CliqueSnapshot,
 	SyncStageProgress,
-	PlainStateBucket,
+	PlainState,
 	PlainContractCode,
 	AccountChangeSet,
 	StorageChangeSet,
@@ -331,7 +331,7 @@ var SentryTables = []string{}
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
 	HeaderPrefixOld,
-	CliqueBucket,
+	Clique,
 }
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
@@ -381,7 +381,7 @@ var BucketsConfigs = TableCfg{
 	StorageChangeSet: {
 		Flags: DupSort,
 	},
-	PlainStateBucket: {
+	PlainState: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                60,

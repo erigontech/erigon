@@ -87,7 +87,7 @@ func TestMatreshkaStream(t *testing.T) {
 	//if err != nil {
 	//	t.Fatal(err)
 	//}
-	psCursor, err := tx.Cursor(kv.PlainStateBucket)
+	psCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		t.Fatal(err)
 	}

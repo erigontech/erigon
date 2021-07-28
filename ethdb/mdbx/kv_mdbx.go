@@ -505,7 +505,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.GcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * pageSize / 8))
 
 	{
-		st, err := tx.BucketStat(kv.PlainStateBucket)
+		st, err := tx.BucketStat(kv.PlainState)
 		if err != nil {
 			return
 		}

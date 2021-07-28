@@ -23,14 +23,14 @@ var (
 			kv.Headers: kv.TableConfigItem{},
 		},
 		SnapshotType_state: {
-			kv.PlainStateBucket: kv.TableConfigItem{
+			kv.PlainState: kv.TableConfigItem{
 				Flags:                     kv.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupFromLen:                60,
 				DupToLen:                  28,
 			},
 			kv.PlainContractCode: kv.TableConfigItem{},
-			kv.CodeBucket:        kv.TableConfigItem{},
+			kv.Code:              kv.TableConfigItem{},
 		},
 	}
 )

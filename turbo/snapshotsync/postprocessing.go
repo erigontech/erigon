@@ -131,7 +131,7 @@ func PostProcessState(db kv.RwTx, info *SnapshotsInfo) error {
 		return nil
 	}
 	// clear genesis state
-	if err = db.ClearBucket(kv.PlainStateBucket); err != nil {
+	if err = db.ClearBucket(kv.PlainState); err != nil {
 		return err
 	}
 	if err = db.ClearBucket(kv.EthTx); err != nil {
