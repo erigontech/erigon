@@ -24,9 +24,9 @@ func CreateHeadersSnapshot(ctx context.Context, readTX kv.Tx, toBlock uint64, sn
 		return err
 	}
 
-	snKV, err := mdbx.NewMDBX(log.New()).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	snKV, err := mdbx.NewMDBX(log.New()).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.BucketsConfigs[kv.Headers],
+			kv.Headers: kv.ChaindataTablesCfg[kv.Headers],
 		}
 	}).Path(snapshotPath).Open()
 	if err != nil {
@@ -88,9 +88,9 @@ func GenerateHeadersSnapshot(ctx context.Context, db kv.Tx, sntx kv.RwTx, toBloc
 }
 
 func OpenHeadersSnapshot(dbPath string) (kv.RoDB, error) {
-	return mdbx.NewMDBX(log.New()).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	return mdbx.NewMDBX(log.New()).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.Headers: kv.BucketsConfigs[kv.Headers],
+			kv.Headers: kv.ChaindataTablesCfg[kv.Headers],
 		}
 	}).Readonly().Path(dbPath).Open()
 }

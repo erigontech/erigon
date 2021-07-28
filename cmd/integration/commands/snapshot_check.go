@@ -54,11 +54,11 @@ var cmdSnapshotCheck = &cobra.Command{
 		}
 
 		stateSnapshotPath := filepath.Join(snapshotDir, "state")
-		stateSnapshot := kv2.NewMDBX(logger).Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		stateSnapshot := kv2.NewMDBX(logger).Path(stateSnapshotPath).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{
-				kv.PlainState:        kv.BucketsConfigs[kv.PlainState],
-				kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
-				kv.Code:              kv.BucketsConfigs[kv.Code],
+				kv.PlainState:        kv.ChaindataTablesCfg[kv.PlainState],
+				kv.PlainContractCode: kv.ChaindataTablesCfg[kv.PlainContractCode],
+				kv.Code:              kv.ChaindataTablesCfg[kv.Code],
 			}
 		}).Readonly().MustOpen()
 		isNew := true

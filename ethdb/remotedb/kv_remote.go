@@ -155,7 +155,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  kv.TableCfg{},
 	}
-	customBuckets := opts.bucketsCfg(kv.BucketsConfigs)
+	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}

@@ -50,7 +50,7 @@ func TestMatreshkaStream(t *testing.T) {
 	//tmpDb:=ethdb.NewMemDatabase()
 	os.RemoveAll(tmpDbDir)
 
-	db, err := mdbx.NewMDBX(log.New()).Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db, err := mdbx.NewMDBX(log.New()).Path(tmpDbDir).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		defaultBuckets[AccountDiff] = kv.TableCfgItem{}
 		defaultBuckets[StorageDiff] = kv.TableCfgItem{}
 		defaultBuckets[ContractDiff] = kv.TableCfgItem{}

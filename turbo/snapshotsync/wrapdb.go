@@ -46,7 +46,7 @@ func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*Snaps
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
 		cfg := BucketConfigs[k]
-		snapshotKV, err := kv2.NewMDBX(log.New()).Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		snapshotKV, err := kv2.NewMDBX(log.New()).Readonly().Path(v.Dbpath).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return cfg
 		}).Open()
 

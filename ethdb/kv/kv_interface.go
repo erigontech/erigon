@@ -10,8 +10,8 @@ import (
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
 var (
-	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
-	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ErigonTables")
+	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ChaindataTables")
 
 	DbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
 	TxLimit   = metrics.GetOrRegisterGauge("tx/limit", metrics.DefaultRegistry)   //nolint

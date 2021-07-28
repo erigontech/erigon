@@ -10,7 +10,7 @@ import (
 // DBSchemaVersion
 var DBSchemaVersion = types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
-// ErigonTables
+// ChaindataTables
 
 // Dictionary:
 // "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
@@ -276,10 +276,10 @@ var (
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 )
 
-// ErigonTables - list of all buckets. App will panic if some bucket is not in this list.
+// ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsConfigs - can be used to find index in sorted version of ErigonTables list by name
-var ErigonTables = []string{
+// ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
+var ChaindataTables = []string{
 	AccountsHistory,
 	StorageHistory,
 	Code,
@@ -328,8 +328,8 @@ var ErigonTables = []string{
 var TxPoolTables = []string{}
 var SentryTables = []string{}
 
-// DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
-var DeprecatedBuckets = []string{
+// ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
+var ChaindataDeprecatedTables = []string{
 	HeaderPrefixOld,
 	Clique,
 }
@@ -368,7 +368,7 @@ type TableCfgItem struct {
 	DupToLen   int
 }
 
-var BucketsConfigs = TableCfg{
+var ChaindataTablesCfg = TableCfg{
 	HashedStorage: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
@@ -393,8 +393,8 @@ var BucketsConfigs = TableCfg{
 }
 
 func sortBuckets() {
-	sort.SliceStable(ErigonTables, func(i, j int) bool {
-		return strings.Compare(ErigonTables[i], ErigonTables[j]) < 0
+	sort.SliceStable(ChaindataTables, func(i, j int) bool {
+		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
 	})
 }
 
@@ -405,20 +405,20 @@ func init() {
 func reinit() {
 	sortBuckets()
 
-	for _, name := range ErigonTables {
-		_, ok := BucketsConfigs[name]
+	for _, name := range ChaindataTables {
+		_, ok := ChaindataTablesCfg[name]
 		if !ok {
-			BucketsConfigs[name] = TableCfgItem{}
+			ChaindataTablesCfg[name] = TableCfgItem{}
 		}
 	}
 
-	for _, name := range DeprecatedBuckets {
-		_, ok := BucketsConfigs[name]
+	for _, name := range ChaindataDeprecatedTables {
+		_, ok := ChaindataTablesCfg[name]
 		if !ok {
-			BucketsConfigs[name] = TableCfgItem{}
+			ChaindataTablesCfg[name] = TableCfgItem{}
 		}
-		tmp := BucketsConfigs[name]
+		tmp := ChaindataTablesCfg[name]
 		tmp.IsDeprecated = true
-		BucketsConfigs[name] = tmp
+		ChaindataTablesCfg[name] = tmp
 	}
 }

@@ -47,11 +47,11 @@ func CopyFromState(ctx context.Context, logger log.Logger, dbpath string, snapsh
 	if err != nil {
 		return err
 	}
-	snkv := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	snkv := mdbx.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			kv.PlainState:        kv.BucketsConfigs[kv.PlainState],
-			kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
-			kv.Code:              kv.BucketsConfigs[kv.Code],
+			kv.PlainState:        kv.ChaindataTablesCfg[kv.PlainState],
+			kv.PlainContractCode: kv.ChaindataTablesCfg[kv.PlainContractCode],
+			kv.Code:              kv.ChaindataTablesCfg[kv.Code],
 		}
 	}).Path(snapshotPath).MustOpen()
 	log.Info("Create snapshot db", "path", snapshotPath)

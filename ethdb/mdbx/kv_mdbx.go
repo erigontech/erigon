@@ -104,7 +104,7 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) WithBucketsConfig(f BucketConfigsFunc) MdbxOpts {
+func (opts MdbxOpts) WithTablessCfg(f BucketConfigsFunc) MdbxOpts {
 	opts.bucketsCfg = f
 	return opts
 }
@@ -207,7 +207,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		buckets: kv.TableCfg{},
 		txSize:  dirtyPagesLimit * pageSize,
 	}
-	customBuckets := opts.bucketsCfg(kv.BucketsConfigs)
+	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
 	}

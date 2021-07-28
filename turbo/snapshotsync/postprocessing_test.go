@@ -41,7 +41,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 	}
 	snKV.Close()
 
-	db := mdbx2.NewMDBX(log.New()).InMem().WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
+	db := mdbx2.NewMDBX(log.New()).InMem().WithTablessCfg(mdbx2.DefaultBucketConfigs).MustOpen()
 	defer db.Close()
 	//we need genesis
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
@@ -51,7 +51,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snKV = mdbx2.NewMDBX(log.New()).Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithBucketsConfig(mdbx2.DefaultBucketConfigs).MustOpen()
+	snKV = mdbx2.NewMDBX(log.New()).Path(snPath).Flags(func(flags uint) uint { return flags | mdbx.Readonly }).WithTablessCfg(mdbx2.DefaultBucketConfigs).MustOpen()
 	defer snKV.Close()
 
 	snKV = snapshotdb.NewSnapshotKV().HeadersSnapshot(snKV).DB(db).Open()

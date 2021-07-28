@@ -168,7 +168,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 		}
 	}
 	var canUseAppend bool
-	isDupSort := kv.BucketsConfigs[bucket].Flags&kv.DupSort != 0 && !kv.BucketsConfigs[bucket].AutoDupSortKeysConversion
+	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
