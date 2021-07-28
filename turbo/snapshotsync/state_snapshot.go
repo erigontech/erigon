@@ -18,7 +18,7 @@ func CreateStateSnapshot(ctx context.Context, snapshotPath string, logger log.Lo
 
 	return mdbx.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return BucketConfigs[SnapshotType_state]
-	}).Path(snapshotPath).Open()
+	}).Path(snapshotPath).DBVerbosity(kv.DBVerbosityLvl(2)).Open()
 }
 
 func OpenStateSnapshot(dbPath string, logger log.Logger) (kv.RoDB, error) {

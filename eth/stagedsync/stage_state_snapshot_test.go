@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon/log"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -48,6 +49,7 @@ func TestSnapshotGeneration(t *testing.T) {
 		tmpDir:           t.TempDir(),
 		client:           nil,
 		snapshotMigrator: nil,
+		log:              log.New(),
 	}, ctx, true, 50)
 	if err != nil {
 		t.Fatal(err)

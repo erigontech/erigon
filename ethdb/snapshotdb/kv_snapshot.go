@@ -1046,3 +1046,6 @@ func IsBodiesSnapshotSnapshotBucket(bucket string) bool {
 func IsStateSnapshotSnapshotBucket(bucket string) bool {
 	return bucket == kv.PlainState || bucket == kv.PlainContractCode || bucket == kv.Code
 }
+func IsDeletedValue(v []byte) bool {
+	return bytes.Equal(v, DeletedValue)
+}

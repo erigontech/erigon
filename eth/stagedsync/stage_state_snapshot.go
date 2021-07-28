@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -89,18 +88,28 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 	codeCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	contractCodeBucketCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	err = mainDBTX.ForEach(kv.PlainState, []byte{}, func(k, v []byte) error {
+		if snapshotdb.IsDeletedValue(v) {
+			return nil
+		}
 		return plainStateCollector.Collect(k, v)
 	})
 	if err != nil {
 		return err
 	}
 	err = mainDBTX.ForEach(kv.Code, []byte{}, func(k, v []byte) error {
+		if snapshotdb.IsDeletedValue(v) {
+			return nil
+		}
 		return codeCollector.Collect(k, v)
 	})
 	if err != nil {
 		return err
 	}
 	err = mainDBTX.ForEach(kv.PlainContractCode, []byte{}, func(k, v []byte) error {
+		if snapshotdb.IsDeletedValue(v) {
+			return nil
+		}
+
 		return contractCodeBucketCollector.Collect(k, v)
 	})
 	if err != nil {
@@ -118,6 +127,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 	if err != nil {
 		return err
 	}
+	defer snRwTX.Rollback()
 
 	err = plainStateCollector.Load("plain state", snRwTX, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),
@@ -147,6 +157,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 	snKV.Close()
 	//snapshot creation finished
 
+	//clean state in main database, because we'd migrated it
 	err = mainDBTX.ClearBucket(kv.PlainState)
 	if err != nil {
 		return err
