@@ -52,7 +52,7 @@ func Setup(address string) {
 	//m.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus2.DefaultGatherer, promhttp.HandlerOpts{
 	//	EnableOpenMetrics: true,
 	//}))
-	log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/metrics", address))
+	log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/metrics/prometheus", address))
 	go func() {
 		if err := http.ListenAndServe(address, nil); err != nil {
 			log.Error("Failure in running metrics server", "err", err)
