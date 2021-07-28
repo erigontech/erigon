@@ -19,12 +19,12 @@ var (
 	TxUnspill = metrics.NewCounter("tx_unspill") //nolint
 	TxDirty   = metrics.NewCounter("tx_dirty")   //nolint
 
-	DbCommitPreparation = metrics.GetOrCreateHistogram("db_commit_preparation") //nolint
-	DbCommitGc          = metrics.GetOrCreateHistogram("db_commit_gc")          //nolint
-	DbCommitAudit       = metrics.GetOrCreateHistogram("db_commit_audit")       //nolint
-	DbCommitWrite       = metrics.GetOrCreateHistogram("db_commit_write")       //nolint
-	DbCommitSync        = metrics.GetOrCreateHistogram("db_commit_sync")        //nolint
-	DbCommitEnding      = metrics.GetOrCreateHistogram("db_commit_ending")      //nolint
+	DbCommitPreparation = metrics.GetOrCreateSummary("db_commit_preparation") //nolint
+	DbCommitGc          = metrics.GetOrCreateSummary("db_commit_gc")          //nolint
+	DbCommitAudit       = metrics.GetOrCreateSummary("db_commit_audit")       //nolint
+	DbCommitWrite       = metrics.GetOrCreateSummary("db_commit_write")       //nolint
+	DbCommitSync        = metrics.GetOrCreateSummary("db_commit_sync")        //nolint
+	DbCommitEnding      = metrics.GetOrCreateSummary("db_commit_ending")      //nolint
 
 	DbPgopsNewly   = metrics.NewCounter("db_pgops_newly")   //nolint
 	DbPgopsCow     = metrics.NewCounter("db_pgops_cow")     //nolint
@@ -35,7 +35,7 @@ var (
 	DbPgopsUnspill = metrics.NewCounter("db_pgops_unspill") //nolint
 	DbPgopsWops    = metrics.NewCounter("db_pgops_wops")    //nolint
 
-	DbCommitBigBatchTimer = metrics.GetOrCreateHistogram("db_commit_big_batch")
+	DbCommitBigBatchTimer = metrics.GetOrCreateSummary("db_commit_big_batch")
 
 	GcLeafMetric     = metrics.NewCounter("db_gc_leaf")     //nolint
 	GcOverflowMetric = metrics.NewCounter("db_gc_overflow") //nolint
