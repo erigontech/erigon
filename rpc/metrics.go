@@ -32,6 +32,6 @@ func newRPCServingTimerMS(method string, valid bool) *metrics.Summary {
 	if !valid {
 		flag = "failure"
 	}
-	m := fmt.Sprintf("rpc_duration_seconds{method=%s,success=%s}", method, flag)
+	m := fmt.Sprintf(`rpc_duration_seconds{method="%s",success="%s"}`, method, flag)
 	return metrics.GetOrCreateSummary(m)
 }
