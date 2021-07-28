@@ -190,7 +190,6 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 		}
 		var hashbuf [32]byte
 		var unknownHashes Hashes
-		var unknownCount int
 		for i := 0; i < hashCount; i++ {
 			_, pos, err = ParseHash(req.Data, pos, hashbuf[:0])
 			if err != nil {
@@ -204,14 +203,12 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 			var encodedRequest []byte
 			var messageId sentry.MessageId
 			if req.Id == sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66 {
-				if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, unknownCount, uint64(1), nil); err != nil {
+				if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
 					return err
 				}
 				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
 			} else {
-				if encodedRequest, err = EncodeHashes(unknownHashes, unknownCount, nil); err != nil {
-					return err
-				}
+				encodedRequest = EncodeHashes(unknownHashes, nil)
 				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_65
 			}
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{

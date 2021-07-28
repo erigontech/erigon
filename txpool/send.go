@@ -85,11 +85,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 			txs = txs[:0]
 		}
 
-		data, err := EncodeHashes(pending, len(pending)/32, nil)
-		if err != nil {
-			f.logger.Warnf("encode hashes: %s", err)
-			return
-		}
+		data := EncodeHashes(pending, nil)
 		var req66, req65 *sentry.OutboundMessageData
 		for _, sentryClient := range f.sentryClients {
 			//if !sentryClient.Ready() {
@@ -145,11 +141,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 			txs = txs[:0]
 		}
 
-		data, err := EncodeHashes(pending, len(pending)/32, nil)
-		if err != nil {
-			f.logger.Warnf("encode hashes: %s", err)
-			return
-		}
+		data := EncodeHashes(pending, nil)
 		var req66, req65 *sentry.SendMessageToRandomPeersRequest
 		for _, sentryClient := range f.sentryClients {
 			//if !sentryClient.Ready() {
@@ -168,7 +160,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 					}
 				}
 
-				if _, err = sentryClient.SendMessageToRandomPeers(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
+				if _, err := sentryClient.SendMessageToRandomPeers(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
 					f.logger.Warnf("sentry response: %s", err)
 				}
 
@@ -182,7 +174,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 						},
 					}
 				}
-				if _, err = sentryClient.SendMessageToRandomPeers(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+				if _, err := sentryClient.SendMessageToRandomPeers(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 					f.logger.Warnf("sentry response: %s", err)
 				}
 			}
@@ -207,11 +199,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 			txs = txs[:0]
 		}
 
-		data, err := EncodeHashes(pending, len(pending)/32, nil)
-		if err != nil {
-			f.logger.Warnf("encode hashes: %s", err)
-			return
-		}
+		data := EncodeHashes(pending, nil)
 		for _, sentryClient := range f.sentryClients {
 			//if !sentryClient.Ready() {
 			//	continue
@@ -228,7 +216,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 						},
 					}
 
-					if _, err = sentryClient.SendMessageById(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
+					if _, err := sentryClient.SendMessageById(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
 						f.logger.Warnf("sentry response: %s", err)
 					}
 
@@ -240,7 +228,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 							Data: data,
 						},
 					}
-					if _, err = sentryClient.SendMessageById(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+					if _, err := sentryClient.SendMessageById(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 						f.logger.Warnf("sentry response: %s", err)
 					}
 				}
