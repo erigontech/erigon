@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	log.SetupDefaultTerminalLogger(log.Lvl(3), "", "")
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	var (
 		needCompare bool
