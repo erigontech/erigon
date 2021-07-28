@@ -304,22 +304,22 @@ func mychart() {
 }
 
 func bucketStats(chaindata string) error {
-	ethDb := mdbx.MustOpen(chaindata)
-	defer ethDb.Close()
-
-	var bucketList []string
-	if err1 := ethDb.View(context.Background(), func(txa kv.Tx) error {
-		if bl, err := txa.(kv.BucketMigrator).ListBuckets(); err == nil {
-			bucketList = bl
-		} else {
-			return err
-		}
-		return nil
-	}); err1 != nil {
-		ethDb.Close()
-		return err1
-	}
 	/*
+		ethDb := mdbx.MustOpen(chaindata)
+		defer ethDb.Close()
+
+		var bucketList []string
+		if err1 := ethDb.View(context.Background(), func(txa kv.Tx) error {
+			if bl, err := txa.(kv.BucketMigrator).ListBuckets(); err == nil {
+				bucketList = bl
+			} else {
+				return err
+			}
+			return nil
+		}); err1 != nil {
+			ethDb.Close()
+			return err1
+		}
 		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
 		switch db := ethDb.(type) {
 		case *mdbx.MdbxKV:

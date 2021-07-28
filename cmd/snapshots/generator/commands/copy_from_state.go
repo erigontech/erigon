@@ -31,7 +31,7 @@ var copyFromStateSnapshotCmd = &cobra.Command{
 }
 
 func CopyFromState(ctx context.Context, logger log.Logger, dbpath string, snapshotPath string, block uint64, snapshotDir, snapshotMode string) error {
-	db, err := mdbx.Open(dbpath, true)
+	db, err := mdbx.Open(dbpath, logger, true)
 	if err != nil {
 		return err
 	}
