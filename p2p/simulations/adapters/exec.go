@@ -36,11 +36,11 @@ import (
 
 	"github.com/docker/docker/pkg/reexec"
 
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/gorilla/websocket"
 )
@@ -382,9 +382,9 @@ type execNodeConfig struct {
 
 func initLogging() {
 	// Initialize the logging by default first.
-	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.LogfmtFormat()))
-	glogger.Verbosity(log.LvlInfo)
-	log.Root().SetHandler(glogger)
+	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.LogfmtFormat()))
+	//glogger.Verbosity(log.LvlInfo)
+	//log.Root().SetHandler(glogger)
 
 	confEnv := os.Getenv(envNodeConfig)
 	if confEnv == "" {
@@ -406,10 +406,12 @@ func initLogging() {
 	if conf.Node.LogVerbosity <= log.LvlTrace && conf.Node.LogVerbosity >= log.LvlCrit {
 		verbosity = conf.Node.LogVerbosity
 	}
+
+	log.Root().SetHandler(log.LvlFilterHandler(verbosity, log.StreamHandler(writer, log.TerminalFormat())))
 	// Reinitialize the logger
-	glogger = log.NewGlogHandler(log.StreamHandler(writer, log.TerminalFormat(true)))
-	glogger.Verbosity(verbosity)
-	log.Root().SetHandler(glogger)
+	//glogger = log.NewGlogHandler(log.StreamHandler(writer, log.TerminalFormat()))
+	//glogger.Verbosity(verbosity)
+	//log.Root().SetHandler(glogger)
 }
 
 // execP2PNode starts a simulation node when the current binary is executed with

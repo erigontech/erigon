@@ -27,11 +27,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
@@ -126,36 +124,40 @@ var DeprecatedFlags = []cli.Flag{
 	legacyBlockprofilerateFlag, legacyCpuprofileFlag,
 }
 
-var glogger *log.GlogHandler
+//var glogger *log.GlogHandler
 
 func init() {
-	glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	glogger.Verbosity(log.LvlInfo)
-	log.Root().SetHandler(glogger)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	//glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
+	//glogger.Verbosity(log.LvlInfo)
+	//log.Root().SetHandler(glogger)
 }
 
 func SetupCobra(cmd *cobra.Command) error {
 	flags := cmd.Flags()
 
-	dbg, err := flags.GetBool(debugFlag.Name)
-	if err != nil {
-		return err
-	}
-	lvl, err := flags.GetInt(verbosityFlag.Name)
-	if err != nil {
-		return err
-	}
-	vmodule, err := flags.GetString(vmoduleFlag.Name)
-	if err != nil {
-		return err
-	}
-	backtrace, err := flags.GetString(backtraceAtFlag.Name)
-	if err != nil {
-		return err
-	}
+	/*
+		dbg, err := flags.GetBool(debugFlag.Name)
+		if err != nil {
+			return err
+		}
+		lvl, err := flags.GetInt(verbosityFlag.Name)
+		if err != nil {
+			return err
+		}
+		vmodule, err := flags.GetString(vmoduleFlag.Name)
+		if err != nil {
+			return err
+		}
+		backtrace, err := flags.GetString(backtraceAtFlag.Name)
+		if err != nil {
+			return err
+		}
 
-	_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
-	log.PrintOrigins(dbg)
+		_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
+		log.PrintOrigins(dbg)
+	*/
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 
 	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
 	if err != nil {
@@ -239,22 +241,22 @@ func Setup(ctx *cli.Context) error {
 	var ostream log.Handler
 	output := io.Writer(os.Stderr)
 	if ctx.GlobalBool(logjsonFlag.Name) {
-		ostream = log.StreamHandler(output, log.JSONFormat())
+		ostream = log.StreamHandler(output, log.JsonFormat())
 	} else {
-		usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-		if usecolor {
-			output = colorable.NewColorableStderr()
-		}
-		ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+		ostream = log.StreamHandler(output, log.TerminalFormat())
 	}
-	glogger.SetHandler(ostream)
-	// logging
-	log.PrintOrigins(ctx.GlobalBool(debugFlag.Name))
-	_, glogger = log.SetupDefaultTerminalLogger(
-		log.Lvl(ctx.GlobalInt(verbosityFlag.Name)),
-		ctx.GlobalString(vmoduleFlag.Name),
-		ctx.GlobalString(backtraceAtFlag.Name),
-	)
+	log.Root().SetHandler(ostream)
+
+	/*
+		glogger.SetHandler(ostream)
+		// logging
+		log.PrintOrigins(ctx.GlobalBool(debugFlag.Name))
+		_, glogger = log.SetupDefaultTerminalLogger(
+			log.Lvl(ctx.GlobalInt(verbosityFlag.Name)),
+			ctx.GlobalString(vmoduleFlag.Name),
+			ctx.GlobalString(backtraceAtFlag.Name),
+		)
+	*/
 
 	// profiling, tracing
 	if ctx.GlobalIsSet(legacyMemprofilerateFlag.Name) {

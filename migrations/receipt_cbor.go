@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 
 	pkg1_common "github.com/ledgerwatch/erigon/common"
 	codec1978 "github.com/ugorji/go/codec"

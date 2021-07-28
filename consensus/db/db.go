@@ -3,7 +3,7 @@ package db
 import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func OpenDatabase(path string, logger log.Logger, inmem bool) kv.RwDB {

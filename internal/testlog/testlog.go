@@ -21,7 +21,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Handler returns a log handler which logs to the unit test log of t.
