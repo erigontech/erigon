@@ -32,7 +32,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-var stageExecutionGauge = metrics2.GetOrCreateCounter("stage/execution")
+var stageExecutionGauge = metrics2.GetOrCreateCounter("stage_execution")
 
 const (
 	logInterval = 30 * time.Second
