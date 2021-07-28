@@ -40,7 +40,7 @@ func TestIHCursor(t *testing.T) {
 		k := common.FromHex(ks)
 		integrity.AssertSubset(k, hasTree, hasState)
 		integrity.AssertSubset(k, hasHash, hasState)
-		_ = tx.Put(kv.TrieOfAccountsBucket, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
+		_ = tx.Put(kv.TrieOfAccounts, k, common.CopyBytes(trie.MarshalTrieNodeTyped(hasState, hasTree, hasHash, hashes, newV)))
 	}
 
 	put("00", 0b0000000000000010, 0b0000000000000000, 0b0000000000000010, []common.Hash{hash})
@@ -59,7 +59,7 @@ func TestIHCursor(t *testing.T) {
 
 	integrity.Trie(tx, false, context.Background())
 
-	cursor, err := tx.Cursor(kv.TrieOfAccountsBucket)
+	cursor, err := tx.Cursor(kv.TrieOfAccounts)
 	require.NoError(err)
 	rl := trie.NewRetainList(0)
 	rl.AddHex(common.FromHex("01"))
@@ -124,7 +124,7 @@ func TestIHCursor(t *testing.T) {
 	k, _, _, _ = ih.Next()
 	assert.Nil(t, k)
 
-	//cursorS := tx.Cursor(dbutils.TrieOfStorageBucket)
+	//cursorS := tx.Cursor(dbutils.TrieOfStorage)
 	//ihStorage := AccTrie(canUse, cursorS)
 	//
 	//k, _, _ = ihStorage.SeekToAccount(common.FromHex(acc))

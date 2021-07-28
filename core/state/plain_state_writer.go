@@ -67,7 +67,7 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 	if err := w.db.Put(kv.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
-	return w.db.Put(kv.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
+	return w.db.Put(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), codeHash[:])
 }
 
 func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
@@ -85,7 +85,7 @@ func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accou
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		if err := w.db.Put(kv.IncarnationMapBucket, address[:], b[:]); err != nil {
+		if err := w.db.Put(kv.IncarnationMap, address[:], b[:]); err != nil {
 			return err
 		}
 	}

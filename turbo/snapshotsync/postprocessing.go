@@ -167,12 +167,12 @@ func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash commo
 	defer tx.Rollback()
 
 	//add header
-	err = tx.Put(kv.HeadersBucket, dbutils.HeaderKey(SnapshotBlock, blockHash), blockHeaderBytes)
+	err = tx.Put(kv.Headers, dbutils.HeaderKey(SnapshotBlock, blockHash), blockHeaderBytes)
 	if err != nil {
 		return err
 	}
 	//add canonical
-	err = tx.Put(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(SnapshotBlock), blockHash.Bytes())
+	err = tx.Put(kv.HeaderCanonical, dbutils.EncodeBlockNumber(SnapshotBlock), blockHash.Bytes())
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,7 @@ func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash commo
 		return err
 	}
 
-	err = tx.Put(kv.HeaderNumberBucket, blockHash.Bytes(), dbutils.EncodeBlockNumber(SnapshotBlock))
+	err = tx.Put(kv.HeaderNumber, blockHash.Bytes(), dbutils.EncodeBlockNumber(SnapshotBlock))
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash commo
 	if err != nil {
 		return err
 	}
-	err = tx.Put(kv.HeaderTDBucket, dbutils.HeaderKey(SnapshotBlock, blockHash), b)
+	err = tx.Put(kv.HeaderTD, dbutils.HeaderKey(SnapshotBlock, blockHash), b)
 	if err != nil {
 		return err
 	}
@@ -233,7 +233,7 @@ func PostProcessNoBlocksSync(db ethdb.Database, blockNum uint64, blockHash commo
 }
 
 func generateHeaderHashToNumberIndex(ctx context.Context, tx kv.RwTx) error {
-	c, err := tx.Cursor(kv.HeadersBucket)
+	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
 		return err
 	}
@@ -250,7 +250,7 @@ func generateHeaderHashToNumberIndex(ctx context.Context, tx kv.RwTx) error {
 	headNumber := big.NewInt(0).SetBytes(headNumberBytes).Uint64()
 	headHash := common.BytesToHash(headHashBytes)
 
-	return etl.Transform("Torrent post-processing 1", tx, kv.HeadersBucket, kv.HeaderNumberBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform("Torrent post-processing 1", tx, kv.Headers, kv.HeaderNumber, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:          ctx.Done(),
@@ -267,7 +267,7 @@ func generateHeaderTDAndCanonicalIndexes(ctx context.Context, tx kv.RwTx) error 
 	td := h.Difficulty
 
 	log.Info("Generate TD index & canonical")
-	err = etl.Transform("Torrent post-processing 2", tx, kv.HeadersBucket, kv.HeaderTDBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	err = etl.Transform("Torrent post-processing 2", tx, kv.Headers, kv.HeaderTD, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		header := &types.Header{}
 		innerErr := rlp.DecodeBytes(v, header)
 		if innerErr != nil {
@@ -289,7 +289,7 @@ func generateHeaderTDAndCanonicalIndexes(ctx context.Context, tx kv.RwTx) error 
 		return err
 	}
 	log.Info("Generate TD index & canonical")
-	err = etl.Transform("Torrent post-processing 2", tx, kv.HeadersBucket, kv.HeaderCanonicalBucket, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	err = etl.Transform("Torrent post-processing 2", tx, kv.Headers, kv.HeaderCanonical, os.TempDir(), func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		return next(k, common.CopyBytes(k[:8]), common.CopyBytes(k[8:]))
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit: ctx.Done(),

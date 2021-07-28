@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	storageTable       = kv.StorageChangeSetBucket
+	storageTable       = kv.StorageChangeSet
 	defaultIncarnation = 1
 )
 
@@ -361,7 +361,7 @@ func formatTestName(elements, keys int) string {
 }
 
 func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
-	bkt := kv.StorageChangeSetBucket
+	bkt := kv.StorageChangeSet
 	m := Mapper[bkt]
 	_, tx := memdb.NewTestTx(t)
 

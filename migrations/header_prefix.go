@@ -31,10 +31,10 @@ var headerPrefixToSeparateBuckets = Migration{
 			return tx.Commit()
 		}
 
-		if err = tx.ClearBucket(kv.HeaderCanonicalBucket); err != nil {
+		if err = tx.ClearBucket(kv.HeaderCanonical); err != nil {
 			return err
 		}
-		if err = tx.ClearBucket(kv.HeaderTDBucket); err != nil {
+		if err = tx.ClearBucket(kv.HeaderTD); err != nil {
 			return err
 		}
 		logPrefix := "split_header_prefix_bucket"
@@ -127,13 +127,13 @@ var headerPrefixToSeparateBuckets = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = canonicalCollector.Load(logPrefix, tx, kv.HeaderCanonicalBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = canonicalCollector.Load(logPrefix, tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the storage table: %w", err)
 		}
-		if err = tdCollector.Load(logPrefix, tx, kv.HeaderTDBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = tdCollector.Load(logPrefix, tx, kv.HeaderTD, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		if err = headersCollector.Load(logPrefix, tx, kv.HeadersBucket, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = headersCollector.Load(logPrefix, tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
 		if err := BeforeCommit(tx, nil, true); err != nil {

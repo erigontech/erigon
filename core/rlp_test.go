@@ -34,7 +34,7 @@ import (
 )
 
 func getBlock(transactions int, uncles int, dataSize int) *types.Block {
-	db := memdb.NewMemKV()
+	db := memdb.New()
 	defer db.Close()
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")

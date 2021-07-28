@@ -414,7 +414,7 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 			// Special case for weird tests - inaccessible storage
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			if err := tx.Put(kv.IncarnationMapBucket, addr[:], b[:]); err != nil {
+			if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
 				return nil, nil, err
 			}
 		}

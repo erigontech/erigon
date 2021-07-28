@@ -53,7 +53,7 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 		return err
 	}
 	err = snKV.View(ctx, func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.HeadersBucket)
+		c, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
 		}

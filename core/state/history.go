@@ -30,9 +30,9 @@ func GetAsOf(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, erro
 func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var csBucket string
 	if storage {
-		csBucket = kv.StorageChangeSetBucket
+		csBucket = kv.StorageChangeSet
 	} else {
-		csBucket = kv.AccountChangeSetBucket
+		csBucket = kv.AccountChangeSet
 	}
 
 	ch, err := tx.Cursor(changeset.Mapper[csBucket].IndexBucket)
@@ -96,7 +96,7 @@ func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 			var codeHash []byte
 			var err error
-			codeHash, err = tx.GetOne(kv.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
+			codeHash, err = tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
 			if err != nil {
 				return nil, err
 			}
@@ -139,7 +139,7 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 	)
 
 	//for historic data
-	shCursor, err := tx.Cursor(kv.StorageHistoryBucket)
+	shCursor, err := tx.Cursor(kv.StorageHistory)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 		common.AddressLength,                   /* part2start */
 		common.AddressLength+common.HashLength, /* part3start */
 	)
-	csCursor, err := tx.CursorDupSort(kv.StorageChangeSetBucket)
+	csCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, w
 		return err
 	}
 	defer mainCursor.Close()
-	ahCursor, err := tx.Cursor(kv.AccountsHistoryBucket)
+	ahCursor, err := tx.Cursor(kv.AccountsHistory)
 	if err != nil {
 		return err
 	}
@@ -259,7 +259,7 @@ func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, w
 		common.AddressLength,   /* part2start */
 		common.AddressLength+8, /* part3start */
 	)
-	csCursor, err := tx.CursorDupSort(kv.AccountChangeSetBucket)
+	csCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
 		return err
 	}

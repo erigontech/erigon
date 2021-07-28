@@ -513,7 +513,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		kv.TableStateSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
 	}
 	{
-		st, err := tx.BucketStat(kv.StorageChangeSetBucket)
+		st, err := tx.BucketStat(kv.StorageChangeSet)
 		if err != nil {
 			return
 		}

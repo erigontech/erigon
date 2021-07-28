@@ -45,7 +45,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 	}
 
 	i := 0
-	err := changeset.Walk(tx, kv.AccountChangeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(tx, kv.AccountChangeSet, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
@@ -56,7 +56,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	index, err := bitmapdb.Get64(tx, kv.AccountsHistoryBucket, addr[0].Bytes(), 0, math.MaxUint32)
+	index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr[0].Bytes(), 0, math.MaxUint32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 	}
 
 	count := 0
-	err = changeset.Walk(tx, kv.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		count++
 		return true, nil
 	})
@@ -78,7 +78,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	found, err := tx.GetOne(kv.AccountsHistoryBucket, addr[0].Bytes())
+	found, err := tx.GetOne(kv.AccountsHistory, addr[0].Bytes())
 	require.NoError(t, err)
 	require.Nil(t, found, "account must be deleted")
 }
@@ -106,7 +106,7 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		index, err := bitmapdb.Get64(tx, kv.AccountsHistoryBucket, addr.Bytes(), 0, math.MaxUint32)
+		index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr.Bytes(), 0, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	changeSetInDB := changeset.NewAccountChangeSet()
-	err := changeset.Walk(tx, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err := changeSetInDB.Add(k, v); err != nil {
 			return false, err
 		}
@@ -177,7 +177,7 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	cs := changeset.NewStorageChangeSet()
-	err = changeset.Walk(tx, kv.StorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err2 := cs.Add(k, v); err2 != nil {
 			return false, err2
 		}

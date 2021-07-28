@@ -61,8 +61,8 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 	if err := etl.Transform(
 		logPrefix,
 		tx,
-		kv.HeadersBucket,
-		kv.HeaderNumberBucket,
+		kv.Headers,
+		kv.HeaderNumber,
 		cfg.tmpDir,
 		extractHeaders,
 		etl.IdentityLoadFunc,

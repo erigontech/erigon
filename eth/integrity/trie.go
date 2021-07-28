@@ -32,15 +32,15 @@ func Trie(tx kv.Tx, slowChecks bool, ctx context.Context) {
 	buf2 := make([]byte, 256)
 
 	{
-		c, err := tx.Cursor(kv.TrieOfAccountsBucket)
+		c, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
 			panic(err)
 		}
-		trieAcc2, err := tx.Cursor(kv.TrieOfAccountsBucket)
+		trieAcc2, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
 			panic(err)
 		}
-		accC, err := tx.Cursor(kv.HashedAccountsBucket)
+		accC, err := tx.Cursor(kv.HashedAccounts)
 		if err != nil {
 			panic(err)
 		}
@@ -141,15 +141,15 @@ func Trie(tx kv.Tx, slowChecks bool, ctx context.Context) {
 		}
 	}
 	{
-		c, err := tx.Cursor(kv.TrieOfStorageBucket)
+		c, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
 			panic(err)
 		}
-		trieStorage, err := tx.Cursor(kv.TrieOfStorageBucket)
+		trieStorage, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
 			panic(err)
 		}
-		storageC, err := tx.Cursor(kv.HashedStorageBucket)
+		storageC, err := tx.Cursor(kv.HashedStorage)
 		if err != nil {
 			panic(err)
 		}

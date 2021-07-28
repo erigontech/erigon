@@ -277,8 +277,8 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 		buckets := []string{
 			"freelist",
 			kv.PlainStateBucket,
-			kv.AccountChangeSetBucket,
-			kv.StorageChangeSetBucket,
+			kv.AccountChangeSet,
+			kv.StorageChangeSet,
 			kv.EthTx,
 			kv.Log,
 		}

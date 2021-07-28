@@ -283,17 +283,17 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
 
-			if err := tx.ClearBucket(kv.HashedAccountsBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedAccountsBucket bucket: %w", err)
+			if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedAccounts bucket: %w", err)
 			}
-			if err := tx.ClearBucket(kv.HashedStorageBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear HashedStorageBucket bucket: %w", err)
+			if err := tx.ClearBucket(kv.HashedStorage); err != nil {
+				return nil, nil, fmt.Errorf("clear HashedStorage bucket: %w", err)
 			}
-			if err := tx.ClearBucket(kv.TrieOfAccountsBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear TrieOfAccountsBucket bucket: %w", err)
+			if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfAccounts bucket: %w", err)
 			}
-			if err := tx.ClearBucket(kv.TrieOfStorageBucket); err != nil {
-				return nil, nil, fmt.Errorf("clear TrieOfStorageBucket bucket: %w", err)
+			if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
+				return nil, nil, fmt.Errorf("clear TrieOfStorage bucket: %w", err)
 			}
 			c, err := tx.Cursor(kv.PlainStateBucket)
 			if err != nil {
@@ -323,11 +323,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
 					//nolint:errcheck
 					h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
-					if err = tx.Put(kv.HashedStorageBucket, newK, common.CopyBytes(v)); err != nil {
+					if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
 					}
 				} else {
-					if err = tx.Put(kv.HashedAccountsBucket, newK, common.CopyBytes(v)); err != nil {
+					if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
 						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
 					}
 				}
@@ -336,14 +336,14 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			c.Close()
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", b.header.Number)
-				if err := tx.ForEach(kv.HashedAccountsBucket, nil, func(k, v []byte) error {
+				if err := tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
 					fmt.Printf("%x: %x\n", k, v)
 					return nil
 				}); err != nil {
 					return nil, nil, fmt.Errorf("print state: %w", err)
 				}
 				fmt.Printf("..................\n")
-				if err := tx.ForEach(kv.HashedStorageBucket, nil, func(k, v []byte) error {
+				if err := tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
 					fmt.Printf("%x: %x\n", k, v)
 					return nil
 				}); err != nil {

@@ -35,7 +35,7 @@ var storageMode = Migration{
 			return math.MaxUint64 // means, prune disabled
 		}
 		{
-			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeHistory)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeHistory)
 			if err != nil {
 				return err
 			}
@@ -43,28 +43,28 @@ var storageMode = Migration{
 
 		}
 		{
-			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeReceipts)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeReceipts)
 			if err != nil {
 				return err
 			}
 			pm.Receipts = castToPruneDistance(v)
 		}
 		{
-			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeTxIndex)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeTxIndex)
 			if err != nil {
 				return err
 			}
 			pm.TxIndex = castToPruneDistance(v)
 		}
 		{
-			v, err := tx.GetOne(kv.DatabaseInfoBucket, StorageModeCallTraces)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeCallTraces)
 			if err != nil {
 				return err
 			}
 			pm.CallTraces = castToPruneDistance(v)
 		}
 		{
-			v, err := tx.GetOne(kv.DatabaseInfoBucket, kv.StorageModeTEVM)
+			v, err := tx.GetOne(kv.DatabaseInfo, kv.StorageModeTEVM)
 			if err != nil {
 				return err
 			}

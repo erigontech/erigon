@@ -19,12 +19,12 @@ import (
 func TestSnapshot2Get(t *testing.T) {
 	sn1 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketConfigItem{},
+			kv.Headers: kv.BucketConfigItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
 	err := sn1.Update(context.Background(), func(tx kv.RwTx) error {
-		bucket, err := tx.RwCursor(kv.HeadersBucket)
+		bucket, err := tx.RwCursor(kv.Headers)
 		if err != nil {
 			return err
 		}
@@ -67,9 +67,9 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	err = mainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		bucket, err := tx.RwCursor(kv.HeadersBucket)
+		bucket, err := tx.RwCursor(kv.Headers)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func TestSnapshot2Get(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	v, err := tx.GetOne(kv.HeadersBucket, dbutils.HeaderKey(1, common.Hash{1}))
+	v, err := tx.GetOne(kv.Headers, dbutils.HeaderKey(1, common.Hash{1}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.GetOne(kv.HeadersBucket, dbutils.HeaderKey(2, common.Hash{2}))
+	v, err = tx.GetOne(kv.Headers, dbutils.HeaderKey(2, common.Hash{2}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.GetOne(kv.HeadersBucket, dbutils.HeaderKey(3, common.Hash{3}))
+	v, err = tx.GetOne(kv.Headers, dbutils.HeaderKey(3, common.Hash{3}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	headerCursor, err := tx.Cursor(kv.HeadersBucket)
+	headerCursor, err := tx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	k, v, err := headerCursor.Last()
 	require.NoError(t, err)
@@ -197,14 +197,14 @@ func TestSnapshot2Get(t *testing.T) {
 func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	sn1 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketConfigItem{},
+			kv.Headers: kv.BucketConfigItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
 
 	{
 		err := sn1.Update(context.Background(), func(tx kv.RwTx) error {
-			bucket, err := tx.RwCursor(kv.HeadersBucket)
+			bucket, err := tx.RwCursor(kv.Headers)
 			require.NoError(t, err)
 			innerErr := bucket.Put(dbutils.HeaderKey(1, common.Hash{1}), []byte{1})
 			if innerErr != nil {
@@ -246,7 +246,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 
 	db := NewSnapshotKV().DB(mainDB).HeadersSnapshot(sn1).BodiesSnapshot(sn2).Open()
 	{
@@ -254,7 +254,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		v, err := tx.GetOne(kv.HeadersBucket, dbutils.HeaderKey(1, common.Hash{1}))
+		v, err := tx.GetOne(kv.Headers, dbutils.HeaderKey(1, common.Hash{1}))
 		require.NoError(t, err)
 		if !bytes.Equal(v, []byte{1}) {
 			t.Fatal(v)
@@ -268,7 +268,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 
 		err = tx.Put(kv.BlockBodyPrefix, dbutils.BlockBodyKey(4, common.Hash{4}), []byte{4})
 		require.NoError(t, err)
-		err = tx.Put(kv.HeadersBucket, dbutils.HeaderKey(4, common.Hash{4}), []byte{4})
+		err = tx.Put(kv.Headers, dbutils.HeaderKey(4, common.Hash{4}), []byte{4})
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -276,7 +276,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	c, err := tx.Cursor(kv.HeadersBucket)
+	c, err := tx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	k, v, err := c.First()
 	require.NoError(t, err)
@@ -353,7 +353,7 @@ func TestSnapshot2WritableTxWalkReplaceAndCreateNewKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
@@ -425,7 +425,7 @@ func TestSnapshot2WritableTxWalkAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
@@ -501,7 +501,7 @@ func TestSnapshot2WritableTxNextAndPrevAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
@@ -790,7 +790,7 @@ func TestSnapshot2WalkByEmptyDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
@@ -828,7 +828,7 @@ func TestSnapshot2WritablePrevAndDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
@@ -891,7 +891,7 @@ func TestSnapshot2WritableTxNextAndPrevWithDeleteAndPutKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
@@ -991,7 +991,7 @@ func TestSnapshotUpdateSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 
@@ -1094,7 +1094,7 @@ func TestPlainStateProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainDB := kv2.NewTestKV(t)
+	mainDB := kv2.NewTestDB(t)
 	db := NewSnapshotKV().DB(mainDB).StateSnapshot(snapshotDB).
 		Open()
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
@@ -1114,7 +1114,7 @@ func TestPlainStateProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpDB := kv2.NewTestKV(t)
+	tmpDB := kv2.NewTestDB(t)
 	db.SetTempDB(tmpDB, []string{kv.PlainStateBucket})
 
 	nonStateKey := []byte{11}

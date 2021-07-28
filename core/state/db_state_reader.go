@@ -51,7 +51,7 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 	if !ok {
 		var err error
 		if addrHash, err1 := common.HashData(address[:]); err1 == nil {
-			enc, err = dbr.db.GetOne(kv.HashedAccountsBucket, addrHash[:])
+			enc, err = dbr.db.GetOne(kv.HashedAccounts, addrHash[:])
 		} else {
 			return nil, err1
 		}
@@ -87,7 +87,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 			return enc, nil
 		}
 	}
-	enc, err2 := dbr.db.GetOne(kv.HashedStorageBucket, compositeKey)
+	enc, err2 := dbr.db.GetOne(kv.HashedStorage, compositeKey)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -144,7 +144,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 }
 
 func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	b, err := dbr.db.GetOne(kv.IncarnationMapBucket, address[:])
+	b, err := dbr.db.GetOne(kv.IncarnationMap, address[:])
 	if err != nil {
 		return 0, err
 	}

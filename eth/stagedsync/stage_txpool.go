@@ -94,7 +94,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
-	canonicals, err := tx.Cursor(kv.HeaderCanonicalBucket)
+	canonicals, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from)
 
-	canonicals, err := tx.Cursor(kv.HeaderCanonicalBucket)
+	canonicals, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}

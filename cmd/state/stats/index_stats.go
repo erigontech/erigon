@@ -21,7 +21,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 	db := olddb.MustOpen(chaindata)
 	startTime := time.Now()
 	lenOfKey := common.AddressLength
-	if strings.HasPrefix(indexBucket, kv.StorageHistoryBucket) {
+	if strings.HasPrefix(indexBucket, kv.StorageHistory) {
 		lenOfKey = common.AddressLength + common.HashLength + common.IncarnationLength
 	}
 

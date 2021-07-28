@@ -163,7 +163,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 			sort.Sort(accountChanges)
 			i := 0
 			match := true
-			err = changeset.Walk(historyTx, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
@@ -195,7 +195,7 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				expectedStorageChanges = changeset.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
-			err = changeset.Walk(historyTx, kv.StorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+			err = changeset.Walk(historyTx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {

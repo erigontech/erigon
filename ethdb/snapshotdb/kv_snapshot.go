@@ -499,11 +499,11 @@ func (s *snTX) CollectMetrics() {
 func (s *snTX) getSnapshotTX(bucket string) (kv.Tx, error) {
 	var tx kv.Tx
 	switch bucket {
-	case kv.HeadersBucket:
+	case kv.Headers:
 		tx = s.headersTX
 	case kv.BlockBodyPrefix, kv.EthTx:
 		tx = s.bodiesTX
-	case kv.PlainStateBucket, kv.PlainContractCodeBucket, kv.CodeBucket:
+	case kv.PlainStateBucket, kv.PlainContractCode, kv.CodeBucket:
 		tx = s.stateTX
 	}
 	if tx == nil {
@@ -1022,11 +1022,11 @@ func IsSnapshotBucket(bucket string) bool {
 	return IsStateSnapshotSnapshotBucket(bucket) || IsHeaderSnapshotSnapshotBucket(bucket) || IsBodiesSnapshotSnapshotBucket(bucket)
 }
 func IsHeaderSnapshotSnapshotBucket(bucket string) bool {
-	return bucket == kv.HeadersBucket
+	return bucket == kv.Headers
 }
 func IsBodiesSnapshotSnapshotBucket(bucket string) bool {
 	return bucket == kv.BlockBodyPrefix || bucket == kv.EthTx
 }
 func IsStateSnapshotSnapshotBucket(bucket string) bool {
-	return bucket == kv.PlainStateBucket || bucket == kv.PlainContractCodeBucket || bucket == kv.CodeBucket
+	return bucket == kv.PlainStateBucket || bucket == kv.PlainContractCode || bucket == kv.CodeBucket
 }

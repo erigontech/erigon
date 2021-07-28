@@ -45,9 +45,9 @@ func withStatsfile(cmd *cobra.Command) {
 }
 
 func withCSBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", kv.AccountChangeSetBucket, kv.AccountChangeSetBucket+" for account and "+kv.StorageChangeSetBucket+" for storage")
+	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", kv.AccountChangeSet, kv.AccountChangeSet+" for account and "+kv.StorageChangeSet+" for storage")
 }
 
 func withIndexBucket(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.AccountsHistoryBucket, kv.AccountsHistoryBucket+" for account and "+kv.StorageHistoryBucket+" for storage")
+	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.AccountsHistory, kv.AccountsHistory+" for account and "+kv.StorageHistory+" for storage")
 }

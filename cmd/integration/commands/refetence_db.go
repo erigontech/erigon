@@ -20,21 +20,21 @@ import (
 )
 
 var stateBuckets = []string{
-	kv.HashedAccountsBucket,
-	kv.HashedStorageBucket,
-	kv.ContractCodeBucket,
+	kv.HashedAccounts,
+	kv.HashedStorage,
+	kv.ContractCode,
 	kv.PlainStateBucket,
-	kv.AccountChangeSetBucket,
-	kv.StorageChangeSetBucket,
-	kv.PlainContractCodeBucket,
-	kv.IncarnationMapBucket,
+	kv.AccountChangeSet,
+	kv.StorageChangeSet,
+	kv.PlainContractCode,
+	kv.IncarnationMap,
 	kv.CodeBucket,
-	kv.TrieOfAccountsBucket,
-	kv.TrieOfStorageBucket,
-	kv.AccountsHistoryBucket,
-	kv.StorageHistoryBucket,
+	kv.TrieOfAccounts,
+	kv.TrieOfStorage,
+	kv.AccountsHistory,
+	kv.StorageHistory,
 	kv.TxLookupPrefix,
-	kv.ContractTEVMCodeBucket,
+	kv.ContractTEVMCode,
 }
 
 var cmdCompareBucket = &cobra.Command{

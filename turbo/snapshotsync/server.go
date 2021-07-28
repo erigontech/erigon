@@ -25,7 +25,7 @@ func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 		db: db,
 	}
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		peerID, err := tx.GetOne(kv.BittorrentInfoBucket, []byte(kv.BittorrentPeerID))
+		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)
 		}

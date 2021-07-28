@@ -14,12 +14,12 @@ import (
 func HeadersSnapshot(snapshotPath string) error {
 	snKV := mdbx.NewMDBX().Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketConfigItem{},
+			kv.Headers: kv.BucketConfigItem{},
 		}
 	}).MustOpen()
 	var prevHeader *types.Header
 	err := snKV.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.HeadersBucket)
+		c, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
 		}

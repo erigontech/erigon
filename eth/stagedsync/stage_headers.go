@@ -255,7 +255,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (e
 	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Mark all descendants of bad block as bad too
-		headerCursor, cErr := tx.Cursor(kv.HeadersBucket)
+		headerCursor, cErr := tx.Cursor(kv.Headers)
 		if cErr != nil {
 			return cErr
 		}
@@ -281,7 +281,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (e
 	}
 	if badBlock {
 		// Find header with biggest TD
-		tdCursor, cErr := tx.Cursor(kv.HeaderTDBucket)
+		tdCursor, cErr := tx.Cursor(kv.HeaderTD)
 		if cErr != nil {
 			return cErr
 		}

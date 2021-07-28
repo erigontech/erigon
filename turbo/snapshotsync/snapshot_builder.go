@@ -121,7 +121,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX
 				//todo headers infohash
 				var infohash []byte
 				var err error
-				infohash, err = tx.GetOne(kv.BittorrentInfoBucket, shapshotHashKey)
+				infohash, err = tx.GetOne(kv.BittorrentInfo, shapshotHashKey)
 				if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 					log.Error("Get infohash", "err", err, "block", toBlock)
 					return err
@@ -237,7 +237,7 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX 
 				},
 				func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error {
 					log.Info("Save bodies snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
-					c, err := tx.RwCursor(kv.BittorrentInfoBucket)
+					c, err := tx.RwCursor(kv.BittorrentInfo)
 					if err != nil {
 						return err
 					}
@@ -258,7 +258,7 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX 
 				},
 				func(db kv.RoDB, tx kv.RwTx, toBlock uint64) error {
 					log.Info("Save headers snapshot", "new", common.Bytes2Hex(sm.HeadersNewSnapshotInfohash), "new", atomic.LoadUint64(&sm.HeadersNewSnapshot))
-					c, err := tx.RwCursor(kv.BittorrentInfoBucket)
+					c, err := tx.RwCursor(kv.BittorrentInfo)
 					if err != nil {
 						return err
 					}
@@ -290,7 +290,7 @@ func (sm *SnapshotMigrator) Final(tx kv.Tx) error {
 		return nil
 	}
 
-	v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+	v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 	if errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil
 	}
@@ -367,7 +367,7 @@ func GetSnapshotInfo(db kv.RwDB) (uint64, []byte, error) {
 		return 0, nil, err
 	}
 	defer tx.Rollback()
-	v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+	v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -379,7 +379,7 @@ func GetSnapshotInfo(db kv.RwDB) (uint64, []byte, error) {
 		snapshotBlock = binary.BigEndian.Uint64(v)
 	}
 
-	infohash, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotHash)
+	infohash, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 	if err != nil {
 		return 0, nil, err
 	}

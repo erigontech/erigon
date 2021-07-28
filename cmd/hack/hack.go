@@ -744,7 +744,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	var fixedbits = 8 * common.HashLength
 	copy(startkey, addrHash[:])
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.HashedStorageBucket)
+		c, err := tx.Cursor(kv.HashedStorage)
 		if err != nil {
 			return err
 		}
@@ -769,16 +769,16 @@ func repairCurrent() {
 	currentDb := olddb.MustOpen("statedb")
 	defer currentDb.Close()
 	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.ClearBucket(kv.HashedStorageBucket)
+		return tx.ClearBucket(kv.HashedStorage)
 	}))
 	tool.Check(historyDb.Update(context.Background(), func(tx kv.RwTx) error {
-		newB, err := tx.RwCursor(kv.HashedStorageBucket)
+		newB, err := tx.RwCursor(kv.HashedStorage)
 		if err != nil {
 			return err
 		}
 		count := 0
 		if err := currentDb.View(context.Background(), func(ctx kv.Tx) error {
-			c, err := ctx.Cursor(kv.HashedStorageBucket)
+			c, err := ctx.Cursor(kv.HashedStorage)
 			if err != nil {
 				return err
 			}
@@ -804,7 +804,7 @@ func dumpStorage() {
 	db := olddb.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.StorageHistoryBucket, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.StorageHistory, nil, func(k, v []byte) error {
 			fmt.Printf("%x %x\n", k, v)
 			return nil
 		})
@@ -822,7 +822,7 @@ func printBucket(chaindata string) {
 	fb := bufio.NewWriter(f)
 	defer fb.Flush()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.StorageHistoryBucket)
+		c, err := tx.Cursor(kv.StorageHistory)
 		if err != nil {
 			return err
 		}
@@ -1024,7 +1024,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 
-	if err := changeset.Walk(tx, kv.AccountChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, kv.AccountChangeSet, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
@@ -1054,7 +1054,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	storageMap := make(map[string][]byte)
-	if err := changeset.Walk(tx, kv.StorageChangeSetBucket, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, kv.StorageChangeSet, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
 		if blockN > *headNumber {
 			return false, nil
 		}
@@ -1083,7 +1083,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 		if acc != nil {
 			// Fill the code hashes
 			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				if codeHash, err1 := tx.GetOne(kv.ContractCodeBucket, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
+				if codeHash, err1 := tx.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix([]byte(ks), acc.Incarnation)); err1 == nil {
 					copy(acc.CodeHash[:], codeHash)
 				} else {
 					return err1
@@ -1235,7 +1235,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 		return err1
 	}
 	defer tx.Rollback()
-	if err := changeset.Walk(tx, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= block2 {
 			return false, nil
 		}
@@ -1249,7 +1249,7 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 	}
 
 	storage := make(map[string]struct{})
-	if err := changeset.Walk(tx, kv.StorageChangeSetBucket, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN >= block2 {
 			return false, nil
 		}
@@ -1276,7 +1276,7 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	}
 	defer tx.Rollback()
 
-	if err := changeset.Walk(tx, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -1296,7 +1296,7 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 		return err1
 	}
 	defer tx.Rollback()
-	if err := changeset.Walk(tx, kv.StorageChangeSetBucket, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -1378,7 +1378,7 @@ func iterateOverCode(chaindata string) error {
 	var codeHashTotalLength int
 	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainContractCodeBucket)
+		c, err := tx.Cursor(kv.PlainContractCode)
 		if err != nil {
 			return err
 		}
@@ -1433,7 +1433,7 @@ func mint(chaindata string, block uint64) error {
 	gwei.SetUint64(1000000000)
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	canonical := make(map[common.Hash]struct{})
-	c, err := tx.Cursor(kv.HeaderCanonicalBucket)
+	c, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}
@@ -1552,7 +1552,7 @@ func extractHeaders(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	c, err := tx.Cursor(kv.HeadersBucket)
+	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
 		return err
 	}
@@ -1604,14 +1604,14 @@ func fixUnwind(chaindata string) error {
 	db := olddb.MustOpen(chaindata)
 	defer db.Close()
 	tool.Check(db.Update(context.Background(), func(tx kv.RwTx) error {
-		i, err := tx.GetOne(kv.IncarnationMapBucket, contractAddr[:])
+		i, err := tx.GetOne(kv.IncarnationMap, contractAddr[:])
 		if err != nil {
 			return err
 		} else if i == nil {
 			fmt.Print("Not found\n")
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], 1)
-			if err = tx.Put(kv.IncarnationMapBucket, contractAddr[:], b[:]); err != nil {
+			if err = tx.Put(kv.IncarnationMap, contractAddr[:], b[:]); err != nil {
 				return err
 			}
 		} else {
@@ -1632,7 +1632,7 @@ func snapSizes(chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	c, _ := tx.Cursor(kv.CliqueSeparateBucket)
+	c, _ := tx.Cursor(kv.CliqueSeparate)
 	defer c.Close()
 
 	sizes := make(map[int]int)
@@ -1725,14 +1725,14 @@ func fixTd(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	c, err1 := tx.RwCursor(kv.HeadersBucket)
+	c, err1 := tx.RwCursor(kv.Headers)
 	if err1 != nil {
 		return err1
 	}
 	defer c.Close()
 	var k, v []byte
 	for k, v, err = c.First(); err == nil && k != nil; k, v, err = c.Next() {
-		hv, herr := tx.GetOne(kv.HeaderTDBucket, k)
+		hv, herr := tx.GetOne(kv.HeaderTD, k)
 		if herr != nil {
 			return herr
 		}
@@ -1749,7 +1749,7 @@ func fixTd(chaindata string) error {
 			binary.BigEndian.PutUint64(parentK[:], header.Number.Uint64()-1)
 			copy(parentK[8:], header.ParentHash[:])
 			var parentTdRec []byte
-			if parentTdRec, err = tx.GetOne(kv.HeaderTDBucket, parentK[:]); err != nil {
+			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
 				return fmt.Errorf("reading parentTd Rec for %d: %v", header.Number.Uint64(), err)
 			}
 			var parentTd big.Int
@@ -1762,7 +1762,7 @@ func fixTd(chaindata string) error {
 			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
 				return fmt.Errorf("encoding td record for block %d: %v", header.Number.Uint64(), err)
 			}
-			if err = tx.Put(kv.HeaderTDBucket, k, newHv); err != nil {
+			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
 				return err
 			}
 		}
@@ -1837,7 +1837,7 @@ func fixState(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	c, err1 := tx.RwCursor(kv.HeaderCanonicalBucket)
+	c, err1 := tx.RwCursor(kv.HeaderCanonical)
 	if err1 != nil {
 		return err1
 	}
@@ -1848,7 +1848,7 @@ func fixState(chaindata string) error {
 		var headerKey [40]byte
 		copy(headerKey[:], k)
 		copy(headerKey[8:], v)
-		hv, herr := tx.GetOne(kv.HeadersBucket, headerKey[:])
+		hv, herr := tx.GetOne(kv.Headers, headerKey[:])
 		if herr != nil {
 			return herr
 		}

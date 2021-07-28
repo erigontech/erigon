@@ -121,8 +121,8 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	if err = changeset.Mapper[kv.AccountChangeSetBucket].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
-		if err = w.db.AppendDup(kv.AccountChangeSetBucket, k, v); err != nil {
+	if err = changeset.Mapper[kv.AccountChangeSet].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+		if err = w.db.AppendDup(kv.AccountChangeSet, k, v); err != nil {
 			return err
 		}
 		return nil
@@ -137,8 +137,8 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
-	if err = changeset.Mapper[kv.StorageChangeSetBucket].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
-		if err = w.db.AppendDup(kv.StorageChangeSetBucket, k, v); err != nil {
+	if err = changeset.Mapper[kv.StorageChangeSet].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
+		if err = w.db.AppendDup(kv.StorageChangeSet, k, v); err != nil {
 			return err
 		}
 		return nil
@@ -153,7 +153,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, accountChanges, kv.AccountsHistoryBucket, w.db)
+	err = writeIndex(w.blockNumber, accountChanges, kv.AccountsHistory, w.db)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(w.blockNumber, storageChanges, kv.StorageHistoryBucket, w.db)
+	err = writeIndex(w.blockNumber, storageChanges, kv.StorageHistory, w.db)
 	if err != nil {
 		return err
 	}

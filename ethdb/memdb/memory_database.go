@@ -24,18 +24,18 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 )
 
-func NewMemKV() kv.RwDB {
+func New() kv.RwDB {
 	return mdbx.NewMDBX().InMem().MustOpen()
 }
 
-func NewTestKV(t testing.TB) kv.RwDB {
-	db := NewMemKV()
+func NewTestDB(t testing.TB) kv.RwDB {
+	db := New()
 	t.Cleanup(db.Close)
 	return db
 }
 
 func NewTestTx(t testing.TB) (kv.RwDB, kv.RwTx) {
-	db := NewMemKV()
+	db := New()
 	t.Cleanup(db.Close)
 	tx, err := db.BeginRw(context.Background()) //nolint
 	if err != nil {

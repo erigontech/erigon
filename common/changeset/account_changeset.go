@@ -58,7 +58,7 @@ func FindAccount(c kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, er
 // GetModifiedAccounts returns a list of addresses that were modified in the block range
 func GetModifiedAccounts(db kv.Tx, startNum, endNum uint64) ([]common.Address, error) {
 	changedAddrs := make(map[common.Address]struct{})
-	if err := Walk(db, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := Walk(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
 		if blockN > endNum {
 			return false, nil
 		}

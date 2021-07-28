@@ -74,7 +74,7 @@ func Get(db kv.Getter) (Mode, error) {
 	prune := DefaultMode
 	prune.Initialised = true
 
-	v, err := db.GetOne(kv.DatabaseInfoBucket, kv.PruneDistanceHistory)
+	v, err := db.GetOne(kv.DatabaseInfo, kv.PruneDistanceHistory)
 	if err != nil {
 		return prune, err
 	}
@@ -83,7 +83,7 @@ func Get(db kv.Getter) (Mode, error) {
 	} else {
 		prune.History = math.MaxUint64
 	}
-	v, err = db.GetOne(kv.DatabaseInfoBucket, kv.PruneDistanceReceipts)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceReceipts)
 	if err != nil {
 		return prune, err
 	}
@@ -92,7 +92,7 @@ func Get(db kv.Getter) (Mode, error) {
 	} else {
 		prune.Receipts = math.MaxUint64
 	}
-	v, err = db.GetOne(kv.DatabaseInfoBucket, kv.PruneDistanceTxIndex)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceTxIndex)
 	if err != nil {
 		return prune, err
 	}
@@ -102,7 +102,7 @@ func Get(db kv.Getter) (Mode, error) {
 		prune.TxIndex = math.MaxUint64
 	}
 
-	v, err = db.GetOne(kv.DatabaseInfoBucket, kv.PruneDistanceCallTraces)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceCallTraces)
 	if err != nil {
 		return prune, err
 	}
@@ -112,7 +112,7 @@ func Get(db kv.Getter) (Mode, error) {
 		prune.CallTraces = math.MaxUint64
 	}
 
-	v, err = db.GetOne(kv.DatabaseInfoBucket, kv.StorageModeTEVM)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.StorageModeTEVM)
 	if err != nil {
 		return prune, err
 	}
@@ -253,21 +253,21 @@ func SetIfNotExist(db kv.GetPut, pm Mode) error {
 func setDistance(db kv.Putter, key []byte, distance Distance) error {
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, uint64(distance))
-	if err := db.Put(kv.DatabaseInfoBucket, key, v); err != nil {
+	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
 		return err
 	}
 	return nil
 }
 
 func setDistanceOnEmpty(db kv.GetPut, key []byte, distance Distance) error {
-	mode, err := db.GetOne(kv.DatabaseInfoBucket, key)
+	mode, err := db.GetOne(kv.DatabaseInfo, key)
 	if err != nil {
 		return err
 	}
 	if len(mode) == 0 || binary.BigEndian.Uint64(mode) == math.MaxUint64 {
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, uint64(distance))
-		if err = db.Put(kv.DatabaseInfoBucket, key, v); err != nil {
+		if err = db.Put(kv.DatabaseInfo, key, v); err != nil {
 			return err
 		}
 	}
@@ -280,14 +280,14 @@ func setMode(db kv.RwTx, key []byte, currentValue bool) error {
 	if currentValue {
 		val = []byte{1}
 	}
-	if err := db.Put(kv.DatabaseInfoBucket, key, val); err != nil {
+	if err := db.Put(kv.DatabaseInfo, key, val); err != nil {
 		return err
 	}
 	return nil
 }
 
 func setModeOnEmpty(db kv.GetPut, key []byte, currentValue bool) error {
-	mode, err := db.GetOne(kv.DatabaseInfoBucket, key)
+	mode, err := db.GetOne(kv.DatabaseInfo, key)
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func setModeOnEmpty(db kv.GetPut, key []byte, currentValue bool) error {
 		if currentValue {
 			val = []byte{1}
 		}
-		if err = db.Put(kv.DatabaseInfoBucket, key, val); err != nil {
+		if err = db.Put(kv.DatabaseInfo, key, val); err != nil {
 			return err
 		}
 	}

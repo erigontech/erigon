@@ -755,7 +755,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 
 	if pm.History.Enabled() {
 		afterPrune := uint64(0)
-		err := tx.ForEach(kv.AccountsHistoryBucket, nil, func(k, _ []byte) error {
+		err := tx.ForEach(kv.AccountsHistory, nil, func(k, _ []byte) error {
 			n := binary.BigEndian.Uint64(k[common.AddressLength:])
 			require.Greater(n, pm.History.PruneTo(head))
 			afterPrune++
@@ -764,7 +764,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Greater(afterPrune, uint64(0))
 		assert.NoError(t, err)
 	} else {
-		found, err := bitmapdb.Get64(tx, kv.AccountsHistoryBucket, address[:], 0, 1024)
+		found, err := bitmapdb.Get64(tx, kv.AccountsHistory, address[:], 0, 1024)
 		require.NoError(err)
 		require.Equal(uint64(0), found.Minimum())
 	}
@@ -791,7 +791,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	}
 	/*
 		for bucketName, shouldBeEmpty := range map[string]bool{
-			//dbutils.AccountsHistoryBucket: pm.History.Enabled(),
+			//dbutils.AccountsHistory: pm.History.Enabled(),
 			dbutils.Receipts: pm.Receipts.Enabled(),
 			//dbutils.TxLookupPrefix: pm.TxIndex.Enabled(),
 		} {
@@ -800,7 +800,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
 				// we ignore empty account history
 				//nolint:scopelint
-				if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
+				if bucketName == dbutils.AccountsHistory && len(v) == 0 {
 					return nil
 				}
 

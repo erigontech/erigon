@@ -10,7 +10,7 @@ import (
 // DBSchemaVersion
 var DBSchemaVersion = types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
-// Buckets
+// ErigonBuckets
 
 // Dictionary:
 // "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
@@ -26,7 +26,7 @@ PlainStateBucket logical layout:
 	  value - storage value(common.hash)
 
 Physical layout:
-	PlainStateBucket and HashedStorageBucket utilises DupSort feature of MDBX (store multiple values inside 1 key).
+	PlainStateBucket and HashedStorage utilises DupSort feature of MDBX (store multiple values inside 1 key).
 -------------------------------------------------------------
 	   key              |            value
 -------------------------------------------------------------
@@ -42,20 +42,20 @@ Physical layout:
 */
 const PlainStateBucket = "PlainState"
 
-//PlainContractCodeBucket -
+//PlainContractCode -
 //key - address+incarnation
 //value - code hash
-const PlainContractCodeBucket = "PlainCodeHash"
+const PlainContractCode = "PlainCodeHash"
 
 /*
-AccountChangeSetBucket and StorageChangeSetBucket - of block N store values of state before block N changed them.
+AccountChangeSet and StorageChangeSet - of block N store values of state before block N changed them.
 Because values "after" change stored in PlainState.
 Logical format:
 	key - blockNum_u64 + key_in_plain_state
 	value - value_in_plain_state_before_blockNum_changes
 
 Example: If block N changed account A from value X to Y. Then:
-	AccountChangeSetBucket has record: bigEndian(N) + A -> X
+	AccountChangeSet has record: bigEndian(N) + A -> X
 	PlainStateBucket has record: A -> Y
 
 See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
@@ -63,31 +63,31 @@ See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
 As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
 MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
 Both buckets are DupSort-ed and have physical format:
-AccountChangeSetBucket:
+AccountChangeSet:
 	key - blockNum_u64
 	value - address + account(encoded)
 
-StorageChangeSetBucket:
+StorageChangeSet:
 	key - blockNum_u64 + address + incarnation_u64
 	value - plain_storage_key + value
 */
-const AccountChangeSetBucket = "AccountChangeSet"
-const StorageChangeSetBucket = "StorageChangeSet"
+const AccountChangeSet = "AccountChangeSet"
+const StorageChangeSet = "StorageChangeSet"
 
 const (
 
-	//HashedAccountsBucket
+	//HashedAccounts
 	// key - address hash
 	// value - account encoded for storage
 	// Contains Storage:
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	HashedAccountsBucket = "HashedAccount"
-	HashedStorageBucket  = "HashedStorage"
+	HashedAccounts = "HashedAccount"
+	HashedStorage  = "HashedStorage"
 )
 
 /*
-AccountsHistoryBucket and StorageHistoryBucket - indices designed to serve next 2 type of requests:
+AccountsHistory and StorageHistory - indices designed to serve next 2 type of requests:
 1. what is smallest block number >= X where account A changed
 2. get last shard of A - to append there new block numbers
 
@@ -111,17 +111,17 @@ It allows:
 
 see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
-AccountsHistoryBucket:
+AccountsHistory:
 	key - address + shard_id_u64
 	value - roaring bitmap  - list of block where it changed
-StorageHistoryBucket
+StorageHistory
 	key - address + storage_key + shard_id_u64
 	value - roaring bitmap - list of block where it changed
 */
-var AccountsHistoryBucket = "AccountHistory"
-var StorageHistoryBucket = "StorageHistory"
+const AccountsHistory = "AccountHistory"
+const StorageHistory = "StorageHistory"
 
-var (
+const (
 
 	//key - contract code hash
 	//value - contract code
@@ -129,20 +129,20 @@ var (
 
 	//key - addressHash+incarnation
 	//value - code hash
-	ContractCodeBucket = "HashedCodeHash"
+	ContractCode = "HashedCodeHash"
 
-	// IncarnationMapBucket for deleted accounts
+	// IncarnationMap for deleted accounts
 	//key - address
 	//value - incarnation of account when it was last deleted
-	IncarnationMapBucket = "IncarnationMap"
+	IncarnationMap = "IncarnationMap"
 
 	//TEVMCodeBucket -
 	//key - contract code hash
 	//value - contract TEVM code
-	ContractTEVMCodeBucket = "TEVMCode"
+	ContractTEVMCode = "TEVMCode"
 )
 
-/*TrieOfAccountsBucket and TrieOfStorageBucket
+/*TrieOfAccounts and TrieOfStorage
 hasState,groups - mark prefixes existing in hashed_account table
 hasTree - mark prefixes existing in trie_account table (not related with branchNodes)
 hasHash - mark prefixes which hashes are saved in current trie_account record (actually only hashes of branchNodes can be saved)
@@ -182,22 +182,22 @@ Invariants:
 - TrieAccount records with length=1 can satisfy (hasBranch==0&&hasHash==0) condition
 - Other records in TrieAccount and TrieStorage must (hasTree!=0 || hasHash!=0)
 */
-const TrieOfAccountsBucket = "TrieAccount"
-const TrieOfStorageBucket = "TrieStorage"
+const TrieOfAccounts = "TrieAccount"
+const TrieOfStorage = "TrieStorage"
 
 const (
-	// DatabaseInfoBucket is used to store information about data layout.
-	DatabaseInfoBucket   = "DbInfo"
-	SnapshotInfoBucket   = "SnapshotInfo"
-	BittorrentInfoBucket = "BittorrentInfo"
+	// DatabaseInfo is used to store information about data layout.
+	DatabaseInfo   = "DbInfo"
+	SnapshotInfo   = "SnapshotInfo"
+	BittorrentInfo = "BittorrentInfo"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
-	HeaderPrefixOld    = "h"            // block_num_u64 + hash -> header
-	HeaderNumberBucket = "HeaderNumber" // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderPrefixOld = "h"            // block_num_u64 + hash -> header
+	HeaderNumber    = "HeaderNumber" // headerNumberPrefix + hash -> num (uint64 big endian)
 
-	HeaderCanonicalBucket = "CanonicalHeader"        // block_num_u64 -> header hash
-	HeadersBucket         = "Header"                 // block_num_u64 + hash -> header (RLP)
-	HeaderTDBucket        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
+	HeaderCanonical = "CanonicalHeader"        // block_num_u64 -> header hash
+	Headers         = "Header"                 // block_num_u64 + hash -> header (RLP)
+	HeaderTD        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
 	BlockBodyPrefix = "BlockBody"        // block_num_u64 + hash -> block body
 	EthTx           = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
@@ -224,21 +224,17 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	TxLookupPrefix  = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
-	BloomBitsPrefix = "BloomBits"              // bit (uint16 big endian) + section (uint64 big endian) + hash -> bloom bits
+	TxLookupPrefix = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigPrefix = "Config" // config prefix for the db
-
-	// Chain index prefixes (use `i` + single byte to avoid mixing data types).
-	BloomBitsIndexPrefix = "BloomBitsIndex" // BloomBitsIndexPrefix is the data table of a chain indexer to track its progress
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
 
-	CliqueBucket             = "Clique"
-	CliqueSeparateBucket     = "CliqueSeparate"
-	CliqueSnapshotBucket     = "CliqueSnapshot"
-	CliqueLastSnapshotBucket = "CliqueLastSnapshot"
+	CliqueBucket       = "Clique"
+	CliqueSeparate     = "CliqueSeparate"
+	CliqueSnapshot     = "CliqueSnapshot"
+	CliqueLastSnapshot = "CliqueLastSnapshot"
 
 	// this bucket stored in separated database
 	InodesBucket = "Inode"
@@ -280,56 +276,56 @@ var (
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 )
 
-// Buckets - list of all buckets. App will panic if some bucket is not in this list.
+// ErigonBuckets - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsConfigs - can be used to find index in sorted version of Buckets list by name
-var Buckets = []string{
-	AccountsHistoryBucket,
-	StorageHistoryBucket,
+// BucketsConfigs - can be used to find index in sorted version of ErigonBuckets list by name
+var ErigonBuckets = []string{
+	AccountsHistory,
+	StorageHistory,
 	CodeBucket,
-	ContractCodeBucket,
-	HeaderNumberBucket,
+	ContractCode,
+	HeaderNumber,
 	BlockBodyPrefix,
 	Receipts,
 	TxLookupPrefix,
-	BloomBitsPrefix,
 	ConfigPrefix,
-	BloomBitsIndexPrefix,
-	DatabaseInfoBucket,
-	IncarnationMapBucket,
-	ContractTEVMCodeBucket,
-	CliqueSeparateBucket,
-	CliqueLastSnapshotBucket,
-	CliqueSnapshotBucket,
+	DatabaseInfo,
+	IncarnationMap,
+	ContractTEVMCode,
+	CliqueSeparate,
+	CliqueLastSnapshot,
+	CliqueSnapshot,
 	SyncStageProgress,
 	PlainStateBucket,
-	PlainContractCodeBucket,
-	AccountChangeSetBucket,
-	StorageChangeSetBucket,
+	PlainContractCode,
+	AccountChangeSet,
+	StorageChangeSet,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
 	Migrations,
 	LogTopicIndex,
 	LogAddressIndex,
-	SnapshotInfoBucket,
+	SnapshotInfo,
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
 	Log,
 	Sequence,
 	EthTx,
-	TrieOfAccountsBucket,
-	TrieOfStorageBucket,
-	HashedAccountsBucket,
-	HashedStorageBucket,
-	BittorrentInfoBucket,
-	HeaderCanonicalBucket,
-	HeadersBucket,
-	HeaderTDBucket,
+	TrieOfAccounts,
+	TrieOfStorage,
+	HashedAccounts,
+	HashedStorage,
+	BittorrentInfo,
+	HeaderCanonical,
+	Headers,
+	HeaderTD,
 	Epoch,
 	PendingEpoch,
 }
+
+var TxPoolBuckets = []string{}
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
@@ -372,16 +368,16 @@ type BucketConfigItem struct {
 }
 
 var BucketsConfigs = BucketsCfg{
-	HashedStorageBucket: {
+	HashedStorage: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
-	AccountChangeSetBucket: {
+	AccountChangeSet: {
 		Flags: DupSort,
 	},
-	StorageChangeSetBucket: {
+	StorageChangeSet: {
 		Flags: DupSort,
 	},
 	PlainStateBucket: {
@@ -396,8 +392,8 @@ var BucketsConfigs = BucketsCfg{
 }
 
 func sortBuckets() {
-	sort.SliceStable(Buckets, func(i, j int) bool {
-		return strings.Compare(Buckets[i], Buckets[j]) < 0
+	sort.SliceStable(ErigonBuckets, func(i, j int) bool {
+		return strings.Compare(ErigonBuckets[i], ErigonBuckets[j]) < 0
 	})
 }
 
@@ -412,7 +408,7 @@ func UpdateBucketsList(newBucketCfg BucketsCfg) {
 			newBuckets = append(newBuckets, k)
 		}
 	}
-	Buckets = newBuckets
+	ErigonBuckets = newBuckets
 	BucketsConfigs = newBucketCfg
 
 	reinit()
@@ -425,7 +421,7 @@ func init() {
 func reinit() {
 	sortBuckets()
 
-	for _, name := range Buckets {
+	for _, name := range ErigonBuckets {
 		_, ok := BucketsConfigs[name]
 		if !ok {
 			BucketsConfigs[name] = BucketConfigItem{}

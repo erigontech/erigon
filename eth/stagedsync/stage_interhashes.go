@@ -113,8 +113,8 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
-	_ = db.ClearBucket(kv.TrieOfAccountsBucket)
-	_ = db.ClearBucket(kv.TrieOfStorageBucket)
+	_ = db.ClearBucket(kv.TrieOfAccounts)
+	_ = db.ClearBucket(kv.TrieOfStorage)
 
 	accTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accTrieCollector.Close(logPrefix)
@@ -138,10 +138,10 @@ func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, exp
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 
-	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
-	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
 	return hash, nil
@@ -166,9 +166,9 @@ func NewHashPromoter(db kv.RwTx, quitCh <-chan struct{}) *HashPromoter {
 func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = kv.StorageChangeSetBucket
+		changeSetBucket = kv.StorageChangeSet
 	} else {
-		changeSetBucket = kv.AccountChangeSetBucket
+		changeSetBucket = kv.AccountChangeSet
 	}
 	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
@@ -234,8 +234,8 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
 		for _, k := range deletedAccounts {
-			if err := p.db.ForPrefix(kv.TrieOfStorageBucket, k, func(k, v []byte) error {
-				if err := p.db.Delete(kv.TrieOfStorageBucket, k, v); err != nil {
+			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
+				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
 					return err
 				}
 				return nil
@@ -253,9 +253,9 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	var changeSetBucket string
 
 	if storage {
-		changeSetBucket = kv.StorageChangeSetBucket
+		changeSetBucket = kv.StorageChangeSet
 	} else {
-		changeSetBucket = kv.AccountChangeSetBucket
+		changeSetBucket = kv.AccountChangeSet
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding of trie hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
@@ -320,8 +320,8 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
 		for _, k := range deletedAccounts {
-			if err := p.db.ForPrefix(kv.TrieOfStorageBucket, k, func(k, v []byte) error {
-				if err := p.db.Delete(kv.TrieOfStorageBucket, k, v); err != nil {
+			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
+				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
 					return err
 				}
 				return nil
@@ -373,10 +373,10 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix),
 		" hash", hash.Hex())
 
-	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
-	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
 	return hash, nil
@@ -457,23 +457,23 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
-	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
 }
 
 func ResetHashState(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.HashedAccountsBucket); err != nil {
+	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.HashedStorageBucket); err != nil {
+	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.ContractCodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
@@ -487,10 +487,10 @@ func ResetHashState(tx kv.RwTx) error {
 }
 
 func ResetIH(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.TrieOfAccountsBucket); err != nil {
+	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.TrieOfStorageBucket); err != nil {
+	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {

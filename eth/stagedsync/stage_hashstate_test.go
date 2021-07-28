@@ -24,7 +24,7 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 		t.Errorf("error while promoting state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, kv.HashedAccountsBucket, kv.HashedStorageBucket, kv.ContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage, kv.ContractCode)
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
@@ -48,7 +48,7 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 		t.Errorf("error while promoting state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, kv.HashedAccountsBucket, kv.HashedStorageBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
@@ -63,7 +63,7 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
-	compareCurrentState(t, tx1, tx2, kv.HashedAccountsBucket, kv.HashedStorageBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestUnwindHashed(t *testing.T) {
@@ -84,7 +84,7 @@ func TestUnwindHashed(t *testing.T) {
 		t.Errorf("error while unwind state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, kv.HashedAccountsBucket, kv.HashedStorageBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestPromoteIncrementallyShutdown(t *testing.T) {

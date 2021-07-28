@@ -30,8 +30,8 @@ type getPutkvMachine struct {
 
 func (m *getPutkvMachine) Init(t *rapid.T) {
 	m.bucket = kv.PlainStateBucket
-	m.snKV = memdb.NewMemKV()
-	m.modelKV = memdb.NewMemKV()
+	m.snKV = memdb.New()
+	m.modelKV = memdb.New()
 	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
 		return len(_v) > 0
 	}).Draw(t, "generate keys").([][20]byte)
@@ -62,7 +62,7 @@ func (m *getPutkvMachine) Init(t *rapid.T) {
 	require.NoError(t, err)
 	err = txModel.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.New()).Open()
 }
 
 func (m *getPutkvMachine) Cleanup() {
@@ -176,8 +176,8 @@ type getKVMachine struct {
 
 func (m *getKVMachine) Init(t *rapid.T) {
 	m.bucket = kv.PlainStateBucket
-	m.snKV = memdb.NewMemKV()
-	m.modelKV = memdb.NewMemKV()
+	m.snKV = memdb.New()
+	m.modelKV = memdb.New()
 	m.snKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
 		return len(_v) > 0
 	}).Draw(t, "generate keys").([][20]byte)
@@ -205,7 +205,7 @@ func (m *getKVMachine) Init(t *rapid.T) {
 	//save snapshot and wrap new write db
 	err = txSn.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.New()).Open()
 	txSn, err = m.snKV.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer txSn.Rollback()
@@ -284,8 +284,8 @@ type cursorKVMachine struct {
 
 func (m *cursorKVMachine) Init(t *rapid.T) {
 	m.bucket = kv.PlainStateBucket
-	m.snKV = memdb.NewMemKV()
-	m.modelKV = memdb.NewMemKV()
+	m.snKV = memdb.New()
+	m.modelKV = memdb.New()
 	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
 		return len(_v) > 0
 	}).Draw(t, "generate keys").([][20]byte)
@@ -320,7 +320,7 @@ func (m *cursorKVMachine) Init(t *rapid.T) {
 	require.NoError(t, err)
 	err = txModel.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.New()).Open()
 }
 
 func (m *cursorKVMachine) Check(t *rapid.T) {

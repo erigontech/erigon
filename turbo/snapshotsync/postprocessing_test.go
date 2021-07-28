@@ -28,7 +28,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 			if innerErr != nil {
 				panic(innerErr)
 			}
-			innerErr = tx.Put(kv.HeadersBucket, dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
+			innerErr = tx.Put(kv.Headers, dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), headerBytes)
 			if innerErr != nil {
 				panic(innerErr)
 			}

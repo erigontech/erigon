@@ -35,7 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var testBucket = kv.HashedAccountsBucket
+var testBucket = kv.HashedAccounts
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
 func TestPutGet(t *testing.T) {
@@ -99,7 +99,7 @@ func TestPutGet(t *testing.T) {
 }
 
 func TestNoPanicAfterDbClosed(t *testing.T) {
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -115,11 +115,11 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 		})
 	}()
 	time.Sleep(time.Millisecond) // wait to check that db.Close doesn't panic, but wait when read tx finished
-	err = writeTx.Put(kv.Buckets[0], []byte{1}, []byte{1})
+	err = writeTx.Put(kv.ErigonBuckets[0], []byte{1}, []byte{1})
 	require.NoError(t, err)
 	err = writeTx.Commit()
 	require.NoError(t, err)
-	_, err = tx.GetOne(kv.Buckets[0], []byte{1})
+	_, err = tx.GetOne(kv.ErigonBuckets[0], []byte{1})
 	require.NoError(t, err)
 	tx.Rollback()
 
@@ -136,7 +136,7 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 }
 
 func TestParallelPutGet(t *testing.T) {
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	const n = 8
 	var pending sync.WaitGroup

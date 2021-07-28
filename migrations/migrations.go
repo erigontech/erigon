@@ -226,7 +226,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 	binary.BigEndian.PutUint32(version[4:], kv.DBSchemaVersion.Minor)
 	binary.BigEndian.PutUint32(version[8:], kv.DBSchemaVersion.Patch)
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		if err := tx.Put(kv.DatabaseInfoBucket, kv.DBSchemaVersionKey, version[:]); err != nil {
+		if err := tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, version[:]); err != nil {
 			return fmt.Errorf("writing DB schema version: %w", err)
 		}
 		return nil

@@ -29,7 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -510,7 +510,7 @@ func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwDB, error) {
 	}
 	var db kv.RwDB
 	if n.config.DataDir == "" {
-		db = kv2.NewMemKV()
+		db = memdb.New()
 		n.databases = append(n.databases, db)
 		return db, nil
 	}
@@ -523,11 +523,11 @@ func (n *Node) OpenDatabase(label kv.Label, datadir string) (kv.RwDB, error) {
 		if exclusive {
 			opts = opts.Exclusive()
 		}
-		kv, err1 := opts.Open()
+		mdbxDB, err1 := opts.Open()
 		if err1 != nil {
 			return nil, err1
 		}
-		return kv, nil
+		return mdbxDB, nil
 	}
 	var err error
 	db, err = openFunc(false)
@@ -572,7 +572,7 @@ func OpenDatabase(config *Config, label kv.Label) (kv.RwDB, error) {
 	}
 	var db kv.RwDB
 	if config.DataDir == "" {
-		db = kv2.NewMemKV()
+		db = memdb.New()
 		return db, nil
 	}
 	dbPath := config.ResolvePath(name)

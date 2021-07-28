@@ -126,7 +126,7 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 		logPrefix,
 		db,
 		kv.PlainStateBucket,
-		kv.HashedAccountsBucket,
+		kv.HashedAccounts,
 		cfg.tmpDir,
 		keyTransformExtractAcc(transformPlainStateKey),
 		etl.IdentityLoadFunc,
@@ -142,7 +142,7 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 		logPrefix,
 		db,
 		kv.PlainStateBucket,
-		kv.HashedStorageBucket,
+		kv.HashedStorage,
 		cfg.tmpDir,
 		keyTransformExtractStorage(transformPlainStateKey),
 		etl.IdentityLoadFunc,
@@ -157,8 +157,8 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 	return etl.Transform(
 		logPrefix,
 		db,
-		kv.PlainContractCodeBucket,
-		kv.ContractCodeBucket,
+		kv.PlainContractCode,
+		kv.ContractCode,
 		cfg.tmpDir,
 		keyTransformExtractFunc(transformContractCodeKey),
 		etl.IdentityLoadFunc,
@@ -313,7 +313,7 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		}
 		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
 		var codeHash []byte
-		codeHash, err = db.GetOne(kv.PlainContractCodeBucket, plainKey)
+		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
 			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
 		}
@@ -359,7 +359,7 @@ func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 			return next(dbKey, newK, v)
 		}
 
-		if codeHash, err := db.GetOne(kv.ContractCodeBucket, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
+		if codeHash, err := db.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(newK, acc.Incarnation)); err == nil {
 			copy(acc.CodeHash[:], codeHash)
 		} else {
 			return fmt.Errorf("adjusting codeHash for ks %x, inc %d: %w", newK, acc.Incarnation, err)
@@ -391,7 +391,7 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 			return nil
 		}
 		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
-		codeHash, err = db.GetOne(kv.PlainContractCodeBucket, plainKey)
+		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
 		}
@@ -406,9 +406,9 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = kv.StorageChangeSetBucket
+		changeSetBucket = kv.StorageChangeSet
 	} else {
-		changeSetBucket = kv.AccountChangeSetBucket
+		changeSetBucket = kv.AccountChangeSet
 	}
 	if to > from+16 {
 		log.Info(fmt.Sprintf("[%s] Incremental promotion started", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
@@ -422,13 +422,13 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 	var loadBucket string
 	var extract etl.ExtractFunc
 	if codes {
-		loadBucket = kv.ContractCodeBucket
+		loadBucket = kv.ContractCode
 		extract = getExtractCode(p.db, changeSetBucket)
 	} else {
 		if storage {
-			loadBucket = kv.HashedStorageBucket
+			loadBucket = kv.HashedStorage
 		} else {
-			loadBucket = kv.HashedAccountsBucket
+			loadBucket = kv.HashedAccounts
 		}
 		extract = getExtractFunc(p.db, changeSetBucket)
 	}
@@ -456,9 +456,9 @@ func (p *Promoter) Promote(logPrefix string, s *StageState, from, to uint64, sto
 func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, storage bool, codes bool) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = kv.StorageChangeSetBucket
+		changeSetBucket = kv.StorageChangeSet
 	} else {
-		changeSetBucket = kv.AccountChangeSetBucket
+		changeSetBucket = kv.AccountChangeSet
 	}
 	from := s.BlockNumber
 	to := u.UnwindPoint
@@ -471,16 +471,16 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	var loadBucket string
 	var extractFunc etl.ExtractFunc
 	if codes {
-		loadBucket = kv.ContractCodeBucket
+		loadBucket = kv.ContractCode
 		extractFunc = getCodeUnwindExtractFunc(p.db, changeSetBucket)
 		l.innerLoadFunc = etl.IdentityLoadFunc
 	} else {
 		l.innerLoadFunc = etl.IdentityLoadFunc
 		if storage {
-			loadBucket = kv.HashedStorageBucket
+			loadBucket = kv.HashedStorage
 			extractFunc = getUnwindExtractStorage(changeSetBucket)
 		} else {
-			loadBucket = kv.HashedAccountsBucket
+			loadBucket = kv.HashedAccounts
 			extractFunc = getUnwindExtractAccounts(p.db, changeSetBucket)
 		}
 	}

@@ -6,14 +6,14 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	mdbx "github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBucketCRUD(t *testing.T) {
 	require := require.New(t)
-	db := memdb.NewMemKV()
+	db := memdb.New()
 	defer db.Close()
 
 	ctx := context.Background()
@@ -21,7 +21,7 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	normalBucket := kv.Buckets[15]
+	normalBucket := kv.ErigonBuckets[15]
 	deprecatedBucket := kv.DeprecatedBuckets[0]
 	migrator, ok := tx.(kv.BucketMigrator)
 	if !ok {
@@ -84,14 +84,14 @@ func TestReadOnlyMode(t *testing.T) {
 	path := t.TempDir()
 	db1 := mdbx.NewMDBX().Path(path).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketConfigItem{},
+			kv.Headers: kv.BucketConfigItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
 	db2 := mdbx.NewMDBX().Readonly().Path(path).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketConfigItem{},
+			kv.Headers: kv.BucketConfigItem{},
 		}
 	}).MustOpen()
 	defer db2.Close()
@@ -100,7 +100,7 @@ func TestReadOnlyMode(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	c, err := tx.Cursor(kv.HeadersBucket)
+	c, err := tx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	_, _, err = c.Seek([]byte("some prefix"))
 	require.NoError(t, err)

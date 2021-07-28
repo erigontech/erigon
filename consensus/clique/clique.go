@@ -577,7 +577,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 	}
 	defer tx.Rollback()
 
-	cur, err1 := tx.Cursor(kv.CliqueSeparateBucket)
+	cur, err1 := tx.Cursor(kv.CliqueSeparate)
 	if err1 != nil {
 		return nil, err1
 	}

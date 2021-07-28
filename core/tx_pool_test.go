@@ -101,7 +101,7 @@ func setupTxPool(t testing.TB) (*TxPool, *ecdsa.PrivateKey) {
 }
 
 func setupTxPoolWithConfig(t testing.TB, config *params.ChainConfig) (*TxPool, *ecdsa.PrivateKey) {
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	key, _ := crypto.GenerateKey()
 	pool := NewTxPool(TestTxPoolConfig, config, db)
@@ -181,7 +181,7 @@ func deriveSender(tx types.Transaction) (common.Address, error) {
 // state reset and tests whether the pending state is in sync with the
 // block head event that initiated the resetState().
 func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 	var (
 		key, _  = crypto.GenerateKey()
 		address = crypto.PubkeyToAddress(key.PublicKey)
@@ -583,7 +583,7 @@ func TestTransactionDropping(t *testing.T) {
 // postponed back into the future queue to prevent broadcasting them.
 func TestTransactionPostponing(t *testing.T) {
 	// Create the pool to test the postponing with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -792,7 +792,7 @@ func TestTransactionQueueGlobalLimitingNoLocals(t *testing.T) {
 
 func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
 	// Create the pool to test the limit enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.NoLocals = nolocals
@@ -886,7 +886,7 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 	evictionInterval = time.Millisecond * 100
 
 	// Create the pool to test the non-expiration enforcement
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.Lifetime = time.Second
@@ -1004,7 +1004,7 @@ func TestTransactionPendingLimiting(t *testing.T) {
 // attacks.
 func TestTransactionPendingGlobalLimiting(t *testing.T) {
 	// Create the pool to test the limit enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = config.AccountSlots * 10
@@ -1105,7 +1105,7 @@ func TestTransactionAllowedTxSize(t *testing.T) {
 // Tests that if transactions start being capped, transactions are also removed from 'all'
 func TestTransactionCapClearsFromAll(t *testing.T) {
 	// Create the pool to test the limit enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.AccountSlots = 2
@@ -1141,7 +1141,7 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 // the transactions are still kept.
 func TestTransactionPendingMinimumAllowance(t *testing.T) {
 	// Create the pool to test the limit enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = 1
@@ -1192,7 +1192,7 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 func TestTransactionPoolRepricing(t *testing.T) {
 	t.Skip("deadlock")
 	// Create the pool to test the pricing enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1315,7 +1315,7 @@ func TestTransactionPoolRepricing(t *testing.T) {
 // remove local transactions.
 func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1379,7 +1379,7 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 // Note, local transactions are never allowed to be dropped.
 func TestTransactionPoolUnderpricing(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = 2
@@ -1487,7 +1487,7 @@ func TestTransactionPoolUnderpricing(t *testing.T) {
 // back and forth between queued/pending.
 func TestTransactionPoolStableUnderpricing(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = 128
@@ -1553,7 +1553,7 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 
 // Tests that the pool rejects duplicate transactions.
 func TestTransactionDeduplication(t *testing.T) {
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1621,7 +1621,7 @@ func TestTransactionDeduplication(t *testing.T) {
 // price bump required.
 func TestTransactionReplacement(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1718,7 +1718,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	os.Remove(journal)
 
 	// Create the original pool to inject transaction into the journal
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.NoLocals = nolocals
@@ -1850,7 +1850,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 // pending status of individual transactions.
 func TestTransactionStatusCheck(t *testing.T) {
 	// Create the pool to test the status retrievals with
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {

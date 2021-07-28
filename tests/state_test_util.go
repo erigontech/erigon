@@ -272,11 +272,11 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 			h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
 			//nolint:errcheck
 			h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
-			if err = tx.Put(kv.HashedStorageBucket, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(kv.HashedAccountsBucket, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
 				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}

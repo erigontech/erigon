@@ -97,7 +97,7 @@ func loadSnapshot(config *params.CliqueConfig, db kv.RwDB, num uint64, hash comm
 		return nil, err
 	}
 	defer tx.Rollback()
-	blob, err := tx.GetOne(kv.CliqueSeparateBucket, SnapshotFullKey(num, hash))
+	blob, err := tx.GetOne(kv.CliqueSeparate, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func lastSnapshot(db kv.RwDB) (uint64, error) {
 	}
 	defer tx.Rollback()
 
-	lastEnc, err := tx.GetOne(kv.CliqueLastSnapshotBucket, LastSnapshotKey())
+	lastEnc, err := tx.GetOne(kv.CliqueLastSnapshot, LastSnapshotKey())
 	if err != nil {
 		return 0, fmt.Errorf("failed check last clique snapshot: %d", err)
 	}
@@ -144,7 +144,7 @@ func (s *Snapshot) store(db kv.RwDB) error {
 		return err
 	}
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob)
+		return tx.Put(kv.CliqueSeparate, SnapshotFullKey(s.Number, s.Hash), blob)
 	})
 }
 

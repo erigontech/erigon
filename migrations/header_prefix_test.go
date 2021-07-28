@@ -17,7 +17,7 @@ import (
 
 func TestHeaderPrefix(t *testing.T) {
 	require := require.New(t)
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		err := tx.CreateBucket(kv.HeaderPrefixOld)
@@ -45,7 +45,7 @@ func TestHeaderPrefix(t *testing.T) {
 
 	num := 0
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeaderCanonicalBucket, []byte{}, func(k, v []byte) error {
+		return tx.ForEach(kv.HeaderCanonical, []byte{}, func(k, v []byte) error {
 			require.Len(k, 8)
 			bytes.Equal(v, common.Hash{uint8(binary.BigEndian.Uint64(k))}.Bytes())
 			num++
@@ -57,7 +57,7 @@ func TestHeaderPrefix(t *testing.T) {
 
 	num = 0
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeaderTDBucket, []byte{}, func(k, v []byte) error {
+		return tx.ForEach(kv.HeaderTD, []byte{}, func(k, v []byte) error {
 			require.Len(k, 40)
 			bytes.Equal(v, []byte{uint8(binary.BigEndian.Uint64(k))})
 			num++
@@ -69,7 +69,7 @@ func TestHeaderPrefix(t *testing.T) {
 
 	num = 0
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeadersBucket, []byte{}, func(k, v []byte) error {
+		return tx.ForEach(kv.Headers, []byte{}, func(k, v []byte) error {
 			require.Len(k, 40)
 			bytes.Equal(v, []byte("header "+strconv.Itoa(int(binary.BigEndian.Uint64(k)))))
 			num++

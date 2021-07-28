@@ -9,7 +9,7 @@ import (
 )
 
 func TestGetChainConfig(t *testing.T) {
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 	config, _, err := core.CommitGenesisBlock(db, core.DefaultGenesisBlock())
 	if err != nil {
 		t.Fatalf("setting up genensis block: %v", err)

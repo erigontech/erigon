@@ -79,7 +79,7 @@ func FindStorage(c kv.CursorDupSort, blockNumber uint64, k []byte) ([]byte, erro
 func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collector, quit <-chan struct{}) error {
 	if err := walkAndCollect(
 		changes.Collect,
-		db, kv.AccountChangeSetBucket,
+		db, kv.AccountChangeSet,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {
@@ -88,7 +88,7 @@ func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collec
 
 	if err := walkAndCollect(
 		changes.Collect,
-		db, kv.StorageChangeSetBucket,
+		db, kv.StorageChangeSet,
 		timestampDst+1, timestampSrc,
 		quit,
 	); err != nil {

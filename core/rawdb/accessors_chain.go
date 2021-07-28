@@ -34,7 +34,7 @@ import (
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
-	data, err := db.GetOne(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(number))
+	data, err := db.GetOne(kv.HeaderCanonical, dbutils.EncodeBlockNumber(number))
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed ReadCanonicalHash: %w, number=%d", err, number)
 	}
@@ -46,7 +46,7 @@ func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
 func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
-	if err := db.Put(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(number), hash.Bytes()); err != nil {
+	if err := db.Put(kv.HeaderCanonical, dbutils.EncodeBlockNumber(number), hash.Bytes()); err != nil {
 		return fmt.Errorf("failed to store number to hash mapping: %w", err)
 	}
 	return nil
@@ -54,7 +54,7 @@ func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
 
 // DeleteCanonicalHash removes the number to hash canonical mapping.
 func DeleteCanonicalHash(db kv.Deleter, number uint64) error {
-	if err := db.Delete(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(number), nil); err != nil {
+	if err := db.Delete(kv.HeaderCanonical, dbutils.EncodeBlockNumber(number), nil); err != nil {
 		return fmt.Errorf("failed to delete number to hash mapping: %w", err)
 	}
 	return nil
@@ -62,7 +62,7 @@ func DeleteCanonicalHash(db kv.Deleter, number uint64) error {
 
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
-	data, err := db.GetOne(kv.HeaderNumberBucket, hash.Bytes())
+	data, err := db.GetOne(kv.HeaderNumber, hash.Bytes())
 	if err != nil {
 		log.Error("ReadHeaderNumber failed", "err", err)
 	}
@@ -80,14 +80,14 @@ func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 // WriteHeaderNumber stores the hash->number mapping.
 func WriteHeaderNumber(db kv.Putter, hash common.Hash, number uint64) {
 	enc := dbutils.EncodeBlockNumber(number)
-	if err := db.Put(kv.HeaderNumberBucket, hash[:], enc); err != nil {
+	if err := db.Put(kv.HeaderNumber, hash[:], enc); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}
 }
 
 // DeleteHeaderNumber removes hash->number mapping.
 func DeleteHeaderNumber(db kv.Deleter, hash common.Hash) {
-	if err := db.Delete(kv.HeaderNumberBucket, hash[:], nil); err != nil {
+	if err := db.Delete(kv.HeaderNumber, hash[:], nil); err != nil {
 		log.Crit("Failed to delete hash to number mapping", "err", err)
 	}
 }
@@ -133,7 +133,7 @@ func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
-	data, err := db.GetOne(kv.HeadersBucket, dbutils.HeaderKey(number, hash))
+	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		log.Error("ReadHeaderRLP failed", "err", err)
 	}
@@ -142,7 +142,7 @@ func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 
 // HasHeader verifies the existence of a block header corresponding to the hash.
 func HasHeader(db kv.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(kv.HeadersBucket, dbutils.HeaderKey(number, hash)); !has || err != nil {
+	if has, err := db.Has(kv.Headers, dbutils.HeaderKey(number, hash)); !has || err != nil {
 		return false
 	}
 	return true
@@ -187,7 +187,7 @@ func ReadCurrentBlock(db kv.Tx) *types.Block {
 
 func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {
 	var res []*types.Header
-	c, err := db.Cursor(kv.HeadersBucket)
+	c, err := db.Cursor(kv.Headers)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +218,7 @@ func WriteHeader(db kv.Putter, header *types.Header) {
 		number  = header.Number.Uint64()
 		encoded = dbutils.EncodeBlockNumber(number)
 	)
-	if err := db.Put(kv.HeaderNumberBucket, hash[:], encoded); err != nil {
+	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}
 	// Write the encoded header
@@ -226,17 +226,17 @@ func WriteHeader(db kv.Putter, header *types.Header) {
 	if err != nil {
 		log.Crit("Failed to RLP encode header", "err", err)
 	}
-	if err := db.Put(kv.HeadersBucket, dbutils.HeaderKey(number, hash), data); err != nil {
+	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), data); err != nil {
 		log.Crit("Failed to store header", "err", err)
 	}
 }
 
 // DeleteHeader removes all block header data associated with a hash.
 func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
-	if err := db.Delete(kv.HeadersBucket, dbutils.HeaderKey(number, hash), nil); err != nil {
+	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
-	if err := db.Delete(kv.HeaderNumberBucket, hash.Bytes(), nil); err != nil {
+	if err := db.Delete(kv.HeaderNumber, hash.Bytes(), nil); err != nil {
 		log.Crit("Failed to delete hash to number mapping", "err", err)
 	}
 }
@@ -466,7 +466,7 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
 func ReadTd(db kv.Getter, hash common.Hash, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.HeaderTDBucket, dbutils.HeaderKey(number, hash))
+	data, err := db.GetOne(kv.HeaderTD, dbutils.HeaderKey(number, hash))
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadTd: %w", err)
 	}
@@ -494,7 +494,7 @@ func WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error {
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
 	}
-	if err := db.Put(kv.HeaderTDBucket, dbutils.HeaderKey(number, hash), data); err != nil {
+	if err := db.Put(kv.HeaderTD, dbutils.HeaderKey(number, hash), data); err != nil {
 		return fmt.Errorf("failed to store block total difficulty: %w", err)
 	}
 	return nil
@@ -502,7 +502,7 @@ func WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error {
 
 // DeleteTd removes all block total difficulty data associated with a hash.
 func DeleteTd(db kv.Deleter, hash common.Hash, number uint64) error {
-	if err := db.Delete(kv.HeaderTDBucket, dbutils.HeaderKey(number, hash), nil); err != nil {
+	if err := db.Delete(kv.HeaderTD, dbutils.HeaderKey(number, hash), nil); err != nil {
 		return fmt.Errorf("failed to delete block total difficulty: %w", err)
 	}
 	return nil

@@ -20,7 +20,7 @@ var (
 			kv.EthTx:           kv.BucketConfigItem{},
 		},
 		SnapshotType_headers: {
-			kv.HeadersBucket: kv.BucketConfigItem{},
+			kv.Headers: kv.BucketConfigItem{},
 		},
 		SnapshotType_state: {
 			kv.PlainStateBucket: kv.BucketConfigItem{
@@ -29,8 +29,8 @@ var (
 				DupFromLen:                60,
 				DupToLen:                  28,
 			},
-			kv.PlainContractCodeBucket: kv.BucketConfigItem{},
-			kv.CodeBucket:              kv.BucketConfigItem{},
+			kv.PlainContractCode: kv.BucketConfigItem{},
+			kv.CodeBucket:        kv.BucketConfigItem{},
 		},
 	}
 )
@@ -72,7 +72,7 @@ func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 	var snapshotBlock uint64
 	var hasSnapshotBlock bool
 	if err := chainDb.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			return err
 		}

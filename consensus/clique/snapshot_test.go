@@ -418,7 +418,7 @@ func TestClique(t *testing.T) {
 				Epoch:  tt.epoch,
 			}
 
-			cliqueDB := memdb.NewTestKV(t)
+			cliqueDB := memdb.NewTestDB(t)
 
 			engine := clique.New(&config, params.CliqueSnapshot, cliqueDB)
 			engine.FakeDiff = true

@@ -64,8 +64,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
-		dbNoFork  = memdb.NewTestKV(t)
-		dbProFork = memdb.NewTestKV(t)
+		dbNoFork  = memdb.NewTestDB(t)
+		dbProFork = memdb.NewTestDB(t)
 
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}

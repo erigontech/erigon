@@ -82,7 +82,7 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(kv.AccountsHistoryBucket, addr.Bytes(), b)
+				err = db.Put(kv.AccountsHistory, addr.Bytes(), b)
 				if err != nil {
 					return err
 				}
@@ -118,12 +118,12 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 	if err != nil {
 		log.Fatal(err)
 	}
-	tgCursor, err := tgTx.Cursor(kv.AccountsHistoryBucket)
+	tgCursor, err := tgTx.Cursor(kv.AccountsHistory)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer tgCursor.Close()
-	gethCursor, err := gethTx.Cursor(kv.AccountsHistoryBucket)
+	gethCursor, err := gethTx.Cursor(kv.AccountsHistory)
 	if err != nil {
 		log.Fatal(err)
 	}

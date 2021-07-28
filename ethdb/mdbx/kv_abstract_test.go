@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/ethdb/remotedb"
+	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,29 +32,29 @@ func TestSequence(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		i, err := tx.ReadSequence(kv.Buckets[0])
+		i, err := tx.ReadSequence(kv.ErigonBuckets[0])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(kv.Buckets[0], 1)
+		i, err = tx.IncrementSequence(kv.ErigonBuckets[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(kv.Buckets[0], 6)
+		i, err = tx.IncrementSequence(kv.ErigonBuckets[0], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.IncrementSequence(kv.Buckets[0], 1)
+		i, err = tx.IncrementSequence(kv.ErigonBuckets[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 
-		i, err = tx.ReadSequence(kv.Buckets[1])
+		i, err = tx.ReadSequence(kv.ErigonBuckets[1])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(kv.Buckets[1], 1)
+		i, err = tx.IncrementSequence(kv.ErigonBuckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(kv.Buckets[1], 6)
+		i, err = tx.IncrementSequence(kv.ErigonBuckets[1], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.IncrementSequence(kv.Buckets[1], 1)
+		i, err = tx.IncrementSequence(kv.ErigonBuckets[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 		tx.Rollback()
@@ -68,8 +68,8 @@ func TestManagedTx(t *testing.T) {
 	}()
 
 	bucketID := 0
-	bucket1 := kv.Buckets[bucketID]
-	bucket2 := kv.Buckets[bucketID+1]
+	bucket1 := kv.ErigonBuckets[bucketID]
+	bucket2 := kv.ErigonBuckets[bucketID+1]
 	writeDBs, readDBs := setupDatabases(t, func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return map[string]kv.BucketConfigItem{
 			bucket1: {
@@ -347,11 +347,11 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //		msg := fmt.Sprintf("%T", db)
 //		t.Run("FillBuckets "+msg, func(t *testing.T) {
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c := tx.Cursor(dbutils.Buckets[0])
+//				c := tx.Cursor(dbutils.ErigonBuckets[0])
 //				for i := uint8(0); i < 10; i++ {
 //					require.NoError(t, c.Put([]byte{i}, []byte{i}))
 //				}
-//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				c2 := tx.Cursor(dbutils.ErigonBuckets[1])
 //				for i := uint8(0); i < 12; i++ {
 //					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
 //				}
@@ -379,7 +379,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //			counter2, counter := 0, 0
 //			var key, value []byte
 //			err := db.View(ctx, func(tx ethdb.Tx) error {
-//				c := tx.Cursor(dbutils.Buckets[0])
+//				c := tx.Cursor(dbutils.ErigonBuckets[0])
 //				for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 //					if err != nil {
 //						return err
@@ -387,7 +387,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //					counter++
 //				}
 //
-//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				c2 := tx.Cursor(dbutils.ErigonBuckets[1])
 //				for k, _, err := c2.First(); k != nil; k, _, err = c2.Next() {
 //					if err != nil {
 //						return err
@@ -395,7 +395,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //					counter2++
 //				}
 //
-//				c3 := tx.Cursor(dbutils.Buckets[0])
+//				c3 := tx.Cursor(dbutils.ErigonBuckets[0])
 //				k, v, err := c3.Seek([]byte{5})
 //				if err != nil {
 //					return err
@@ -425,7 +425,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //		msg := fmt.Sprintf("%T", db)
 //		t.Run("GetAfterPut "+msg, func(t *testing.T) {
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c := tx.Cursor(dbutils.Buckets[0])
+//				c := tx.Cursor(dbutils.ErigonBuckets[0])
 //				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 //					require.NoError(t, c.Put([]byte{i}, []byte{i}))
 //				}
@@ -436,7 +436,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //					require.Equal(t, []byte{i}, v)
 //				}
 //
-//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				c2 := tx.Cursor(dbutils.ErigonBuckets[1])
 //				for i := uint8(0); i < 12; i++ {
 //					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
 //				}
@@ -464,12 +464,12 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //
 //		t.Run("cursor put and delete"+msg, func(t *testing.T) {
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c3 := tx.Cursor(dbutils.Buckets[2])
+//				c3 := tx.Cursor(dbutils.ErigonBuckets[2])
 //				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 //					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
 //				}
 //				for i := uint8(0); i < 10; i++ {
-//					v, err := tx.GetOne(dbutils.Buckets[2], []byte{i})
+//					v, err := tx.GetOne(dbutils.ErigonBuckets[2], []byte{i})
 //					require.NoError(t, err)
 //					require.Equal(t, []byte{i}, v)
 //				}
@@ -481,9 +481,9 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //			}
 //
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c3 := tx.Cursor(dbutils.Buckets[2])
+//				c3 := tx.Cursor(dbutils.ErigonBuckets[2])
 //				require.NoError(t, c3.Delete([]byte{5}, nil))
-//				v, err := tx.GetOne(dbutils.Buckets[2], []byte{5})
+//				v, err := tx.GetOne(dbutils.ErigonBuckets[2], []byte{5})
 //				require.NoError(t, err)
 //				require.Nil(t, v)
 //				return nil

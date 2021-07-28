@@ -50,9 +50,9 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	}
 	snkv := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.PlainStateBucket:        kv.BucketsConfigs[kv.PlainStateBucket],
-			kv.PlainContractCodeBucket: kv.BucketsConfigs[kv.PlainContractCodeBucket],
-			kv.CodeBucket:              kv.BucketsConfigs[kv.CodeBucket],
+			kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
+			kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
+			kv.CodeBucket:        kv.BucketsConfigs[kv.CodeBucket],
 		}
 	}).Path(snapshotPath).MustOpen()
 	log.Info("Create snapshot db", "path", snapshotPath)
@@ -83,14 +83,14 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	log.Info("Copy plain state end", "t", time.Since(tt))
 	tt = time.Now()
 	if err = snkv.Update(ctx, func(sntx kv.RwTx) error {
-		return tx.ForEach(kv.PlainContractCodeBucket, []byte{}, func(k, v []byte) error {
-			innerErr := sntx.Put(kv.PlainContractCodeBucket, k, v)
+		return tx.ForEach(kv.PlainContractCode, []byte{}, func(k, v []byte) error {
+			innerErr := sntx.Put(kv.PlainContractCode, k, v)
 			if innerErr != nil {
 				return fmt.Errorf("put contract code err: %w", innerErr)
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("progress", "bucket", kv.PlainContractCodeBucket, "key", fmt.Sprintf("%x", k))
+				log.Info("progress", "bucket", kv.PlainContractCode, "key", fmt.Sprintf("%x", k))
 			default:
 			}
 			return nil

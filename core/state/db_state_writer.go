@@ -70,7 +70,7 @@ func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, ac
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	if err := dsw.db.Put(kv.HashedAccountsBucket, addrHash[:], value); err != nil {
+	if err := dsw.db.Put(kv.HashedAccounts, addrHash[:], value); err != nil {
 		return err
 	}
 	return nil
@@ -84,13 +84,13 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accoun
 	if err != nil {
 		return err
 	}
-	if err := dsw.db.Delete(kv.HashedAccountsBucket, addrHash[:], nil); err != nil {
+	if err := dsw.db.Delete(kv.HashedAccounts, addrHash[:], nil); err != nil {
 		return err
 	}
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		if err := dsw.db.Put(kv.IncarnationMapBucket, address[:], b[:]); err != nil {
+		if err := dsw.db.Put(kv.IncarnationMap, address[:], b[:]); err != nil {
 			return err
 		}
 	}
@@ -110,7 +110,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 		return err
 	}
 	//save contract to codeHash mapping
-	if err := dsw.db.Put(kv.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
+	if err := dsw.db.Put(kv.ContractCode, dbutils.GenerateStoragePrefix(addrHash[:], incarnation), codeHash[:]); err != nil {
 		return err
 	}
 	return nil
@@ -136,9 +136,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 
 	v := value.Bytes()
 	if len(v) == 0 {
-		return dsw.db.Delete(kv.HashedStorageBucket, compositeKey, nil)
+		return dsw.db.Delete(kv.HashedStorage, compositeKey, nil)
 	}
-	return dsw.db.Put(kv.HashedStorageBucket, compositeKey, v)
+	return dsw.db.Put(kv.HashedStorage, compositeKey, v)
 }
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
@@ -159,7 +159,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, accountChanges, kv.AccountsHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, accountChanges, kv.AccountsHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, storageChanges, kv.StorageHistoryBucket, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, storageChanges, kv.StorageHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
 	if err != nil {
 		return err
 	}

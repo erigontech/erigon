@@ -23,12 +23,12 @@ on each level of trie calculates intermediate hash of underlying data.
 **Practically:** It can be implemented as "Preorder trie traversal" (Preorder - visit Root, visit Left, visit Right).
 But, let's make couple observations to make traversal over huge state efficient.
 
-**Observation 1:** `TrieOfAccountsBucket` already stores state keys in sorted way.
+**Observation 1:** `TrieOfAccounts` already stores state keys in sorted way.
 Iteration over this bucket will retrieve keys in same order as "Preorder trie traversal".
 
 **Observation 2:** each Eth block - changes not big part of state - it means most of Merkle trie intermediate hashes will not change.
-It means we effectively can cache them. `TrieOfAccountsBucket` stores "Intermediate hashes of all Merkle trie levels".
-It also sorted and Iteration over `TrieOfAccountsBucket` will retrieve keys in same order as "Preorder trie traversal".
+It means we effectively can cache them. `TrieOfAccounts` stores "Intermediate hashes of all Merkle trie levels".
+It also sorted and Iteration over `TrieOfAccounts` will retrieve keys in same order as "Preorder trie traversal".
 
 **Implementation:** by opening 1 Cursor on state and 1 more Cursor on intermediate hashes bucket - we will receive data in
  order of "Preorder trie traversal". Cursors will only do "sequential reads" and "jumps forward" - been hardware-friendly.
@@ -195,18 +195,18 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 //	}
 func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan struct{}) (common.Hash, error) {
 
-	accC, err := tx.Cursor(kv.HashedAccountsBucket)
+	accC, err := tx.Cursor(kv.HashedAccounts)
 	if err != nil {
 		return EmptyRoot, err
 	}
 	defer accC.Close()
 	accs := NewStateCursor(accC, quit)
-	trieAccC, err := tx.Cursor(kv.TrieOfAccountsBucket)
+	trieAccC, err := tx.Cursor(kv.TrieOfAccounts)
 	if err != nil {
 		return EmptyRoot, err
 	}
 	defer trieAccC.Close()
-	trieStorageC, err := tx.CursorDupSort(kv.TrieOfStorageBucket)
+	trieStorageC, err := tx.CursorDupSort(kv.TrieOfStorage)
 	if err != nil {
 		return EmptyRoot, err
 	}
@@ -219,7 +219,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 	accTrie := AccTrie(canUse, l.hc, trieAccC, quit)
 	storageTrie := StorageTrie(canUse, l.shc, trieStorageC, quit)
 
-	ss, err := tx.CursorDupSort(kv.HashedStorageBucket)
+	ss, err := tx.CursorDupSort(kv.HashedStorage)
 	if err != nil {
 		return EmptyRoot, err
 	}
@@ -674,8 +674,8 @@ type AccTrieCursor struct {
 	SkipState       bool
 	is, lvl         int
 	k, v            [64][]byte // store up to 64 levels of key/value pairs in nibbles format
-	hasState        [64]uint16 // says that records in dbutil.HashedAccountsBucket exists by given prefix
-	hasTree         [64]uint16 // says that records in dbutil.TrieOfAccountsBucket exists by given prefix
+	hasState        [64]uint16 // says that records in dbutil.HashedAccounts exists by given prefix
+	hasTree         [64]uint16 // says that records in dbutil.TrieOfAccounts exists by given prefix
 	hasHash         [64]uint16 // store ownership of hashes stored in .v
 	childID, hashID [64]int8   // meta info: current child in .hasState[lvl] field, max child id, current hash in .v[lvl]
 	deleted         [64]bool   // helper to avoid multiple deletes of same key

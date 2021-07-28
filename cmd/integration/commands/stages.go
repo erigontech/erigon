@@ -22,8 +22,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
@@ -888,7 +888,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		engine = ethconfig.CreateConsensusEngine(chainConfig, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
 	}
 
-	events := remotedbserver.NewEvents()
+	events := privateapi.NewEvents()
 
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db)
 

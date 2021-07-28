@@ -106,7 +106,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		}
 		return h
 	}
-	db := memdb.NewMemKV()
+	db := memdb.New()
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

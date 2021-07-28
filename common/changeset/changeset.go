@@ -114,7 +114,7 @@ func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 }
 
 func AvailableFrom(tx kv.Tx) (uint64, error) {
-	c, err := tx.Cursor(kv.AccountChangeSetBucket)
+	c, err := tx.Cursor(kv.AccountChangeSet)
 	if err != nil {
 		return math.MaxUint64, err
 	}
@@ -129,7 +129,7 @@ func AvailableFrom(tx kv.Tx) (uint64, error) {
 	return binary.BigEndian.Uint64(k), nil
 }
 func AvailableStorageFrom(tx kv.Tx) (uint64, error) {
-	c, err := tx.Cursor(kv.StorageChangeSetBucket)
+	c, err := tx.Cursor(kv.StorageChangeSet)
 	if err != nil {
 		return math.MaxUint64, err
 	}
@@ -161,7 +161,7 @@ func Truncate(tx kv.RwTx, from uint64) error {
 	keyStart := dbutils.EncodeBlockNumber(from)
 
 	{
-		c, err := tx.RwCursorDupSort(kv.AccountChangeSetBucket)
+		c, err := tx.RwCursorDupSort(kv.AccountChangeSet)
 		if err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func Truncate(tx kv.RwTx, from uint64) error {
 		}
 	}
 	{
-		c, err := tx.RwCursorDupSort(kv.StorageChangeSetBucket)
+		c, err := tx.RwCursorDupSort(kv.StorageChangeSet)
 		if err != nil {
 			return err
 		}
@@ -203,16 +203,16 @@ var Mapper = map[string]struct {
 	Encode        Encoder
 	Decode        Decoder
 }{
-	kv.AccountChangeSetBucket: {
-		IndexBucket:   kv.AccountsHistoryBucket,
+	kv.AccountChangeSet: {
+		IndexBucket:   kv.AccountsHistory,
 		IndexChunkKey: dbutils.AccountIndexChunkKey,
 		New:           NewAccountChangeSet,
 		Find:          FindAccount,
 		Encode:        EncodeAccounts,
 		Decode:        DecodeAccounts,
 	},
-	kv.StorageChangeSetBucket: {
-		IndexBucket:   kv.StorageHistoryBucket,
+	kv.StorageChangeSet: {
+		IndexBucket:   kv.StorageHistory,
 		IndexChunkKey: dbutils.StorageIndexChunkKey,
 		Find:          FindStorage,
 		New:           NewStorageChangeSet,

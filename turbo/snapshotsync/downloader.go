@@ -69,14 +69,14 @@ func (cli *Client) Torrents() []metainfo.Hash {
 }
 func (cli *Client) Load(tx kv.Tx) error {
 	log.Info("Load added torrents")
-	return tx.ForEach(kv.SnapshotInfoBucket, []byte{}, func(k, infoHashBytes []byte) error {
+	return tx.ForEach(kv.SnapshotInfo, []byte{}, func(k, infoHashBytes []byte) error {
 		if !bytes.HasPrefix(k[8:], []byte(SnapshotInfoHashPrefix)) {
 			return nil
 		}
 		networkID, snapshotName := ParseInfoHashKey(k)
 		infoHash := metainfo.Hash{}
 		copy(infoHash[:], infoHashBytes)
-		infoBytes, err := tx.GetOne(kv.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
+		infoBytes, err := tx.GetOne(kv.SnapshotInfo, MakeInfoBytesKey(snapshotName, networkID))
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func (cli *Client) Load(tx kv.Tx) error {
 }
 
 func (cli *Client) SavePeerID(db kv.Putter) error {
-	return db.Put(kv.BittorrentInfoBucket, []byte(kv.BittorrentPeerID), cli.PeerID())
+	return db.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), cli.PeerID())
 }
 
 func (cli *Client) Close() {
@@ -260,7 +260,7 @@ func (cli *Client) GetSnapshots(tx kv.Tx, networkID uint64) (map[SnapshotType]*S
 	mp := make(map[SnapshotType]*SnapshotsInfo)
 	networkIDBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
-	err := tx.ForPrefix(kv.SnapshotInfoBucket, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), func(k, v []byte) error {
+	err := tx.ForPrefix(kv.SnapshotInfo, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), func(k, v []byte) error {
 		var hash metainfo.Hash
 		if len(v) != metainfo.HashSize {
 			return nil
@@ -336,11 +336,11 @@ func getTorrentSpec(db kv.Tx, snapshotName string, networkID uint64) ([]byte, []
 	var err error
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, networkID)
-	infohash, err = db.GetOne(kv.SnapshotInfoBucket, MakeInfoHashKey(snapshotName, networkID))
+	infohash, err = db.GetOne(kv.SnapshotInfo, MakeInfoHashKey(snapshotName, networkID))
 	if err != nil {
 		return nil, nil, err
 	}
-	infobytes, err = db.GetOne(kv.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID))
+	infobytes, err = db.GetOne(kv.SnapshotInfo, MakeInfoBytesKey(snapshotName, networkID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -350,11 +350,11 @@ func getTorrentSpec(db kv.Tx, snapshotName string, networkID uint64) ([]byte, []
 func saveTorrentSpec(db kv.Putter, snapshotName string, networkID uint64, hash torrent.InfoHash, infobytes []byte) error {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, networkID)
-	err := db.Put(kv.SnapshotInfoBucket, MakeInfoHashKey(snapshotName, networkID), hash.Bytes())
+	err := db.Put(kv.SnapshotInfo, MakeInfoHashKey(snapshotName, networkID), hash.Bytes())
 	if err != nil {
 		return err
 	}
-	return db.Put(kv.SnapshotInfoBucket, MakeInfoBytesKey(snapshotName, networkID), infobytes)
+	return db.Put(kv.SnapshotInfo, MakeInfoBytesKey(snapshotName, networkID), infobytes)
 }
 
 func MakeInfoHashKey(snapshotName string, networkID uint64) []byte {
@@ -382,7 +382,7 @@ func SnapshotSeeding(chainDB kv.RwDB, cli *Client, name string, snapshotsDir str
 	var snapshotBlock uint64
 	var hasSnapshotBlock bool
 	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return err
 		}

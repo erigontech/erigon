@@ -68,34 +68,34 @@ import (
 }*/
 
 var bucketLabels = map[string]string{
-	kv.Receipts:               "Receipts",
-	kv.Log:                    "Event Logs",
-	kv.AccountsHistoryBucket:  "History Of Accounts",
-	kv.StorageHistoryBucket:   "History Of Storage",
-	kv.HeadersBucket:          "Headers",
-	kv.HeaderCanonicalBucket:  "Canonical headers",
-	kv.HeaderTDBucket:         "Headers TD",
-	kv.BlockBodyPrefix:        "Block Bodies",
-	kv.HeaderNumberBucket:     "Header Numbers",
-	kv.TxLookupPrefix:         "Transaction Index",
-	kv.CodeBucket:             "Code Of Contracts",
-	kv.SyncStageProgress:      "Sync Progress",
-	kv.PlainStateBucket:       "Plain State",
-	kv.HashedAccountsBucket:   "Hashed Accounts",
-	kv.HashedStorageBucket:    "Hashed Storage",
-	kv.TrieOfAccountsBucket:   "Intermediate Hashes Of Accounts",
-	kv.TrieOfStorageBucket:    "Intermediate Hashes Of Storage",
-	kv.AccountChangeSetBucket: "Account Changes",
-	kv.StorageChangeSetBucket: "Storage Changes",
-	kv.IncarnationMapBucket:   "Incarnations",
-	kv.Senders:                "Transaction Senders",
-	kv.ContractTEVMCodeBucket: "Contract TEVM code",
+	kv.Receipts:          "Receipts",
+	kv.Log:               "Event Logs",
+	kv.AccountsHistory:   "History Of Accounts",
+	kv.StorageHistory:    "History Of Storage",
+	kv.Headers:           "Headers",
+	kv.HeaderCanonical:   "Canonical headers",
+	kv.HeaderTD:          "Headers TD",
+	kv.BlockBodyPrefix:   "Block Bodies",
+	kv.HeaderNumber:      "Header Numbers",
+	kv.TxLookupPrefix:    "Transaction Index",
+	kv.CodeBucket:        "Code Of Contracts",
+	kv.SyncStageProgress: "Sync Progress",
+	kv.PlainStateBucket:  "Plain State",
+	kv.HashedAccounts:    "Hashed Accounts",
+	kv.HashedStorage:     "Hashed Storage",
+	kv.TrieOfAccounts:    "Intermediate Hashes Of Accounts",
+	kv.TrieOfStorage:     "Intermediate Hashes Of Storage",
+	kv.AccountChangeSet:  "Account Changes",
+	kv.StorageChangeSet:  "Storage Changes",
+	kv.IncarnationMap:    "Incarnations",
+	kv.Senders:           "Transaction Senders",
+	kv.ContractTEVMCode:  "Contract TEVM code",
 }
 
-/*dbutils.PlainContractCodeBucket,
+/*dbutils.PlainContractCode,
 dbutils.CodeBucket,
-dbutils.AccountsHistoryBucket,
-dbutils.StorageHistoryBucket,
+dbutils.AccountsHistory,
+dbutils.StorageHistory,
 dbutils.TxLookupPrefix,*/
 
 func hexPalette() error {
@@ -410,7 +410,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.NewMemKV()
+	emptyKv := memdb.New()
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

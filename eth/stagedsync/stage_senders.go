@@ -85,7 +85,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
-	canonicalC, err := tx.Cursor(kv.HeaderCanonicalBucket)
+	canonicalC, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}

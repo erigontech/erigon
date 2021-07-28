@@ -45,7 +45,7 @@ func GetCheckTEVM(db kv.Getter) func(contractHash common.Hash) (bool, error) {
 			return true, nil
 		}
 
-		ok, err := db.Has(kv.ContractTEVMCodeBucket, contractHash.Bytes())
+		ok, err := db.Has(kv.ContractTEVMCode, contractHash.Bytes())
 		if err != nil && !errors.Is(err, ErrKeyNotFound) {
 			return false, fmt.Errorf("can't check TEVM bucket by contract %q hash: %w",
 				contractHash.String(), err)

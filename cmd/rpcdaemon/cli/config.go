@@ -14,8 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/ethdb/remotedb"
+	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
@@ -132,7 +132,7 @@ func checkDbCompatibility(db kv.RoDB) error {
 		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
 	}
 	defer compatTx.Rollback()
-	if version, compatErr = compatTx.GetOne(kv.DatabaseInfoBucket, kv.DBSchemaVersionKey); compatErr != nil {
+	if version, compatErr = compatTx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey); compatErr != nil {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
 	if len(version) != 12 {

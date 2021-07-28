@@ -198,7 +198,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		observedCodeHashes[codeHash] = struct{}{}
 
 		// check if we already have TEVM code
-		ok, err = batch.Has(kv.ContractTEVMCodeBucket, codeHashBytes)
+		ok, err = batch.Has(kv.ContractTEVMCode, codeHashBytes)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return 0, fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
 		}
@@ -230,7 +230,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 		}
 
 		// store TEVM contract code
-		err = batch.Put(kv.ContractTEVMCodeBucket, codeHashBytes, transpiledCode)
+		err = batch.Put(kv.ContractTEVMCode, codeHashBytes, transpiledCode)
 		if err != nil {
 			return 0, fmt.Errorf("cannot store TEVM code %q: %w", codeHash, err)
 		}
@@ -327,7 +327,7 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg Transpi
 		codeHashBytes = codeHash.Bytes()
 
 		// check if we already have TEVM code
-		ok, err = tx.Has(kv.ContractTEVMCodeBucket, codeHashBytes)
+		ok, err = tx.Has(kv.ContractTEVMCode, codeHashBytes)
 		if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 			return fmt.Errorf("can't read code TEVM bucket by contract hash %q: %w", codeHash, err)
 		}
@@ -336,7 +336,7 @@ func UnwindTranspileStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg Transpi
 			continue
 		}
 
-		err = tx.Delete(kv.ContractTEVMCodeBucket, codeHashBytes, nil)
+		err = tx.Delete(kv.ContractTEVMCode, codeHashBytes, nil)
 		if err != nil {
 			return fmt.Errorf("can't delete TEVM code by hash %q: %w", codeHash, err)
 		}

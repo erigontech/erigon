@@ -98,7 +98,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
 	}
 	results := make([]StatetestResult, 0, len(tests))
-	db := memdb.NewMemKV()
+	db := memdb.New()
 	defer db.Close()
 
 	tx, txErr := db.BeginRw(context.Background())

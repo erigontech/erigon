@@ -175,7 +175,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err := rotx.Cursor(kv.HeadersBucket)
+	roc, err := rotx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	var headerNumber uint64
 	headerNumber = 11
@@ -197,7 +197,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
 	headerNumber = 0
-	err = snRoTx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+	err = snRoTx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -217,7 +217,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -239,7 +239,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotHash)
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +247,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +267,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 	//just start snapshot transaction
 	// it can't be empty slice but shouldn't be in main db
-	_, err = roTX.GetOne(kv.HeadersBucket, []byte{112, 3})
+	_, err = roTX.GetOne(kv.Headers, []byte{112, 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	rotx, err = db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err = rotx.Cursor(kv.HeadersBucket)
+	roc, err = rotx.Cursor(kv.Headers)
 	require.NoError(t, err)
 
 	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
@@ -311,7 +311,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 
 	headerNumber = 0
 	err = db.HeadersSnapshot().View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -329,7 +329,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -349,7 +349,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 		t.Fatal("incorrect len", trnts)
 	}
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotHash)
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,7 +357,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -489,7 +489,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err := rotx.Cursor(kv.HeadersBucket)
+	roc, err := rotx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	var headerNumber uint64
 	headerNumber = 11
@@ -510,7 +510,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	snokv := db.HeadersSnapshot()
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
-	headersCursor, err := snRoTx.Cursor(kv.HeadersBucket)
+	headersCursor, err := snRoTx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	headerNumber = 0
 	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
@@ -531,7 +531,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -553,7 +553,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotHash)
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -561,7 +561,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -605,7 +605,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		defer rotx.Rollback()
 		//just start snapshot transaction
 		// it can't be empty slice but shouldn't be in main db
-		_, err = roTX.GetOne(kv.HeadersBucket, []byte{1})
+		_, err = roTX.GetOne(kv.Headers, []byte{1})
 		if err != nil {
 			wg.Done()
 			t.Error(err)
@@ -651,7 +651,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
-	err = rotx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+	err = rotx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		t.Fatal("main db must be empty here", k)
 		return nil
 	})
@@ -662,7 +662,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	headerNumber = 0
 	snRoTx, err = db.HeadersSnapshot().BeginRo(context.Background())
 	require.NoError(t, err)
-	err = snRoTx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+	err = snRoTx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -679,7 +679,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 	headerNumber = 0
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.HeadersBucket, nil, func(k, v []byte) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -699,7 +699,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		t.Fatal("incorrect len", trnts)
 	}
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotHash)
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -707,7 +707,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(kv.BittorrentInfoBucket, kv.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -733,11 +733,11 @@ func GenerateHeaderData(tx kv.RwTx, from, to int) error {
 		return errors.New("greater than uint8")
 	}
 	for i := from; i <= to; i++ {
-		err = tx.Put(kv.HeadersBucket, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i)}), []byte{uint8(i), uint8(i), uint8(i)})
+		err = tx.Put(kv.Headers, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i)}), []byte{uint8(i), uint8(i), uint8(i)})
 		if err != nil {
 			return err
 		}
-		err = tx.Put(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(uint64(i)), common.Hash{uint8(i)}.Bytes())
+		err = tx.Put(kv.HeaderCanonical, dbutils.EncodeBlockNumber(uint64(i)), common.Hash{uint8(i)}.Bytes())
 		if err != nil {
 			return err
 		}
@@ -775,7 +775,7 @@ func GenerateBodyData(tx kv.RwTx, from, to uint64) error {
 				return err
 			}
 
-			err = tx.Put(kv.HeadersBucket, dbutils.HeaderKey(i, common.Hash{uint8(i), uint8(blockNum)}), headersBytes)
+			err = tx.Put(kv.Headers, dbutils.HeaderKey(i, common.Hash{uint8(i), uint8(blockNum)}), headersBytes)
 			if err != nil {
 				return err
 			}
@@ -813,7 +813,7 @@ func GenerateBodyData(tx kv.RwTx, from, to uint64) error {
 			}
 		}
 
-		err = tx.Put(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3) + 1}.Bytes())
+		err = tx.Put(kv.HeaderCanonical, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3) + 1}.Bytes())
 		if err != nil {
 			return err
 		}
@@ -871,7 +871,7 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX kv.Tx, snapshotTo uint64)
 // check headers snapshot data based on GenerateBodyData
 func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX kv.Tx, snapshotTo uint64) {
 	t.Helper()
-	headersCursor, err := headersSnapshotTX.Cursor(kv.HeadersBucket)
+	headersCursor, err := headersSnapshotTX.Cursor(kv.Headers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1455,7 +1455,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 	var blockNum uint64
 	var numOfDuplicateBlocks uint64
 	dataFrom := uint64(10)
-	err = roWriteDBTX.ForEach(kv.HeadersBucket, []byte{}, func(k, v []byte) error {
+	err = roWriteDBTX.ForEach(kv.Headers, []byte{}, func(k, v []byte) error {
 		numOfDuplicateBlocks++
 
 		if binary.BigEndian.Uint64(k[:8]) != blockNum {

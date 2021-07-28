@@ -73,7 +73,7 @@ func SpawnAccountHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 		startBlock = pruneTo
 	}
 
-	if err := promoteHistory(logPrefix, tx, kv.AccountChangeSetBucket, startBlock, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx, kv.AccountChangeSet, startBlock, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
 		return err
 	}
 
@@ -116,7 +116,7 @@ func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, kv.StorageChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx, kv.StorageChangeSet, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
 		return err
 	}
 
@@ -240,7 +240,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx kv.RwTx, cfg Hi
 
 	quitCh := ctx.Done()
 	logPrefix := s.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, kv.AccountChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
+	if err := unwindHistory(logPrefix, tx, kv.AccountChangeSet, u.UnwindPoint, cfg, quitCh); err != nil {
 		return err
 	}
 
@@ -269,7 +269,7 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx kv.RwTx, cfg Hi
 	quitCh := ctx.Done()
 
 	logPrefix := s.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, kv.StorageChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
+	if err := unwindHistory(logPrefix, tx, kv.StorageChangeSet, u.UnwindPoint, cfg, quitCh); err != nil {
 		return err
 	}
 
@@ -370,7 +370,7 @@ func PruneAccountHistoryIndex(s *PruneState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	}
 
 	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
-	if err = pruneHistoryIndex(tx, kv.AccountChangeSetBucket, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+	if err = pruneHistoryIndex(tx, kv.AccountChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
 		return err
 	}
 	if err = s.Done(tx); err != nil {
@@ -400,7 +400,7 @@ func PruneStorageHistoryIndex(s *PruneState, tx kv.RwTx, cfg HistoryCfg, ctx con
 		defer tx.Rollback()
 	}
 	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
-	if err = pruneHistoryIndex(tx, kv.StorageChangeSetBucket, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+	if err = pruneHistoryIndex(tx, kv.StorageChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
 		return err
 	}
 	if err = s.Done(tx); err != nil {
@@ -440,7 +440,7 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	}
 	defer c.Close()
 	prefixLen := common.AddressLength
-	if csTable == kv.StorageChangeSetBucket {
+	if csTable == kv.StorageChangeSet {
 		prefixLen = common.HashLength
 	}
 	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {

@@ -77,7 +77,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, cfg TxLookupCfg) error {
 	bigNum := new(big.Int)
-	return etl.Transform(logPrefix, tx, kv.HeaderCanonicalBucket, kv.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(tx, blockHash, blocknum)

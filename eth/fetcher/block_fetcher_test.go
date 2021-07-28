@@ -36,7 +36,7 @@ import (
 )
 
 var (
-	testdb       = memdb.NewMemKV()
+	testdb       = memdb.New()
 	testKey, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddress  = crypto.PubkeyToAddress(testKey.PublicKey)
 	genesis      = core.GenesisBlockForTesting(testdb, testAddress, big.NewInt(1000000000))
@@ -48,7 +48,7 @@ var (
 // contains a transaction and every 5th an uncle to allow testing correct block
 // reassembly.
 func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common.Hash]*types.Block) {
-	db := memdb.NewMemKV()
+	db := memdb.New()
 	defer db.Close()
 	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
 	chain, err := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {

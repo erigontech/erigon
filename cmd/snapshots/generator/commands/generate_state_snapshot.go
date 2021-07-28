@@ -50,9 +50,9 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	db = kv2.NewMDBX().Path(dbPath).MustOpen()
 	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.PlainStateBucket:        kv.BucketConfigItem{},
-			kv.PlainContractCodeBucket: kv.BucketConfigItem{},
-			kv.CodeBucket:              kv.BucketConfigItem{},
+			kv.PlainStateBucket:  kv.BucketConfigItem{},
+			kv.PlainContractCode: kv.BucketConfigItem{},
+			kv.CodeBucket:        kv.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -122,7 +122,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 			}
 
 			if acc.IsEmptyCodeHash() {
-				codeHash, err1 := tx2.GetOne(kv.PlainContractCodeBucket, storagePrefix)
+				codeHash, err1 := tx2.GetOne(kv.PlainContractCode, storagePrefix)
 				if err1 != nil && errors.Is(err1, ethdb.ErrKeyNotFound) {
 					return false, fmt.Errorf("getting code hash for %x: %v", k, err1)
 				}
@@ -134,7 +134,7 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 					if err1 = writeTx.Put(kv.CodeBucket, codeHash, code); err1 != nil {
 						return false, err1
 					}
-					if err1 = writeTx.Put(kv.PlainContractCodeBucket, storagePrefix, codeHash); err1 != nil {
+					if err1 = writeTx.Put(kv.PlainContractCode, storagePrefix, codeHash); err1 != nil {
 						return false, err1
 					}
 				}

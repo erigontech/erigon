@@ -29,9 +29,9 @@ func CheckEnc(chaindata string) error {
 	)
 
 	//set test methods
-	chainDataStorageDecoder := changeset.Mapper[kv.StorageChangeSetBucket].Decode
-	testStorageEncoder := changeset.Mapper[kv.StorageChangeSetBucket].Encode
-	testStorageDecoder := changeset.Mapper[kv.StorageChangeSetBucket].Decode
+	chainDataStorageDecoder := changeset.Mapper[kv.StorageChangeSet].Decode
+	testStorageEncoder := changeset.Mapper[kv.StorageChangeSet].Encode
+	testStorageDecoder := changeset.Mapper[kv.StorageChangeSet].Decode
 
 	startTime := time.Now()
 	ch := make(chan struct {
@@ -80,7 +80,7 @@ func CheckEnc(chaindata string) error {
 			close(stop)
 		}()
 		return db.View(context.Background(), func(tx kv.Tx) error {
-			return tx.ForEach(kv.StorageChangeSetBucket, []byte{}, func(k, v []byte) error {
+			return tx.ForEach(kv.StorageChangeSet, []byte{}, func(k, v []byte) error {
 				if i%100_000 == 0 {
 					blockNum := binary.BigEndian.Uint64(k)
 					fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",

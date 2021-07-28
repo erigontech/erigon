@@ -386,10 +386,10 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, tx kv.
 		delete(expectedStorageChanges, blockN)
 	}
 
-	if err := checkHistory(tx, kv.AccountChangeSetBucket, checkHistoryFrom); err != nil {
+	if err := checkHistory(tx, kv.AccountChangeSet, checkHistoryFrom); err != nil {
 		return err
 	}
-	if err := checkHistory(tx, kv.StorageChangeSetBucket, checkHistoryFrom); err != nil {
+	if err := checkHistory(tx, kv.StorageChangeSet, checkHistoryFrom); err != nil {
 		return err
 	}
 	return nil
@@ -530,7 +530,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
 	i := 0
 	sort.Sort(expectedAccountChanges)
-	err := changeset.Walk(db, kv.AccountChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		c := expectedAccountChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -556,7 +556,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 
 	i = 0
 	sort.Sort(expectedStorageChanges)
-	err = changeset.Walk(db, kv.StorageChangeSetBucket, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(db, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		c := expectedStorageChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {

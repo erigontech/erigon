@@ -30,7 +30,7 @@ func TestVM(t *testing.T) {
 	vmt.slow("^vmPerformance")
 	vmt.fails("^vmSystemOperationsTest.json/createNameRegistrator$", "fails without parallel execution")
 
-	db := memdb.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	vmt.walk(t, vmTestDir, func(t *testing.T, name string, test *VMTest) {
 		withTrace(t, test.json.Exec.GasLimit, func(vmconfig vm.Config) error {

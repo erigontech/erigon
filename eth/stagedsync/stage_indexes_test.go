@@ -24,7 +24,7 @@ import (
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
-	db := kv2.NewTestKV(t)
+	db := kv2.NewTestDB(t)
 	cfg := StageHistoryCfg(db, prune.DefaultMode, t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -52,15 +52,15 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		}
 	}
 
-	t.Run("account plain state", test(2100, kv.AccountChangeSetBucket))
-	t.Run("storage plain state", test(2100, kv.StorageChangeSetBucket))
+	t.Run("account plain state", test(2100, kv.AccountChangeSet))
+	t.Run("storage plain state", test(2100, kv.StorageChangeSet))
 
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
-	buckets := []string{kv.AccountChangeSetBucket, kv.StorageChangeSetBucket}
+	buckets := []string{kv.AccountChangeSet, kv.StorageChangeSet}
 	tmpDir, ctx := t.TempDir(), context.Background()
-	kv := kv2.NewTestKV(t)
+	kv := kv2.NewTestDB(t)
 	cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir())
 	for i := range buckets {
 		csbucket := buckets[i]
@@ -172,7 +172,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 
 func expectNoHistoryBefore(t *testing.T, tx kv.Tx, csbucket string, prunedTo uint64) {
 	prefixLen := common.AddressLength
-	if csbucket == kv.StorageChangeSetBucket {
+	if csbucket == kv.StorageChangeSet {
 		prefixLen = common.HashLength
 	}
 	afterPrune := 0
@@ -192,12 +192,12 @@ func generateTestData(t *testing.T, tx kv.RwTx, csBucket string, numOfBlocks int
 		t.Fatal("incorrect cs bucket")
 	}
 	var isPlain bool
-	if kv.StorageChangeSetBucket == csBucket || kv.AccountChangeSetBucket == csBucket {
+	if kv.StorageChangeSet == csBucket || kv.AccountChangeSet == csBucket {
 		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	require.NoError(t, err)
-	if kv.StorageChangeSetBucket == csBucket {
+	if kv.StorageChangeSet == csBucket {
 		keys, innerErr := generateAddrs(3, false)
 		require.NoError(t, innerErr)
 

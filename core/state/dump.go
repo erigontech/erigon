@@ -179,7 +179,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		incarnation := incarnationList[i]
 		storagePrefix := dbutils.PlainGenerateStoragePrefix(addr[:], incarnation)
 		if incarnation > 0 {
-			codeHash, err := d.db.GetOne(kv.PlainContractCodeBucket, storagePrefix)
+			codeHash, err := d.db.GetOne(kv.PlainContractCode, storagePrefix)
 			if err != nil {
 				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
 			}

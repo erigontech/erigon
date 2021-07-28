@@ -53,8 +53,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	remotedbserver2 "github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -141,7 +142,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.Snapshot.Enabled {
 		var peerID string
 		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			v, err := tx.GetOne(kv.BittorrentInfoBucket, []byte(kv.BittorrentPeerID))
+			v, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 			if err != nil {
 				return err
 			}
@@ -191,7 +192,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		waitForMiningStop:    make(chan struct{}),
 		sentries:             []remote.SentryClient{},
 		notifications: &stagedsync.Notifications{
-			Events:      remotedbserver.NewEvents(),
+			Events:      privateapi.NewEvents(),
 			Accumulator: &shards.Accumulator{},
 		},
 	}
@@ -283,10 +284,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
-	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.notifications.Events)
-	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
-	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
+	kvRPC := remotedbserver2.NewKvServer(backend.chainKV)
+	ethBackendRPC := privateapi.NewEthBackendServer(backend, backend.notifications.Events)
+	txPoolRPC := privateapi.NewTxPoolServer(context.Background(), backend.txPool)
+	miningRPC := privateapi.NewMiningServer(context.Background(), backend, ethashApi)
 
 	if stack.Config().PrivateApiAddr != "" {
 
@@ -322,7 +323,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			backend.privateAPI, err = remotedbserver.StartGrpc(
+			backend.privateAPI, err = privateapi.StartGrpc(
 				kvRPC,
 				ethBackendRPC,
 				txPoolRPC,
@@ -334,7 +335,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return nil, err
 			}
 		} else {
-			backend.privateAPI, err = remotedbserver.StartGrpc(
+			backend.privateAPI, err = privateapi.StartGrpc(
 				kvRPC,
 				ethBackendRPC,
 				txPoolRPC,

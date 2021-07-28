@@ -56,9 +56,9 @@ var cmdSnapshotCheck = &cobra.Command{
 		stateSnapshotPath := filepath.Join(snapshotDir, "state")
 		stateSnapshot := kv2.NewMDBX().Path(stateSnapshotPath).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 			return kv.BucketsCfg{
-				kv.PlainStateBucket:        kv.BucketsConfigs[kv.PlainStateBucket],
-				kv.PlainContractCodeBucket: kv.BucketsConfigs[kv.PlainContractCodeBucket],
-				kv.CodeBucket:              kv.BucketsConfigs[kv.CodeBucket],
+				kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
+				kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
+				kv.CodeBucket:        kv.BucketsConfigs[kv.CodeBucket],
 			}
 		}).Readonly().MustOpen()
 		isNew := true
@@ -84,8 +84,8 @@ var cmdSnapshotCheck = &cobra.Command{
 		db := snapshotdb.NewSnapshotKV().
 			DB(tmpDb).
 			//broken
-			//SnapshotDB([]string{dbutils.HeadersBucket, dbutils.HeaderCanonicalBucket, dbutils.HeaderTDBucket, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumberBucket}, mainDB.RwDB()).
-			//SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCodeBucket}, stateSnapshot).
+			//SnapshotDB([]string{dbutils.Headers, dbutils.HeaderCanonical, dbutils.HeaderTD, dbutils.BlockBodyPrefix, dbutils.Senders, dbutils.HeadBlockKey, dbutils.HeaderNumber}, mainDB.RwDB()).
+			//SnapshotDB([]string{dbutils.PlainStateBucket, dbutils.CodeBucket, dbutils.PlainContractCode}, stateSnapshot).
 			Open()
 		_ = mainDB
 		_ = stateSnapshot

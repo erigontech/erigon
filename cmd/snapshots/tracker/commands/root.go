@@ -90,7 +90,7 @@ var rootCmd = &cobra.Command{
 			}}
 
 			err := db.View(context.Background(), func(tx kv.Tx) error {
-				c, err := tx.Cursor(kv.SnapshotInfoBucket)
+				c, err := tx.Cursor(kv.SnapshotInfo)
 				if err != nil {
 					return err
 				}
@@ -211,7 +211,7 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := append(req.InfoHash, req.PeerID...)
 	if req.Event == tracker.Stopped.String() {
 		err = t.db.Update(context.Background(), func(tx kv.RwTx) error {
-			return tx.Delete(kv.SnapshotInfoBucket, key, nil)
+			return tx.Delete(kv.SnapshotInfo, key, nil)
 		})
 		if err != nil {
 			log.Error("Json marshal", "err", err)
@@ -221,7 +221,7 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		var prevBytes []byte
 		err = t.db.View(context.Background(), func(tx kv.Tx) error {
-			prevBytes, err = tx.GetOne(kv.SnapshotInfoBucket, key)
+			prevBytes, err = tx.GetOne(kv.SnapshotInfo, key)
 			return err
 		})
 		if err != nil {
@@ -245,7 +245,7 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		}
 		if err = t.db.Update(context.Background(), func(tx kv.RwTx) error {
-			return tx.Put(kv.SnapshotInfoBucket, key, peerBytes)
+			return tx.Put(kv.SnapshotInfo, key, peerBytes)
 		}); err != nil {
 			log.Error("db.Put", "err", err)
 			WriteResp(w, ErrResponse{FailureReason: err.Error()}, req.Compact)
@@ -259,7 +259,7 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := t.db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForPrefix(kv.SnapshotInfoBucket, append(req.InfoHash, make([]byte, 20)...), func(k, v []byte) error {
+		return tx.ForPrefix(kv.SnapshotInfo, append(req.InfoHash, make([]byte, 20)...), func(k, v []byte) error {
 			a := AnnounceReqWithTime{}
 			err = json.Unmarshal(v, &a)
 			if err != nil {

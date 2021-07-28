@@ -45,7 +45,7 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX kv.Tx, writeTX kv.RwTx, 
 			return false, nil
 		}
 
-		canonocalHash, err := readTX.GetOne(kv.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(k)))
+		canonocalHash, err := readTX.GetOne(kv.HeaderCanonical, dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(k)))
 		if err != nil {
 			return false, err
 		}

@@ -98,25 +98,25 @@ func resetSenders(tx kv.RwTx) error {
 }
 
 func resetExec(tx kv.RwTx, g *core.Genesis) error {
-	if err := tx.ClearBucket(kv.HashedAccountsBucket); err != nil {
+	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.HashedStorageBucket); err != nil {
+	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.ContractCodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
 	if err := tx.ClearBucket(kv.PlainStateBucket); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.AccountChangeSetBucket); err != nil {
+	if err := tx.ClearBucket(kv.AccountChangeSet); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.StorageChangeSetBucket); err != nil {
+	if err := tx.ClearBucket(kv.StorageChangeSet); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.PlainContractCodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.PlainContractCode); err != nil {
 		return err
 	}
 	if err := tx.ClearBucket(kv.Receipts); err != nil {
@@ -125,7 +125,7 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 	if err := tx.ClearBucket(kv.Log); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.IncarnationMapBucket); err != nil {
+	if err := tx.ClearBucket(kv.IncarnationMap); err != nil {
 		return err
 	}
 	if err := tx.ClearBucket(kv.CodeBucket); err != nil {
@@ -155,10 +155,10 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 }
 
 func resetHistory(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.AccountsHistoryBucket); err != nil {
+	if err := tx.ClearBucket(kv.AccountsHistory); err != nil {
 		return err
 	}
-	if err := tx.ClearBucket(kv.StorageHistoryBucket); err != nil {
+	if err := tx.ClearBucket(kv.StorageHistory); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.AccountHistoryIndex, 0); err != nil {

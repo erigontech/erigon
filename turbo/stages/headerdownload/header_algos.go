@@ -459,7 +459,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		delete(hd.links, link.hash)
 	}
 	err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.HeadersBucket)
+		c, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
 		}
@@ -794,7 +794,7 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	if err = db.Put(kv.HeadersBucket, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 	hi.prevHash = hash

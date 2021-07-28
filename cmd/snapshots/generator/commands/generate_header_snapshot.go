@@ -46,7 +46,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 
 	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketConfigItem{},
+			kv.Headers: kv.BucketConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -64,7 +64,7 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	t := time.Now()
 	var hash common.Hash
 	var header []byte
-	c, err := snTx.RwCursor(kv.HeadersBucket)
+	c, err := snTx.RwCursor(kv.Headers)
 	if err != nil {
 		return err
 	}

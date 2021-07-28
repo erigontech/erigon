@@ -26,7 +26,7 @@ func CreateHeadersSnapshot(ctx context.Context, readTX kv.Tx, toBlock uint64, sn
 
 	snKV, err := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketsConfigs[kv.HeadersBucket],
+			kv.Headers: kv.BucketsConfigs[kv.Headers],
 		}
 	}).Path(snapshotPath).Open()
 	if err != nil {
@@ -52,7 +52,7 @@ func CreateHeadersSnapshot(ctx context.Context, readTX kv.Tx, toBlock uint64, sn
 }
 
 func GenerateHeadersSnapshot(ctx context.Context, db kv.Tx, sntx kv.RwTx, toBlock uint64) error {
-	headerCursor, err := sntx.RwCursor(kv.HeadersBucket)
+	headerCursor, err := sntx.RwCursor(kv.Headers)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func GenerateHeadersSnapshot(ctx context.Context, db kv.Tx, sntx kv.RwTx, toBloc
 func OpenHeadersSnapshot(dbPath string) (kv.RoDB, error) {
 	return mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
 		return kv.BucketsCfg{
-			kv.HeadersBucket: kv.BucketsConfigs[kv.HeadersBucket],
+			kv.Headers: kv.BucketsConfigs[kv.Headers],
 		}
 	}).Readonly().Path(dbPath).Open()
 }
@@ -105,13 +105,13 @@ func RemoveHeadersData(db kv.RoDB, tx kv.RwTx, currentSnapshot, newSnapshot uint
 		return errors.New("empty headers snapshot")
 	}
 	writeTX := tx.(snapshotdb.DBTX).DBTX()
-	c, err := writeTX.RwCursor(kv.HeadersBucket)
+	c, err := writeTX.RwCursor(kv.Headers)
 	if err != nil {
 		return fmt.Errorf("get headers cursor %w", err)
 	}
 
 	return headerSnapshot.View(context.Background(), func(tx kv.Tx) error {
-		c2, err := tx.Cursor(kv.HeadersBucket)
+		c2, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
 		}

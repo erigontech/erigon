@@ -69,7 +69,7 @@ func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, incarnati
 }
 
 func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	b, err := r.db.GetOne(kv.IncarnationMapBucket, address.Bytes())
+	b, err := r.db.GetOne(kv.IncarnationMap, address.Bytes())
 	if err != nil {
 		return 0, err
 	}

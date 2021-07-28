@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -16,7 +16,7 @@ type ChainEventNotifier interface {
 }
 
 type Notifications struct {
-	Events      *remotedbserver.Events
+	Events      *privateapi.Events
 	Accumulator *shards.Accumulator
 }
 
