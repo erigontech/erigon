@@ -18,10 +18,8 @@ package mdbx_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -140,10 +138,6 @@ func TestManagedTx(t *testing.T) {
 			continue
 		}
 
-		t.Run("ctx cancel "+msg, func(t *testing.T) {
-			t.Skip("probably need enable after go 1.4")
-			testCtxCancel(t, db, bucket1)
-		})
 		t.Run("filter "+msg, func(t *testing.T) {
 			//testPrefixFilter(t, db, bucket1)
 		})
@@ -236,28 +230,6 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 
 	})
 	return writeDBs, readDBs
-}
-
-func testCtxCancel(t *testing.T, db kv.RwDB, bucket1 string) {
-	assert := assert.New(t)
-	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
-	defer cancel()
-
-	if err := db.View(cancelableCtx, func(tx kv.Tx) error {
-		c, err := tx.Cursor(bucket1)
-		if err != nil {
-			return err
-		}
-		for {
-			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-				if err != nil {
-					return err
-				}
-			}
-		}
-	}); err != nil {
-		assert.True(errors.Is(context.DeadlineExceeded, err))
-	}
 }
 
 func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
