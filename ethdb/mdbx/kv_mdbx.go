@@ -720,6 +720,7 @@ func (tx *MdbxTx) Commit() error {
 		kv.DbCommitWrite.Update(latency.Write.Seconds())
 		kv.DbCommitSync.Update(latency.Sync.Seconds())
 		kv.DbCommitEnding.Update(latency.Ending.Seconds())
+		kv.DbCommitTotal.Update(latency.Whole.Seconds())
 	}
 
 	if latency.Whole > slowTx {

@@ -25,6 +25,7 @@ var (
 	DbCommitWrite       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="write"}`)       //nolint
 	DbCommitSync        = metrics.GetOrCreateSummary(`db_commit_seconds{phase="sync"}`)        //nolint
 	DbCommitEnding      = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`)      //nolint
+	DbCommitTotal       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)       //nolint
 
 	DbPgopsNewly   = metrics.NewCounter(`db_pgops_newly`)   //nolint
 	DbPgopsCow     = metrics.NewCounter(`db_pgops_cow`)     //nolint
