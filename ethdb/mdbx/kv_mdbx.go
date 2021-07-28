@@ -27,14 +27,14 @@ const pageSize = 4 * 1024
 
 const NonExistingDBI kv.DBI = 999_999_999
 
-type BucketConfigsFunc func(defaultBuckets kv.TableCfg) kv.TableCfg
+type TableCfgFunc func(defaultBuckets kv.TableCfg) kv.TableCfg
 
-func DefaultBucketConfigs(defaultBuckets kv.TableCfg) kv.TableCfg {
+func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 	return defaultBuckets
 }
 
 type MdbxOpts struct {
-	bucketsCfg BucketConfigsFunc
+	bucketsCfg TableCfgFunc
 	path       string
 	inMem      bool
 	label      kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
@@ -54,7 +54,7 @@ func testKVPath() string {
 
 func NewMDBX(log log.Logger) MdbxOpts {
 	return MdbxOpts{
-		bucketsCfg: DefaultBucketConfigs,
+		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:        log,
 	}
@@ -104,7 +104,7 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	return opts
 }
 
-func (opts MdbxOpts) WithTablessCfg(f BucketConfigsFunc) MdbxOpts {
+func (opts MdbxOpts) WithTablessCfg(f TableCfgFunc) MdbxOpts {
 	opts.bucketsCfg = f
 	return opts
 }

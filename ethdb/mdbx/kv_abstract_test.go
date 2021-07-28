@@ -178,7 +178,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	require.False(t, a.EnsureVersionCompatibility())
 }
 
-func setupDatabases(t *testing.T, logger log.Logger, f mdbx.BucketConfigsFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
 	writeDBs = []kv.RwDB{
 		mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen(),
 		mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen(), // for remote db
@@ -338,7 +338,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 }
 
 //func TestMultipleBuckets(t *testing.T) {
-//	writeDBs, readDBs, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
+//	writeDBs, readDBs, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
 //	ctx := context.Background()
@@ -416,7 +416,7 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 //}
 
 //func TestReadAfterPut(t *testing.T) {
-//	writeDBs, _, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
+//	writeDBs, _, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
 //	ctx := context.Background()

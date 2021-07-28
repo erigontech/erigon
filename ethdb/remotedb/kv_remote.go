@@ -28,7 +28,7 @@ import (
 
 // generate the messages and services
 type remoteOpts struct {
-	bucketsCfg  mdbx.BucketConfigsFunc
+	bucketsCfg  mdbx.TableCfgFunc
 	inMemConn   *bufconn.Listener // for tests
 	DialAddress string
 	version     gointerfaces.Version
@@ -75,7 +75,7 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) WithBucketsConfig(f mdbx.BucketConfigsFunc) remoteOpts {
+func (opts remoteOpts) WithBucketsConfig(f mdbx.TableCfgFunc) remoteOpts {
 	opts.bucketsCfg = f
 	return opts
 }
@@ -175,7 +175,7 @@ func (opts remoteOpts) MustOpen() kv.RwDB {
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
 func NewRemote(v gointerfaces.Version, logger log.Logger) remoteOpts {
-	return remoteOpts{bucketsCfg: mdbx.DefaultBucketConfigs, version: v, log: logger}
+	return remoteOpts{bucketsCfg: mdbx.WithChaindataTables, version: v, log: logger}
 }
 
 func (db *RemoteKV) AllBuckets() kv.TableCfg {
