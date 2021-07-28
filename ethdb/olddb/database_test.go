@@ -115,11 +115,11 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 		})
 	}()
 	time.Sleep(time.Millisecond) // wait to check that db.Close doesn't panic, but wait when read tx finished
-	err = writeTx.Put(kv.ErigonBuckets[0], []byte{1}, []byte{1})
+	err = writeTx.Put(kv.ErigonTables[0], []byte{1}, []byte{1})
 	require.NoError(t, err)
 	err = writeTx.Commit()
 	require.NoError(t, err)
-	_, err = tx.GetOne(kv.ErigonBuckets[0], []byte{1})
+	_, err = tx.GetOne(kv.ErigonTables[0], []byte{1})
 	require.NoError(t, err)
 	tx.Rollback()
 

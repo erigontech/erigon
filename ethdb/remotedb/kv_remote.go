@@ -38,7 +38,7 @@ type RemoteKV struct {
 	conn     *grpc.ClientConn
 	remoteKV remote.KVClient
 	log      log.Logger
-	buckets  kv.BucketsCfg
+	buckets  kv.TableCfg
 	opts     remoteOpts
 }
 
@@ -57,7 +57,7 @@ type remoteCursor struct {
 	stream     remote.KV_TxClient
 	tx         *remoteTx
 	bucketName string
-	bucketCfg  kv.BucketConfigItem
+	bucketCfg  kv.TableConfigItem
 	id         uint32
 }
 
@@ -152,7 +152,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 		conn:     conn,
 		remoteKV: kvClient,
 		log:      log.New("remote_db", opts.DialAddress),
-		buckets:  kv.BucketsCfg{},
+		buckets:  kv.TableCfg{},
 	}
 	customBuckets := opts.bucketsCfg(kv.BucketsConfigs)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
@@ -177,7 +177,7 @@ func NewRemote(v gointerfaces.Version) remoteOpts {
 	return remoteOpts{bucketsCfg: mdbx.DefaultBucketConfigs, version: v}
 }
 
-func (db *RemoteKV) AllBuckets() kv.BucketsCfg {
+func (db *RemoteKV) AllBuckets() kv.TableCfg {
 	return db.buckets
 }
 

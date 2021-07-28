@@ -48,8 +48,8 @@ func CopyFromState(ctx context.Context, dbpath string, snapshotPath string, bloc
 	if err != nil {
 		return err
 	}
-	snkv := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
+	snkv := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
 			kv.PlainStateBucket:  kv.BucketsConfigs[kv.PlainStateBucket],
 			kv.PlainContractCode: kv.BucketsConfigs[kv.PlainContractCode],
 			kv.CodeBucket:        kv.BucketsConfigs[kv.CodeBucket],

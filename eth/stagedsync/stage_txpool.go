@@ -116,7 +116,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	}
 
 	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
-	bodies, err := tx.Cursor(kv.BlockBodyPrefix)
+	bodies, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 	}
 
 	var txsToInject []types.Transaction
-	bodies, err := tx.Cursor(kv.BlockBodyPrefix)
+	bodies, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}

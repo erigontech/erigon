@@ -12,9 +12,9 @@ import (
 )
 
 func HeadersSnapshot(snapshotPath string) error {
-	snKV := mdbx.NewMDBX().Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.Headers: kv.BucketConfigItem{},
+	snKV := mdbx.NewMDBX().Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableConfigItem{},
 		}
 	}).MustOpen()
 	var prevHeader *types.Header

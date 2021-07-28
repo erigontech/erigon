@@ -27,9 +27,9 @@ const pageSize = 4 * 1024
 
 const NonExistingDBI kv.DBI = 999_999_999
 
-type BucketConfigsFunc func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg
+type BucketConfigsFunc func(defaultBuckets kv.TableCfg) kv.TableCfg
 
-func DefaultBucketConfigs(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+func DefaultBucketConfigs(defaultBuckets kv.TableCfg) kv.TableCfg {
 	return defaultBuckets
 }
 
@@ -202,7 +202,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		env:     env,
 		log:     logger,
 		wg:      &sync.WaitGroup{},
-		buckets: kv.BucketsCfg{},
+		buckets: kv.TableCfg{},
 		txSize:  dirtyPagesLimit * pageSize,
 	}
 	customBuckets := opts.bucketsCfg(kv.BucketsConfigs)
@@ -293,7 +293,7 @@ type MdbxKV struct {
 	env     *mdbx.Env
 	log     log.Logger
 	wg      *sync.WaitGroup
-	buckets kv.BucketsCfg
+	buckets kv.TableCfg
 	opts    MdbxOpts
 	txSize  uint64
 }
@@ -376,7 +376,7 @@ type MdbxCursor struct {
 	tx         *MdbxTx
 	c          *mdbx.Cursor
 	bucketName string
-	bucketCfg  kv.BucketConfigItem
+	bucketCfg  kv.TableConfigItem
 	dbi        mdbx.DBI
 	id         uint64
 }
@@ -393,7 +393,7 @@ func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 	return res
 }
 
-func (db *MdbxKV) AllBuckets() kv.BucketsCfg {
+func (db *MdbxKV) AllBuckets() kv.TableCfg {
 	return db.buckets
 }
 
@@ -604,7 +604,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 		if err != nil {
 			return err
 		}
-		cnfCopy.Flags = kv.BucketFlags(flags)
+		cnfCopy.Flags = kv.TableFlags(flags)
 
 		tx.db.buckets[name] = cnfCopy
 		return nil
@@ -1546,7 +1546,7 @@ func (c *MdbxDupSortCursor) CountDuplicates() (uint64, error) {
 	return res, nil
 }
 
-func bucketSlice(b kv.BucketsCfg) []string {
+func bucketSlice(b kv.TableCfg) []string {
 	buckets := make([]string, 0, len(b))
 	for name := range b {
 		buckets = append(buckets, name)

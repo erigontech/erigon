@@ -50,10 +50,10 @@ func TestMatreshkaStream(t *testing.T) {
 	//tmpDb:=ethdb.NewMemDatabase()
 	os.RemoveAll(tmpDbDir)
 
-	db, err := kv2.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		defaultBuckets[AccountDiff] = kv.BucketConfigItem{}
-		defaultBuckets[StorageDiff] = kv.BucketConfigItem{}
-		defaultBuckets[ContractDiff] = kv.BucketConfigItem{}
+	db, err := kv2.NewMDBX().Path(tmpDbDir).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		defaultBuckets[AccountDiff] = kv.TableConfigItem{}
+		defaultBuckets[StorageDiff] = kv.TableConfigItem{}
+		defaultBuckets[ContractDiff] = kv.TableConfigItem{}
 		return defaultBuckets
 	}).Open()
 	if err != nil {
@@ -72,7 +72,7 @@ func TestMatreshkaStream(t *testing.T) {
 
 	snkv := snapshotdb.NewSnapshotKV().DB(db).
 		//broken
-		//SnapshotDB([]string{dbutils.Headers, dbutils.HeaderCanonical, dbutils.HeaderTD, dbutils.HeaderNumber, dbutils.BlockBodyPrefix, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwDB()).
+		//SnapshotDB([]string{dbutils.Headers, dbutils.HeaderCanonical, dbutils.HeaderTD, dbutils.HeaderNumber, dbutils.BlockBody, dbutils.HeadHeaderKey, dbutils.Senders}, chaindata.RwDB()).
 		Open()
 	_ = chaindata
 	defer snkv.Close()

@@ -41,11 +41,11 @@ func (eri *ErigonNode) run() {
 
 // Params contains optional parameters for creating a node.
 // * GitCommit is a commit from which then node was built.
-// * CustomBuckets is a `map[string]dbutils.BucketConfigItem`, that contains bucket name and its properties.
+// * CustomBuckets is a `map[string]dbutils.TableConfigItem`, that contains bucket name and its properties.
 //
 // NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
-	CustomBuckets kv.BucketsCfg
+	CustomBuckets kv.TableCfg
 }
 
 func NewNodConfigUrfave(ctx *cli.Context) *node.Config {

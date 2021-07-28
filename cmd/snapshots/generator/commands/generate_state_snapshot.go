@@ -48,11 +48,11 @@ func GenerateStateSnapshot(ctx context.Context, dbPath, snapshotPath string, toB
 	var db, snkv kv.RwDB
 
 	db = kv2.NewMDBX().Path(dbPath).MustOpen()
-	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.PlainStateBucket:  kv.BucketConfigItem{},
-			kv.PlainContractCode: kv.BucketConfigItem{},
-			kv.CodeBucket:        kv.BucketConfigItem{},
+	snkv = kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.PlainStateBucket:  kv.TableConfigItem{},
+			kv.PlainContractCode: kv.TableConfigItem{},
+			kv.CodeBucket:        kv.TableConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 

@@ -267,7 +267,7 @@ func (s *SnapshotKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	}, nil
 }
 
-func (s *SnapshotKV) AllBuckets() kv.BucketsCfg {
+func (s *SnapshotKV) AllBuckets() kv.TableCfg {
 	return s.db.AllBuckets()
 }
 
@@ -501,7 +501,7 @@ func (s *snTX) getSnapshotTX(bucket string) (kv.Tx, error) {
 	switch bucket {
 	case kv.Headers:
 		tx = s.headersTX
-	case kv.BlockBodyPrefix, kv.EthTx:
+	case kv.BlockBody, kv.EthTx:
 		tx = s.bodiesTX
 	case kv.PlainStateBucket, kv.PlainContractCode, kv.CodeBucket:
 		tx = s.stateTX
@@ -1025,7 +1025,7 @@ func IsHeaderSnapshotSnapshotBucket(bucket string) bool {
 	return bucket == kv.Headers
 }
 func IsBodiesSnapshotSnapshotBucket(bucket string) bool {
-	return bucket == kv.BlockBodyPrefix || bucket == kv.EthTx
+	return bucket == kv.BlockBody || bucket == kv.EthTx
 }
 func IsStateSnapshotSnapshotBucket(bucket string) bool {
 	return bucket == kv.PlainStateBucket || bucket == kv.PlainContractCode || bucket == kv.CodeBucket

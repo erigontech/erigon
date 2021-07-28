@@ -770,14 +770,14 @@ func checkReader(tx kv.Tx, errorCh chan error) (bool, error) {
 	return false, nil
 }
 
-func defragSteps(filename string, bucketsCfg kv.BucketsCfg, generateFs ...func(kv.RwDB, kv.RwTx) (bool, error)) error {
+func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.RwDB, kv.RwTx) (bool, error)) error {
 	dir, err := ioutil.TempDir(".", "db-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
 	defer os.RemoveAll(dir)
 	var db kv.RwDB
-	db, err = kv2.NewMDBX().Path(dir).WithBucketsConfig(func(kv.BucketsCfg) kv.BucketsCfg {
+	db, err = kv2.NewMDBX().Path(dir).WithBucketsConfig(func(kv.TableCfg) kv.TableCfg {
 		return bucketsCfg
 	}).Open()
 	if err != nil {
@@ -823,14 +823,14 @@ func defragSteps(filename string, bucketsCfg kv.BucketsCfg, generateFs ...func(k
 }
 
 func Defrag() error {
-	emptyBucketCfg := make(kv.BucketsCfg)
+	emptyBucketCfg := make(kv.TableCfg)
 	fmt.Println("------------------- 1 -------------------")
 	if err := defragSteps("vis1", emptyBucketCfg, nothing); err != nil {
 		return err
 	}
 
-	oneBucketCfg := make(kv.BucketsCfg)
-	oneBucketCfg["t"] = kv.BucketConfigItem{}
+	oneBucketCfg := make(kv.TableCfg)
+	oneBucketCfg["t"] = kv.TableConfigItem{}
 	fmt.Println("------------------- 2 -------------------")
 	if err := defragSteps("vis2", oneBucketCfg, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate2(tx, 2) }); err != nil {
 		return err
@@ -847,8 +847,8 @@ func Defrag() error {
 	if err := defragSteps("vis5", oneBucketCfg, generate4); err != nil {
 		return err
 	}
-	oneDupSortCfg := make(kv.BucketsCfg)
-	oneDupSortCfg["t"] = kv.BucketConfigItem{Flags: kv.DupSort}
+	oneDupSortCfg := make(kv.TableCfg)
+	oneDupSortCfg["t"] = kv.TableConfigItem{Flags: kv.DupSort}
 	fmt.Println("------------------- 6 -------------------")
 	if err := defragSteps("vis6", oneDupSortCfg, generate5); err != nil {
 		return err
@@ -862,9 +862,9 @@ func Defrag() error {
 		return err
 	}
 
-	twoBucketCfg := make(kv.BucketsCfg)
-	twoBucketCfg["t1"] = kv.BucketConfigItem{}
-	twoBucketCfg["t2"] = kv.BucketConfigItem{}
+	twoBucketCfg := make(kv.TableCfg)
+	twoBucketCfg["t1"] = kv.TableConfigItem{}
+	twoBucketCfg["t2"] = kv.TableConfigItem{}
 	fmt.Println("------------------- 9 -------------------")
 	if err := defragSteps("vis9", twoBucketCfg, generate7); err != nil {
 		return err
@@ -877,10 +877,10 @@ func Defrag() error {
 	if err := defragSteps("vis11", twoBucketCfg, generate7, dropT1, dropT2); err != nil {
 		return err
 	}
-	manyBucketCfg := make(kv.BucketsCfg)
+	manyBucketCfg := make(kv.TableCfg)
 	for i := 0; i < 100; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		manyBucketCfg[k] = kv.BucketConfigItem{IsDeprecated: true}
+		manyBucketCfg[k] = kv.TableConfigItem{IsDeprecated: true}
 	}
 	fmt.Println("------------------- 12 -------------------")
 	if err := defragSteps("vis12", manyBucketCfg, generate8, func(_ kv.RwDB, tx kv.RwTx) (bool, error) { return true, generate9(tx, 1000) }, dropGradually); err != nil {

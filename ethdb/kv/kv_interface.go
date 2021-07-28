@@ -11,7 +11,7 @@ const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.DeprecatedBuckets can be deleted")
-	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ErigonBuckets")
+	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ErigonTables")
 
 	DbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
 	TxLimit   = metrics.GetOrRegisterGauge("tx/limit", metrics.DefaultRegistry)   //nolint
@@ -142,7 +142,7 @@ type RoDB interface {
 	//	transaction and its cursors may not issue any other operations than
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
-	AllBuckets() BucketsCfg
+	AllBuckets() TableCfg
 }
 
 // RwDB low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
@@ -214,7 +214,7 @@ type Tx interface {
 	// Otherwise - object of interface Cursor created
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
-	// long keys into DupSort key/values. See docs for `bucket.go:BucketConfigItem`
+	// long keys into DupSort key/values. See docs for `bucket.go:TableConfigItem`
 	Cursor(bucket string) (Cursor, error)
 	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 

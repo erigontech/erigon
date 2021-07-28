@@ -75,9 +75,9 @@ var bucketLabels = map[string]string{
 	kv.Headers:           "Headers",
 	kv.HeaderCanonical:   "Canonical headers",
 	kv.HeaderTD:          "Headers TD",
-	kv.BlockBodyPrefix:   "Block Bodies",
+	kv.BlockBody:         "Block Bodies",
 	kv.HeaderNumber:      "Header Numbers",
-	kv.TxLookupPrefix:    "Transaction Index",
+	kv.TxLookup:          "Transaction Index",
 	kv.CodeBucket:        "Code Of Contracts",
 	kv.SyncStageProgress: "Sync Progress",
 	kv.PlainStateBucket:  "Plain State",
@@ -96,7 +96,7 @@ var bucketLabels = map[string]string{
 dbutils.CodeBucket,
 dbutils.AccountsHistory,
 dbutils.StorageHistory,
-dbutils.TxLookupPrefix,*/
+dbutils.TxLookup,*/
 
 func hexPalette() error {
 	filename := "hex_palette.dot"

@@ -793,7 +793,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		for bucketName, shouldBeEmpty := range map[string]bool{
 			//dbutils.AccountsHistory: pm.History.Enabled(),
 			dbutils.Receipts: pm.Receipts.Enabled(),
-			//dbutils.TxLookupPrefix: pm.TxIndex.Enabled(),
+			//dbutils.TxLookup: pm.TxIndex.Enabled(),
 		} {
 			numberOfEntries := 0
 

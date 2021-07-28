@@ -21,7 +21,7 @@ func TestBucketCRUD(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	normalBucket := kv.ErigonBuckets[15]
+	normalBucket := kv.ErigonTables[15]
 	deprecatedBucket := kv.DeprecatedBuckets[0]
 	migrator, ok := tx.(kv.BucketMigrator)
 	if !ok {
@@ -82,16 +82,16 @@ func TestBucketCRUD(t *testing.T) {
 
 func TestReadOnlyMode(t *testing.T) {
 	path := t.TempDir()
-	db1 := mdbx.NewMDBX().Path(path).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.Headers: kv.BucketConfigItem{},
+	db1 := mdbx.NewMDBX().Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableConfigItem{},
 		}
 	}).MustOpen()
 	db1.Close()
 
-	db2 := mdbx.NewMDBX().Readonly().Path(path).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.Headers: kv.BucketConfigItem{},
+	db2 := mdbx.NewMDBX().Readonly().Path(path).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableConfigItem{},
 		}
 	}).MustOpen()
 	defer db2.Close()

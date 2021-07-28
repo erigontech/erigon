@@ -23,7 +23,7 @@ func RegenerateTxLookup(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := tx.ClearBucket(kv.TxLookupPrefix); err != nil {
+	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
 	}
 

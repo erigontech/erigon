@@ -35,9 +35,9 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 
 func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
 	db := kv2.NewMDBX().Path(dbPath).MustOpen()
-	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.BlockBodyPrefix: kv.BucketConfigItem{},
+	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.TableConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
@@ -63,12 +63,12 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 				return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
 			}
 			body := rawdb.ReadBodyRLP(tx, hash, i)
-			if err = sntx.Put(kv.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash), body); err != nil {
+			if err = sntx.Put(kv.BlockBody, dbutils.BlockBodyKey(i, hash), body); err != nil {
 				return err
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("progress", "bucket", kv.BlockBodyPrefix, "block num", i)
+				log.Info("progress", "bucket", kv.BlockBody, "block num", i)
 			default:
 			}
 		}

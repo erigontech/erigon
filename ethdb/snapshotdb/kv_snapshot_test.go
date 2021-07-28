@@ -17,9 +17,9 @@ import (
 )
 
 func TestSnapshot2Get(t *testing.T) {
-	sn1 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.Headers: kv.BucketConfigItem{},
+	sn1 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableConfigItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
@@ -43,14 +43,14 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sn2 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.BlockBodyPrefix: kv.BucketConfigItem{},
+	sn2 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.TableConfigItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn2.Close()
 	err = sn2.Update(context.Background(), func(tx kv.RwTx) error {
-		bucket, err := tx.RwCursor(kv.BlockBodyPrefix)
+		bucket, err := tx.RwCursor(kv.BlockBody)
 		require.NoError(t, err)
 		innerErr := bucket.Put(dbutils.BlockBodyKey(1, common.Hash{1}), []byte{1})
 		if innerErr != nil {
@@ -82,7 +82,7 @@ func TestSnapshot2Get(t *testing.T) {
 			return innerErr
 		}
 
-		bucket, err = tx.RwCursor(kv.BlockBodyPrefix)
+		bucket, err = tx.RwCursor(kv.BlockBody)
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.GetOne(kv.BlockBodyPrefix, dbutils.BlockBodyKey(1, common.Hash{1}))
+	v, err = tx.GetOne(kv.BlockBody, dbutils.BlockBodyKey(1, common.Hash{1}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.GetOne(kv.BlockBodyPrefix, dbutils.BlockBodyKey(2, common.Hash{2}))
+	v, err = tx.GetOne(kv.BlockBody, dbutils.BlockBodyKey(2, common.Hash{2}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestSnapshot2Get(t *testing.T) {
 		t.Fatal(v)
 	}
 
-	v, err = tx.GetOne(kv.BlockBodyPrefix, dbutils.BlockBodyKey(3, common.Hash{3}))
+	v, err = tx.GetOne(kv.BlockBody, dbutils.BlockBodyKey(3, common.Hash{3}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,9 +195,9 @@ func TestSnapshot2Get(t *testing.T) {
 }
 
 func TestSnapshot2WritableTxAndGet(t *testing.T) {
-	sn1 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.Headers: kv.BucketConfigItem{},
+	sn1 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableConfigItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn1.Close()
@@ -222,15 +222,15 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		}
 	}
 
-	sn2 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.BlockBodyPrefix: kv.BucketConfigItem{},
+	sn2 := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.TableConfigItem{},
 		}
 	}).InMem().MustOpen()
 	defer sn2.Close()
 	{
 		err := sn2.Update(context.Background(), func(tx kv.RwTx) error {
-			bucket, err := tx.RwCursor(kv.BlockBodyPrefix)
+			bucket, err := tx.RwCursor(kv.BlockBody)
 			require.NoError(t, err)
 			innerErr := bucket.Put(dbutils.BlockBodyKey(1, common.Hash{1}), []byte{1})
 			if innerErr != nil {
@@ -260,13 +260,13 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 			t.Fatal(v)
 		}
 
-		v, err = tx.GetOne(kv.BlockBodyPrefix, dbutils.BlockBodyKey(1, common.Hash{1}))
+		v, err = tx.GetOne(kv.BlockBody, dbutils.BlockBodyKey(1, common.Hash{1}))
 		require.NoError(t, err)
 		if !bytes.Equal(v, []byte{1}) {
 			t.Fatal(v)
 		}
 
-		err = tx.Put(kv.BlockBodyPrefix, dbutils.BlockBodyKey(4, common.Hash{4}), []byte{4})
+		err = tx.Put(kv.BlockBody, dbutils.BlockBodyKey(4, common.Hash{4}), []byte{4})
 		require.NoError(t, err)
 		err = tx.Put(kv.Headers, dbutils.HeaderKey(4, common.Hash{4}), []byte{4})
 		require.NoError(t, err)
@@ -307,7 +307,7 @@ func TestSnapshot2WritableTxAndGet(t *testing.T) {
 		t.Fatal(k, v, err)
 	}
 
-	c, err = tx.Cursor(kv.BlockBodyPrefix)
+	c, err = tx.Cursor(kv.BlockBody)
 	require.NoError(t, err)
 	k, v, err = c.First()
 	require.NoError(t, err)
@@ -1121,7 +1121,7 @@ func TestPlainStateProxy(t *testing.T) {
 	nonStateValue := []byte{99}
 
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		err = tx.Put(kv.BlockBodyPrefix, nonStateKey, nonStateValue)
+		err = tx.Put(kv.BlockBody, nonStateKey, nonStateValue)
 		if err != nil {
 			return err
 		}
@@ -1145,7 +1145,7 @@ func TestPlainStateProxy(t *testing.T) {
 
 	fullStateResult := []KvData{}
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BlockBodyPrefix, nonStateKey)
+		v, err := tx.GetOne(kv.BlockBody, nonStateKey)
 		if err != nil {
 			t.Error(err)
 		}
@@ -1169,7 +1169,7 @@ func TestPlainStateProxy(t *testing.T) {
 
 	tmpDBResult := []KvData{}
 	err = db.tmpDB.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BlockBodyPrefix, nonStateKey)
+		v, err := tx.GetOne(kv.BlockBody, nonStateKey)
 		if err != nil {
 			t.Error(err)
 		}
@@ -1192,7 +1192,7 @@ func TestPlainStateProxy(t *testing.T) {
 
 	writeDBResult := []KvData{}
 	err = db.WriteDB().View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.BlockBodyPrefix, nonStateKey)
+		v, err := tx.GetOne(kv.BlockBody, nonStateKey)
 		if err != nil {
 			t.Error(err)
 		}
@@ -1276,9 +1276,9 @@ type KvData struct {
 }
 
 func GenStateData(data []KvData) (kv.RwDB, error) {
-	snapshot := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.PlainStateBucket: kv.BucketConfigItem{},
+	snapshot := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.PlainStateBucket: kv.TableConfigItem{},
 		}
 	}).InMem().MustOpen()
 

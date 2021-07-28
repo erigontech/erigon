@@ -14,23 +14,23 @@ import (
 )
 
 var (
-	BucketConfigs = map[SnapshotType]kv.BucketsCfg{
+	BucketConfigs = map[SnapshotType]kv.TableCfg{
 		SnapshotType_bodies: {
-			kv.BlockBodyPrefix: kv.BucketConfigItem{},
-			kv.EthTx:           kv.BucketConfigItem{},
+			kv.BlockBody: kv.TableConfigItem{},
+			kv.EthTx:     kv.TableConfigItem{},
 		},
 		SnapshotType_headers: {
-			kv.Headers: kv.BucketConfigItem{},
+			kv.Headers: kv.TableConfigItem{},
 		},
 		SnapshotType_state: {
-			kv.PlainStateBucket: kv.BucketConfigItem{
+			kv.PlainStateBucket: kv.TableConfigItem{
 				Flags:                     kv.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupFromLen:                60,
 				DupToLen:                  28,
 			},
-			kv.PlainContractCode: kv.BucketConfigItem{},
-			kv.CodeBucket:        kv.BucketConfigItem{},
+			kv.PlainContractCode: kv.TableConfigItem{},
+			kv.CodeBucket:        kv.TableConfigItem{},
 		},
 	}
 )
@@ -46,7 +46,7 @@ func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*Snaps
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
 		cfg := BucketConfigs[k]
-		snapshotKV, err := kv2.NewMDBX().Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
+		snapshotKV, err := kv2.NewMDBX().Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return cfg
 		}).Open()
 

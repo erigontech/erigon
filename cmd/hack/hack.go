@@ -883,7 +883,7 @@ func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 		bn := blockBytes.Bytes()
 
 		for _, txn := range body.Transactions {
-			val, err := tx.GetOne(kv.TxLookupPrefix, txn.Hash().Bytes())
+			val, err := tx.GetOne(kv.TxLookup, txn.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
 				log.Info("Validated", "entries", iterations, "number", blockNum)
@@ -1450,7 +1450,7 @@ func mint(chaindata string, block uint64) error {
 		}
 	}
 	log.Info("Read canonical hashes", "count", len(canonical))
-	c, err = tx.Cursor(kv.BlockBodyPrefix)
+	c, err = tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
@@ -1581,7 +1581,7 @@ func extractBodies(chaindata string, block uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	c, err := tx.Cursor(kv.BlockBodyPrefix)
+	c, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
@@ -1892,7 +1892,7 @@ func trimTxs(chaindata string) error {
 		return err1
 	}
 	defer txs.Close()
-	bodies, err2 := tx.Cursor(kv.BlockBodyPrefix)
+	bodies, err2 := tx.Cursor(kv.BlockBody)
 	if err2 != nil {
 		return err
 	}

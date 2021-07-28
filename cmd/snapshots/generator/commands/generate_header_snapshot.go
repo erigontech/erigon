@@ -44,9 +44,9 @@ func HeaderSnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock ui
 	}
 	db := kv2.NewMDBX().Path(dbPath).MustOpen()
 
-	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.Headers: kv.BucketConfigItem{},
+	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableConfigItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 

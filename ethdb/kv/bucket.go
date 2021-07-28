@@ -10,7 +10,7 @@ import (
 // DBSchemaVersion
 var DBSchemaVersion = types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
-// ErigonBuckets
+// ErigonTables
 
 // Dictionary:
 // "Plain State" - state where keys arent' hashed. "CurrentState" - same, but keys are hashed. "PlainState" used for blocks execution. "CurrentState" used mostly for Merkle root calculation.
@@ -199,10 +199,10 @@ const (
 	Headers         = "Header"                 // block_num_u64 + hash -> header (RLP)
 	HeaderTD        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
-	BlockBodyPrefix = "BlockBody"        // block_num_u64 + hash -> block body
-	EthTx           = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
-	Receipts        = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log             = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
+	BlockBody = "BlockBody"        // block_num_u64 + hash -> block body
+	EthTx     = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
+	Receipts  = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log       = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -224,9 +224,9 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
-	TxLookupPrefix = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
+	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
-	ConfigPrefix = "Config" // config prefix for the db
+	ConfigTable = "Config" // config prefix for the db
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
@@ -276,19 +276,19 @@ var (
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
 )
 
-// ErigonBuckets - list of all buckets. App will panic if some bucket is not in this list.
+// ErigonTables - list of all buckets. App will panic if some bucket is not in this list.
 // This list will be sorted in `init` method.
-// BucketsConfigs - can be used to find index in sorted version of ErigonBuckets list by name
-var ErigonBuckets = []string{
+// BucketsConfigs - can be used to find index in sorted version of ErigonTables list by name
+var ErigonTables = []string{
 	AccountsHistory,
 	StorageHistory,
 	CodeBucket,
 	ContractCode,
 	HeaderNumber,
-	BlockBodyPrefix,
+	BlockBody,
 	Receipts,
-	TxLookupPrefix,
-	ConfigPrefix,
+	TxLookup,
+	ConfigTable,
 	DatabaseInfo,
 	IncarnationMap,
 	ContractTEVMCode,
@@ -325,7 +325,8 @@ var ErigonBuckets = []string{
 	PendingEpoch,
 }
 
-var TxPoolBuckets = []string{}
+var TxPoolTables = []string{}
+var SentryTables = []string{}
 
 // DeprecatedBuckets - list of buckets which can be programmatically deleted - for example after migration
 var DeprecatedBuckets = []string{
@@ -335,23 +336,23 @@ var DeprecatedBuckets = []string{
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type BucketsCfg map[string]BucketConfigItem
+type TableCfg map[string]TableConfigItem
 type Bucket string
 
 type DBI uint
-type BucketFlags uint
+type TableFlags uint
 
 const (
-	Default    BucketFlags = 0x00
-	ReverseKey BucketFlags = 0x02
-	DupSort    BucketFlags = 0x04
-	IntegerKey BucketFlags = 0x08
-	IntegerDup BucketFlags = 0x20
-	ReverseDup BucketFlags = 0x40
+	Default    TableFlags = 0x00
+	ReverseKey TableFlags = 0x02
+	DupSort    TableFlags = 0x04
+	IntegerKey TableFlags = 0x08
+	IntegerDup TableFlags = 0x20
+	ReverseDup TableFlags = 0x40
 )
 
-type BucketConfigItem struct {
-	Flags BucketFlags
+type TableConfigItem struct {
+	Flags TableFlags
 	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
 	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
 	// If good DB format found, push app code to accept this format and then disable this property.
@@ -367,7 +368,7 @@ type BucketConfigItem struct {
 	DupToLen   int
 }
 
-var BucketsConfigs = BucketsCfg{
+var BucketsConfigs = TableCfg{
 	HashedStorage: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
@@ -392,26 +393,9 @@ var BucketsConfigs = BucketsCfg{
 }
 
 func sortBuckets() {
-	sort.SliceStable(ErigonBuckets, func(i, j int) bool {
-		return strings.Compare(ErigonBuckets[i], ErigonBuckets[j]) < 0
+	sort.SliceStable(ErigonTables, func(i, j int) bool {
+		return strings.Compare(ErigonTables[i], ErigonTables[j]) < 0
 	})
-}
-
-func DefaultBuckets() BucketsCfg {
-	return BucketsConfigs
-}
-
-func UpdateBucketsList(newBucketCfg BucketsCfg) {
-	newBuckets := make([]string, 0)
-	for k, v := range newBucketCfg {
-		if !v.IsDeprecated {
-			newBuckets = append(newBuckets, k)
-		}
-	}
-	ErigonBuckets = newBuckets
-	BucketsConfigs = newBucketCfg
-
-	reinit()
 }
 
 func init() {
@@ -421,17 +405,17 @@ func init() {
 func reinit() {
 	sortBuckets()
 
-	for _, name := range ErigonBuckets {
+	for _, name := range ErigonTables {
 		_, ok := BucketsConfigs[name]
 		if !ok {
-			BucketsConfigs[name] = BucketConfigItem{}
+			BucketsConfigs[name] = TableConfigItem{}
 		}
 	}
 
 	for _, name := range DeprecatedBuckets {
 		_, ok := BucketsConfigs[name]
 		if !ok {
-			BucketsConfigs[name] = BucketConfigItem{}
+			BucketsConfigs[name] = TableConfigItem{}
 		}
 		tmp := BucketsConfigs[name]
 		tmp.IsDeprecated = true

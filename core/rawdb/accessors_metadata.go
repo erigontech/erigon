@@ -28,7 +28,7 @@ import (
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*params.ChainConfig, error) {
-	data, err := db.GetOne(kv.ConfigPrefix, hash[:])
+	data, err := db.GetOne(kv.ConfigTable, hash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *params.ChainConfig) e
 	if err != nil {
 		return fmt.Errorf("failed to JSON encode chain config: %w", err)
 	}
-	if err := db.Put(kv.ConfigPrefix, hash[:], data); err != nil {
+	if err := db.Put(kv.ConfigTable, hash[:], data); err != nil {
 		return fmt.Errorf("failed to store chain config: %w", err)
 	}
 	return nil
@@ -59,5 +59,5 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *params.ChainConfig) e
 
 // DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
 func DeleteChainConfig(db kv.Deleter, hash common.Hash) error {
-	return db.Delete(kv.ConfigPrefix, hash[:], nil)
+	return db.Delete(kv.ConfigTable, hash[:], nil)
 }

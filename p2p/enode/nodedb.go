@@ -87,8 +87,8 @@ func OpenDB(path string) (*DB, error) {
 	return newPersistentDB(path)
 }
 
-var bucketsConfig = func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-	return kv.BucketsCfg{
+var bucketsConfig = func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	return kv.TableCfg{
 		kv.InodesBucket: {},
 	}
 }

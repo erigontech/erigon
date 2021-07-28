@@ -77,7 +77,7 @@ func PostProcessBodies(tx kv.RwTx) error {
 	if v > 0 {
 		return nil
 	}
-	err = tx.ClearBucket(kv.TxLookupPrefix)
+	err = tx.ClearBucket(kv.TxLookup)
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func PostProcessBodies(tx kv.RwTx) error {
 		return err
 	}
 
-	bodyC, err := tx.Cursor(kv.BlockBodyPrefix)
+	bodyC, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}

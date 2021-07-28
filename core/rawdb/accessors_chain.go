@@ -252,7 +252,7 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 }
 
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
-	bodyRlp, err := db.GetOne(kv.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
+	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
 	}
@@ -335,14 +335,14 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 
 // WriteBodyRLP stores an RLP encoded block body into the database.
 func WriteBodyRLP(db kv.Putter, hash common.Hash, number uint64, rlp rlp.RawValue) {
-	if err := db.Put(kv.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
+	if err := db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)
 	}
 }
 
 // HasBody verifies the existence of a block body corresponding to the hash.
 func HasBody(db kv.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(kv.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash)); !has || err != nil {
+	if has, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); !has || err != nil {
 		return false
 	}
 	return true
@@ -459,7 +459,7 @@ func WriteSenders(db kv.RwTx, hash common.Hash, number uint64, senders []common.
 
 // DeleteBody removes all block body data associated with a hash.
 func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
-	if err := db.Delete(kv.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), nil); err != nil {
+	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
 }

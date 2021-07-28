@@ -181,7 +181,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		return nil
 	}
 
-	bodiesC, err := tx.Cursor(kv.BlockBodyPrefix)
+	bodiesC, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}

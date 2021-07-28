@@ -21,12 +21,12 @@ import (
 )
 
 func GenerateBodiesSnapshot(ctx context.Context, readTX kv.Tx, writeTX kv.RwTx, toBlock uint64) error {
-	readBodyCursor, err := readTX.Cursor(kv.BlockBodyPrefix)
+	readBodyCursor, err := readTX.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
 
-	writeBodyCursor, err := writeTX.RwCursor(kv.BlockBodyPrefix)
+	writeBodyCursor, err := writeTX.RwCursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
@@ -99,10 +99,10 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX kv.Tx, writeTX kv.RwTx, 
 }
 
 func CreateBodySnapshot(readTx kv.Tx, lastBlock uint64, snapshotPath string) error {
-	kv, err := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.BlockBodyPrefix: kv.BucketsConfigs[kv.BlockBodyPrefix],
-			kv.EthTx:           kv.BucketsConfigs[kv.EthTx],
+	kv, err := mdbx.NewMDBX().WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.BucketsConfigs[kv.BlockBody],
+			kv.EthTx:     kv.BucketsConfigs[kv.EthTx],
 		}
 	}).Path(snapshotPath).Open()
 	if err != nil {
@@ -123,10 +123,10 @@ func CreateBodySnapshot(readTx kv.Tx, lastBlock uint64, snapshotPath string) err
 }
 
 func OpenBodiesSnapshot(dbPath string) (kv.RoDB, error) {
-	return mdbx.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets kv.BucketsCfg) kv.BucketsCfg {
-		return kv.BucketsCfg{
-			kv.BlockBodyPrefix: kv.BucketsConfigs[kv.BlockBodyPrefix],
-			kv.EthTx:           kv.BucketsConfigs[kv.EthTx],
+	return mdbx.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.BucketsConfigs[kv.BlockBody],
+			kv.EthTx:     kv.BucketsConfigs[kv.EthTx],
 		}
 	}).Readonly().Open()
 }
@@ -157,7 +157,7 @@ func RemoveBlocksData(db kv.RoDB, tx kv.RwTx, newSnapshot uint64) (err error) {
 	rewriteId := binary.BigEndian.Uint64(lastEthTXSnapshotKey) + 1
 
 	writeTX := tx.(snapshotdb.DBTX).DBTX()
-	blockBodyWriteCursor, err := writeTX.RwCursor(kv.BlockBodyPrefix)
+	blockBodyWriteCursor, err := writeTX.RwCursor(kv.BlockBody)
 	if err != nil {
 		return fmt.Errorf("get bodies cursor %w", err)
 	}
@@ -175,7 +175,7 @@ func RemoveBlocksData(db kv.RoDB, tx kv.RwTx, newSnapshot uint64) (err error) {
 		if binary.BigEndian.Uint64(k) > newSnapshot {
 			return false, nil
 		}
-		has, err := blockBodySnapshotReadTX.Has(kv.BlockBodyPrefix, k)
+		has, err := blockBodySnapshotReadTX.Has(kv.BlockBody, k)
 		if err != nil {
 			return false, err
 		}
@@ -247,7 +247,7 @@ func RemoveBlocksData(db kv.RoDB, tx kv.RwTx, newSnapshot uint64) (err error) {
 	if err != nil {
 		return err
 	}
-	err = bodiesCollector.Load("bodies", writeTX, kv.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{})
+	err = bodiesCollector.Load("bodies", writeTX, kv.BlockBody, etl.IdentityLoadFunc, etl.TransformArgs{})
 	if err != nil {
 		return err
 	}

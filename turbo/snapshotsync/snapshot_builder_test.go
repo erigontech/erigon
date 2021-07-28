@@ -763,7 +763,7 @@ func GenerateBodyData(tx kv.RwTx, from, to uint64) error {
 			if err != nil {
 				return err
 			}
-			err = tx.Put(kv.BlockBodyPrefix, dbutils.BlockBodyKey(i, common.Hash{uint8(i), uint8(blockNum)}), body)
+			err = tx.Put(kv.BlockBody, dbutils.BlockBodyKey(i, common.Hash{uint8(i), uint8(blockNum)}), body)
 			if err != nil {
 				return err
 			}
@@ -824,7 +824,7 @@ func GenerateBodyData(tx kv.RwTx, from, to uint64) error {
 // check snapshot data based on GenerateBodyData
 func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX kv.Tx, snapshotTo uint64) {
 	t.Helper()
-	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBodyPrefix)
+	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -899,7 +899,7 @@ func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX kv.Tx, snapshotTo uin
 
 func verifyFullBodiesData(t *testing.T, bodySnapshotTX kv.Tx, dataTo uint64) {
 	t.Helper()
-	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBodyPrefix)
+	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,7 +958,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX kv.Tx, dataTo uint64) {
 
 func verifyPrunedBlocksData(t *testing.T, tx kv.Tx, dataFrom, dataTo, snapshotTxTo uint64) {
 	t.Helper()
-	bodyCursor, err := tx.Cursor(kv.BlockBodyPrefix)
+	bodyCursor, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1258,7 +1258,7 @@ func TestPruneBlocks(t *testing.T) {
 }
 
 func PrintBodyBuckets(t *testing.T, tx kv.Tx) { //nolint: deadcode
-	bodyCursor, err := tx.Cursor(kv.BlockBodyPrefix)
+	bodyCursor, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ var stateBuckets = []string{
 	kv.TrieOfStorage,
 	kv.AccountsHistory,
 	kv.StorageHistory,
-	kv.TxLookupPrefix,
+	kv.TxLookup,
 	kv.ContractTEVMCode,
 }
 

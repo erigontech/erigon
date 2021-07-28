@@ -58,7 +58,7 @@ func ValidateTxLookups(chaindata string) error {
 		bn := blockBytes.Bytes()
 
 		for _, txn := range body.Transactions {
-			val, err := tx.GetOne(kv.TxLookupPrefix, txn.Hash().Bytes())
+			val, err := tx.GetOne(kv.TxLookup, txn.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
 				log.Info("Validated", "entries", iterations, "number", blockNum)

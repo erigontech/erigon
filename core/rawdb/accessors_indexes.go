@@ -36,7 +36,7 @@ type TxLookupEntry struct {
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
 func ReadTxLookupEntry(db kv.Tx, txnHash common.Hash) (*uint64, error) {
-	data, err := db.GetOne(kv.TxLookupPrefix, txnHash.Bytes())
+	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func ReadTxLookupEntry(db kv.Tx, txnHash common.Hash) (*uint64, error) {
 func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 	for _, tx := range block.Transactions() {
 		data := block.Number().Bytes()
-		if err := db.Put(kv.TxLookupPrefix, tx.Hash().Bytes(), data); err != nil {
+		if err := db.Put(kv.TxLookup, tx.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
 	}
@@ -60,7 +60,7 @@ func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
 func DeleteTxLookupEntry(db kv.Deleter, hash common.Hash) error {
-	return db.Delete(kv.TxLookupPrefix, hash.Bytes(), nil)
+	return db.Delete(kv.TxLookup, hash.Bytes(), nil)
 }
 
 // ReadTransaction retrieves a specific transaction from the database, along with

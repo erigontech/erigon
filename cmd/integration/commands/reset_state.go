@@ -210,7 +210,7 @@ func resetCallTraces(tx kv.RwTx) error {
 }
 
 func resetTxLookup(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.TxLookupPrefix); err != nil {
+	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {

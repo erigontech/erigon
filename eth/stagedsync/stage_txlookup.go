@@ -77,7 +77,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, cfg TxLookupCfg) error {
 	bigNum := new(big.Int)
-	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookupPrefix, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadBody(tx, blockHash, blocknum)
@@ -132,7 +132,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, quitCh <-chan struct{}) error {
 	reader := bytes.NewReader(nil)
 	logPrefix := s.LogPrefix()
-	return etl.Transform(logPrefix, tx, kv.BlockBodyPrefix, kv.TxLookupPrefix, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform(logPrefix, tx, kv.BlockBody, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
 		if err := rlp.Decode(reader, body); err != nil {
@@ -195,7 +195,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context) error {
 	reader := bytes.NewReader(nil)
-	return etl.Transform(logPrefix, tx, kv.BlockBodyPrefix, kv.TxLookupPrefix, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
+	return etl.Transform(logPrefix, tx, kv.BlockBody, kv.TxLookup, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
 		if err := rlp.Decode(reader, body); err != nil {
