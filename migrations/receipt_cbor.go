@@ -11,12 +11,11 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 
 	pkg1_common "github.com/ledgerwatch/erigon/common"
@@ -36,7 +35,7 @@ type OldReceipts []*OldReceipt
 
 var ReceiptCbor = Migration{
 	Name: "receipt_cbor",
-	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err
@@ -70,7 +69,7 @@ var ReceiptCbor = Migration{
 		}
 		for blockNum := uint64(1); blockNum <= to; blockNum++ {
 			binary.BigEndian.PutUint64(key[:], blockNum)
-			if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
+			if v, err = tx.GetOne(kv.Receipts, key[:]); err != nil {
 				return err
 			}
 			if v == nil {
@@ -109,7 +108,7 @@ var ReceiptCbor = Migration{
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			if err = tx.Put(dbutils.Receipts, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+			if err = tx.Put(kv.Receipts, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 		}

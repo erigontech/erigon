@@ -6,9 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -53,8 +52,8 @@ func VerifyHeadersSnapshot(ctx context.Context, snapshotPath string) error {
 	if err != nil {
 		return err
 	}
-	err = snKV.View(ctx, func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HeadersBucket)
+	err = snKV.View(ctx, func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
 		}

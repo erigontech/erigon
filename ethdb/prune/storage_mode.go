@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -71,11 +70,11 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 	return mode, nil
 }
 
-func Get(db ethdb.KVGetter) (Mode, error) {
+func Get(db kv.Getter) (Mode, error) {
 	prune := DefaultMode
 	prune.Initialised = true
 
-	v, err := db.GetOne(dbutils.DatabaseInfoBucket, dbutils.PruneDistanceHistory)
+	v, err := db.GetOne(kv.DatabaseInfo, kv.PruneDistanceHistory)
 	if err != nil {
 		return prune, err
 	}
@@ -84,7 +83,7 @@ func Get(db ethdb.KVGetter) (Mode, error) {
 	} else {
 		prune.History = math.MaxUint64
 	}
-	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.PruneDistanceReceipts)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceReceipts)
 	if err != nil {
 		return prune, err
 	}
@@ -93,7 +92,7 @@ func Get(db ethdb.KVGetter) (Mode, error) {
 	} else {
 		prune.Receipts = math.MaxUint64
 	}
-	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.PruneDistanceTxIndex)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceTxIndex)
 	if err != nil {
 		return prune, err
 	}
@@ -103,7 +102,7 @@ func Get(db ethdb.KVGetter) (Mode, error) {
 		prune.TxIndex = math.MaxUint64
 	}
 
-	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.PruneDistanceCallTraces)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceCallTraces)
 	if err != nil {
 		return prune, err
 	}
@@ -113,7 +112,7 @@ func Get(db ethdb.KVGetter) (Mode, error) {
 		prune.CallTraces = math.MaxUint64
 	}
 
-	v, err = db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeTEVM)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.StorageModeTEVM)
 	if err != nil {
 		return prune, err
 	}
@@ -182,32 +181,32 @@ func (m Mode) String() string {
 	return modeString
 }
 
-func Override(db ethdb.RwTx, sm Mode) error {
+func Override(db kv.RwTx, sm Mode) error {
 	var (
 		err error
 	)
 
-	err = setDistance(db, dbutils.PruneDistanceHistory, sm.History)
+	err = setDistance(db, kv.PruneDistanceHistory, sm.History)
 	if err != nil {
 		return err
 	}
 
-	err = setDistance(db, dbutils.PruneDistanceReceipts, sm.Receipts)
+	err = setDistance(db, kv.PruneDistanceReceipts, sm.Receipts)
 	if err != nil {
 		return err
 	}
 
-	err = setDistance(db, dbutils.PruneDistanceTxIndex, sm.TxIndex)
+	err = setDistance(db, kv.PruneDistanceTxIndex, sm.TxIndex)
 	if err != nil {
 		return err
 	}
 
-	err = setDistance(db, dbutils.PruneDistanceCallTraces, sm.CallTraces)
+	err = setDistance(db, kv.PruneDistanceCallTraces, sm.CallTraces)
 	if err != nil {
 		return err
 	}
 
-	err = setMode(db, dbutils.StorageModeTEVM, sm.Experiments.TEVM)
+	err = setMode(db, kv.StorageModeTEVM, sm.Experiments.TEVM)
 	if err != nil {
 		return err
 	}
@@ -215,7 +214,7 @@ func Override(db ethdb.RwTx, sm Mode) error {
 	return nil
 }
 
-func SetIfNotExist(db ethdb.GetPut, pm Mode) error {
+func SetIfNotExist(db kv.GetPut, pm Mode) error {
 	var (
 		err error
 	)
@@ -223,27 +222,27 @@ func SetIfNotExist(db ethdb.GetPut, pm Mode) error {
 		pm = DefaultMode
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceHistory, pm.History)
+	err = setDistanceOnEmpty(db, kv.PruneDistanceHistory, pm.History)
 	if err != nil {
 		return err
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceReceipts, pm.Receipts)
+	err = setDistanceOnEmpty(db, kv.PruneDistanceReceipts, pm.Receipts)
 	if err != nil {
 		return err
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceTxIndex, pm.TxIndex)
+	err = setDistanceOnEmpty(db, kv.PruneDistanceTxIndex, pm.TxIndex)
 	if err != nil {
 		return err
 	}
 
-	err = setDistanceOnEmpty(db, dbutils.PruneDistanceCallTraces, pm.CallTraces)
+	err = setDistanceOnEmpty(db, kv.PruneDistanceCallTraces, pm.CallTraces)
 	if err != nil {
 		return err
 	}
 
-	err = setModeOnEmpty(db, dbutils.StorageModeTEVM, pm.Experiments.TEVM)
+	err = setModeOnEmpty(db, kv.StorageModeTEVM, pm.Experiments.TEVM)
 	if err != nil {
 		return err
 	}
@@ -251,24 +250,24 @@ func SetIfNotExist(db ethdb.GetPut, pm Mode) error {
 	return nil
 }
 
-func setDistance(db ethdb.Putter, key []byte, distance Distance) error {
+func setDistance(db kv.Putter, key []byte, distance Distance) error {
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, uint64(distance))
-	if err := db.Put(dbutils.DatabaseInfoBucket, key, v); err != nil {
+	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
 		return err
 	}
 	return nil
 }
 
-func setDistanceOnEmpty(db ethdb.GetPut, key []byte, distance Distance) error {
-	mode, err := db.GetOne(dbutils.DatabaseInfoBucket, key)
+func setDistanceOnEmpty(db kv.GetPut, key []byte, distance Distance) error {
+	mode, err := db.GetOne(kv.DatabaseInfo, key)
 	if err != nil {
 		return err
 	}
 	if len(mode) == 0 || binary.BigEndian.Uint64(mode) == math.MaxUint64 {
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, uint64(distance))
-		if err = db.Put(dbutils.DatabaseInfoBucket, key, v); err != nil {
+		if err = db.Put(kv.DatabaseInfo, key, v); err != nil {
 			return err
 		}
 	}
@@ -276,19 +275,19 @@ func setDistanceOnEmpty(db ethdb.GetPut, key []byte, distance Distance) error {
 	return nil
 }
 
-func setMode(db ethdb.RwTx, key []byte, currentValue bool) error {
+func setMode(db kv.RwTx, key []byte, currentValue bool) error {
 	val := []byte{2}
 	if currentValue {
 		val = []byte{1}
 	}
-	if err := db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
+	if err := db.Put(kv.DatabaseInfo, key, val); err != nil {
 		return err
 	}
 	return nil
 }
 
-func setModeOnEmpty(db ethdb.GetPut, key []byte, currentValue bool) error {
-	mode, err := db.GetOne(dbutils.DatabaseInfoBucket, key)
+func setModeOnEmpty(db kv.GetPut, key []byte, currentValue bool) error {
+	mode, err := db.GetOne(kv.DatabaseInfo, key)
 	if err != nil {
 		return err
 	}
@@ -297,7 +296,7 @@ func setModeOnEmpty(db ethdb.GetPut, key []byte, currentValue bool) error {
 		if currentValue {
 			val = []byte{1}
 		}
-		if err = db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
+		if err = db.Put(kv.DatabaseInfo, key, val); err != nil {
 			return err
 		}
 	}

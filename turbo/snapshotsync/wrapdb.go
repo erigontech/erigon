@@ -6,46 +6,47 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 var (
-	BucketConfigs = map[SnapshotType]dbutils.BucketsCfg{
+	BucketConfigs = map[SnapshotType]kv.TableCfg{
 		SnapshotType_bodies: {
-			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
-			dbutils.EthTx:           dbutils.BucketConfigItem{},
+			kv.BlockBody: kv.TableConfigItem{},
+			kv.EthTx:     kv.TableConfigItem{},
 		},
 		SnapshotType_headers: {
-			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
+			kv.Headers: kv.TableConfigItem{},
 		},
 		SnapshotType_state: {
-			dbutils.PlainStateBucket: dbutils.BucketConfigItem{
-				Flags:                     dbutils.DupSort,
+			kv.PlainStateBucket: kv.TableConfigItem{
+				Flags:                     kv.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupFromLen:                60,
 				DupToLen:                  28,
 			},
-			dbutils.PlainContractCodeBucket: dbutils.BucketConfigItem{},
-			dbutils.CodeBucket:              dbutils.BucketConfigItem{},
+			kv.PlainContractCode: kv.TableConfigItem{},
+			kv.CodeBucket:        kv.TableConfigItem{},
 		},
 	}
 )
 
 //nolint
-func WrapBySnapshotsFromDir(kv ethdb.RwKV, snapshotDir string, mode SnapshotMode) (ethdb.RwKV, error) {
+func WrapBySnapshotsFromDir(kv kv.RwDB, snapshotDir string, mode SnapshotMode) (kv.RwDB, error) {
 	//todo remove it
 	return nil, errors.New("deprecated") //nolint
 }
 
-func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*SnapshotsInfo) (ethdb.RwKV, error) {
-	snKV := kv2.NewSnapshotKV().DB(kv)
+func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*SnapshotsInfo) (kv.RwDB, error) {
+	snKV := snapshotdb.NewSnapshotKV().DB(db)
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
 		cfg := BucketConfigs[k]
-		snapshotKV, err := kv2.NewMDBX().Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+		snapshotKV, err := kv2.NewMDBX(log.New()).Readonly().Path(v.Dbpath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return cfg
 		}).Open()
 
@@ -67,11 +68,11 @@ func WrapBySnapshotsFromDownloader(kv ethdb.RwKV, snapshots map[SnapshotType]*Sn
 	return snKV.Open(), nil
 }
 
-func WrapSnapshots(chainDb ethdb.RwKV, snapshotsDir string) (ethdb.RwKV, error) {
+func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 	var snapshotBlock uint64
 	var hasSnapshotBlock bool
-	if err := chainDb.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+	if err := chainDb.View(context.Background(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			return err
 		}
@@ -84,7 +85,7 @@ func WrapSnapshots(chainDb ethdb.RwKV, snapshotsDir string) (ethdb.RwKV, error) 
 		return chainDb, err
 	}
 
-	snKVOpts := kv2.NewSnapshotKV().DB(chainDb)
+	snKVOpts := snapshotdb.NewSnapshotKV().DB(chainDb)
 	if hasSnapshotBlock {
 		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", snapshotBlock))
 		if innerErr != nil {
@@ -176,7 +177,7 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 		}
 
 	} else {
-		if err := chainDb.RwKV().Update(context.Background(), func(tx ethdb.RwTx) error {
+		if err := chainDb.RwKV().Update(context.Background(), func(tx kv.RwTx) error {
 			err := torrentClient.Load(tx)
 			if err != nil {
 				return err
@@ -188,7 +189,7 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 			torrentClient.Download()
 			var innerErr error
 			var downloadedSnapshots map[SnapshotType]*SnapshotsInfo
-			if err := chainDb.RwKV().View(context.Background(), func(tx ethdb.Tx) (err error) {
+			if err := chainDb.RwKV().View(context.Background(), func(tx kv.Tx) (err error) {
 				downloadedSnapshots, err = torrentClient.GetSnapshots(tx, networkID)
 				if err != nil {
 					return err

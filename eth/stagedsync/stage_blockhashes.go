@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -22,18 +22,18 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 }
 
 type BlockHashesCfg struct {
-	db     ethdb.RwKV
+	db     kv.RwDB
 	tmpDir string
 }
 
-func StageBlockHashesCfg(db ethdb.RwKV, tmpDir string) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string) BlockHashesCfg {
 	return BlockHashesCfg{
 		db:     db,
 		tmpDir: tmpDir,
 	}
 }
 
-func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -61,8 +61,8 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	if err := etl.Transform(
 		logPrefix,
 		tx,
-		dbutils.HeadersBucket,
-		dbutils.HeaderNumberBucket,
+		kv.Headers,
+		kv.HeaderNumber,
 		cfg.tmpDir,
 		extractHeaders,
 		etl.IdentityLoadFunc,
@@ -85,7 +85,7 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	return nil
 }
 
-func UnwindBlockHashStage(u *UnwindState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -106,7 +106,7 @@ func UnwindBlockHashStage(u *UnwindState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx
 	return nil
 }
 
-func PruneBlockHashStage(p *PruneState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+func PruneBlockHashStage(p *PruneState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

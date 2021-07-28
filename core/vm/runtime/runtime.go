@@ -22,7 +22,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -116,7 +117,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 	setDefaults(cfg)
 
 	if cfg.State == nil {
-		db := kv.NewObjectDatabase(kv.NewMemKV())
+		db := olddb.NewObjectDatabase(memdb.New())
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
@@ -154,7 +155,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	setDefaults(cfg)
 
 	if cfg.State == nil {
-		db := kv.NewObjectDatabase(kv.NewMemKV())
+		db := olddb.NewObjectDatabase(memdb.New())
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)

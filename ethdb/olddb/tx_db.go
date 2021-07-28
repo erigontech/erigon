@@ -1,10 +1,11 @@
-package kv
+package olddb
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -13,17 +14,19 @@ import (
 // TxDb not usable after .Commit()/.Rollback() call, but usable after .CommitAndBegin() call
 // you can put unlimited amount of data into this class
 // Walk and MultiWalk methods - work outside of Tx object yet, will implement it later
+//Deprecated
+//nolint
 type TxDb struct {
 	db      ethdb.Database
-	tx      ethdb.Tx
-	cursors map[string]ethdb.Cursor
+	tx      kv.Tx
+	cursors map[string]kv.Cursor
 	txFlags ethdb.TxFlags
 	len     uint64
 }
 
 //nolint
-func WrapIntoTxDB(tx ethdb.RwTx) *TxDb {
-	return &TxDb{tx: tx, cursors: map[string]ethdb.Cursor{}}
+func WrapIntoTxDB(tx kv.RwTx) *TxDb {
+	return &TxDb{tx: tx, cursors: map[string]kv.Cursor{}}
 }
 
 func (m *TxDb) Close() {
@@ -42,7 +45,7 @@ func (m *TxDb) Begin(ctx context.Context, flags ethdb.TxFlags) (ethdb.DbWithPend
 	return batch, nil
 }
 
-func (m *TxDb) cursor(bucket string) (ethdb.Cursor, error) {
+func (m *TxDb) cursor(bucket string) (kv.Cursor, error) {
 	c, ok := m.cursors[bucket]
 	if !ok {
 		var err error
@@ -56,7 +59,7 @@ func (m *TxDb) cursor(bucket string) (ethdb.Cursor, error) {
 }
 
 func (m *TxDb) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
-	return m.tx.(ethdb.RwTx).IncrementSequence(bucket, amount)
+	return m.tx.(kv.RwTx).IncrementSequence(bucket, amount)
 }
 
 func (m *TxDb) ReadSequence(bucket string) (res uint64, err error) {
@@ -69,7 +72,7 @@ func (m *TxDb) Put(bucket string, key []byte, value []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.(ethdb.RwCursor).Put(key, value)
+	return c.(kv.RwCursor).Put(key, value)
 }
 
 func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
@@ -78,7 +81,7 @@ func (m *TxDb) Append(bucket string, key []byte, value []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.(ethdb.RwCursor).Append(key, value)
+	return c.(kv.RwCursor).Append(key, value)
 }
 
 func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
@@ -87,7 +90,7 @@ func (m *TxDb) AppendDup(bucket string, key []byte, value []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.(ethdb.RwCursorDupSort).AppendDup(key, value)
+	return c.(kv.RwCursorDupSort).AppendDup(key, value)
 }
 
 func (m *TxDb) Delete(bucket string, k, v []byte) error {
@@ -96,28 +99,28 @@ func (m *TxDb) Delete(bucket string, k, v []byte) error {
 	if err != nil {
 		return err
 	}
-	return c.(ethdb.RwCursor).Delete(k, v)
+	return c.(kv.RwCursor).Delete(k, v)
 }
 
 func (m *TxDb) begin(ctx context.Context, flags ethdb.TxFlags) error {
-	kv := m.db.(ethdb.HasRwKV).RwKV()
+	db := m.db.(ethdb.HasRwKV).RwKV()
 
-	var tx ethdb.Tx
+	var tx kv.Tx
 	var err error
 	if flags&ethdb.RO != 0 {
-		tx, err = kv.BeginRo(ctx)
+		tx, err = db.BeginRo(ctx)
 	} else {
-		tx, err = kv.BeginRw(ctx)
+		tx, err = db.BeginRw(ctx)
 	}
 	if err != nil {
 		return err
 	}
 	m.tx = tx
-	m.cursors = make(map[string]ethdb.Cursor, 16)
+	m.cursors = make(map[string]kv.Cursor, 16)
 	return nil
 }
 
-func (m *TxDb) RwKV() ethdb.RwKV {
+func (m *TxDb) RwKV() kv.RwDB {
 	panic("not allowed to get KV interface because you will loose transaction, please use .Tx() method")
 }
 
@@ -150,10 +153,6 @@ func (m *TxDb) Has(bucket string, key []byte) (bool, error) {
 		return false, err
 	}
 	return v != nil, nil
-}
-
-func (m *TxDb) MultiPut(tuples ...[]byte) (uint64, error) {
-	return 0, ethdb.MultiPut(m.tx.(ethdb.RwTx), tuples...)
 }
 
 func (m *TxDb) BatchSize() int {
@@ -193,20 +192,6 @@ func (m *TxDb) ForAmount(bucket string, prefix []byte, amount uint32, walker fun
 	return m.tx.ForAmount(bucket, prefix, amount, walker)
 }
 
-func (m *TxDb) CommitAndBegin(ctx context.Context) error {
-	err := m.Commit()
-	if err != nil {
-		return err
-	}
-
-	return m.begin(ctx, m.txFlags)
-}
-
-func (m *TxDb) RollbackAndBegin(ctx context.Context) error {
-	m.Rollback()
-	return m.begin(ctx, m.txFlags)
-}
-
 func (m *TxDb) Commit() error {
 	if m.tx == nil {
 		return fmt.Errorf("second call .Commit() on same transaction")
@@ -230,12 +215,12 @@ func (m *TxDb) Rollback() {
 	m.len = 0
 }
 
-func (m *TxDb) Tx() ethdb.Tx {
+func (m *TxDb) Tx() kv.Tx {
 	return m.tx
 }
 
 func (m *TxDb) BucketExists(name string) (bool, error) {
-	migrator, ok := m.tx.(ethdb.BucketMigrator)
+	migrator, ok := m.tx.(kv.BucketMigrator)
 	if !ok {
 		return false, fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 	}
@@ -246,7 +231,7 @@ func (m *TxDb) ClearBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 
-		migrator, ok := m.tx.(ethdb.BucketMigrator)
+		migrator, ok := m.tx.(kv.BucketMigrator)
 		if !ok {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 		}
@@ -262,7 +247,7 @@ func (m *TxDb) DropBuckets(buckets ...string) error {
 	for i := range buckets {
 		name := buckets[i]
 		log.Info("Dropping bucket", "name", name)
-		migrator, ok := m.tx.(ethdb.BucketMigrator)
+		migrator, ok := m.tx.(kv.BucketMigrator)
 		if !ok {
 			return fmt.Errorf("%T doesn't implement ethdb.TxMigrator interface", m.tx)
 		}

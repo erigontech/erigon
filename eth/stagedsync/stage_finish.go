@@ -6,29 +6,30 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 type FinishCfg struct {
-	db        ethdb.RwKV
+	db        kv.RwDB
 	tmpDir    string
 	btClient  *snapshotsync.Client
 	snBuilder *snapshotsync.SnapshotMigrator
+	log       log.Logger
 }
 
-func StageFinishCfg(db ethdb.RwKV, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator, logger log.Logger) FinishCfg {
 	return FinishCfg{
 		db:        db,
+		log:       logger,
 		tmpDir:    tmpDir,
 		btClient:  btClient,
 		snBuilder: snBuilder,
 	}
 }
 
-func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -50,7 +51,7 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
 
 	if cfg.snBuilder != nil && useExternalTx {
 		snBlock := snapshotsync.CalculateEpoch(executionAt, snapshotsync.EpochSize)
-		err = cfg.snBuilder.AsyncStages(snBlock, cfg.db, tx, cfg.btClient, true)
+		err = cfg.snBuilder.AsyncStages(snBlock, cfg.log, cfg.db, tx, cfg.btClient, true)
 		if err != nil {
 			return err
 		}
@@ -74,7 +75,7 @@ func FinishForward(s *StageState, tx ethdb.RwTx, cfg FinishCfg) error {
 	return nil
 }
 
-func UnwindFinish(u *UnwindState, tx ethdb.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
+func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -95,7 +96,7 @@ func UnwindFinish(u *UnwindState, tx ethdb.RwTx, cfg FinishCfg, ctx context.Cont
 	return nil
 }
 
-func PruneFinish(u *PruneState, tx ethdb.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
+func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -113,7 +114,7 @@ func PruneFinish(u *PruneState, tx ethdb.RwTx, cfg FinishCfg, ctx context.Contex
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db ethdb.RwKV) error {
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db kv.RwDB) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err

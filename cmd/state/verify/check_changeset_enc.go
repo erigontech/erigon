@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -22,7 +21,7 @@ type Walker interface {
 }
 
 func CheckEnc(chaindata string) error {
-	db := kv.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	var (
 		currentSize uint64
@@ -30,9 +29,9 @@ func CheckEnc(chaindata string) error {
 	)
 
 	//set test methods
-	chainDataStorageDecoder := changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
-	testStorageEncoder := changeset.Mapper[dbutils.StorageChangeSetBucket].Encode
-	testStorageDecoder := changeset.Mapper[dbutils.StorageChangeSetBucket].Decode
+	chainDataStorageDecoder := changeset.Mapper[kv.StorageChangeSet].Decode
+	testStorageEncoder := changeset.Mapper[kv.StorageChangeSet].Encode
+	testStorageDecoder := changeset.Mapper[kv.StorageChangeSet].Decode
 
 	startTime := time.Now()
 	ch := make(chan struct {
@@ -80,8 +79,8 @@ func CheckEnc(chaindata string) error {
 		defer func() {
 			close(stop)
 		}()
-		return db.View(context.Background(), func(tx ethdb.Tx) error {
-			return tx.ForEach(dbutils.StorageChangeSetBucket, []byte{}, func(k, v []byte) error {
+		return db.View(context.Background(), func(tx kv.Tx) error {
+			return tx.ForEach(kv.StorageChangeSet, []byte{}, func(k, v []byte) error {
 				if i%100_000 == 0 {
 					blockNum := binary.BigEndian.Uint64(k)
 					fmt.Printf("Processed %dK, block number %d, current %d, new %d, time %s\n",

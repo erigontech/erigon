@@ -30,15 +30,14 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -170,7 +169,7 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -187,7 +186,7 @@ func CommitGenesisBlock(db ethdb.RwKV, genesis *Genesis) (*params.ChainConfig, *
 	return c, b, nil
 }
 
-func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis) (*params.ChainConfig, *types.Block) {
+func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block) {
 	c, b, err := CommitGenesisBlock(db, genesis)
 	if err != nil {
 		panic(err)
@@ -195,7 +194,7 @@ func MustCommitGenesisBlock(db ethdb.RwKV, genesis *Genesis) (*params.ChainConfi
 	return c, b
 }
 
-func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+func OverrideGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	stored, err := rawdb.ReadCanonicalHash(db, 0)
 	if err != nil {
 		return nil, nil, err
@@ -211,7 +210,7 @@ func OverrideGenesisBlock(db ethdb.RwTx, genesis *Genesis) (*params.ChainConfig,
 	return WriteGenesisBlock(db, genesis)
 }
 
-func WriteGenesisBlock(db ethdb.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -324,7 +323,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	wg.Add(1)
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		defer wg.Done()
-		tmpDB := kv.NewMDBX().InMem().MustOpen()
+		tmpDB := mdbx.NewMDBX(log.New()).InMem().MustOpen()
 		defer tmpDB.Close()
 		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {
@@ -405,7 +404,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	return types.NewBlock(head, nil, nil, nil), statedb, nil
 }
 
-func (g *Genesis) WriteGenesisState(tx ethdb.RwTx) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err := g.ToBlock()
 	if err != nil {
 		return nil, nil, err
@@ -415,7 +414,7 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx) (*types.Block, *state.IntraBl
 			// Special case for weird tests - inaccessible storage
 			var b [8]byte
 			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			if err := tx.Put(dbutils.IncarnationMapBucket, addr[:], b[:]); err != nil {
+			if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -439,7 +438,7 @@ func (g *Genesis) WriteGenesisState(tx ethdb.RwTx) (*types.Block, *state.IntraBl
 	return block, statedb, nil
 }
 
-func (g *Genesis) MustWrite(tx ethdb.RwTx, history bool) (*types.Block, *state.IntraBlockState) {
+func (g *Genesis) MustWrite(tx kv.RwTx, history bool) (*types.Block, *state.IntraBlockState) {
 	b, s, err := g.Write(tx)
 	if err != nil {
 		panic(err)
@@ -449,7 +448,7 @@ func (g *Genesis) MustWrite(tx ethdb.RwTx, history bool) (*types.Block, *state.I
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func (g *Genesis) Write(tx ethdb.RwTx) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {
 	block, statedb, err2 := g.WriteGenesisState(tx)
 	if err2 != nil {
 		return block, statedb, err2
@@ -487,7 +486,7 @@ func (g *Genesis) Write(tx ethdb.RwTx) (*types.Block, *state.IntraBlockState, er
 
 // MustCommit writes the genesis block and state to db, panicking on error.
 // The block is committed as the canonical head block.
-func (g *Genesis) MustCommit(db ethdb.RwKV) *types.Block {
+func (g *Genesis) MustCommit(db kv.RwDB) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
@@ -502,7 +501,7 @@ func (g *Genesis) MustCommit(db ethdb.RwKV) *types.Block {
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db ethdb.RwKV, addr common.Address, balance *big.Int) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int) *types.Block {
 	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
 	block := g.MustCommit(db)
 	return block
@@ -513,7 +512,7 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-func GenesisWithAccounts(db ethdb.RwKV, accs []GenAccount) *types.Block {
+func GenesisWithAccounts(db kv.RwDB, accs []GenAccount) *types.Block {
 	g := Genesis{Config: params.TestChainConfig}
 	allocs := make(map[common.Address]GenesisAccount)
 	for _, acc := range accs {

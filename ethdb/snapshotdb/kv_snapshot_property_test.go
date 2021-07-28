@@ -1,12 +1,12 @@
-package kv
+package snapshotdb
 
 import (
 	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 )
@@ -18,20 +18,20 @@ func TestGetAndPut(t *testing.T) {
 
 type getPutkvMachine struct {
 	bucket       string
-	snKV         ethdb.RwKV
-	modelKV      ethdb.RwKV
+	snKV         kv.RwDB
+	modelKV      kv.RwDB
 	snapshotKeys [][20]byte
 	newKeys      [][20]byte
 	allKeys      [][20]byte
 
-	snTX    ethdb.RwTx
-	modelTX ethdb.RwTx
+	snTX    kv.RwTx
+	modelTX kv.RwTx
 }
 
 func (m *getPutkvMachine) Init(t *rapid.T) {
-	m.bucket = dbutils.PlainStateBucket
-	m.snKV = NewMemKV()
-	m.modelKV = NewMemKV()
+	m.bucket = kv.PlainStateBucket
+	m.snKV = memdb.New()
+	m.modelKV = memdb.New()
 	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
 		return len(_v) > 0
 	}).Draw(t, "generate keys").([][20]byte)
@@ -62,7 +62,7 @@ func (m *getPutkvMachine) Init(t *rapid.T) {
 	require.NoError(t, err)
 	err = txModel.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.New()).Open()
 }
 
 func (m *getPutkvMachine) Cleanup() {
@@ -166,8 +166,8 @@ func (m *getPutkvMachine) Commit(t *rapid.T) {
 
 type getKVMachine struct {
 	bucket        string
-	snKV          ethdb.RwKV
-	modelKV       ethdb.RwKV
+	snKV          kv.RwDB
+	modelKV       kv.RwDB
 	overWriteKeys [][20]byte
 	snKeys        [][20]byte
 	newKeys       [][20]byte
@@ -175,9 +175,9 @@ type getKVMachine struct {
 }
 
 func (m *getKVMachine) Init(t *rapid.T) {
-	m.bucket = dbutils.PlainStateBucket
-	m.snKV = NewMemKV()
-	m.modelKV = NewMemKV()
+	m.bucket = kv.PlainStateBucket
+	m.snKV = memdb.New()
+	m.modelKV = memdb.New()
 	m.snKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
 		return len(_v) > 0
 	}).Draw(t, "generate keys").([][20]byte)
@@ -205,7 +205,7 @@ func (m *getKVMachine) Init(t *rapid.T) {
 	//save snapshot and wrap new write db
 	err = txSn.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.New()).Open()
 	txSn, err = m.snKV.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer txSn.Rollback()
@@ -242,12 +242,12 @@ func (m *getKVMachine) Get(t *rapid.T) {
 		v1, v2     []byte
 		err1, err2 error
 	)
-	err := m.snKV.View(context.Background(), func(tx ethdb.Tx) error {
+	err := m.snKV.View(context.Background(), func(tx kv.Tx) error {
 		v1, err1 = tx.GetOne(m.bucket, key[:])
 		return nil
 	})
 	require.NoError(t, err)
-	err = m.modelKV.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.modelKV.View(context.Background(), func(tx kv.Tx) error {
 		v2, err2 = tx.GetOne(m.bucket, key[:])
 		return nil
 	})
@@ -268,14 +268,14 @@ func TestCursorWithTX(t *testing.T) {
 
 type cursorKVMachine struct {
 	bucket  string
-	snKV    ethdb.RwKV
-	modelKV ethdb.RwKV
+	snKV    kv.RwDB
+	modelKV kv.RwDB
 
-	snTX    ethdb.RwTx
-	modelTX ethdb.RwTx
+	snTX    kv.RwTx
+	modelTX kv.RwTx
 
-	snCursor    ethdb.RwCursor
-	modelCursor ethdb.RwCursor
+	snCursor    kv.RwCursor
+	modelCursor kv.RwCursor
 
 	snapshotKeys [][20]byte
 	newKeys      [][20]byte
@@ -283,9 +283,9 @@ type cursorKVMachine struct {
 }
 
 func (m *cursorKVMachine) Init(t *rapid.T) {
-	m.bucket = dbutils.PlainStateBucket
-	m.snKV = NewMemKV()
-	m.modelKV = NewMemKV()
+	m.bucket = kv.PlainStateBucket
+	m.snKV = memdb.New()
+	m.modelKV = memdb.New()
 	m.snapshotKeys = rapid.SliceOf(rapid.ArrayOf(20, rapid.Byte())).Filter(func(_v [][20]byte) bool {
 		return len(_v) > 0
 	}).Draw(t, "generate keys").([][20]byte)
@@ -320,7 +320,7 @@ func (m *cursorKVMachine) Init(t *rapid.T) {
 	require.NoError(t, err)
 	err = txModel.Commit()
 	require.NoError(t, err)
-	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(NewMemKV()).Open()
+	m.snKV = NewSnapshotKV().StateSnapshot(m.snKV).DB(memdb.New()).Open()
 }
 
 func (m *cursorKVMachine) Check(t *rapid.T) {

@@ -31,6 +31,7 @@ import (
 	"text/template"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -42,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -1251,7 +1251,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
 	default:
-		Fatalf("Chain name is not recognized: %s", chain)
+		Fatalf("ChainDB name is not recognized: %s", chain)
 	}
 }
 
@@ -1285,8 +1285,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(cfg *node.Config) ethdb.RwKV {
-	chainDb, err := node.OpenDatabase(cfg, ethdb.Chain)
+func MakeChainDatabase(logger log.Logger, cfg *node.Config) kv.RwDB {
+	chainDb, err := node.OpenDatabase(cfg, logger, kv.ChainDB)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}

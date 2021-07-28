@@ -7,15 +7,15 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func addTestAccount(tx ethdb.Putter, hash common.Hash, balance uint64, incarnation uint64) error {
+func addTestAccount(tx kv.Putter, hash common.Hash, balance uint64, incarnation uint64) error {
 	acc := accounts.NewAccount()
 	acc.Balance.SetUint64(balance)
 	acc.Incarnation = incarnation
@@ -24,11 +24,11 @@ func addTestAccount(tx ethdb.Putter, hash common.Hash, balance uint64, incarnati
 	}
 	encoded := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(encoded)
-	return tx.Put(dbutils.HashedAccountsBucket, hash[:], encoded)
+	return tx.Put(kv.HashedAccounts, hash[:], encoded)
 }
 
 func TestAccountAndStorageTrie(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	hash1 := common.HexToHash("0xB000000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash1, 3*params.Ether, 0))
@@ -50,10 +50,10 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	val3 := common.FromHex("0x127a89")
 	val4 := common.FromHex("0x05")
 
-	assert.Nil(t, tx.Put(dbutils.HashedStorageBucket, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc1), val1))
-	assert.Nil(t, tx.Put(dbutils.HashedStorageBucket, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc2), val2))
-	assert.Nil(t, tx.Put(dbutils.HashedStorageBucket, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc3), val3))
-	assert.Nil(t, tx.Put(dbutils.HashedStorageBucket, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc4), val4))
+	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc1), val1))
+	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc2), val2))
+	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc3), val3))
+	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc4), val4))
 
 	hash4 := common.HexToHash("0xB100000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash4, 4*params.Ether, 0))
@@ -68,7 +68,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
-	err = tx.ForEach(dbutils.TrieOfAccountsBucket, nil, func(k, v []byte) error {
+	err = tx.ForEach(kv.TrieOfAccounts, nil, func(k, v []byte) error {
 		accountTrie[string(k)] = v
 		return nil
 	})
@@ -91,7 +91,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	assert.Equal(t, 0, len(rootHash2))
 
 	storageTrie := make(map[string][]byte)
-	err = tx.ForEach(dbutils.TrieOfStorageBucket, nil, func(k, v []byte) error {
+	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
 		storageTrie[string(k)] = v
 		return nil
 	})
@@ -112,7 +112,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 }
 
 func TestAccountTrieAroundExtensionNode(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	acc := accounts.NewAccount()
 	acc.Balance.SetUint64(1 * params.Ether)
@@ -120,28 +120,28 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	acc.EncodeForStorage(encoded)
 
 	hash1 := common.HexToHash("0x30af561000000000000000000000000000000000000000000000000000000000")
-	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash1[:], encoded))
+	assert.Nil(t, tx.Put(kv.HashedAccounts, hash1[:], encoded))
 
 	hash2 := common.HexToHash("0x30af569000000000000000000000000000000000000000000000000000000000")
-	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash2[:], encoded))
+	assert.Nil(t, tx.Put(kv.HashedAccounts, hash2[:], encoded))
 
 	hash3 := common.HexToHash("0x30af650000000000000000000000000000000000000000000000000000000000")
-	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash3[:], encoded))
+	assert.Nil(t, tx.Put(kv.HashedAccounts, hash3[:], encoded))
 
 	hash4 := common.HexToHash("0x30af6f0000000000000000000000000000000000000000000000000000000000")
-	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash4[:], encoded))
+	assert.Nil(t, tx.Put(kv.HashedAccounts, hash4[:], encoded))
 
 	hash5 := common.HexToHash("0x30af8f0000000000000000000000000000000000000000000000000000000000")
-	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash5[:], encoded))
+	assert.Nil(t, tx.Put(kv.HashedAccounts, hash5[:], encoded))
 
 	hash6 := common.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
-	assert.Nil(t, tx.Put(dbutils.HashedAccountsBucket, hash6[:], encoded))
+	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
 	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
-	err = tx.ForEach(dbutils.TrieOfAccountsBucket, nil, func(k, v []byte) error {
+	err = tx.ForEach(kv.TrieOfAccounts, nil, func(k, v []byte) error {
 		accountTrie[string(k)] = v
 		return nil
 	})

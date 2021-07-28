@@ -1,4 +1,4 @@
-package remotedbserver
+package privateapi
 
 import (
 	"bytes"

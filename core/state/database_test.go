@@ -24,8 +24,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -129,7 +128,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
 			t.Error("expected account to exist")
@@ -146,7 +145,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -173,7 +172,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	var key2 common.Hash
 	var check2 uint256.Int
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
@@ -192,7 +191,7 @@ func TestCreate2Revive(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if st.Exist(create2address) {
 			t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
@@ -215,7 +214,7 @@ func TestCreate2Revive(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
@@ -355,7 +354,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
@@ -373,7 +372,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
@@ -398,7 +397,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
@@ -417,7 +416,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if st.Exist(create2address) {
 			t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
@@ -440,7 +439,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 4", create2address.String())
@@ -470,7 +469,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	if it.Event.D != create2address {
 		t.Errorf("Wrong create2address: %x, expected %x", it.Event.D, create2address)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(create2address) {
 			t.Error("expected create2address to exist at the block 5", create2address.String())
@@ -573,7 +572,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("generate long blocks")
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
@@ -592,7 +591,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	var key0 common.Hash
 	var correctValueX uint256.Int
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -609,7 +608,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if st.Exist(contractAddress) {
 			t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
@@ -622,7 +621,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
@@ -716,7 +715,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
 			t.Error("expected account to exist")
@@ -735,7 +734,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	var key0 common.Hash
 	var correctValueX uint256.Int
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -756,7 +755,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	if err = m.InsertChain(longerChain.Slice(1, 3)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
@@ -847,7 +846,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
 			t.Error("expected account to exist")
@@ -866,7 +865,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 
 	var key0 common.Hash
 	var check0 uint256.Int
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -895,7 +894,7 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := uint256.NewInt(0x58c00a51)
 
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	tsw := state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(state.NewPlainState(tx, 0))
 	// Start the 1st transaction
@@ -984,7 +983,7 @@ func TestEip2200Gas(t *testing.T) {
 	}
 
 	var balanceBefore *uint256.Int
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
 			t.Error("expected account to exist")
@@ -1002,7 +1001,7 @@ func TestEip2200Gas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -1073,7 +1072,7 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
 			t.Error("expected account to exist")
@@ -1091,7 +1090,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	var acc accounts.Account
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		ok, err := rawdb.ReadAccount(tx, contractAddress, &acc)
 		if err != nil {
 			t.Fatal(err)
@@ -1116,7 +1115,7 @@ func TestWrongIncarnation(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		ok, err := rawdb.ReadAccount(tx, contractAddress, &acc)
 		if err != nil {
 			t.Fatal(err)
@@ -1222,7 +1221,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatalf("generate longer blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(address) {
 			t.Error("expected account to exist")
@@ -1242,7 +1241,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	var acc accounts.Account
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(contractAddress) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -1266,7 +1265,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		ok, err := rawdb.ReadAccount(tx, contractAddress, &acc)
 		if err != nil {
 			t.Fatal(err)
@@ -1286,7 +1285,7 @@ func TestWrongIncarnation2(t *testing.T) {
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	r, tsw := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1324,7 +1323,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1357,7 +1356,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
@@ -1383,7 +1382,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
-	assert.NoError(t, tx.Delete(dbutils.CodeBucket, codeHash[:], nil), nil)
+	assert.NoError(t, tx.Delete(kv.CodeBucket, codeHash[:], nil), nil)
 
 	codeSize2, err := r.ReadAccountCodeSize(contract, 1, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")
@@ -1542,7 +1541,7 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	var key0 common.Hash
 	var check0 uint256.Int
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(phoenixAddress) {
 			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
@@ -1560,7 +1559,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(2, chain.Length)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(phoenixAddress) {
@@ -1579,7 +1578,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	if err = m.InsertChain(longerChain); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(phoenixAddress) {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)

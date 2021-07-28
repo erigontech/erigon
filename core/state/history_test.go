@@ -18,13 +18,14 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestMutationDeleteTimestamp(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
@@ -44,7 +45,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 	}
 
 	i := 0
-	err := changeset.Walk(tx, dbutils.AccountChangeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(tx, kv.AccountChangeSet, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
 		i++
 		return true, nil
 	})
@@ -55,7 +56,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	index, err := bitmapdb.Get64(tx, dbutils.AccountsHistoryBucket, addr[0].Bytes(), 0, math.MaxUint32)
+	index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr[0].Bytes(), 0, math.MaxUint32)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 	}
 
 	count := 0
-	err = changeset.Walk(tx, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(1), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
 		count++
 		return true, nil
 	})
@@ -77,13 +78,13 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	found, err := tx.GetOne(dbutils.AccountsHistoryBucket, addr[0].Bytes())
+	found, err := tx.GetOne(kv.AccountsHistory, addr[0].Bytes())
 	require.NoError(t, err)
 	require.Nil(t, found, "account must be deleted")
 }
 
 func TestMutationCommit(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	numOfAccounts := 5
 	numOfStateKeys := 5
@@ -105,7 +106,7 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		index, err := bitmapdb.Get64(tx, dbutils.AccountsHistoryBucket, addr.Bytes(), 0, math.MaxUint32)
+		index, err := bitmapdb.Get64(tx, kv.AccountsHistory, addr.Bytes(), 0, math.MaxUint32)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,7 +117,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]uint256.Int)
-		err = tx.ForPrefix(dbutils.PlainStateBucket, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), func(k, v []byte) error {
+		err = tx.ForPrefix(kv.PlainStateBucket, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), func(k, v []byte) error {
 			resAccStorage[common.BytesToHash(k[common.AddressLength+8:])] = *uint256.NewInt(0).SetBytes(v)
 			return nil
 		})
@@ -144,7 +145,7 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	changeSetInDB := changeset.NewAccountChangeSet()
-	err := changeset.Walk(tx, dbutils.AccountChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+	err := changeset.Walk(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err := changeSetInDB.Add(k, v); err != nil {
 			return false, err
 		}
@@ -176,7 +177,7 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	cs := changeset.NewStorageChangeSet()
-	err = changeset.Walk(tx, dbutils.StorageChangeSetBucket, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
+	err = changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(2), 8*8, func(_ uint64, k, v []byte) (bool, error) {
 		if err2 := cs.Add(k, v); err2 != nil {
 			return false, err2
 		}
@@ -285,7 +286,7 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Address) {
 */
 
 func TestWalkAsOfStatePlain(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
 	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
@@ -445,7 +446,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	emptyVal := uint256.NewInt(0)
 	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
@@ -651,7 +652,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
@@ -799,7 +800,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 }
 
 func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	emptyValAcc := accounts.NewAccount()
 	emptyVal := make([]byte, emptyValAcc.EncodingLengthForStorage())
@@ -950,7 +951,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 }
 
 func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	numOfAccounts := uint8(4)
 	addrs := make([]common.Address, numOfAccounts)

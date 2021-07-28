@@ -37,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -140,7 +140,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	defer tx.Rollback()
 
 	var num uint64
-	if err := sim.m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := sim.m.DB.View(context.Background(), func(tx kv.Tx) error {
 		num = rawdb.ReadCurrentHeader(tx).Number.Uint64()
 		return nil
 	}); err != nil {

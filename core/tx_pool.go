@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -257,7 +258,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb ethdb.RwKV) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb kv.RwDB) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -278,7 +279,7 @@ func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chaindb eth
 		reorgShutdownCh: make(chan struct{}, 1),
 		gasPrice:        new(uint256.Int).SetUint64(config.PriceLimit),
 		stopCh:          make(chan struct{}),
-		chaindb:         kv.NewObjectDatabase(chaindb),
+		chaindb:         olddb.NewObjectDatabase(chaindb),
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range pool.config.Locals {

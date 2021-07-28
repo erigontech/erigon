@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
@@ -22,7 +22,7 @@ import (
 var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
 
 type BodiesCfg struct {
-	db              ethdb.RwKV
+	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
@@ -33,7 +33,7 @@ type BodiesCfg struct {
 }
 
 func StageBodiesCfg(
-	db ethdb.RwKV,
+	db kv.RwDB,
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []headerdownload.PenaltyItem),
@@ -50,7 +50,7 @@ func BodiesForward(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	cfg BodiesCfg,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
@@ -224,7 +224,7 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 		"sys", common.StorageSize(m.Sys))
 }
 
-func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -245,7 +245,7 @@ func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context
 	return nil
 }
 
-func PruneBodiesStage(s *PruneState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func PruneBodiesStage(s *PruneState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

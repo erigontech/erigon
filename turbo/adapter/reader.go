@@ -8,15 +8,15 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 type StateReader struct {
 	blockNr uint64
-	tx      ethdb.Tx
+	tx      kv.Tx
 }
 
-func NewStateReader(tx ethdb.Tx, blockNr uint64) *StateReader {
+func NewStateReader(tx kv.Tx, blockNr uint64) *StateReader {
 	return &StateReader{
 		tx:      tx,
 		blockNr: blockNr,
@@ -45,7 +45,7 @@ func (r *StateReader) ReadAccountCode(address common.Address, incarnation uint64
 		return nil, nil
 	}
 	var val []byte
-	v, err := r.tx.GetOne(dbutils.CodeBucket, codeHash[:])
+	v, err := r.tx.GetOne(kv.CodeBucket, codeHash[:])
 	if err != nil {
 		return nil, err
 	}

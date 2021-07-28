@@ -26,11 +26,11 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -91,13 +91,13 @@ func newSnapshot(config *params.CliqueConfig, number uint64, hash common.Hash, s
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.CliqueConfig, db ethdb.RwKV, num uint64, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(config *params.CliqueConfig, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blob, err := tx.GetOne(dbutils.CliqueSeparateBucket, SnapshotFullKey(num, hash))
+	blob, err := tx.GetOne(kv.CliqueSeparate, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
@@ -113,14 +113,14 @@ func loadSnapshot(config *params.CliqueConfig, db ethdb.RwKV, num uint64, hash c
 
 var ErrNotFound = errors.New("not found")
 
-func lastSnapshot(db ethdb.RwKV) (uint64, error) {
+func lastSnapshot(db kv.RwDB) (uint64, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 
-	lastEnc, err := tx.GetOne(dbutils.CliqueLastSnapshotBucket, LastSnapshotKey())
+	lastEnc, err := tx.GetOne(kv.CliqueLastSnapshot, LastSnapshotKey())
 	if err != nil {
 		return 0, fmt.Errorf("failed check last clique snapshot: %d", err)
 	}
@@ -138,13 +138,13 @@ func lastSnapshot(db ethdb.RwKV) (uint64, error) {
 }
 
 // store inserts the snapshot into the database.
-func (s *Snapshot) store(db ethdb.RwKV) error {
+func (s *Snapshot) store(db kv.RwDB) error {
 	blob, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	return db.Update(context.Background(), func(tx ethdb.RwTx) error {
-		return tx.Put(dbutils.CliqueSeparateBucket, SnapshotFullKey(s.Number, s.Hash), blob)
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.CliqueSeparate, SnapshotFullKey(s.Number, s.Hash), blob)
 	})
 }
 

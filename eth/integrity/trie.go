@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -23,7 +23,7 @@ func AssertSubset(prefix []byte, a, b uint16) {
 	}
 }
 
-func Trie(tx ethdb.Tx, slowChecks bool, ctx context.Context) {
+func Trie(tx kv.Tx, slowChecks bool, ctx context.Context) {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
@@ -32,15 +32,15 @@ func Trie(tx ethdb.Tx, slowChecks bool, ctx context.Context) {
 	buf2 := make([]byte, 256)
 
 	{
-		c, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		c, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
 			panic(err)
 		}
-		trieAcc2, err := tx.Cursor(dbutils.TrieOfAccountsBucket)
+		trieAcc2, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
 			panic(err)
 		}
-		accC, err := tx.Cursor(dbutils.HashedAccountsBucket)
+		accC, err := tx.Cursor(kv.HashedAccounts)
 		if err != nil {
 			panic(err)
 		}
@@ -141,15 +141,15 @@ func Trie(tx ethdb.Tx, slowChecks bool, ctx context.Context) {
 		}
 	}
 	{
-		c, err := tx.Cursor(dbutils.TrieOfStorageBucket)
+		c, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
 			panic(err)
 		}
-		trieStorage, err := tx.Cursor(dbutils.TrieOfStorageBucket)
+		trieStorage, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
 			panic(err)
 		}
-		storageC, err := tx.Cursor(dbutils.HashedStorageBucket)
+		storageC, err := tx.Cursor(kv.HashedStorage)
 		if err != nil {
 			panic(err)
 		}

@@ -23,6 +23,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
 )
@@ -42,6 +45,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -67,7 +71,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	defer btCli.Close()
 	btCli.trackers = [][]string{}
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	quit := make(chan struct{})
 	defer func() {
 		close(quit)
@@ -111,7 +115,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 
 		}
 
-		err = sb.AsyncStages(currentSnapshotBlock, db, tx, btCli, true)
+		err = sb.AsyncStages(currentSnapshotBlock, logger, db, tx, btCli, true)
 		if err != nil {
 			t.Error(err)
 		}
@@ -173,7 +177,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err := rotx.Cursor(dbutils.HeadersBucket)
+	roc, err := rotx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	var headerNumber uint64
 	headerNumber = 11
@@ -195,7 +199,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
 	headerNumber = 0
-	err = snRoTx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = snRoTx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -214,8 +218,8 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 
 	headerNumber = 0
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -236,8 +240,8 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 		t.Fatal("incorrect len", trnts)
 	}
 
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,7 +249,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -265,7 +269,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 	//just start snapshot transaction
 	// it can't be empty slice but shouldn't be in main db
-	_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{112, 3})
+	_, err = roTX.GetOne(kv.Headers, []byte{112, 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +300,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	rotx, err = db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err = rotx.Cursor(dbutils.HeadersBucket)
+	roc, err = rotx.Cursor(kv.Headers)
 	require.NoError(t, err)
 
 	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
@@ -308,8 +312,8 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	}
 
 	headerNumber = 0
-	err = db.HeadersSnapshot().View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = db.HeadersSnapshot().View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -326,8 +330,8 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 	headerNumber = 0
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -346,8 +350,8 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	if len(trnts) != 1 {
 		t.Fatal("incorrect len", trnts)
 	}
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -355,7 +359,7 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -380,6 +384,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -405,7 +410,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	btCli.trackers = [][]string{}
 	defer btCli.Close()
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 
 	sb := &SnapshotMigrator{
@@ -456,7 +461,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		}
 		defer rotx.Rollback()
 
-		err = sb.AsyncStages(currentSnapshotBlock, db, rotx, btCli, false)
+		err = sb.AsyncStages(currentSnapshotBlock, logger, db, rotx, btCli, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -470,7 +475,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	tm := time.After(time.Second * 10)
 	for atomic.LoadUint64(&sb.started) > 0 && atomic.LoadUint64(&sb.HeadersCurrentSnapshot) != 10 {
-		err = db.View(context.Background(), func(tx ethdb.Tx) error { return sb.Final(tx) })
+		err = db.View(context.Background(), func(tx kv.Tx) error { return sb.Final(tx) })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -487,7 +492,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err := rotx.Cursor(dbutils.HeadersBucket)
+	roc, err := rotx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	var headerNumber uint64
 	headerNumber = 11
@@ -508,7 +513,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	snokv := db.HeadersSnapshot()
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
-	headersCursor, err := snRoTx.Cursor(dbutils.HeadersBucket)
+	headersCursor, err := snRoTx.Cursor(kv.Headers)
 	require.NoError(t, err)
 	headerNumber = 0
 	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
@@ -528,8 +533,8 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 
 	headerNumber = 0
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -550,8 +555,8 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		t.Fatal("incorrect len", trnts)
 	}
 
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -559,7 +564,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -603,7 +608,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		defer rotx.Rollback()
 		//just start snapshot transaction
 		// it can't be empty slice but shouldn't be in main db
-		_, err = roTX.GetOne(dbutils.HeadersBucket, []byte{1})
+		_, err = roTX.GetOne(kv.Headers, []byte{1})
 		if err != nil {
 			wg.Done()
 			t.Error(err)
@@ -649,7 +654,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 
 	rotx, err = db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
-	err = rotx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = rotx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		t.Fatal("main db must be empty here", k)
 		return nil
 	})
@@ -660,7 +665,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	headerNumber = 0
 	snRoTx, err = db.HeadersSnapshot().BeginRo(context.Background())
 	require.NoError(t, err)
-	err = snRoTx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = snRoTx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
@@ -676,8 +681,8 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 		t.Fatal(headerNumber)
 	}
 	headerNumber = 0
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		return tx.ForEach(dbutils.HeadersBucket, nil, func(k, v []byte) error {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 			if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 				t.Fatal(k)
 			}
@@ -696,8 +701,8 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	if len(trnts) != 1 {
 		t.Fatal("incorrect len", trnts)
 	}
-	err = db.View(context.Background(), func(tx ethdb.Tx) error {
-		v, err := tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotHash)
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotHash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -705,7 +710,7 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 			t.Fatal("incorrect bytes", common.Bytes2Hex(v), common.Bytes2Hex(trnts[0].Bytes()))
 		}
 
-		v, err = tx.GetOne(dbutils.BittorrentInfoBucket, dbutils.CurrentHeadersSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -725,17 +730,17 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	}
 }
 
-func GenerateHeaderData(tx ethdb.RwTx, from, to int) error {
+func GenerateHeaderData(tx kv.RwTx, from, to int) error {
 	var err error
 	if to > math.MaxInt8 {
 		return errors.New("greater than uint8")
 	}
 	for i := from; i <= to; i++ {
-		err = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i)}), []byte{uint8(i), uint8(i), uint8(i)})
+		err = tx.Put(kv.Headers, dbutils.HeaderKey(uint64(i), common.Hash{uint8(i)}), []byte{uint8(i), uint8(i), uint8(i)})
 		if err != nil {
 			return err
 		}
-		err = tx.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(uint64(i)), common.Hash{uint8(i)}.Bytes())
+		err = tx.Put(kv.HeaderCanonical, dbutils.EncodeBlockNumber(uint64(i)), common.Hash{uint8(i)}.Bytes())
 		if err != nil {
 			return err
 		}
@@ -743,7 +748,7 @@ func GenerateHeaderData(tx ethdb.RwTx, from, to int) error {
 	return nil
 }
 
-func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
+func GenerateBodyData(tx kv.RwTx, from, to uint64) error {
 	var err error
 	if to > math.MaxInt8 {
 		return errors.New("greater than uint8")
@@ -751,7 +756,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 	for i := from; i <= to; i++ {
 		for blockNum := 1; blockNum < 4; blockNum++ {
 			bodyForStorage := new(types.BodyForStorage)
-			baseTxId, err := tx.IncrementSequence(dbutils.EthTx, 3)
+			baseTxId, err := tx.IncrementSequence(kv.EthTx, 3)
 			if err != nil {
 				return err
 			}
@@ -761,7 +766,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 			if err != nil {
 				return err
 			}
-			err = tx.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, common.Hash{uint8(i), uint8(blockNum)}), body)
+			err = tx.Put(kv.BlockBody, dbutils.BlockBodyKey(i, common.Hash{uint8(i), uint8(blockNum)}), body)
 			if err != nil {
 				return err
 			}
@@ -773,7 +778,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 				return err
 			}
 
-			err = tx.Put(dbutils.HeadersBucket, dbutils.HeaderKey(i, common.Hash{uint8(i), uint8(blockNum)}), headersBytes)
+			err = tx.Put(kv.Headers, dbutils.HeaderKey(i, common.Hash{uint8(i), uint8(blockNum)}), headersBytes)
 			if err != nil {
 				return err
 			}
@@ -786,7 +791,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 				return err
 			}
 
-			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId), txBytes)
+			err = tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(baseTxId), txBytes)
 			if err != nil {
 				return err
 			}
@@ -795,7 +800,7 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 				return err
 			}
 
-			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+1), txBytes)
+			err = tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(baseTxId+1), txBytes)
 			if err != nil {
 				return err
 			}
@@ -805,13 +810,13 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 				return err
 			}
 
-			err = tx.Put(dbutils.EthTx, dbutils.EncodeBlockNumber(baseTxId+2), txBytes)
+			err = tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(baseTxId+2), txBytes)
 			if err != nil {
 				return err
 			}
 		}
 
-		err = tx.Put(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3) + 1}.Bytes())
+		err = tx.Put(kv.HeaderCanonical, dbutils.EncodeBlockNumber(i), common.Hash{uint8(i), uint8(i%3) + 1}.Bytes())
 		if err != nil {
 			return err
 		}
@@ -820,9 +825,9 @@ func GenerateBodyData(tx ethdb.RwTx, from, to uint64) error {
 }
 
 // check snapshot data based on GenerateBodyData
-func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint64) {
+func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX kv.Tx, snapshotTo uint64) {
 	t.Helper()
-	bodyCursor, err := bodySnapshotTX.Cursor(dbutils.BlockBodyPrefix)
+	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,9 +872,9 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX ethdb.Tx, snapshotTo uint
 }
 
 // check headers snapshot data based on GenerateBodyData
-func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX ethdb.Tx, snapshotTo uint64) {
+func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX kv.Tx, snapshotTo uint64) {
 	t.Helper()
-	headersCursor, err := headersSnapshotTX.Cursor(dbutils.HeadersBucket)
+	headersCursor, err := headersSnapshotTX.Cursor(kv.Headers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -895,9 +900,9 @@ func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX ethdb.Tx, snapshotTo 
 	}
 }
 
-func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) {
+func verifyFullBodiesData(t *testing.T, bodySnapshotTX kv.Tx, dataTo uint64) {
 	t.Helper()
-	bodyCursor, err := bodySnapshotTX.Cursor(dbutils.BlockBodyPrefix)
+	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -954,9 +959,9 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX ethdb.Tx, dataTo uint64) 
 	}
 }
 
-func verifyPrunedBlocksData(t *testing.T, tx ethdb.Tx, dataFrom, dataTo, snapshotTxTo uint64) {
+func verifyPrunedBlocksData(t *testing.T, tx kv.Tx, dataFrom, dataTo, snapshotTxTo uint64) {
 	t.Helper()
-	bodyCursor, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	bodyCursor, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1019,6 +1024,7 @@ func TestPruneBlocks(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -1043,7 +1049,7 @@ func TestPruneBlocks(t *testing.T) {
 	btCli.trackers = [][]string{}
 	defer btCli.Close()
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -1070,12 +1076,12 @@ func TestPruneBlocks(t *testing.T) {
 	defer readTX.Rollback()
 
 	bodySnapshotPath := filepath.Join(snapshotsDir, SnapshotName(snapshotsDir, "bodies", snapshotTo))
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	err = CreateBodySnapshot(readTX, logger, snapshotTo, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	readTX.Rollback()
-	kvSnapshot, err := OpenBodiesSnapshot(bodySnapshotPath)
+	kvSnapshot, err := OpenBodiesSnapshot(logger, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1087,7 +1093,7 @@ func TestPruneBlocks(t *testing.T) {
 	defer bodySnapshotTX.Rollback()
 
 	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
-	ethTXCursor, err := bodySnapshotTX.Cursor(dbutils.EthTx)
+	ethTXCursor, err := bodySnapshotTX.Cursor(kv.EthTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1176,13 +1182,13 @@ func TestPruneBlocks(t *testing.T) {
 	}
 	defer readTX.Rollback()
 
-	err = CreateBodySnapshot(readTX, snapshotTo, bodySnapshotPath)
+	err = CreateBodySnapshot(readTX, logger, snapshotTo, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	readTX.Rollback()
 
-	kvSnapshot, err = OpenBodiesSnapshot(bodySnapshotPath)
+	kvSnapshot, err = OpenBodiesSnapshot(logger, bodySnapshotPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1194,7 +1200,7 @@ func TestPruneBlocks(t *testing.T) {
 	defer bodySnapshotTX.Rollback()
 
 	verifyBodiesSnapshot(t, bodySnapshotTX, snapshotTo)
-	ethTXCursor, err = bodySnapshotTX.Cursor(dbutils.EthTx)
+	ethTXCursor, err = bodySnapshotTX.Cursor(kv.EthTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1255,8 +1261,8 @@ func TestPruneBlocks(t *testing.T) {
 	verifyPrunedBlocksData(t, writeDBKVRoTX, snapshotTo, dataTo, binary.BigEndian.Uint64(lastTxID))
 }
 
-func PrintBodyBuckets(t *testing.T, tx ethdb.Tx) { //nolint: deadcode
-	bodyCursor, err := tx.Cursor(dbutils.BlockBodyPrefix)
+func PrintBodyBuckets(t *testing.T, tx kv.Tx) { //nolint: deadcode
+	bodyCursor, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1287,6 +1293,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	logger := log.New()
 	var err error
 	dir := t.TempDir()
 
@@ -1316,7 +1323,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		replaceChan:  make(chan struct{}),
 	}
 
-	db := kv.NewSnapshotKV().DB(kv.MustOpen(filepath.Join(dir, "chaindata"))).Open()
+	db := snapshotdb.NewSnapshotKV().DB(mdbx.MustOpen(filepath.Join(dir, "chaindata"))).Open()
 	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -1361,7 +1368,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		}
 		defer rotx.Rollback()
 
-		err = sb.AsyncStages(currentSnapshotBlock, db, rotx, btCli, false)
+		err = sb.AsyncStages(currentSnapshotBlock, logger, db, rotx, btCli, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1433,7 +1440,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifyBodiesSnapshot(t, btx, 10)
-	ethTX, err := btx.Cursor(dbutils.EthTx)
+	ethTX, err := btx.Cursor(kv.EthTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1453,7 +1460,7 @@ func TestBodySnapshotSyncMigration(t *testing.T) {
 	var blockNum uint64
 	var numOfDuplicateBlocks uint64
 	dataFrom := uint64(10)
-	err = roWriteDBTX.ForEach(dbutils.HeadersBucket, []byte{}, func(k, v []byte) error {
+	err = roWriteDBTX.ForEach(kv.Headers, []byte{}, func(k, v []byte) error {
 		numOfDuplicateBlocks++
 
 		if binary.BigEndian.Uint64(k[:8]) != blockNum {

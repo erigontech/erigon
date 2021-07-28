@@ -4,17 +4,16 @@ import (
 	"context"
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 var rebuilCallTraceIndex = Migration{
 	Name: "rebuild_call_trace_index",
-	Up: func(db ethdb.RwKV, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			return err
@@ -22,7 +21,7 @@ var rebuilCallTraceIndex = Migration{
 		defer tx.Rollback()
 
 		// Find the lowest key in the TraceCallSet table
-		c, err := tx.CursorDupSort(dbutils.CallTraceSet)
+		c, err := tx.CursorDupSort(kv.CallTraceSet)
 		if err != nil {
 			return err
 		}

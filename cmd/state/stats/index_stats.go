@@ -13,15 +13,15 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 )
 
 func IndexStats(chaindata string, indexBucket string, statsFile string) error {
-	db := kv.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	startTime := time.Now()
 	lenOfKey := common.AddressLength
-	if strings.HasPrefix(indexBucket, dbutils.StorageHistoryBucket) {
+	if strings.HasPrefix(indexBucket, kv.StorageHistory) {
 		lenOfKey = common.AddressLength + common.HashLength + common.IncarnationLength
 	}
 

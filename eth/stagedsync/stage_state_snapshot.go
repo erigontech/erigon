@@ -4,19 +4,19 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type SnapshotStateCfg struct {
-	db               ethdb.RwKV
+	db               kv.RwDB
 	snapshotDir      string
 	tmpDir           string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
 }
 
-func StageSnapshotStateCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, tmpDir string, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotStateCfg {
+func StageSnapshotStateCfg(db kv.RwDB, snapshot ethconfig.Snapshot, tmpDir string, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotStateCfg {
 	return SnapshotStateCfg{
 		db:               db,
 		snapshotDir:      snapshot.Dir,
@@ -26,7 +26,7 @@ func StageSnapshotStateCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, tmpDir st
 	}
 }
 
-func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
+func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -47,7 +47,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snapsho
 	return nil
 }
 
-func UnwindStateSnapshotGenerationStage(s *UnwindState, tx ethdb.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
+func UnwindStateSnapshotGenerationStage(s *UnwindState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -68,7 +68,7 @@ func UnwindStateSnapshotGenerationStage(s *UnwindState, tx ethdb.RwTx, cfg Snaps
 	return nil
 }
 
-func PruneStateSnapshotGenerationStage(s *PruneState, tx ethdb.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
+func PruneStateSnapshotGenerationStage(s *PruneState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

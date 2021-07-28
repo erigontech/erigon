@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/erigon/core"
@@ -55,7 +55,7 @@ func TestGenerateChain(t *testing.T) {
 		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	m := stages.MockWithGenesis(t, gspec, key1)
-	db := kv.NewObjectDatabase(m.DB)
+	db := olddb.NewObjectDatabase(m.DB)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the

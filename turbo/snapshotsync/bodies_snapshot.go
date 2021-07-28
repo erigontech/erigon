@@ -14,25 +14,27 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.RwTx, toBlock uint64) error {
-	readBodyCursor, err := readTX.Cursor(dbutils.BlockBodyPrefix)
+func GenerateBodiesSnapshot(ctx context.Context, readTX kv.Tx, writeTX kv.RwTx, toBlock uint64) error {
+	readBodyCursor, err := readTX.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
 
-	writeBodyCursor, err := writeTX.RwCursor(dbutils.BlockBodyPrefix)
+	writeBodyCursor, err := writeTX.RwCursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
-	writeEthTXCursor, err := writeTX.RwCursor(dbutils.EthTx)
+	writeEthTXCursor, err := writeTX.RwCursor(kv.EthTx)
 	if err != nil {
 		return err
 	}
-	readEthTXCursor, err := readTX.Cursor(dbutils.EthTx)
+	readEthTXCursor, err := readTX.Cursor(kv.EthTx)
 	if err != nil {
 		return err
 	}
@@ -43,7 +45,7 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 			return false, nil
 		}
 
-		canonocalHash, err := readTX.GetOne(dbutils.HeaderCanonicalBucket, dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(k)))
+		canonocalHash, err := readTX.GetOne(kv.HeaderCanonical, dbutils.EncodeBlockNumber(binary.BigEndian.Uint64(k)))
 		if err != nil {
 			return false, err
 		}
@@ -96,19 +98,19 @@ func GenerateBodiesSnapshot(ctx context.Context, readTX ethdb.Tx, writeTX ethdb.
 	return nil
 }
 
-func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string) error {
-	kv, err := kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-			dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
+func CreateBodySnapshot(readTx kv.Tx, logger log.Logger, lastBlock uint64, snapshotPath string) error {
+	db, err := mdbx.NewMDBX(logger).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.BucketsConfigs[kv.BlockBody],
+			kv.EthTx:     kv.BucketsConfigs[kv.EthTx],
 		}
 	}).Path(snapshotPath).Open()
 	if err != nil {
 		return err
 	}
 
-	defer kv.Close()
-	writeTX, err := kv.BeginRw(context.Background())
+	defer db.Close()
+	writeTX, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -120,21 +122,21 @@ func CreateBodySnapshot(readTx ethdb.Tx, lastBlock uint64, snapshotPath string) 
 	return writeTX.Commit()
 }
 
-func OpenBodiesSnapshot(dbPath string) (ethdb.RoKV, error) {
-	return kv.NewMDBX().Path(dbPath).WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix: dbutils.BucketsConfigs[dbutils.BlockBodyPrefix],
-			dbutils.EthTx:           dbutils.BucketsConfigs[dbutils.EthTx],
+func OpenBodiesSnapshot(logger log.Logger, dbPath string) (kv.RoDB, error) {
+	return mdbx.NewMDBX(logger).Path(dbPath).WithBucketsConfig(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.BucketsConfigs[kv.BlockBody],
+			kv.EthTx:     kv.BucketsConfigs[kv.EthTx],
 		}
 	}).Readonly().Open()
 }
 
-func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err error) {
+func RemoveBlocksData(db kv.RoDB, tx kv.RwTx, newSnapshot uint64) (err error) {
 	log.Info("Remove blocks data", "to", newSnapshot)
-	if _, ok := db.(kv.SnapshotUpdater); !ok {
+	if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	bodiesSnapshot := db.(kv.SnapshotUpdater).BodiesSnapshot()
+	bodiesSnapshot := db.(snapshotdb.SnapshotUpdater).BodiesSnapshot()
 	if bodiesSnapshot == nil {
 		log.Info("bodiesSnapshot is empty")
 		return nil
@@ -144,7 +146,7 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 		return err
 	}
 	defer blockBodySnapshotReadTX.Rollback()
-	ethtxSnapshotReadTX, err := blockBodySnapshotReadTX.Cursor(dbutils.EthTx)
+	ethtxSnapshotReadTX, err := blockBodySnapshotReadTX.Cursor(kv.EthTx)
 	if err != nil {
 		return err
 	}
@@ -154,12 +156,12 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 	}
 	rewriteId := binary.BigEndian.Uint64(lastEthTXSnapshotKey) + 1
 
-	writeTX := tx.(kv.DBTX).DBTX()
-	blockBodyWriteCursor, err := writeTX.RwCursor(dbutils.BlockBodyPrefix)
+	writeTX := tx.(snapshotdb.DBTX).DBTX()
+	blockBodyWriteCursor, err := writeTX.RwCursor(kv.BlockBody)
 	if err != nil {
 		return fmt.Errorf("get bodies cursor %w", err)
 	}
-	ethTXWriteCursor, err := writeTX.RwCursor(dbutils.EthTx)
+	ethTXWriteCursor, err := writeTX.RwCursor(kv.EthTx)
 	if err != nil {
 		return fmt.Errorf("get ethtx cursor %w", err)
 	}
@@ -173,7 +175,7 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 		if binary.BigEndian.Uint64(k) > newSnapshot {
 			return false, nil
 		}
-		has, err := blockBodySnapshotReadTX.Has(dbutils.BlockBodyPrefix, k)
+		has, err := blockBodySnapshotReadTX.Has(kv.BlockBody, k)
 		if err != nil {
 			return false, err
 		}
@@ -245,12 +247,12 @@ func RemoveBlocksData(db ethdb.RoKV, tx ethdb.RwTx, newSnapshot uint64) (err err
 	if err != nil {
 		return err
 	}
-	err = bodiesCollector.Load("bodies", writeTX, dbutils.BlockBodyPrefix, etl.IdentityLoadFunc, etl.TransformArgs{})
+	err = bodiesCollector.Load("bodies", writeTX, kv.BlockBody, etl.IdentityLoadFunc, etl.TransformArgs{})
 	if err != nil {
 		return err
 	}
 
-	err = ethTXCollector.Load("ethtx", writeTX, dbutils.EthTx, etl.IdentityLoadFunc, etl.TransformArgs{})
+	err = ethTXCollector.Load("ethtx", writeTX, kv.EthTx, etl.IdentityLoadFunc, etl.TransformArgs{})
 	if err != nil {
 		return err
 	}

@@ -22,21 +22,21 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // Tests that positional lookup metadata can be stored and retrieved.
 func TestLookupStorage(t *testing.T) {
 	tests := []struct {
 		name                 string
-		writeTxLookupEntries func(ethdb.Putter, *types.Block)
+		writeTxLookupEntries func(kv.Putter, *types.Block)
 	}{
 		{
 			"DatabaseV6",
-			func(db ethdb.Putter, block *types.Block) {
+			func(db kv.Putter, block *types.Block) {
 				WriteTxLookupEntries(db, block)
 			},
 		},
@@ -45,7 +45,7 @@ func TestLookupStorage(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, tx := kv.NewTestTx(t)
+			_, tx := memdb.NewTestTx(t)
 
 			tx1 := types.NewTransaction(1, common.BytesToAddress([]byte{0x11}), uint256.NewInt(111), 1111, uint256.NewInt(11111), []byte{0x11, 0x11, 0x11})
 			tx2 := types.NewTransaction(2, common.BytesToAddress([]byte{0x22}), uint256.NewInt(222), 2222, uint256.NewInt(22222), []byte{0x22, 0x22, 0x22})
