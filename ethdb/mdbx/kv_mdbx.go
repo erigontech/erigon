@@ -714,13 +714,12 @@ func (tx *MdbxTx) Commit() error {
 	}
 
 	if tx.db.opts.label == kv.ChainDB {
-		kv.DbCommitPreparation.Update(float64(latency.Preparation))
-		kv.DbCommitGc.Update(float64(latency.GC))
-		kv.DbCommitAudit.Update(float64(latency.Audit))
-		kv.DbCommitWrite.Update(float64(latency.Write))
-		kv.DbCommitSync.Update(float64(latency.Sync))
-		kv.DbCommitEnding.Update(float64(latency.Ending))
-		kv.DbCommitBigBatchTimer.Update(float64(latency.Whole))
+		kv.DbCommitPreparation.Update(latency.Preparation.Seconds())
+		kv.DbCommitGc.Update(latency.GC.Seconds())
+		kv.DbCommitAudit.Update(latency.Audit.Seconds())
+		kv.DbCommitWrite.Update(latency.Write.Seconds())
+		kv.DbCommitSync.Update(latency.Sync.Seconds())
+		kv.DbCommitEnding.Update(latency.Ending.Seconds())
 	}
 
 	if latency.Whole > slowTx {
