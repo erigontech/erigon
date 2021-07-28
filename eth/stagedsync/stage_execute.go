@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
@@ -26,13 +27,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
 
-var stageExecutionGauge = metrics.NewRegisteredGauge("stage/execution", nil)
+var stageExecutionGauge = metrics2.GetOrCreateCounter("stage/execution")
 
 const (
 	logInterval = 30 * time.Second
@@ -327,7 +327,7 @@ Loop:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
 			gas = 0
 			tx.CollectMetrics()
-			stageExecutionGauge.Update(int64(blockNum))
+			stageExecutionGauge.Set(blockNum)
 		}
 	}
 
