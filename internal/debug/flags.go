@@ -18,7 +18,6 @@ package debug
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -127,7 +126,7 @@ var DeprecatedFlags = []cli.Flag{
 //var glogger *log.GlogHandler
 
 func init() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	//glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	//glogger.Verbosity(log.LvlInfo)
 	//log.Root().SetHandler(glogger)
@@ -157,7 +156,7 @@ func SetupCobra(cmd *cobra.Command) error {
 		_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
 		log.PrintOrigins(dbg)
 	*/
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
 	if err != nil {
@@ -238,14 +237,15 @@ func SetupCobra(cmd *cobra.Command) error {
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
-	var ostream log.Handler
-	output := io.Writer(os.Stderr)
+	//var ostream log.Handler
+	//output := io.Writer(os.Stderr)
 	if ctx.GlobalBool(logjsonFlag.Name) {
-		ostream = log.StreamHandler(output, log.JsonFormat())
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.JsonFormat())))
+		//ostream = log.StreamHandler(output, log.JsonFormat())
 	} else {
-		ostream = log.StreamHandler(output, log.TerminalFormat())
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	}
-	log.Root().SetHandler(ostream)
+	//log.Root().SetHandler(ostream)
 
 	/*
 		glogger.SetHandler(ostream)

@@ -394,20 +394,21 @@ func initLogging() {
 	if err := json.Unmarshal([]byte(confEnv), &conf); err != nil {
 		return
 	}
-	var writer = os.Stderr
-	if conf.Node.LogFile != "" {
-		logWriter, err := os.Create(conf.Node.LogFile)
-		if err != nil {
-			return
-		}
-		writer = logWriter
-	}
+	//var writer = os.Stderr
+	//if conf.Node.LogFile != "" {
+	//logWriter, err := os.Create(conf.Node.LogFile)
+	//if err != nil {
+	//	return
+	//}
+	//writer = logWriter
+	//}
 	var verbosity = log.LvlInfo
 	if conf.Node.LogVerbosity <= log.LvlTrace && conf.Node.LogVerbosity >= log.LvlCrit {
 		verbosity = conf.Node.LogVerbosity
 	}
 
-	log.Root().SetHandler(log.LvlFilterHandler(verbosity, log.StreamHandler(writer, log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(verbosity, log.StderrHandler))
+
 	// Reinitialize the logger
 	//glogger = log.NewGlogHandler(log.StreamHandler(writer, log.TerminalFormat()))
 	//glogger.Verbosity(verbosity)

@@ -36,14 +36,13 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/simulations/adapters"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/mattn/go-colorable"
 )
 
 func TestMain(m *testing.M) {
 	loglevel := flag.Int("loglevel", 2, "verbosity of logs")
 	flag.Parse()
 	//log.PrintOrigins(true)
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*loglevel), log.StreamHandler(colorable.NewColorableStderr(), log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*loglevel), log.StderrHandler))
 	os.Exit(m.Run())
 }
 

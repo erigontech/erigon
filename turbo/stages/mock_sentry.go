@@ -358,7 +358,7 @@ func Mock(t *testing.T) *MockSentry {
 }
 
 func (ms *MockSentry) EnableLogs() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	ms.t.Cleanup(func() {
 		log.Root().SetHandler(log.Root().GetHandler())
 	})

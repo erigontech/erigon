@@ -2269,7 +2269,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 func main() {
 	flag.Parse()
 
-	log.SetupDefaultTerminalLogger(log.Lvl(*verbosity), "", "")
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*verbosity), log.StderrHandler))
 
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)

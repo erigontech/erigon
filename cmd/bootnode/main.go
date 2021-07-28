@@ -54,7 +54,7 @@ func main() {
 	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	//glogger.Verbosity(log.Lvl(*verbosity))
 	//glogger.Vmodule(*vmodule)
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*verbosity), log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*verbosity), log.StderrHandler))
 
 	natm, err := nat.Parse(*natdesc)
 	if err != nil {
