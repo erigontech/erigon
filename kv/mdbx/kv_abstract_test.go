@@ -19,6 +19,7 @@ package mdbx_test
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -35,6 +36,10 @@ import (
 )
 
 func TestSequence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	writeDBs, _ := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
 	})
@@ -76,6 +81,10 @@ func TestSequence(t *testing.T) {
 }
 
 func TestManagedTx(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	logger := log.New()
 	defaultConfig := kv.ChaindataTablesCfg
 	defer func() {
