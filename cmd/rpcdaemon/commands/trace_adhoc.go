@@ -922,13 +922,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			}
 		}
 		vmConfig := vm.Config{}
-		if txIndexNeeded == -1 || txIndex == txIndexNeeded {
+		if traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded) {
 			var ot OeTracer
 			ot.compat = api.compatibility
-			if traceTypeTrace {
-				ot.r = traceResult
-				ot.traceAddr = []int{}
-			}
+			ot.r = traceResult
+			ot.traceAddr = []int{}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
 		}
