@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -32,14 +33,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
 
 var (
-	blockExecutionTimer     = metrics.NewRegisteredTimer("chain/execution", nil)
-	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
+	blockExecutionTimer     = metrics2.GetOrCreateSummary("chain_execution")
+	blockReorgInvalidatedTx = metrics2.GetOrCreateCounter("chain_reorg_invalidTx")
 )
 
 const (
@@ -99,7 +99,7 @@ func ExecuteBlockEphemerally(
 	chainReader consensus.ChainHeaderReader,
 	checkTEVM func(codeHash common.Hash) (bool, error),
 ) (types.Receipts, error) {
-	defer blockExecutionTimer.UpdateSince(time.Now())
+	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
