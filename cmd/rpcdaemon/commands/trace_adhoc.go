@@ -60,10 +60,11 @@ type TraceCallParam struct {
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
-	Output    hexutil.Bytes                        `json:"output"`
-	StateDiff map[common.Address]*StateDiffAccount `json:"stateDiff"`
-	Trace     []*ParityTrace                       `json:"trace"`
-	VmTrace   *TraceCallVmTrace                    `json:"vmTrace"`
+	Output          hexutil.Bytes                        `json:"output"`
+	StateDiff       map[common.Address]*StateDiffAccount `json:"stateDiff"`
+	Trace           []*ParityTrace                       `json:"trace"`
+	VmTrace         *TraceCallVmTrace                    `json:"vmTrace"`
+	TransactionHash *common.Hash                         `json:"transactionHash,omitempty"`
 }
 
 // StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
@@ -538,7 +539,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -622,7 +623,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -645,12 +646,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 			tr.VmTrace = trace.VmTrace
 		}
 		result[i] = tr
-		for _, pt := range tr.Trace {
-			txpos := uint64(i)
-			txhash := block.Transactions()[i].Hash()
-			pt.TransactionHash = &txhash
-			pt.TransactionPosition = &txpos
-		}
+		txhash := block.Transactions()[i].Hash()
+		tr.TransactionHash = &txhash
 	}
 
 	return result, nil
@@ -925,13 +922,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			}
 		}
 		vmConfig := vm.Config{}
-		if txIndexNeeded == -1 || txIndex == txIndexNeeded {
+		if traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded) {
 			var ot OeTracer
 			ot.compat = api.compatibility
-			if traceTypeTrace {
-				ot.r = traceResult
-				ot.traceAddr = []int{}
-			}
+			ot.r = traceResult
+			ot.traceAddr = []int{}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
 		}
