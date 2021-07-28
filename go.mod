@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/RoaringBitmap/roaring v0.6.0
 	github.com/VictoriaMetrics/fastcache v1.6.0
+	github.com/VictoriaMetrics/metrics v1.17.3 // indirect
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
 	github.com/aws/aws-sdk-go v1.34.21

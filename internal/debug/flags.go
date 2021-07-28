@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/log/v3"
@@ -319,7 +320,9 @@ func StartPProf(address string, withMetrics bool) {
 	// Hook go-metrics into expvar on any /debug/metrics request, load all vars
 	// from the registry into expvar, and execute regular expvar handler.
 	if withMetrics {
-		exp.Exp(metrics.DefaultRegistry, http.NewServeMux())
+		http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, req *http.Request) {
+			metrics2.WritePrometheus(w, true)
+		})
 	}
 	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")

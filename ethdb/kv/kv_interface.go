@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon/metrics"
+	"github.com/VictoriaMetrics/metrics"
 )
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
@@ -13,52 +13,52 @@ var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
 	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ChaindataTables")
 
-	DbSize    = metrics.GetOrRegisterGauge("db/size", metrics.DefaultRegistry)    //nolint
-	TxLimit   = metrics.GetOrRegisterGauge("tx/limit", metrics.DefaultRegistry)   //nolint
-	TxSpill   = metrics.GetOrRegisterGauge("tx/spill", metrics.DefaultRegistry)   //nolint
-	TxUnspill = metrics.GetOrRegisterGauge("tx/unspill", metrics.DefaultRegistry) //nolint
-	TxDirty   = metrics.GetOrRegisterGauge("tx/dirty", metrics.DefaultRegistry)   //nolint
+	DbSize    = metrics.NewCounter("db_size")    //nolint
+	TxLimit   = metrics.NewCounter("tx_limit")   //nolint
+	TxSpill   = metrics.NewCounter("tx_spill")   //nolint
+	TxUnspill = metrics.NewCounter("tx_unspill") //nolint
+	TxDirty   = metrics.NewCounter("tx_dirty")   //nolint
 
-	DbCommitPreparation = metrics.GetOrRegisterTimer("db/commit/preparation", metrics.DefaultRegistry) //nolint
-	DbCommitGc          = metrics.GetOrRegisterTimer("db/commit/gc", metrics.DefaultRegistry)          //nolint
-	DbCommitAudit       = metrics.GetOrRegisterTimer("db/commit/audit", metrics.DefaultRegistry)       //nolint
-	DbCommitWrite       = metrics.GetOrRegisterTimer("db/commit/write", metrics.DefaultRegistry)       //nolint
-	DbCommitSync        = metrics.GetOrRegisterTimer("db/commit/sync", metrics.DefaultRegistry)        //nolint
-	DbCommitEnding      = metrics.GetOrRegisterTimer("db/commit/ending", metrics.DefaultRegistry)      //nolint
+	DbCommitPreparation = metrics.GetOrCreateHistogram("db_commit_preparation") //nolint
+	DbCommitGc          = metrics.GetOrCreateHistogram("db_commit_gc")          //nolint
+	DbCommitAudit       = metrics.GetOrCreateHistogram("db_commit_audit")       //nolint
+	DbCommitWrite       = metrics.GetOrCreateHistogram("db_commit_write")       //nolint
+	DbCommitSync        = metrics.GetOrCreateHistogram("db_commit_sync")        //nolint
+	DbCommitEnding      = metrics.GetOrCreateHistogram("db_commit_ending")      //nolint
 
-	DbPgopsNewly   = metrics.GetOrRegisterGauge("db/pgops/newly", metrics.DefaultRegistry)   //nolint
-	DbPgopsCow     = metrics.GetOrRegisterGauge("db/pgops/cow", metrics.DefaultRegistry)     //nolint
-	DbPgopsClone   = metrics.GetOrRegisterGauge("db/pgops/clone", metrics.DefaultRegistry)   //nolint
-	DbPgopsSplit   = metrics.GetOrRegisterGauge("db/pgops/split", metrics.DefaultRegistry)   //nolint
-	DbPgopsMerge   = metrics.GetOrRegisterGauge("db/pgops/merge", metrics.DefaultRegistry)   //nolint
-	DbPgopsSpill   = metrics.GetOrRegisterGauge("db/pgops/spill", metrics.DefaultRegistry)   //nolint
-	DbPgopsUnspill = metrics.GetOrRegisterGauge("db/pgops/unspill", metrics.DefaultRegistry) //nolint
-	DbPgopsWops    = metrics.GetOrRegisterGauge("db/pgops/wops", metrics.DefaultRegistry)    //nolint
+	DbPgopsNewly   = metrics.NewCounter("db_pgops_newly")   //nolint
+	DbPgopsCow     = metrics.NewCounter("db_pgops_cow")     //nolint
+	DbPgopsClone   = metrics.NewCounter("db_pgops_clone")   //nolint
+	DbPgopsSplit   = metrics.NewCounter("db_pgops_split")   //nolint
+	DbPgopsMerge   = metrics.NewCounter("db_pgops_merge")   //nolint
+	DbPgopsSpill   = metrics.NewCounter("db_pgops_spill")   //nolint
+	DbPgopsUnspill = metrics.NewCounter("db_pgops_unspill") //nolint
+	DbPgopsWops    = metrics.NewCounter("db_pgops_wops")    //nolint
 
-	DbCommitBigBatchTimer = metrics.NewRegisteredTimer("db/commit/big_batch", nil)
+	DbCommitBigBatchTimer = metrics.GetOrCreateHistogram("db_commit_big_batch")
 
-	GcLeafMetric     = metrics.GetOrRegisterGauge("db/gc/leaf", metrics.DefaultRegistry)     //nolint
-	GcOverflowMetric = metrics.GetOrRegisterGauge("db/gc/overflow", metrics.DefaultRegistry) //nolint
-	GcPagesMetric    = metrics.GetOrRegisterGauge("db/gc/pages", metrics.DefaultRegistry)    //nolint
+	GcLeafMetric     = metrics.NewCounter("db_gc_leaf")     //nolint
+	GcOverflowMetric = metrics.NewCounter("db_gc_overflow") //nolint
+	GcPagesMetric    = metrics.NewCounter("db_gc_pages")    //nolint
 
-	TableScsLeaf      = metrics.GetOrRegisterGauge("table/scs/leaf", metrics.DefaultRegistry)      //nolint
-	TableScsBranch    = metrics.GetOrRegisterGauge("table/scs/branch", metrics.DefaultRegistry)    //nolint
-	TableScsEntries   = metrics.GetOrRegisterGauge("table/scs/entries", metrics.DefaultRegistry)   //nolint
-	TableScsSize      = metrics.GetOrRegisterGauge("table/scs/size", metrics.DefaultRegistry)      //nolint
-	TableStateLeaf    = metrics.GetOrRegisterGauge("table/state/leaf", metrics.DefaultRegistry)    //nolint
-	TableStateBranch  = metrics.GetOrRegisterGauge("table/state/branch", metrics.DefaultRegistry)  //nolint
-	TableStateEntries = metrics.GetOrRegisterGauge("table/state/entries", metrics.DefaultRegistry) //nolint
-	TableStateSize    = metrics.GetOrRegisterGauge("table/state/size", metrics.DefaultRegistry)    //nolint
-	TableLogLeaf      = metrics.GetOrRegisterGauge("table/log/leaf", metrics.DefaultRegistry)      //nolint
-	TableLogBranch    = metrics.GetOrRegisterGauge("table/log/branch", metrics.DefaultRegistry)    //nolint
-	TableLogOverflow  = metrics.GetOrRegisterGauge("table/log/overflow", metrics.DefaultRegistry)  //nolint
-	TableLogEntries   = metrics.GetOrRegisterGauge("table/log/entries", metrics.DefaultRegistry)   //nolint
-	TableLogSize      = metrics.GetOrRegisterGauge("table/log/size", metrics.DefaultRegistry)      //nolint
-	TableTxLeaf       = metrics.GetOrRegisterGauge("table/tx/leaf", metrics.DefaultRegistry)       //nolint
-	TableTxBranch     = metrics.GetOrRegisterGauge("table/tx/branch", metrics.DefaultRegistry)     //nolint
-	TableTxOverflow   = metrics.GetOrRegisterGauge("table/tx/overflow", metrics.DefaultRegistry)   //nolint
-	TableTxEntries    = metrics.GetOrRegisterGauge("table/tx/entries", metrics.DefaultRegistry)    //nolint
-	TableTxSize       = metrics.GetOrRegisterGauge("table/tx/size", metrics.DefaultRegistry)       //nolint
+	TableScsLeaf      = metrics.NewCounter("table_scs_leaf")      //nolint
+	TableScsBranch    = metrics.NewCounter("table_scs_branch")    //nolint
+	TableScsEntries   = metrics.NewCounter("table_scs_entries")   //nolint
+	TableScsSize      = metrics.NewCounter("table_scs_size")      //nolint
+	TableStateLeaf    = metrics.NewCounter("table_state_leaf")    //nolint
+	TableStateBranch  = metrics.NewCounter("table_state_branch")  //nolint
+	TableStateEntries = metrics.NewCounter("table_state_entries") //nolint
+	TableStateSize    = metrics.NewCounter("table_state_size")    //nolint
+	TableLogLeaf      = metrics.NewCounter("table_log_leaf")      //nolint
+	TableLogBranch    = metrics.NewCounter("table_log_branch")    //nolint
+	TableLogOverflow  = metrics.NewCounter("table_log_overflow")  //nolint
+	TableLogEntries   = metrics.NewCounter("table_log_entries")   //nolint
+	TableLogSize      = metrics.NewCounter("table_log_size")      //nolint
+	TableTxLeaf       = metrics.NewCounter("table_tx_leaf")       //nolint
+	TableTxBranch     = metrics.NewCounter("table_tx_branch")     //nolint
+	TableTxOverflow   = metrics.NewCounter("table_tx_overflow")   //nolint
+	TableTxEntries    = metrics.NewCounter("table_tx_entries")    //nolint
+	TableTxSize       = metrics.NewCounter("table_tx_size")       //nolint
 )
 
 type DBVerbosityLvl int8
