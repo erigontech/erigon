@@ -78,6 +78,7 @@ type Config = ethconfig.Config
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	config *ethconfig.Config
+	logger log.Logger
 
 	// Handlers
 	txPool *core.TxPool
@@ -120,8 +121,7 @@ type Ethereum struct {
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
-	logger := log.New()
+func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -183,6 +183,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	backend := &Ethereum{
 		config:               config,
+		logger:               logger,
 		chainKV:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
@@ -429,6 +430,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	backend.stagedSync, err = stages2.NewStagedSync2(
 		backend.downloadCtx,
+		backend.logger,
 		backend.chainKV,
 		*config,
 		backend.downloadServer,
@@ -675,7 +677,7 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go Loop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
+	go Loop(s.downloadCtx, s.logger, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 	return nil
 }
 
@@ -718,6 +720,7 @@ func (s *Ethereum) Stop() error {
 //Deprecated - use stages.StageLoop
 func Loop(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB, sync *stagedsync.Sync,
 	controlServer *download.ControlServerImpl,
 	notifications *stagedsync.Notifications,
@@ -727,6 +730,7 @@ func Loop(
 	defer debug.LogPanic()
 	stages2.StageLoop(
 		ctx,
+		logger,
 		db,
 		sync,
 		controlServer.Hd,

@@ -940,7 +940,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync2(context.Background(), db, cfg,
+	sync, err := stages2.NewStagedSync2(context.Background(), logger, db, cfg,
 		downloadServer,
 		tmpdir,
 		txPool,

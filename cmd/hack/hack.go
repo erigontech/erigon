@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	mdbx "github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
@@ -49,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 var (
@@ -320,29 +319,30 @@ func bucketStats(chaindata string) error {
 		ethDb.Close()
 		return err1
 	}
-
-	fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
-	switch db := ethDb.(type) {
-	case *mdbx.MdbxKV:
-		type MdbxStat interface {
-			BucketStat(name string) (*mdbx.Stat, error)
-		}
-
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			for _, bucket := range bucketList {
-				bs, statErr := tx.(MdbxStat).BucketStat(bucket)
-				tool.Check(statErr)
-				fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
-					bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+	/*
+		fmt.Printf(",BranchPageN,LeafPageN,OverflowN,Entries\n")
+		switch db := ethDb.(type) {
+		case *mdbx.MdbxKV:
+			type MdbxStat interface {
+				BucketStat(name string) (*mdbx.Stat, error)
 			}
-			bs, statErr := tx.(MdbxStat).BucketStat("freelist")
-			tool.Check(statErr)
-			fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
-			return nil
-		}); err != nil {
-			panic(err)
+
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				for _, bucket := range bucketList {
+					bs, statErr := tx.(MdbxStat).BucketStat(bucket)
+					tool.Check(statErr)
+					fmt.Printf("%s,%d,%d,%d,%d\n", bucket,
+						bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+				}
+				bs, statErr := tx.(MdbxStat).BucketStat("freelist")
+				tool.Check(statErr)
+				fmt.Printf("%s,%d,%d,%d,%d\n", "freelist", bs.BranchPages, bs.LeafPages, bs.OverflowPages, bs.Entries)
+				return nil
+			}); err != nil {
+				panic(err)
+			}
 		}
-	}
+	*/
 	return nil
 }
 

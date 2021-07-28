@@ -28,6 +28,7 @@ import (
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
@@ -50,7 +51,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
+		if err := StageLoopStep(ctx, logger, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -80,6 +81,7 @@ func StageLoop(
 
 func StageLoopStep(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
@@ -194,6 +196,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 
 func NewStagedSync2(
 	ctx context.Context,
+	logger log.Logger,
 	db kv.RwDB,
 	cfg ethconfig.Config,
 	controlServer *download.ControlServerImpl,
@@ -219,7 +222,7 @@ func NewStagedSync2(
 				cfg.BatchSize,
 			),
 			stagedsync.StageBlockHashesCfg(db, tmpdir),
-			stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator),
+			stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator, logger),
 			stagedsync.StageBodiesCfg(
 				db,
 				controlServer.Bd,
@@ -267,7 +270,7 @@ func NewStagedSync2(
 				}
 				txPoolServer.TxFetcher.Start()
 			}),
-			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator),
+			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger),
 			false, /* test */
 		),
 		stagedsync.DefaultUnwindOrder,

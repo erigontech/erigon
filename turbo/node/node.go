@@ -91,16 +91,17 @@ func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *node.Config) *ethconfig.Co
 func New(
 	nodeConfig *node.Config,
 	ethConfig *ethconfig.Config,
+	logger log.Logger,
 ) *ErigonNode {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node := makeConfigNode(nodeConfig)
-	ethereum := RegisterEthService(node, ethConfig)
+	ethereum := RegisterEthService(node, ethConfig, logger)
 	return &ErigonNode{stack: node, backend: ethereum}
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg)
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) *eth.Ethereum {
+	backend, err := eth.New(stack, cfg, logger)
 	if err != nil {
 		panic(err)
 	}

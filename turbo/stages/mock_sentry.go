@@ -47,6 +47,7 @@ import (
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx             context.Context
+	Log             log.Logger
 	t               *testing.T
 	cancel          context.CancelFunc
 	DB              kv.RwDB
@@ -143,7 +144,6 @@ func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.Pr
 }
 
 func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine) *MockSentry {
-	logger := log.New()
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -152,6 +152,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	mock := &MockSentry{
 		t:           t,
+		Log:         log.New(),
 		tmpdir:      tmpdir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
@@ -242,7 +243,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				cfg.BatchSize,
 			),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil, logger),
+			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil, mock.Log),
 			stagedsync.StageBodiesCfg(
 				mock.DB,
 				mock.downloader.Bd,
@@ -296,7 +297,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.StreamWg.Wait()
 				mock.TxPoolP2PServer.TxFetcher.Start()
 			}),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil, logger),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil, mock.Log),
 			true, /* test */
 		),
 		stagedsync.DefaultUnwindOrder,
@@ -413,7 +414,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if err := StageLoopStep(ms.Ctx, ms.Log, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	// Check if the latest header was imported or rolled back
