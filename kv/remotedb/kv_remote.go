@@ -33,7 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
@@ -127,12 +127,12 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 			// load peer cert/key, ca cert
 			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 			if err != nil {
-				opts.log.Errorf("load peer cert/key: %s", err)
+				opts.log.Error("load peer cert/key: %s", err)
 				return nil, err
 			}
 			caCert, err := ioutil.ReadFile(caCert)
 			if err != nil {
-				opts.log.Errorf("read ca cert: %s", err)
+				opts.log.Error("read ca cert: %s", err)
 				return nil, err
 			}
 			caCertPool := x509.NewCertPool()
@@ -205,15 +205,15 @@ func (db *RemoteKV) GrpcConn() *grpc.ClientConn {
 func (db *RemoteKV) EnsureVersionCompatibility() bool {
 	versionReply, err := db.remoteKV.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
-		db.log.Errorf("getting Version", "error", err)
+		db.log.Error("getting Version", "err", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(db.opts.version, versionReply) {
-		db.log.Errorf("incompatible interface versions: client=%s", db.opts.version.String(),
+		db.log.Error("incompatible interface versions", "client", db.opts.version.String(),
 			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 		return false
 	}
-	db.log.Infof("interfaces compatible: client=%s", db.opts.version.String(),
+	db.log.Info("interfaces compatible", "client", db.opts.version.String(),
 		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
 	return true
 }
@@ -221,9 +221,9 @@ func (db *RemoteKV) EnsureVersionCompatibility() bool {
 func (db *RemoteKV) Close() {
 	if db.conn != nil {
 		if err := db.conn.Close(); err != nil {
-			db.log.Warnf("close remote DB: %s", err)
+			db.log.Warn("close remote DB", "err", err)
 		} else {
-			db.log.Infof("remote database closed")
+			db.log.Info("remote database closed")
 		}
 		db.conn = nil
 	}
@@ -598,12 +598,12 @@ func (tx *remoteTx) closeGrpcStream() {
 		err := tx.stream.CloseSend()
 		if err != nil {
 			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
-				tx.db.log.Warnf("couldn't send msg CloseSend to server: %s", err)
+				tx.db.log.Warn("couldn't send msg CloseSend to server", "err", err)
 			}
 		} else {
 			_, err = tx.stream.Recv()
 			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
-				tx.db.log.Warnf("received unexpected error from server after CloseSend: %s", err)
+				tx.db.log.Warn("received unexpected error from server after CloseSend", "err", err)
 			}
 		}
 	}

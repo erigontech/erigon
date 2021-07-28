@@ -26,13 +26,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFetch(t *testing.T) {
-	logger := log.NewTest(t)
+	logger := log.New()
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 
@@ -68,7 +68,7 @@ func TestFetch(t *testing.T) {
 }
 
 func TestSendTxPropagate(t *testing.T) {
-	logger := log.NewTest(t)
+	logger := log.New()
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()

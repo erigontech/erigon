@@ -30,7 +30,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
@@ -288,9 +288,9 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 
 	if !opts.inMem {
 		if staleReaders, err := db.env.ReaderCheck(); err != nil {
-			db.log.Errorf("ReaderCheck: %s", err)
+			db.log.Error("ReaderCheck", "err", err)
 		} else if staleReaders > 0 {
-			db.log.Infof("[db] cleared reader slots from dead processes: amount=%s", staleReaders)
+			db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
 		}
 	}
 	return db, nil
@@ -326,10 +326,10 @@ func (db *MdbxKV) Close() {
 
 	if db.opts.inMem {
 		if err := os.RemoveAll(db.opts.path); err != nil {
-			db.log.Warnf("remove in-mem db file: %s", err)
+			db.log.Warn("remove in-mem db file", "err", err)
 		}
 	} else {
-		db.log.Infof("database closed (MDBX)")
+		db.log.Info("database closed (MDBX)")
 	}
 }
 

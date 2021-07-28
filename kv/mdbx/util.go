@@ -18,7 +18,7 @@ package mdbx
 
 import (
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/log/v3"
 	mdbxbind "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
