@@ -14,7 +14,7 @@ func UpdateMetrics(tx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	stageHeadersGauge.Update(int64(progress))
+	stageHeadersGauge.Set(progress)
 
 	progress, err = stages.GetStageProgress(tx, stages.Bodies)
 	if err != nil {
