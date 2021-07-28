@@ -19,6 +19,7 @@ package mdbx_test
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -27,7 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -35,6 +36,10 @@ import (
 )
 
 func TestSequence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	writeDBs, _ := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
 	})
@@ -76,7 +81,11 @@ func TestSequence(t *testing.T) {
 }
 
 func TestManagedTx(t *testing.T) {
-	logger := log.NewTest(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
+	logger := log.New()
 	defaultConfig := kv.ChaindataTablesCfg
 	defer func() {
 		kv.ChaindataTablesCfg = defaultConfig
@@ -201,7 +210,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	f2 := func() {
 		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
 		if err := grpcServer.Serve(conn); err != nil {
-			logger.Errorf("private RPC server fail: %s", err)
+			logger.Error("private RPC server fail", "err", err)
 		}
 	}
 	go f2()

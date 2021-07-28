@@ -22,7 +22,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 )
 
@@ -47,7 +47,7 @@ func NewSend(ctx context.Context, sentryClients []SentryClient, pool Pool, logge
 		ctx:           ctx,
 		pool:          pool,
 		sentryClients: sentryClients,
-		logger:        logger.Named("[TxPool.Send]"),
+		logger:        logger.New("at", "TxPool.Send"),
 	}
 }
 
@@ -102,7 +102,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req65, &grpc.EmptyCallOption{})
 				if err != nil {
-					f.logger.Warnf("sentry response: %s", err)
+					f.logger.Warn("sentry response", "err", err)
 				}
 				avgPeersPerSent65 += len(peers.Peers)
 
@@ -115,7 +115,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 				}
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
-					f.logger.Warnf("sentry response: %s", err)
+					f.logger.Warn("sentry response", "err", err)
 				}
 				avgPeersPerSent66 += len(peers.Peers)
 			}
@@ -161,7 +161,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 				}
 
 				if _, err := sentryClient.SendMessageToRandomPeers(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-					f.logger.Warnf("sentry response: %s", err)
+					f.logger.Warn("sentry response", "err", err)
 				}
 
 			case direct.ETH66:
@@ -175,7 +175,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 					}
 				}
 				if _, err := sentryClient.SendMessageToRandomPeers(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-					f.logger.Warnf("sentry response: %s", err)
+					f.logger.Warn("sentry response", "err", err)
 				}
 			}
 		}
@@ -217,7 +217,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 					}
 
 					if _, err := sentryClient.SendMessageById(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-						f.logger.Warnf("sentry response: %s", err)
+						f.logger.Warn("sentry response", "err", err)
 					}
 
 				case direct.ETH66:
@@ -229,7 +229,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 						},
 					}
 					if _, err := sentryClient.SendMessageById(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-						f.logger.Warnf("sentry response: %s", err)
+						f.logger.Warn("sentry response", "err", err)
 					}
 				}
 			}

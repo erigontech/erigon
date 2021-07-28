@@ -22,7 +22,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func New() kv.RwDB {

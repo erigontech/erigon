@@ -7,6 +7,7 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/holiman/uint256 v1.2.0
 	github.com/kr/pretty v0.2.1 // indirect
+	github.com/ledgerwatch/log/v3 v3.1.2
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/matryer/moq v0.2.3
 	github.com/pkg/errors v0.9.1 // indirect
