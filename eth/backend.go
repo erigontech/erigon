@@ -677,7 +677,13 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go Loop(s.downloadCtx, s.logger, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
+	go stages2.StageLoop(
+		s.downloadCtx, s.logger, s.chainKV,
+		s.stagedSync, s.downloadServer.Hd,
+		s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop,
+		s.config.SyncLoopThrottle,
+	)
+
 	return nil
 }
 
@@ -715,28 +721,4 @@ func (s *Ethereum) Stop() error {
 		<-s.waitForMiningStop
 	}
 	return nil
-}
-
-//Deprecated - use stages.StageLoop
-func Loop(
-	ctx context.Context,
-	logger log.Logger,
-	db kv.RwDB, sync *stagedsync.Sync,
-	controlServer *download.ControlServerImpl,
-	notifications *stagedsync.Notifications,
-	waitForDone chan struct{},
-	loopMinTime time.Duration,
-) {
-	defer debug.LogPanic()
-	stages2.StageLoop(
-		ctx,
-		logger,
-		db,
-		sync,
-		controlServer.Hd,
-		notifications,
-		controlServer.UpdateHead,
-		waitForDone,
-		loopMinTime,
-	)
 }
