@@ -24,7 +24,6 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
-	"time"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/metrics"
@@ -96,20 +95,6 @@ var (
 		Name:  "trace",
 		Usage: "Write execution trace to the given file",
 	}
-	// (Deprecated April 2020)
-	legacyMemprofilerateFlag = cli.IntFlag{
-		Name:  "memprofilerate",
-		Usage: "Turn on memory profiling with the given rate (deprecated, use --pprof.memprofilerate)",
-		Value: runtime.MemProfileRate,
-	}
-	legacyBlockprofilerateFlag = cli.IntFlag{
-		Name:  "blockprofilerate",
-		Usage: "Turn on block profiling with the given rate (deprecated, use --pprof.blockprofilerate)",
-	}
-	legacyCpuprofileFlag = cli.StringFlag{
-		Name:  "cpuprofile",
-		Usage: "Write CPU profile to the given file (deprecated, use --pprof.cpuprofile)",
-	}
 )
 
 // Flags holds all command-line flags required for debugging.
@@ -117,11 +102,6 @@ var Flags = []cli.Flag{
 	verbosityFlag, logjsonFlag, vmoduleFlag, backtraceAtFlag, debugFlag,
 	pprofFlag, pprofAddrFlag, pprofPortFlag, memprofilerateFlag,
 	blockprofilerateFlag, cpuprofileFlag, traceFlag,
-}
-
-var DeprecatedFlags = []cli.Flag{
-	legacyMemprofilerateFlag,
-	legacyBlockprofilerateFlag, legacyCpuprofileFlag,
 }
 
 //var glogger *log.GlogHandler
@@ -218,10 +198,6 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
-	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(10 * time.Second) // Start system runtime metrics collection
-	}
-
 	if metrics.Enabled && metricsAddr != "" {
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		exp.Setup(address)
@@ -260,16 +236,8 @@ func Setup(ctx *cli.Context) error {
 	*/
 
 	// profiling, tracing
-	if ctx.GlobalIsSet(legacyMemprofilerateFlag.Name) {
-		runtime.MemProfileRate = ctx.GlobalInt(legacyMemprofilerateFlag.Name)
-		log.Warn("The flag --memprofilerate is deprecated and will be removed in the future, please use --pprof.memprofilerate")
-	}
 	runtime.MemProfileRate = ctx.GlobalInt(memprofilerateFlag.Name)
 
-	if ctx.GlobalIsSet(legacyBlockprofilerateFlag.Name) {
-		Handler.SetBlockProfileRate(ctx.GlobalInt(legacyBlockprofilerateFlag.Name))
-		log.Warn("The flag --blockprofilerate is deprecated and will be removed in the future, please use --pprof.blockprofilerate")
-	}
 	Handler.SetBlockProfileRate(ctx.GlobalInt(blockprofilerateFlag.Name))
 
 	if traceFile := ctx.GlobalString(traceFlag.Name); traceFile != "" {
@@ -283,17 +251,6 @@ func Setup(ctx *cli.Context) error {
 			return err
 		}
 	}
-	if cpuFile := ctx.GlobalString(legacyCpuprofileFlag.Name); cpuFile != "" {
-		log.Warn("The flag --cpuprofile is deprecated and will be removed in the future, please use --pprof.cpuprofile")
-		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return err
-		}
-	}
-
-	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(10 * time.Second) // Start system runtime metrics collection
-	}
-
 	pprofEnabled := ctx.GlobalBool(pprofFlag.Name)
 	metricsAddr := ctx.GlobalString(metricsAddrFlag.Name)
 
