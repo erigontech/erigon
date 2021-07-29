@@ -15,9 +15,9 @@ import (
 	"path"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/log/v3"
 )
 

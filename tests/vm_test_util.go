@@ -23,7 +23,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
 	"github.com/ledgerwatch/erigon/common"

@@ -3,9 +3,9 @@ package commands
 import (
 	"path"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/log/v3"

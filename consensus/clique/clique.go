@@ -29,7 +29,7 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"

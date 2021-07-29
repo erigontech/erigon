@@ -4,10 +4,10 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 )
 
 func TestInserter1(t *testing.T) {

@@ -3,8 +3,8 @@ package prune
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/assert"
 )
 

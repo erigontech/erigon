@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/bencode"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"

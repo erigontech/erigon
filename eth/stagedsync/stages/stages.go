@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode

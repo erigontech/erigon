@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 

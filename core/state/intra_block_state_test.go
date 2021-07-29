@@ -30,7 +30,7 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"gopkg.in/check.v1"
 

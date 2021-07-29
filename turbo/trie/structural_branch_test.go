@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/integrity"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
