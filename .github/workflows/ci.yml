@@ -37,5 +37,8 @@ jobs:
           skip-go-installation: true
           skip-pkg-cache: true
           skip-build-cache: true
+      - name: Install deps
+        if: matrix.os == 'windows-2019'
+        run: choco upgrade mingw cmake -y --no-progress
       - run: go test ./...
 
