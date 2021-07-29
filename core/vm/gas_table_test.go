@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -87,7 +87,7 @@ func TestEIP2200(t *testing.T) {
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			address := common.BytesToAddress([]byte("contract"))
-			_, tx := kv.NewTestTx(t)
+			_, tx := memdb.NewTestTx(t)
 
 			s := state.New(state.NewPlainStateReader(tx))
 			s.CreateAccount(address, true)

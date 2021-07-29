@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -69,7 +69,7 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 	return ret, nil
 }
 
-func (api *ErigonImpl) getBlockByRPCNumber(tx ethdb.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
+func (api *ErigonImpl) getBlockByRPCNumber(tx kv.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
 	blockNum, err := getBlockNumber(blockNr, tx)
 	if err != nil {
 		return nil, err

@@ -10,17 +10,17 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 )
 
 type TxPoolCfg struct {
-	db        ethdb.RwKV
+	db        kv.RwDB
 	pool      *core.TxPool
 	startFunc func()
 }
 
-func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool, startFunc func()) TxPoolCfg {
+func StageTxPoolCfg(db kv.RwDB, pool *core.TxPool, startFunc func()) TxPoolCfg {
 	return TxPoolCfg{
 		db:        db,
 		pool:      pool,
@@ -28,7 +28,7 @@ func StageTxPoolCfg(db ethdb.RwKV, pool *core.TxPool, startFunc func()) TxPoolCf
 	}
 }
 
-func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Context) error {
+func SpawnTxPool(s *StageState, tx kv.RwTx, cfg TxPoolCfg, ctx context.Context) error {
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -49,7 +49,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 
 	logPrefix := s.LogPrefix()
 	if to < s.BlockNumber {
-		return fmt.Errorf("%s: to (%d) < from (%d)", logPrefix, to, s.BlockNumber)
+		return fmt.Errorf("to (%d) < from (%d)", to, s.BlockNumber)
 	}
 	if cfg.pool != nil && !cfg.pool.IsStarted() {
 		log.Info(fmt.Sprintf("[%s] Starting tx pool after sync", logPrefix), "from", s.BlockNumber, "to", to)
@@ -59,7 +59,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 		}
 		headHeader := rawdb.ReadHeader(tx, headHash, to)
 		if err := cfg.pool.Start(headHeader.GasLimit, to); err != nil {
-			return fmt.Errorf("%s: start pool phase 1: %w", logPrefix, err)
+			return fmt.Errorf(" start pool phase 1: %w", err)
 		}
 		if cfg.startFunc != nil {
 			cfg.startFunc()
@@ -67,7 +67,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 	}
 	if cfg.pool != nil && cfg.pool.IsStarted() && s.BlockNumber > 0 {
 		if err := incrementalTxPoolUpdate(logPrefix, s.BlockNumber, to, cfg.pool, tx, quitCh); err != nil {
-			return fmt.Errorf("[%s]: %w", logPrefix, err)
+			return err
 		}
 		pending, queued := cfg.pool.Stats()
 		log.Info(fmt.Sprintf("[%s] Transaction stats", logPrefix), "pending", pending, "queued", queued)
@@ -83,7 +83,7 @@ func SpawnTxPool(s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Contex
 	return nil
 }
 
-func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx ethdb.RwTx, quitCh <-chan struct{}) error {
+func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx kv.RwTx, quitCh <-chan struct{}) error {
 	headHash, err := rawdb.ReadCanonicalHash(tx, to)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	canonical := make([]common.Hash, to-from)
 	currentHeaderIdx := uint64(0)
 
-	canonicals, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
+	canonicals, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	}
 
 	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
-	bodies, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	bodies, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 	return nil
 }
 
-func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Context) (err error) {
+func UnwindTxPool(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxPoolCfg, ctx context.Context) (err error) {
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}
@@ -165,13 +165,13 @@ func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, c
 	logPrefix := s.LogPrefix()
 	if cfg.pool != nil && cfg.pool.IsStarted() {
 		if err := unwindTxPoolUpdate(logPrefix, u.UnwindPoint, s.BlockNumber, cfg.pool, tx, quitCh); err != nil {
-			return fmt.Errorf("[%s]: %w", logPrefix, err)
+			return err
 		}
 		pending, queued := cfg.pool.Stats()
 		log.Info(fmt.Sprintf("[%s] Transaction stats", logPrefix), "pending", pending, "queued", queued)
 	}
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %w", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -181,7 +181,7 @@ func UnwindTxPool(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TxPoolCfg, c
 	return nil
 }
 
-func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx ethdb.RwTx, quitCh <-chan struct{}) error {
+func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx kv.RwTx, quitCh <-chan struct{}) error {
 	headHash, err := rawdb.ReadCanonicalHash(tx, from)
 	if err != nil {
 		return err
@@ -190,7 +190,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 	pool.ResetHead(headHeader.GasLimit, from)
 	canonical := make([]common.Hash, to-from)
 
-	canonicals, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
+	canonicals, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 	}
 	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
-	sendersC, err := tx.Cursor(dbutils.Senders)
+	sendersC, err := tx.Cursor(kv.Senders)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 	}
 
 	var txsToInject []types.Transaction
-	bodies, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	bodies, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 	return nil
 }
 
-func PruneTxPool(s *PruneState, tx ethdb.RwTx, cfg TxPoolCfg, ctx context.Context) (err error) {
+func PruneTxPool(s *PruneState, tx kv.RwTx, cfg TxPoolCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -81,8 +80,8 @@ type vmExecMarshaling struct {
 	GasPrice *math.HexOrDecimal256
 }
 
-func (t *VMTest) Run(tx ethdb.RwTx, vmconfig vm.Config, blockNr uint64) error {
-	state, err := MakePreState(params.MainnetChainConfig.Rules(blockNr), kv.WrapIntoTxDB(tx), t.json.Pre, blockNr)
+func (t *VMTest) Run(tx kv.RwTx, vmconfig vm.Config, blockNr uint64) error {
+	state, err := MakePreState(params.MainnetChainConfig.Rules(blockNr), tx, t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("error in MakePreState: %v", err)
 	}

@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -31,9 +31,9 @@ type BlockGetter interface {
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, dbtx ethdb.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainKVState, error) {
+func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, dbtx kv.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainState, error) {
 	// Create the parent state database
-	reader := state.NewPlainKvState(dbtx, block.NumberU64()-1)
+	reader := state.NewPlainState(dbtx, block.NumberU64()-1)
 	statedb := state.New(reader)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
@@ -224,6 +224,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 	} else {
 		l.firstCapture = false
 	}
+	var outputStorage bool
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract
 		// if not present.
@@ -238,6 +239,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			)
 			env.IntraBlockState.GetState(contract.Address(), &address, &value)
 			l.storage[contract.Address()][address] = common.Hash(value.Bytes32())
+			outputStorage = true
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == vm.SSTORE && stack.Len() >= 2 {
@@ -246,6 +248,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
 			)
 			l.storage[contract.Address()][address] = value
+			outputStorage = true
 		}
 	}
 	// create a new snapshot of the EVM.
@@ -277,7 +280,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(fmt.Sprintf("%x", stackValue.Bytes32()))
+			l.stream.WriteString(stackValue.String())
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -294,7 +297,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if !l.cfg.DisableStorage {
+	if outputStorage {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()

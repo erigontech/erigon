@@ -42,6 +42,9 @@ type StateTracer interface {
 	CaptureAccountWrite(account common.Address) error
 }
 
+// SystemAddress - sender address for internal state updates.
+var SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.
 // NOT THREAD SAFE!

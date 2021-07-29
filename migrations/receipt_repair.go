@@ -2,14 +2,13 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -17,14 +16,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
 
-func availableReceiptFrom(tx ethdb.Tx) (uint64, error) {
-	c, err := tx.Cursor(dbutils.Receipts)
+func availableReceiptFrom(tx kv.Tx) (uint64, error) {
+	c, err := tx.Cursor(kv.Receipts)
 	if err != nil {
 		return 0, err
 	}
@@ -41,13 +40,12 @@ func availableReceiptFrom(tx ethdb.Tx) (uint64, error) {
 
 var ReceiptRepair = Migration{
 	Name: "receipt_repair",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		var tx ethdb.RwTx
-		if hasTx, ok := db.(ethdb.HasTx); ok {
-			tx = hasTx.Tx().(ethdb.RwTx)
-		} else {
-			return fmt.Errorf("no transaction")
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
 		}
+		defer tx.Rollback()
 
 		blockNum, err := changeset.AvailableFrom(tx)
 		if err != nil {
@@ -91,7 +89,7 @@ var ReceiptRepair = Migration{
 				break
 			}
 			binary.BigEndian.PutUint64(key[:], blockNum)
-			if v, err = tx.GetOne(dbutils.Receipts, key[:]); err != nil {
+			if v, err = tx.GetOne(kv.Receipts, key[:]); err != nil {
 				return err
 			}
 			var receipts types.Receipts
@@ -112,7 +110,7 @@ var ReceiptRepair = Migration{
 				return err
 			}
 
-			dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
+			dbstate := state.NewPlainState(tx, block.NumberU64()-1)
 			intraBlockState := state.New(dbstate)
 
 			getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
@@ -135,13 +133,16 @@ var ReceiptRepair = Migration{
 				if err != nil {
 					return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
 				}
-				if err = tx.Put(dbutils.Receipts, key[:], buf.Bytes()); err != nil {
+				if err = tx.Put(kv.Receipts, key[:], buf.Bytes()); err != nil {
 					return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
 				}
 				fixedCount++
 			}
 		}
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }
 

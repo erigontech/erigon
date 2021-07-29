@@ -1,4 +1,4 @@
-package kv_test
+package mdbx_test
 
 import (
 	"context"
@@ -9,10 +9,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon/ethdb/remotedb"
+	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +21,7 @@ import (
 )
 
 func TestSequence(t *testing.T) {
-	writeDBs, _ := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	writeDBs, _ := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
 	})
 	ctx := context.Background()
@@ -32,29 +32,29 @@ func TestSequence(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		i, err := tx.ReadSequence(dbutils.Buckets[0])
+		i, err := tx.ReadSequence(kv.ChaindataTables[0])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[0], 1)
+		i, err = tx.IncrementSequence(kv.ChaindataTables[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[0], 6)
+		i, err = tx.IncrementSequence(kv.ChaindataTables[0], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[0], 1)
+		i, err = tx.IncrementSequence(kv.ChaindataTables[0], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 
-		i, err = tx.ReadSequence(dbutils.Buckets[1])
+		i, err = tx.ReadSequence(kv.ChaindataTables[1])
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
+		i, err = tx.IncrementSequence(kv.ChaindataTables[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[1], 6)
+		i, err = tx.IncrementSequence(kv.ChaindataTables[1], 6)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), i)
-		i, err = tx.IncrementSequence(dbutils.Buckets[1], 1)
+		i, err = tx.IncrementSequence(kv.ChaindataTables[1], 1)
 		require.NoError(t, err)
 		require.Equal(t, uint64(7), i)
 		tx.Rollback()
@@ -62,18 +62,18 @@ func TestSequence(t *testing.T) {
 }
 
 func TestManagedTx(t *testing.T) {
-	defaultConfig := dbutils.BucketsConfigs
+	defaultConfig := kv.ChaindataTablesCfg
 	defer func() {
-		dbutils.BucketsConfigs = defaultConfig
+		kv.ChaindataTablesCfg = defaultConfig
 	}()
 
 	bucketID := 0
-	bucket1 := dbutils.Buckets[bucketID]
-	bucket2 := dbutils.Buckets[bucketID+1]
-	writeDBs, readDBs := setupDatabases(t, func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return map[string]dbutils.BucketConfigItem{
+	bucket1 := kv.ChaindataTables[bucketID]
+	bucket2 := kv.ChaindataTables[bucketID+1]
+	writeDBs, readDBs := setupDatabases(t, log.New(), func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return map[string]kv.TableCfgItem{
 			bucket1: {
-				Flags:                     dbutils.DupSort,
+				Flags:                     kv.DupSort,
 				AutoDupSortKeysConversion: true,
 				DupToLen:                  4,
 				DupFromLen:                6,
@@ -118,7 +118,7 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
-		case *kv.RemoteKV:
+		case *remotedb.RemoteKV:
 		default:
 			continue
 		}
@@ -137,10 +137,11 @@ func TestManagedTx(t *testing.T) {
 }
 
 func TestRemoteKvVersion(t *testing.T) {
-	f := func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
+	logger := log.New()
+	f := func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
 	}
-	writeDb := kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen()
+	writeDb := mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen()
 	defer writeDb.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
@@ -154,7 +155,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Major versions
 	v1 := v
 	v1.Major++
-	a, err := kv.NewRemote(v1).InMem(conn).Open("", "", "")
+	a, err := remotedb.NewRemote(v1, logger).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -162,7 +163,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Minor versions
 	v2 := v
 	v2.Minor++
-	_, err = kv.NewRemote(v2).InMem(conn).Open("", "", "")
+	_, err = remotedb.NewRemote(v2, logger).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -170,17 +171,17 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Patch versions
 	v3 := v
 	v3.Patch++
-	_, err = kv.NewRemote(v3).InMem(conn).Open("", "", "")
+	_, err = remotedb.NewRemote(v3, logger).InMem(conn).Open("", "", "")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	require.False(t, a.EnsureVersionCompatibility())
 }
 
-func setupDatabases(t *testing.T, f kv.BucketConfigsFunc) (writeDBs []ethdb.RwKV, readDBs []ethdb.RwKV) {
-	writeDBs = []ethdb.RwKV{
-		kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(),
-		kv.NewMDBX().InMem().WithBucketsConfig(f).MustOpen(), // for remote db
+func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+	writeDBs = []kv.RwDB{
+		mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen(),
+		mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)
@@ -193,8 +194,8 @@ func setupDatabases(t *testing.T, f kv.BucketConfigsFunc) (writeDBs []ethdb.RwKV
 		}
 	}()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
-	rdb := kv.NewRemote(v).InMem(conn).MustOpen()
-	readDBs = []ethdb.RwKV{
+	rdb := remotedb.NewRemote(v, logger).InMem(conn).MustOpen()
+	readDBs = []kv.RwDB{
 		writeDBs[0],
 		writeDBs[1],
 		rdb,
@@ -219,12 +220,12 @@ func setupDatabases(t *testing.T, f kv.BucketConfigsFunc) (writeDBs []ethdb.RwKV
 	return writeDBs, readDBs
 }
 
-func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {
+func testCtxCancel(t *testing.T, db kv.RwDB, bucket1 string) {
 	assert := assert.New(t)
 	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
 
-	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
+	if err := db.View(cancelableCtx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(bucket1)
 		if err != nil {
 			return err
@@ -241,10 +242,10 @@ func testCtxCancel(t *testing.T, db ethdb.RwKV, bucket1 string) {
 	}
 }
 
-func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
+func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 	assert, ctx := assert.New(t), context.Background()
 
-	if err := db.View(ctx, func(tx ethdb.Tx) error {
+	if err := db.View(ctx, func(tx kv.Tx) error {
 		c1, err := tx.Cursor(bucket1)
 		if err != nil {
 			return err
@@ -337,7 +338,7 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 }
 
 //func TestMultipleBuckets(t *testing.T) {
-//	writeDBs, readDBs, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
+//	writeDBs, readDBs, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
 //	ctx := context.Background()
@@ -347,11 +348,11 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //		msg := fmt.Sprintf("%T", db)
 //		t.Run("FillBuckets "+msg, func(t *testing.T) {
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c := tx.Cursor(dbutils.Buckets[0])
+//				c := tx.Cursor(dbutils.ChaindataTables[0])
 //				for i := uint8(0); i < 10; i++ {
 //					require.NoError(t, c.Put([]byte{i}, []byte{i}))
 //				}
-//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				c2 := tx.Cursor(dbutils.ChaindataTables[1])
 //				for i := uint8(0); i < 12; i++ {
 //					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
 //				}
@@ -379,7 +380,7 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //			counter2, counter := 0, 0
 //			var key, value []byte
 //			err := db.View(ctx, func(tx ethdb.Tx) error {
-//				c := tx.Cursor(dbutils.Buckets[0])
+//				c := tx.Cursor(dbutils.ChaindataTables[0])
 //				for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 //					if err != nil {
 //						return err
@@ -387,7 +388,7 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //					counter++
 //				}
 //
-//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				c2 := tx.Cursor(dbutils.ChaindataTables[1])
 //				for k, _, err := c2.First(); k != nil; k, _, err = c2.Next() {
 //					if err != nil {
 //						return err
@@ -395,7 +396,7 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //					counter2++
 //				}
 //
-//				c3 := tx.Cursor(dbutils.Buckets[0])
+//				c3 := tx.Cursor(dbutils.ChaindataTables[0])
 //				k, v, err := c3.Seek([]byte{5})
 //				if err != nil {
 //					return err
@@ -415,7 +416,7 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //}
 
 //func TestReadAfterPut(t *testing.T) {
-//	writeDBs, _, closeAll := setupDatabases(ethdb.DefaultBucketConfigs)
+//	writeDBs, _, closeAll := setupDatabases(ethdb.WithChaindataTables)
 //	defer closeAll()
 //
 //	ctx := context.Background()
@@ -425,7 +426,7 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //		msg := fmt.Sprintf("%T", db)
 //		t.Run("GetAfterPut "+msg, func(t *testing.T) {
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c := tx.Cursor(dbutils.Buckets[0])
+//				c := tx.Cursor(dbutils.ChaindataTables[0])
 //				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 //					require.NoError(t, c.Put([]byte{i}, []byte{i}))
 //				}
@@ -436,7 +437,7 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //					require.Equal(t, []byte{i}, v)
 //				}
 //
-//				c2 := tx.Cursor(dbutils.Buckets[1])
+//				c2 := tx.Cursor(dbutils.ChaindataTables[1])
 //				for i := uint8(0); i < 12; i++ {
 //					require.NoError(t, c2.Put([]byte{i}, []byte{i}))
 //				}
@@ -464,12 +465,12 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //
 //		t.Run("cursor put and delete"+msg, func(t *testing.T) {
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c3 := tx.Cursor(dbutils.Buckets[2])
+//				c3 := tx.Cursor(dbutils.ChaindataTables[2])
 //				for i := uint8(0); i < 10; i++ { // don't read in same loop to check that writes don't affect each other (for example by sharing bucket.prefix buffer)
 //					require.NoError(t, c3.Put([]byte{i}, []byte{i}))
 //				}
 //				for i := uint8(0); i < 10; i++ {
-//					v, err := tx.GetOne(dbutils.Buckets[2], []byte{i})
+//					v, err := tx.GetOne(dbutils.ChaindataTables[2], []byte{i})
 //					require.NoError(t, err)
 //					require.Equal(t, []byte{i}, v)
 //				}
@@ -481,9 +482,9 @@ func testMultiCursor(t *testing.T, db ethdb.RwKV, bucket1, bucket2 string) {
 //			}
 //
 //			if err := db.Update(ctx, func(tx ethdb.Tx) error {
-//				c3 := tx.Cursor(dbutils.Buckets[2])
+//				c3 := tx.Cursor(dbutils.ChaindataTables[2])
 //				require.NoError(t, c3.Delete([]byte{5}, nil))
-//				v, err := tx.GetOne(dbutils.Buckets[2], []byte{5})
+//				v, err := tx.GetOne(dbutils.ChaindataTables[2], []byte{5})
 //				require.NoError(t, err)
 //				require.Nil(t, v)
 //				return nil

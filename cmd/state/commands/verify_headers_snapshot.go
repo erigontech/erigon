@@ -2,6 +2,7 @@ package commands
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/state/verify"
+	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +18,7 @@ var verifyHeadersSnapshotCmd = &cobra.Command{
 		if chaindata == "" && len(args) > 0 {
 			chaindata = args[0]
 		}
-		return verify.HeadersSnapshot(chaindata)
+		logger := log.New()
+		return verify.HeadersSnapshot(logger, chaindata)
 	},
 }

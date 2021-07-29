@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -103,8 +103,8 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	db := kv.NewTestDB(t)
-	state := state.New(state.NewDbStateReader(db))
+	_, tx := memdb.NewTestTx(t)
+	state := state.New(state.NewDbStateReader(tx))
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -159,9 +159,9 @@ func BenchmarkCall(b *testing.B) {
 	}
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
-	_, tx := kv.NewTestTx(bench)
+	_, tx := memdb.NewTestTx(bench)
 	var (
-		statedb  = state.New(state.NewPlainKvState(tx, 0))
+		statedb  = state.New(state.NewPlainState(tx, 0))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -329,8 +329,8 @@ func TestBlockhash(t *testing.T) {
 func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.B) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
-	_, tx := kv.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainKvState(tx, 0))
+	_, tx := memdb.NewTestTx(b)
+	cfg.State = state.New(state.NewPlainState(tx, 0))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))

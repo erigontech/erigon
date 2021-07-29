@@ -61,7 +61,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if num, ok := stateBlockNumberOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(tx)
 	} else {
-		stateReader = state.NewPlainKvState(tx, stateBlockNumber)
+		stateReader = state.NewPlainState(tx, stateBlockNumber)
 	}
 	st := state.New(stateReader)
 

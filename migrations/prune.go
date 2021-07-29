@@ -1,17 +1,22 @@
 package migrations
 
 import (
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
+	"context"
+
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 var storageMode = Migration{
 	Name: "storage_mode",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 		var ( // old db keys
 			//StorageModeHistory - does node save history.
 			StorageModeHistory = []byte("smHistory")
@@ -30,7 +35,7 @@ var storageMode = Migration{
 			return math.MaxUint64 // means, prune disabled
 		}
 		{
-			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeHistory)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeHistory)
 			if err != nil {
 				return err
 			}
@@ -38,39 +43,42 @@ var storageMode = Migration{
 
 		}
 		{
-			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeReceipts)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeReceipts)
 			if err != nil {
 				return err
 			}
 			pm.Receipts = castToPruneDistance(v)
 		}
 		{
-			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeTxIndex)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeTxIndex)
 			if err != nil {
 				return err
 			}
 			pm.TxIndex = castToPruneDistance(v)
 		}
 		{
-			v, err := db.GetOne(dbutils.DatabaseInfoBucket, StorageModeCallTraces)
+			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeCallTraces)
 			if err != nil {
 				return err
 			}
 			pm.CallTraces = castToPruneDistance(v)
 		}
 		{
-			v, err := db.GetOne(dbutils.DatabaseInfoBucket, dbutils.StorageModeTEVM)
+			v, err := tx.GetOne(kv.DatabaseInfo, kv.StorageModeTEVM)
 			if err != nil {
 				return err
 			}
 			pm.Experiments.TEVM = len(v) == 1 && v[0] == 1
 		}
 
-		err = prune.SetIfNotExist(db, pm)
+		err = prune.SetIfNotExist(tx, pm)
 		if err != nil {
 			return err
 		}
 
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }

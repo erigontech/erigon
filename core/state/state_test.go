@@ -23,20 +23,20 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 var toAddr = common.BytesToAddress
 
 type StateSuite struct {
-	kv    ethdb.RwKV
-	tx    ethdb.RwTx
+	kv    kv.RwDB
+	tx    kv.RwTx
 	state *IntraBlockState
 	r     StateReader
 	w     StateWriter
@@ -102,14 +102,14 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	s.kv = kv.NewMemKV()
+	s.kv = memdb.New()
 	tx, err := s.kv.BeginRw(context.Background()) //nolint
 	if err != nil {
 		panic(err)
 	}
 	s.tx = tx
-	s.r = NewPlainKvState(tx, 0)
-	s.w = NewPlainKvState(tx, 0)
+	s.r = NewPlainState(tx, 0)
+	s.w = NewPlainState(tx, 0)
 	s.state = New(s.r)
 }
 
@@ -176,9 +176,9 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
-	w := NewPlainKvState(tx, 0)
-	state := New(NewPlainKvState(tx, 0))
+	_, tx := memdb.NewTestTx(t)
+	w := NewPlainState(tx, 0)
+	state := New(NewPlainState(tx, 0))
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -203,7 +203,7 @@ func TestSnapshot2(t *testing.T) {
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
-	w = NewPlainKvState(tx, 1)
+	w = NewPlainState(tx, 1)
 
 	err = state.CommitBlock(params.Rules{}, w)
 	if err != nil {
@@ -291,7 +291,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func TestDump(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	w := NewPlainStateWriter(tx, tx, 0)
 	state := New(NewPlainStateReader(tx))
 

@@ -3,25 +3,24 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 // Implements StateReader by wrapping database only, without trie
 type DbStateReader struct {
-	db            ethdb.Getter
+	db            kv.Getter
 	accountCache  *fastcache.Cache
 	storageCache  *fastcache.Cache
 	codeCache     *fastcache.Cache
 	codeSizeCache *fastcache.Cache
 }
 
-func NewDbStateReader(db ethdb.Getter) *DbStateReader {
+func NewDbStateReader(db kv.Getter) *DbStateReader {
 	return &DbStateReader{
 		db: db,
 	}
@@ -52,7 +51,7 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 	if !ok {
 		var err error
 		if addrHash, err1 := common.HashData(address[:]); err1 == nil {
-			enc, err = dbr.db.GetOne(dbutils.HashedAccountsBucket, addrHash[:])
+			enc, err = dbr.db.GetOne(kv.HashedAccounts, addrHash[:])
 		} else {
 			return nil, err1
 		}
@@ -88,8 +87,8 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 			return enc, nil
 		}
 	}
-	enc, err2 := dbr.db.Get(dbutils.HashedStorageBucket, compositeKey)
-	if err2 != nil && !errors.Is(err2, ethdb.ErrKeyNotFound) {
+	enc, err2 := dbr.db.GetOne(kv.HashedStorage, compositeKey)
+	if err2 != nil {
 		return nil, err2
 	}
 	if dbr.storageCache != nil {
@@ -107,7 +106,10 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, incarnation ui
 			return code, nil
 		}
 	}
-	code, err := dbr.db.Get(dbutils.CodeBucket, codeHash[:])
+	code, err := dbr.db.GetOne(kv.Code, codeHash[:])
+	if err != nil {
+		return nil, err
+	}
 	if dbr.codeCache != nil && len(code) <= 1024 {
 		dbr.codeCache.Set(address[:], code)
 	}
@@ -129,7 +131,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 		}
 	}
 	var code []byte
-	code, err = dbr.db.Get(dbutils.CodeBucket, codeHash[:])
+	code, err = dbr.db.GetOne(kv.Code, codeHash[:])
 	if err != nil {
 		return 0, err
 	}
@@ -142,11 +144,12 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 }
 
 func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	if b, err := dbr.db.Get(dbutils.IncarnationMapBucket, address[:]); err == nil {
-		return binary.BigEndian.Uint64(b), nil
-	} else if errors.Is(err, ethdb.ErrKeyNotFound) {
-		return 0, nil
-	} else {
+	b, err := dbr.db.GetOne(kv.IncarnationMap, address[:])
+	if err != nil {
 		return 0, err
 	}
+	if b == nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(b), nil
 }

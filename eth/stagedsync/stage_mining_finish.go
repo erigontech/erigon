@@ -5,14 +5,13 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 type MiningFinishCfg struct {
-	db          ethdb.RwKV
+	db          kv.RwDB
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
 	sealCancel  <-chan struct{}
@@ -20,7 +19,7 @@ type MiningFinishCfg struct {
 }
 
 func StageMiningFinishCfg(
-	db ethdb.RwKV,
+	db kv.RwDB,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
 	miningState MiningState,
@@ -35,7 +34,7 @@ func StageMiningFinishCfg(
 	}
 }
 
-func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, cfg MiningFinishCfg, quit <-chan struct{}) error {
+func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit <-chan struct{}) error {
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 
@@ -71,7 +70,7 @@ func SpawnMiningFinishStage(s *StageState, tx ethdb.RwTx, cfg MiningFinishCfg, q
 		"difficulty", block.Difficulty(),
 	)
 
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: kv.WrapIntoTxDB(tx)}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}

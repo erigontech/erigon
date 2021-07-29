@@ -11,8 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
@@ -92,14 +92,14 @@ import (
 */
 func TestRewardContract(t *testing.T) {
 	t.Skip("not ready yet")
-	auraDB, require := kv.NewTestKV(t), require.New(t)
+	auraDB, require := memdb.NewTestDB(t), require.New(t)
 	engine, err := aura.NewAuRa(nil, auraDB, common.Address{}, test.AuthorityRoundBlockRewardContract)
 	require.NoError(err)
 	m := stages.MockWithGenesisEngine(t, core.DefaultSokolGenesisBlock(), engine)
 	m.EnableLogs()
 
 	var accBefore *accounts.Account
-	err = auraDB.View(context.Background(), func(tx ethdb.Tx) (err error) { _, err = rawdb.ReadAccount(tx, m.Address, accBefore); return err })
+	err = auraDB.View(context.Background(), func(tx kv.Tx) (err error) { _, err = rawdb.ReadAccount(tx, m.Address, accBefore); return err })
 	require.NoError(err)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
@@ -111,7 +111,7 @@ func TestRewardContract(t *testing.T) {
 	require.NoError(err)
 
 	var accAfter *accounts.Account
-	err = auraDB.View(context.Background(), func(tx ethdb.Tx) (err error) { _, err = rawdb.ReadAccount(tx, m.Address, accAfter); return err })
+	err = auraDB.View(context.Background(), func(tx kv.Tx) (err error) { _, err = rawdb.ReadAccount(tx, m.Address, accAfter); return err })
 	require.NoError(err)
 
 	fmt.Printf("balance: %d\n", accAfter.Balance.Uint64())

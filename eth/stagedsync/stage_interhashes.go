@@ -15,19 +15,19 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 type TrieCfg struct {
-	db                ethdb.RwKV
+	db                kv.RwDB
 	checkRoot         bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 }
 
-func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -36,7 +36,7 @@ func StageTrieCfg(db ethdb.RwKV, checkRoot, saveNewHashesToDB bool, tmpDir strin
 	}
 }
 
-func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) (common.Hash, error) {
+func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (common.Hash, error) {
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -110,11 +110,11 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx ethdb.RwTx, cfg 
 	return root, err
 }
 
-func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
+func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
-	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfAccountsBucket)
-	_ = db.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfStorageBucket)
+	_ = db.ClearBucket(kv.TrieOfAccounts)
+	_ = db.ClearBucket(kv.TrieOfStorage)
 
 	accTrieCollector := etl.NewCollector(cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accTrieCollector.Close(logPrefix)
@@ -138,23 +138,23 @@ func RegenerateIntermediateHashes(logPrefix string, db ethdb.RwTx, cfg TrieCfg, 
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 
-	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
-	if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
 	return hash, nil
 }
 
 type HashPromoter struct {
-	db               ethdb.RwTx
+	db               kv.RwTx
 	ChangeSetBufSize uint64
 	TempDir          string
 	quitCh           <-chan struct{}
 }
 
-func NewHashPromoter(db ethdb.RwTx, quitCh <-chan struct{}) *HashPromoter {
+func NewHashPromoter(db kv.RwTx, quitCh <-chan struct{}) *HashPromoter {
 	return &HashPromoter{
 		db:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
@@ -166,9 +166,9 @@ func NewHashPromoter(db ethdb.RwTx, quitCh <-chan struct{}) *HashPromoter {
 func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64, storage bool, load etl.LoadFunc) error {
 	var changeSetBucket string
 	if storage {
-		changeSetBucket = dbutils.StorageChangeSetBucket
+		changeSetBucket = kv.StorageChangeSet
 	} else {
-		changeSetBucket = dbutils.AccountChangeSetBucket
+		changeSetBucket = kv.AccountChangeSet
 	}
 	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
@@ -183,7 +183,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			return err
 		}
 		if !storage {
-			newValue, err := p.db.GetOne(dbutils.PlainStateBucket, k)
+			newValue, err := p.db.GetOne(kv.PlainState, k)
 			if err != nil {
 				return err
 			}
@@ -234,8 +234,8 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
 		for _, k := range deletedAccounts {
-			if err := p.db.ForPrefix(dbutils.TrieOfStorageBucket, k, func(k, v []byte) error {
-				if err := p.db.Delete(dbutils.TrieOfStorageBucket, k, v); err != nil {
+			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
+				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
 					return err
 				}
 				return nil
@@ -253,9 +253,9 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	var changeSetBucket string
 
 	if storage {
-		changeSetBucket = dbutils.StorageChangeSetBucket
+		changeSetBucket = kv.StorageChangeSet
 	} else {
-		changeSetBucket = dbutils.AccountChangeSetBucket
+		changeSetBucket = kv.AccountChangeSet
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding of trie hashes", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
@@ -270,7 +270,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 			return err
 		}
 		// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
-		value, err := p.db.GetOne(dbutils.PlainStateBucket, k)
+		value, err := p.db.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
 		}
@@ -320,8 +320,8 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	if !storage { // delete Intermediate hashes of deleted accounts
 		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
 		for _, k := range deletedAccounts {
-			if err := p.db.ForPrefix(dbutils.TrieOfStorageBucket, k, func(k, v []byte) error {
-				if err := p.db.Delete(dbutils.TrieOfStorageBucket, k, v); err != nil {
+			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
+				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
 					return err
 				}
 				return nil
@@ -335,7 +335,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	return nil
 }
 
-func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx, to uint64, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
+func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to uint64, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = cfg.tmpDir
 	rl := trie.NewRetainList(0)
@@ -373,16 +373,16 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db ethdb.RwTx,
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix),
 		" hash", hash.Hex())
 
-	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
-	if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
 	return hash, nil
 }
 
-func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) (err error) {
+func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (err error) {
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -412,7 +412,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx,
 		return err
 	}
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %w", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -422,7 +422,7 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx ethdb.RwTx,
 	return nil
 }
 
-func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db ethdb.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) error {
+func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) error {
 	p := NewHashPromoter(db, quit)
 	p.TempDir = cfg.tmpDir
 	rl := trie.NewRetainList(0)
@@ -454,26 +454,26 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return err
 	}
 	if hash != expectedRootHash {
-		return fmt.Errorf("%s: wrong trie root: %x, expected (from header): %x", logPrefix, hash, expectedRootHash)
+		return fmt.Errorf("wrong trie root: %x, expected (from header): %x", hash, expectedRootHash)
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
-	if err := accTrieCollector.Load(logPrefix, db, dbutils.TrieOfAccountsBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if err := stTrieCollector.Load(logPrefix, db, dbutils.TrieOfStorageBucket, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(logPrefix, db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func ResetHashState(tx ethdb.RwTx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedAccountsBucket); err != nil {
+func ResetHashState(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedStorageBucket); err != nil {
+	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.ContractCodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
@@ -486,11 +486,11 @@ func ResetHashState(tx ethdb.RwTx) error {
 	return nil
 }
 
-func ResetIH(tx ethdb.RwTx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfAccountsBucket); err != nil {
+func ResetIH(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.TrieOfStorageBucket); err != nil {
+	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
@@ -548,7 +548,7 @@ func storageTrieCollector(collector *etl.Collector) trie.StorageHashCollector2 {
 	}
 }
 
-func PruneIntermediateHashesStage(s *PruneState, tx ethdb.RwTx, cfg TrieCfg, ctx context.Context) (err error) {
+func PruneIntermediateHashesStage(s *PruneState, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

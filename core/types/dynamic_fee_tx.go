@@ -484,7 +484,7 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, 
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx DynamicFeeTransaction) Hash() common.Hash {
+func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}

@@ -2,13 +2,14 @@ package log
 
 import (
 	"fmt"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
 	"io"
 	"net"
 	"os"
 	"reflect"
 	"sync"
+
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 
 	"github.com/go-stack/stack"
 )

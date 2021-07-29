@@ -9,9 +9,8 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/ugorji/go/codec"
 )
@@ -81,8 +80,8 @@ func TestNextKeyErr(t *testing.T) {
 
 func TestFileDataProviders(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := kv.NewTestTx(t)
-	sourceBucket := dbutils.Buckets[0]
+	_, tx := memdb.NewTestTx(t)
+	sourceBucket := kv.ChaindataTables[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
 
@@ -112,8 +111,8 @@ func TestFileDataProviders(t *testing.T) {
 
 func TestRAMDataProviders(t *testing.T) {
 	// test invariant when we go through memory (1 buffer)
-	_, tx := kv.NewTestTx(t)
-	sourceBucket := dbutils.Buckets[0]
+	_, tx := memdb.NewTestTx(t)
+	sourceBucket := kv.ChaindataTables[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
 	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
@@ -131,10 +130,10 @@ func TestRAMDataProviders(t *testing.T) {
 
 func TestTransformRAMOnly(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := kv.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 20)
 	err := Transform(
 		"logPrefix",
@@ -151,9 +150,9 @@ func TestTransformRAMOnly(t *testing.T) {
 }
 
 func TestEmptySourceBucket(t *testing.T) {
-	_, tx := kv.NewTestTx(t)
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
+	_, tx := memdb.NewTestTx(t)
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	err := Transform(
 		"logPrefix",
 		tx,
@@ -170,9 +169,9 @@ func TestEmptySourceBucket(t *testing.T) {
 
 func TestTransformExtractStartKey(t *testing.T) {
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := kv.NewTestTx(t)
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
+	_, tx := memdb.NewTestTx(t)
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
@@ -190,9 +189,9 @@ func TestTransformExtractStartKey(t *testing.T) {
 
 func TestTransformThroughFiles(t *testing.T) {
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := kv.NewTestTx(t)
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
+	_, tx := memdb.NewTestTx(t)
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
@@ -212,9 +211,9 @@ func TestTransformThroughFiles(t *testing.T) {
 
 func TestTransformDoubleOnExtract(t *testing.T) {
 	// test invariant when extractFunc multiplies the data 2x
-	_, tx := kv.NewTestTx(t)
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
+	_, tx := memdb.NewTestTx(t)
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
@@ -232,9 +231,9 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 
 func TestTransformDoubleOnLoad(t *testing.T) {
 	// test invariant when loadFunc multiplies the data 2x
-	_, tx := kv.NewTestTx(t)
-	sourceBucket := dbutils.Buckets[0]
-	destBucket := dbutils.Buckets[1]
+	_, tx := memdb.NewTestTx(t)
+	sourceBucket := kv.ChaindataTables[0]
+	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
 	err := Transform(
 		"logPrefix",
@@ -250,7 +249,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 	compareBucketsDouble(t, tx, sourceBucket, destBucket)
 }
 
-func generateTestData(t *testing.T, db ethdb.Putter, bucket string, count int) {
+func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 	for i := 0; i < count; i++ {
 		k := []byte(fmt.Sprintf("%10d-key-%010d", i, i))
 		v := []byte(fmt.Sprintf("val-%099d", i))
@@ -324,7 +323,7 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next Lo
 	return next(k, append(k, 0xBB), append(realValue, 0xBB))
 }
 
-func compareBuckets(t *testing.T, db ethdb.Tx, b1, b2 string, startKey []byte) {
+func compareBuckets(t *testing.T, db kv.Tx, b1, b2 string, startKey []byte) {
 	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.ForEach(b1, startKey, func(k, v []byte) error {
@@ -341,7 +340,7 @@ func compareBuckets(t *testing.T, db ethdb.Tx, b1, b2 string, startKey []byte) {
 	assert.Equal(t, b1Map, b2Map)
 }
 
-func compareBucketsDouble(t *testing.T, db ethdb.Tx, b1, b2 string) {
+func compareBucketsDouble(t *testing.T, db kv.Tx, b1, b2 string) {
 	t.Helper()
 	b1Map := make(map[string]string)
 	err := db.ForEach(b1, nil, func(k, v []byte) error {

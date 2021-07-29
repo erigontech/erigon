@@ -18,9 +18,9 @@ import (
 	"github.com/anacrolix/torrent/tracker"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/spf13/cobra"
@@ -74,9 +74,9 @@ var rootCmd = &cobra.Command{
 	Args:       cobra.ExactArgs(1),
 	ArgAliases: []string{"snapshots dir"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := kv.MustOpen(args[0])
+		db := mdbx.MustOpen(args[0])
 		m := http.NewServeMux()
-		m.Handle("/announce", &Tracker{db: kv.NewObjectDatabase(db)})
+		m.Handle("/announce", &Tracker{db: db})
 		m.HandleFunc("/scrape", func(writer http.ResponseWriter, request *http.Request) {
 			log.Warn("scrape", "url", request.RequestURI)
 			ih := request.URL.Query().Get("info_hash")
@@ -89,8 +89,8 @@ var rootCmd = &cobra.Command{
 				ih: {},
 			}}
 
-			err := db.View(context.Background(), func(tx ethdb.Tx) error {
-				c, err := tx.Cursor(dbutils.SnapshotInfoBucket)
+			err := db.View(context.Background(), func(tx kv.Tx) error {
+				c, err := tx.Cursor(kv.SnapshotInfo)
 				if err != nil {
 					return err
 				}
@@ -145,7 +145,7 @@ var rootCmd = &cobra.Command{
 }
 
 type Tracker struct {
-	db ethdb.Database
+	db kv.RwDB
 }
 
 /*
@@ -210,32 +210,43 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	key := append(req.InfoHash, req.PeerID...)
 	if req.Event == tracker.Stopped.String() {
-		err = t.db.Delete(dbutils.SnapshotInfoBucket, key, nil)
+		err = t.db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Delete(kv.SnapshotInfo, key, nil)
+		})
 		if err != nil {
 			log.Error("Json marshal", "err", err)
 			WriteResp(w, ErrResponse{FailureReason: err.Error()}, req.Compact)
 			return
 		}
 	} else {
-		if prevBytes, err := t.db.Get(dbutils.SnapshotInfoBucket, key); err == nil && len(prevBytes) > 0 {
-			prev := new(AnnounceReqWithTime)
-			err = json.Unmarshal(prevBytes, prev)
-			if err != nil {
-				log.Error("Unable to unmarshall", "err", err)
-			}
-			if time.Since(prev.UpdatedAt) < time.Second*SoftLimit {
-				//too early to update
-				WriteResp(w, ErrResponse{FailureReason: "too early to update"}, req.Compact)
-				return
-
-			}
-		} else if !errors.Is(err, ethdb.ErrKeyNotFound) && err != nil {
+		var prevBytes []byte
+		err = t.db.View(context.Background(), func(tx kv.Tx) error {
+			prevBytes, err = tx.GetOne(kv.SnapshotInfo, key)
+			return err
+		})
+		if err != nil {
 			log.Error("get from db is return error", "err", err)
 			WriteResp(w, ErrResponse{FailureReason: err.Error()}, req.Compact)
 			return
 		}
-		err = t.db.Put(dbutils.SnapshotInfoBucket, key, peerBytes)
+		if prevBytes == nil {
+			return
+		}
+
+		prev := new(AnnounceReqWithTime)
+		err = json.Unmarshal(prevBytes, prev)
 		if err != nil {
+			log.Error("Unable to unmarshall", "err", err)
+		}
+		if time.Since(prev.UpdatedAt) < time.Second*SoftLimit {
+			//too early to update
+			WriteResp(w, ErrResponse{FailureReason: "too early to update"}, req.Compact)
+			return
+
+		}
+		if err = t.db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Put(kv.SnapshotInfo, key, peerBytes)
+		}); err != nil {
 			log.Error("db.Put", "err", err)
 			WriteResp(w, ErrResponse{FailureReason: err.Error()}, req.Compact)
 			return
@@ -247,31 +258,32 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		TrackerId: trackerID,
 	}
 
-	err = t.db.ForPrefix(dbutils.SnapshotInfoBucket, append(req.InfoHash, make([]byte, 20)...), func(k, v []byte) error {
-		a := AnnounceReqWithTime{}
-		err = json.Unmarshal(v, &a)
-		if err != nil {
-			log.Error("Fail to unmarshall", "k", common.Bytes2Hex(k), "err", err)
-			//skip failed
+	if err := t.db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForPrefix(kv.SnapshotInfo, append(req.InfoHash, make([]byte, 20)...), func(k, v []byte) error {
+			a := AnnounceReqWithTime{}
+			err = json.Unmarshal(v, &a)
+			if err != nil {
+				log.Error("Fail to unmarshall", "k", common.Bytes2Hex(k), "err", err)
+				//skip failed
+				return nil
+			}
+			if time.Since(a.UpdatedAt) > 5*DisconnectInterval {
+				log.Debug("Skipped requset", "peer", common.Bytes2Hex(a.PeerID), "last updated", a.UpdatedAt, "now", time.Now())
+				return nil
+			}
+			if a.Left == 0 {
+				resp.Complete++
+			} else {
+				resp.Incomplete++
+			}
+			resp.Peers = append(resp.Peers, map[string]interface{}{
+				"ip":      a.RemoteAddr.String(),
+				"peer id": a.PeerID,
+				"port":    a.Port,
+			})
 			return nil
-		}
-		if time.Since(a.UpdatedAt) > 5*DisconnectInterval {
-			log.Debug("Skipped requset", "peer", common.Bytes2Hex(a.PeerID), "last updated", a.UpdatedAt, "now", time.Now())
-			return nil
-		}
-		if a.Left == 0 {
-			resp.Complete++
-		} else {
-			resp.Incomplete++
-		}
-		resp.Peers = append(resp.Peers, map[string]interface{}{
-			"ip":      a.RemoteAddr.String(),
-			"peer id": a.PeerID,
-			"port":    a.Port,
 		})
-		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		log.Error("Walk", "err", err)
 		WriteResp(w, ErrResponse{FailureReason: err.Error()}, req.Compact)
 		return

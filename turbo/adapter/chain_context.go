@@ -8,17 +8,17 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type chainContext struct {
-	tx ethdb.Tx
+	tx kv.Tx
 }
 
-func NewChainContext(tx ethdb.Tx) *chainContext {
+func NewChainContext(tx kv.Tx) *chainContext {
 	return &chainContext{
 		tx: tx,
 	}
@@ -34,9 +34,6 @@ func (c *powEngine) VerifyHeader(chain consensus.ChainHeaderReader, header *type
 func (c *powEngine) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	panic("must not be called")
 }
-func (c *powEngine) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
-	panic("must not be called")
-}
 func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Header, uncles []*types.Header) error {
 	panic("must not be called")
 }
@@ -46,13 +43,10 @@ func (c *powEngine) VerifySeal(chain consensus.ChainHeaderReader, header *types.
 func (c *powEngine) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	panic("must not be called")
 }
-func (c *powEngine) Initialize(chainConfig *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header,
-	syscall consensus.SystemCall, call consensus.Call) {
+func (c *powEngine) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 	panic("must not be called")
 }
-func (c *powEngine) Finalize(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs []types.Transaction, uncles []*types.Header, r types.Receipts,
-	e consensus.EpochReader, h consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) error {
+func (c *powEngine) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
 	panic("must not be called")
 }
 func (c *powEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState,

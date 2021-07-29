@@ -19,7 +19,6 @@ package rpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -173,7 +172,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 				if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
 					batchStream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
 					response = h.handleCallMsg(cp, calls[i], batchStream)
-					writeToStream(batchStream.Buffer())
+					if response == nil {
+						writeToStream(batchStream.Buffer())
+					}
 				} else {
 					response = h.handleCallMsg(cp, calls[i], stream)
 				}
@@ -489,31 +490,34 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		stream.WriteObjectField("result")
 		_, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
-			stream.WriteMore()
-			stream.WriteObjectField("error")
-			stream.WriteObjectStart()
-			stream.WriteObjectField("code")
-			ec, ok := err.(Error)
-			if ok {
-				stream.WriteInt(ec.ErrorCode())
-			} else {
-				stream.WriteInt(defaultErrorCode)
-			}
-			stream.WriteMore()
-			stream.WriteObjectField("message")
-			stream.WriteString(fmt.Sprintf("%v", err))
-			de, ok := err.(DataError)
-			if ok {
+			return msg.errorResponse(err)
+			/*
 				stream.WriteMore()
-				stream.WriteObjectField("data")
-				data, derr := json.Marshal(de.ErrorData())
-				if derr == nil {
-					stream.Write(data)
+				stream.WriteObjectField("error")
+				stream.WriteObjectStart()
+				stream.WriteObjectField("code")
+				ec, ok := err.(Error)
+				if ok {
+					stream.WriteInt(ec.ErrorCode())
 				} else {
-					stream.WriteString(fmt.Sprintf("%v", derr))
+					stream.WriteInt(defaultErrorCode)
 				}
-			}
-			stream.WriteObjectEnd()
+				stream.WriteMore()
+				stream.WriteObjectField("message")
+				stream.WriteString(fmt.Sprintf("%v", err))
+				de, ok := err.(DataError)
+				if ok {
+					stream.WriteMore()
+					stream.WriteObjectField("data")
+					data, derr := json.Marshal(de.ErrorData())
+					if derr == nil {
+						stream.Write(data)
+					} else {
+						stream.WriteString(fmt.Sprintf("%v", derr))
+					}
+				}
+				stream.WriteObjectEnd()
+			*/
 		}
 		stream.WriteObjectEnd()
 		stream.Flush()

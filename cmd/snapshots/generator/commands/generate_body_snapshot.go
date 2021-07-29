@@ -6,13 +6,13 @@ import (
 	"os"
 	"time"
 
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/log"
 )
 
@@ -29,19 +29,19 @@ var generateBodiesSnapshotCmd = &cobra.Command{
 	Short:   "Generate bodies snapshot",
 	Example: "go run cmd/snapshots/generator/main.go bodies --block 11000000 --datadir /media/b00ris/nvme/snapshotsync/ --snapshotDir /media/b00ris/nvme/snapshotsync/tg/snapshots/ --snapshotMode \"hb\" --snapshot /media/b00ris/nvme/snapshots/bodies_test",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return BodySnapshot(cmd.Context(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
+		return BodySnapshot(cmd.Context(), log.New(), chaindata, snapshotFile, block, snapshotDir, snapshotMode)
 	},
 }
 
-func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
-	kv := kv2.NewMDBX().Path(dbPath).MustOpen()
-	snKV := kv2.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.BlockBodyPrefix: dbutils.BucketConfigItem{},
+func BodySnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath string, toBlock uint64, snapshotDir string, snapshotMode string) error {
+	db := kv2.NewMDBX(logger).Path(dbPath).MustOpen()
+	snKV := kv2.NewMDBX(logger).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.BlockBody: kv.TableCfgItem{},
 		}
 	}).Path(snapshotPath).MustOpen()
 
-	tx, err := kv.BeginRo(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 
 	t := time.Now()
 	var hash common.Hash
-	if err := snKV.Update(ctx, func(sntx ethdb.RwTx) error {
+	if err := snKV.Update(ctx, func(sntx kv.RwTx) error {
 		for i := uint64(1); i <= toBlock; i++ {
 			if common.IsCanceled(ctx) {
 				return common.ErrStopped
@@ -63,12 +63,12 @@ func BodySnapshot(ctx context.Context, dbPath, snapshotPath string, toBlock uint
 				return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
 			}
 			body := rawdb.ReadBodyRLP(tx, hash, i)
-			if err = sntx.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(i, hash), body); err != nil {
+			if err = sntx.Put(kv.BlockBody, dbutils.BlockBodyKey(i, hash), body); err != nil {
 				return err
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("progress", "bucket", dbutils.BlockBodyPrefix, "block num", i)
+				log.Info("progress", "bucket", kv.BlockBody, "block num", i)
 			default:
 			}
 		}

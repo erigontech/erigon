@@ -10,6 +10,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -44,7 +45,7 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type ExecuteBlockCfg struct {
-	db            ethdb.RwKV
+	db            kv.RwDB
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
 	changeSetHook ChangeSetHook
@@ -57,7 +58,7 @@ type ExecuteBlockCfg struct {
 }
 
 func StageExecuteBlocksCfg(
-	kv ethdb.RwKV,
+	kv kv.RwDB,
 	prune prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
@@ -82,7 +83,7 @@ func StageExecuteBlocksCfg(
 	}
 }
 
-func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
+func readBlock(blockNum uint64, tx kv.Tx) (*types.Block, error) {
 	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -93,7 +94,7 @@ func readBlock(blockNum uint64, tx ethdb.Tx) (*types.Block, error) {
 
 func executeBlock(
 	block *types.Block,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	batch ethdb.Database,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
@@ -169,11 +170,11 @@ func executeBlock(
 				}
 			}
 			if j == 0 {
-				if err = tx.Append(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+				if err = tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			} else {
-				if err = tx.AppendDup(dbutils.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+				if err = tx.AppendDup(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
 					return err
 				}
 			}
@@ -186,7 +187,7 @@ func executeBlock(
 
 func newStateReaderWriter(
 	batch ethdb.Database,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	blockNum uint64,
 	blockHash common.Hash,
 	writeChangesets bool,
@@ -214,7 +215,7 @@ func newStateReaderWriter(
 	return stateReader, stateWriter
 }
 
-func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -248,7 +249,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx ethdb.RwTx, toBlock u
 	}
 
 	var batch ethdb.DbWithPendingMutations
-	batch = kv.NewBatch(tx, quit)
+	batch = olddb.NewBatch(tx, quit)
 	defer batch.Rollback()
 
 	logEvery := time.NewTicker(logInterval)
@@ -273,10 +274,6 @@ Loop:
 		if block == nil {
 			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 			break
-		}
-
-		if err = cfg.engine.VerifyFamily(&chainReader{config: cfg.chainConfig, tx: tx}, block.Header()); err != nil {
-			return err
 		}
 
 		lastLogTx += uint64(block.Transactions().Len())
@@ -317,7 +314,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = kv.NewBatch(tx, quit)
+			batch = olddb.NewBatch(tx, quit)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
@@ -338,7 +335,7 @@ Loop:
 		return err
 	}
 	if err = batch.Commit(); err != nil {
-		return fmt.Errorf("%s: failed to write batch commit: %v", logPrefix, err)
+		return fmt.Errorf("batch commit: %v", err)
 	}
 
 	if !useExternalTx {
@@ -351,7 +348,7 @@ Loop:
 	return stoppedErr
 }
 
-func pruneChangeSets(tx ethdb.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+func pruneChangeSets(tx kv.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
 	c, err := tx.RwCursorDupSort(table)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
@@ -403,7 +400,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	return currentBlock, currentTx, currentTime
 }
 
-func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
 	quit := ctx.Done()
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
@@ -423,7 +420,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx cont
 		return err
 	}
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+		return err
 	}
 
 	if !useExternalTx {
@@ -434,16 +431,16 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, ctx cont
 	return nil
 }
 
-func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
+func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	logPrefix := s.LogPrefix()
-	stateBucket := dbutils.PlainStateBucket
+	stateBucket := kv.PlainState
 	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
 
 	var accumulator *shards.Accumulator
 	if !initialCycle && cfg.stateStream {
 		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 		if err != nil {
-			return fmt.Errorf("%s: reading canonical hash of unwind point: %v", logPrefix, err)
+			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}
 		accumulator.StartChange(u.UnwindPoint, hash, true /* unwind */)
 	}
@@ -452,14 +449,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	defer changes.Close(logPrefix)
 	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 	if errRewind != nil {
-		return fmt.Errorf("%s: getting rewind data: %v", logPrefix, errRewind)
+		return fmt.Errorf("getting rewind data: %w", errRewind)
 	}
 
-	if err := changes.Load(logPrefix, tx, stateBucket, func(k []byte, value []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := changes.Load(logPrefix, tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
-			if len(value) > 0 {
+			if len(v) > 0 {
 				var acc accounts.Account
-				if err := acc.DecodeForStorage(value); err != nil {
+				if err := acc.DecodeForStorage(v); err != nil {
 					return err
 				}
 
@@ -471,14 +468,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 				// cleanup contract code bucket
 				original, err := state.NewPlainStateReader(tx).ReadAccountData(address)
 				if err != nil {
-					return fmt.Errorf("%s: read account for %x: %w", logPrefix, address, err)
+					return fmt.Errorf("read account for %x: %w", address, err)
 				}
 				if original != nil {
 					// clean up all the code incarnations original incarnation and the new one
 					for incarnation := original.Incarnation; incarnation > acc.Incarnation && incarnation > 0; incarnation-- {
-						err = tx.Delete(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), nil)
+						err = tx.Delete(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], incarnation), nil)
 						if err != nil {
-							return fmt.Errorf("%s: writeAccountPlain for %x: %w", logPrefix, address, err)
+							return fmt.Errorf("writeAccountPlain for %x: %w", address, err)
 						}
 					}
 				}
@@ -510,10 +507,10 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 			copy(address[:], k[:common.AddressLength])
 			incarnation = binary.BigEndian.Uint64(k[common.AddressLength:])
 			copy(location[:], k[common.AddressLength+common.IncarnationLength:])
-			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(value))
+			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
 		}
-		if len(value) > 0 {
-			if err := next(k, k[:storageKeyLength], value); err != nil {
+		if len(v) > 0 {
+			if err := next(k, k[:storageKeyLength], v); err != nil {
 				return err
 			}
 		} else {
@@ -528,16 +525,19 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	}
 
 	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("%s: walking receipts: %v", logPrefix, err)
+		return fmt.Errorf("walking receipts: %w", err)
+	}
+	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("walking epoch: %w", err)
 	}
 
 	// Truncate CallTraceSet
 	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
-	c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err
 	}
@@ -555,11 +555,11 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx ethdb.RwTx, quit <-c
 	return nil
 }
 
-func recoverCodeHashPlain(acc *accounts.Account, db ethdb.Tx, key []byte) {
+func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 	var address common.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-		if codeHash, err2 := db.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
+		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}
@@ -572,7 +572,7 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -587,10 +587,10 @@ func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
-		if err = pruneChangeSets(tx, logPrefix, dbutils.AccountChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, kv.AccountChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
-		if err = pruneChangeSets(tx, logPrefix, dbutils.StorageChangeSetBucket, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneChangeSets(tx, logPrefix, kv.StorageChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
@@ -611,14 +611,14 @@ func PruneExecutionStage(s *PruneState, tx ethdb.RwTx, cfg ExecuteBlockCfg, ctx 
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil
 }
 
-func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursor(dbutils.Receipts)
+func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursor(kv.Receipts)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -635,7 +635,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Receipts, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Receipts, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -645,7 +645,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 	}
 
-	c, err = tx.RwCursor(dbutils.Log)
+	c, err = tx.RwCursor(kv.Log)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -661,7 +661,7 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.Log, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Log, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -673,8 +673,8 @@ func pruneReceipts(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *ti
 	return nil
 }
 
-func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+func pruneCallTracesSet(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -690,7 +690,7 @@ func pruneCallTracesSet(tx ethdb.RwTx, logPrefix string, pruneTo uint64, logEver
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", dbutils.CallTraceSet, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:

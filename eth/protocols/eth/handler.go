@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
@@ -61,7 +61,7 @@ type Handler func(peer *Peer) error
 // Backend defines the data retrieval methods t,o serve remote requests and the
 // callback methods to invoke on remote deliveries.
 type Backend interface {
-	DB() ethdb.RwKV
+	DB() kv.RwDB
 
 	// TxPool retrieves the transaction pool object to serve data.
 	TxPool() TxPool
@@ -128,12 +128,12 @@ type NodeInfo struct {
 	Network    uint64              `json:"network"`    // Ethereum network ID (1=Frontier, 2=Morden, Ropsten=3, Rinkeby=4)
 	Difficulty *big.Int            `json:"difficulty"` // Total difficulty of the host's blockchain
 	Genesis    common.Hash         `json:"genesis"`    // SHA3 hash of the host's genesis block
-	Config     *params.ChainConfig `json:"config"`     // Chain configuration for the fork rules
+	Config     *params.ChainConfig `json:"config"`     // ChainDB configuration for the fork rules
 	Head       common.Hash         `json:"head"`       // Hex hash of the host's best owned block
 }
 
 // ReadNodeInfo retrieves some `eth` protocol metadata about the running host node.
-func ReadNodeInfo(getter ethdb.KVGetter, config *params.ChainConfig, genesisHash common.Hash, network uint64) *NodeInfo {
+func ReadNodeInfo(getter kv.Getter, config *params.ChainConfig, genesisHash common.Hash, network uint64) *NodeInfo {
 	head := rawdb.ReadCurrentHeader(getter)
 	td, _ := rawdb.ReadTd(getter, head.Hash(), head.Number.Uint64())
 	return &NodeInfo{

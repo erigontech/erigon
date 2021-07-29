@@ -18,7 +18,6 @@ package stages_test
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -29,8 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
@@ -62,8 +61,6 @@ func TestDefaultGenesisBlock(t *testing.T) {
 	if err != nil {
 		t.Errorf("error: %w", err)
 	}
-	aa, _ := rlp.EncodeToBytes(block.Header())
-	fmt.Printf("a: %x\n", aa)
 	if block.Root() != params.SokolGenesisStateRoot {
 		t.Errorf("wrong sokol genesis state root, got %v, want %v", block.Root(), params.SokolGenesisStateRoot)
 	}
@@ -136,14 +133,14 @@ func TestSetupGenesis(t *testing.T) {
 	oldcustomg.Config = &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
 		wantErr    error
-		fn         func(ethdb.RwKV) (*params.ChainConfig, *types.Block, error)
+		fn         func(kv.RwDB) (*params.ChainConfig, *types.Block, error)
 		wantConfig *params.ChainConfig
 		name       string
 		wantHash   common.Hash
 	}{
 		{
 			name: "genesis without ChainConfig",
-			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				return core.CommitGenesisBlock(db, new(core.Genesis))
 			},
 			wantErr:    core.ErrGenesisNoConfig,
@@ -151,7 +148,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "no block in DB, genesis == nil",
-			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -159,7 +156,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "mainnet block in DB, genesis == nil",
-			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				return core.CommitGenesisBlock(db, nil)
 			},
 			wantHash:   params.MainnetGenesisHash,
@@ -167,7 +164,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == nil",
-			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
 				return core.CommitGenesisBlock(db, nil)
 			},
@@ -176,7 +173,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "custom block in DB, genesis == ropsten",
-			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
 				return core.CommitGenesisBlock(db, core.DefaultRopstenGenesisBlock())
 			},
@@ -186,7 +183,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "compatible config in DB",
-			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				oldcustomg.MustCommit(db)
 				return core.CommitGenesisBlock(db, &customg)
 			},
@@ -195,7 +192,7 @@ func TestSetupGenesis(t *testing.T) {
 		},
 		{
 			name: "incompatible config in DB",
-			fn: func(db ethdb.RwKV) (*params.ChainConfig, *types.Block, error) {
+			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -225,7 +222,7 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
-			db := kv.NewTestKV(t)
+			db := memdb.NewTestDB(t)
 			config, genesis, err := test.fn(db)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
@@ -246,7 +243,7 @@ func TestSetupGenesis(t *testing.T) {
 			if genesis.Hash() != test.wantHash {
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {
-				if dbErr := db.View(context.Background(), func(tx ethdb.Tx) error {
+				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
 					// Check database content.
 					stored := rawdb.ReadBlock(tx, test.wantHash, 0)
 					if stored.Hash() != test.wantHash {

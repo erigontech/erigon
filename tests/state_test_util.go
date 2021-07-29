@@ -25,7 +25,6 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -33,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -159,7 +157,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(rules params.Rules, tx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+func (t *StateTest) Run(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
 	state, root, err := t.RunNoVerify(rules, tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
@@ -177,8 +175,7 @@ func (t *StateTest) Run(rules params.Rules, tx ethdb.RwTx, subtest StateSubtest,
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(rules params.Rules, kvtx ethdb.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
-	tx := kv.WrapIntoTxDB(kvtx)
+func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -247,7 +244,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, kvtx ethdb.RwTx, subtest Sta
 		return nil, common.Hash{}, err
 	}
 	// Generate hashed state
-	c, err := kvtx.RwCursor(dbutils.PlainStateBucket)
+	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
@@ -275,18 +272,18 @@ func (t *StateTest) RunNoVerify(rules params.Rules, kvtx ethdb.RwTx, subtest Sta
 			h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
 			//nolint:errcheck
 			h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
-			if err = tx.Put(dbutils.HashedStorageBucket, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
-			if err = tx.Put(dbutils.HashedAccountsBucket, newK, common.CopyBytes(v)); err != nil {
+			if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
 				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}
 	}
 	c.Close()
 
-	root, err := trie.CalcRoot("", kvtx)
+	root, err := trie.CalcRoot("", tx)
 	if err != nil {
 		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
@@ -298,8 +295,8 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(rules params.Rules, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := state.NewPlainStateReader(db)
+func MakePreState(rules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+	r := state.NewPlainStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -317,10 +314,10 @@ func MakePreState(rules params.Rules, db ethdb.Database, accounts core.GenesisAl
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(db, nil, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
 	return statedb, nil

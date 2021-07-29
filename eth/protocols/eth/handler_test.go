@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
@@ -52,7 +52,7 @@ var (
 // purpose is to allow testing the request/reply workflows and wire serialization
 // in the `eth` protocol without actually doing any data processing.
 type testBackend struct {
-	db          ethdb.RwKV
+	db          kv.RwDB
 	txpool      *core.TxPool
 	headBlock   *types.Block
 	genesis     *types.Block
@@ -98,7 +98,7 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 	return b
 }
 
-func (b *testBackend) DB() ethdb.RwKV     { return b.db }
+func (b *testBackend) DB() kv.RwDB        { return b.db }
 func (b *testBackend) TxPool() eth.TxPool { return b.txpool }
 func (b *testBackend) RunPeer(peer *eth.Peer, handler eth.Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
@@ -113,7 +113,7 @@ func (b *testBackend) AcceptTxs() bool {
 func (b *testBackend) Handle(*eth.Peer, eth.Packet) error {
 	panic("data processing tests should be done in the handler package")
 }
-func (b *testBackend) GetBlockHashesFromHash(tx ethdb.Tx, hash common.Hash, max uint64) []common.Hash {
+func (b *testBackend) GetBlockHashesFromHash(tx kv.Tx, hash common.Hash, max uint64) []common.Hash {
 	// Get the origin header from which to fetch
 	header, _ := rawdb.ReadHeaderByHash(tx, hash)
 	if header == nil {
@@ -393,7 +393,6 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 }
 
 // Tests that the transaction receipts can be retrieved based on hashes.
-func TestGetBlockReceipts64(t *testing.T) { testGetBlockReceipts(t, 64) }
 func TestGetBlockReceipts65(t *testing.T) { testGetBlockReceipts(t, 65) }
 func TestGetBlockReceipts66(t *testing.T) { testGetBlockReceipts(t, 66) }
 
@@ -442,7 +441,7 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 		receipts []rlp.RawValue
 	)
 
-	err := m.DB.View(m.Ctx, func(tx ethdb.Tx) error {
+	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
 			block := rawdb.ReadHeaderByNumber(tx, i)
 
@@ -464,8 +463,8 @@ func testGetBlockReceipts(t *testing.T, protocol uint) {
 
 	m.StreamWg.Wait()
 
-	// Send the hash request and verify the response
 	m.ReceiveWg.Add(1)
+	// Send the hash request and verify the response
 	for _, err = range m.Send(&sentry.InboundMessage{Id: eth.ToProto[eth.ETH66][eth.GetReceiptsMsg], Data: b, PeerId: m.PeerId}) {
 		require.NoError(t, err)
 	}

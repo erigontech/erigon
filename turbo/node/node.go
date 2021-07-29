@@ -3,9 +3,9 @@ package node
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
@@ -41,11 +41,11 @@ func (eri *ErigonNode) run() {
 
 // Params contains optional parameters for creating a node.
 // * GitCommit is a commit from which then node was built.
-// * CustomBuckets is a `map[string]dbutils.BucketConfigItem`, that contains bucket name and its properties.
+// * CustomBuckets is a `map[string]dbutils.TableCfgItem`, that contains bucket name and its properties.
 //
 // NB: You have to declare your custom buckets here to be able to use them in the app.
 type Params struct {
-	CustomBuckets dbutils.BucketsCfg
+	CustomBuckets kv.TableCfg
 }
 
 func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
@@ -91,16 +91,17 @@ func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *node.Config) *ethconfig.Co
 func New(
 	nodeConfig *node.Config,
 	ethConfig *ethconfig.Config,
+	logger log.Logger,
 ) *ErigonNode {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node := makeConfigNode(nodeConfig)
-	ethereum := RegisterEthService(node, ethConfig)
+	ethereum := RegisterEthService(node, ethConfig, logger)
 	return &ErigonNode{stack: node, backend: ethereum}
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *ethconfig.Config) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg)
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) *eth.Ethereum {
+	backend, err := eth.New(stack, cfg, logger)
 	if err != nil {
 		panic(err)
 	}

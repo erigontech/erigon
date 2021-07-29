@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
@@ -60,7 +60,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	)
 
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
+	db := olddb.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)

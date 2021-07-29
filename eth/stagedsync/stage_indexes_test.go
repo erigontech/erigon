@@ -15,20 +15,20 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	kv2 "github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
-	kv := kv2.NewTestKV(t)
-	cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir())
+	db := kv2.NewTestDB(t)
+	cfg := StageHistoryCfg(db, prune.DefaultMode, t.TempDir())
 	test := func(blocksNum int, csBucket string) func(t *testing.T) {
 		return func(t *testing.T) {
-			tx, err := kv.BeginRw(context.Background())
+			tx, err := db.BeginRw(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
 
@@ -52,15 +52,15 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		}
 	}
 
-	t.Run("account plain state", test(2100, dbutils.AccountChangeSetBucket))
-	t.Run("storage plain state", test(2100, dbutils.StorageChangeSetBucket))
+	t.Run("account plain state", test(2100, kv.AccountChangeSet))
+	t.Run("storage plain state", test(2100, kv.StorageChangeSet))
 
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
-	buckets := []string{dbutils.AccountChangeSetBucket, dbutils.StorageChangeSetBucket}
+	buckets := []string{kv.AccountChangeSet, kv.StorageChangeSet}
 	tmpDir, ctx := t.TempDir(), context.Background()
-	kv := kv2.NewTestKV(t)
+	kv := kv2.NewTestDB(t)
 	cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir())
 	for i := range buckets {
 		csbucket := buckets[i]
@@ -170,9 +170,9 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 	}
 }
 
-func expectNoHistoryBefore(t *testing.T, tx ethdb.Tx, csbucket string, prunedTo uint64) {
+func expectNoHistoryBefore(t *testing.T, tx kv.Tx, csbucket string, prunedTo uint64) {
 	prefixLen := common.AddressLength
-	if csbucket == dbutils.StorageChangeSetBucket {
+	if csbucket == kv.StorageChangeSet {
 		prefixLen = common.HashLength
 	}
 	afterPrune := 0
@@ -186,18 +186,18 @@ func expectNoHistoryBefore(t *testing.T, tx ethdb.Tx, csbucket string, prunedTo 
 	assert.NoError(t, err)
 }
 
-func generateTestData(t *testing.T, tx ethdb.RwTx, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
+func generateTestData(t *testing.T, tx kv.RwTx, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
 	csInfo, ok := changeset.Mapper[csBucket]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}
 	var isPlain bool
-	if dbutils.StorageChangeSetBucket == csBucket || dbutils.AccountChangeSetBucket == csBucket {
+	if kv.StorageChangeSet == csBucket || kv.AccountChangeSet == csBucket {
 		isPlain = true
 	}
 	addrs, err := generateAddrs(3, isPlain)
 	require.NoError(t, err)
-	if dbutils.StorageChangeSetBucket == csBucket {
+	if kv.StorageChangeSet == csBucket {
 		keys, innerErr := generateAddrs(3, false)
 		require.NoError(t, innerErr)
 
@@ -243,7 +243,7 @@ func generateTestData(t *testing.T, tx ethdb.RwTx, csBucket string, numOfBlocks 
 	}
 }
 
-func checkIndex(t *testing.T, db ethdb.Tx, bucket string, k []byte, expected []uint64) {
+func checkIndex(t *testing.T, db kv.Tx, bucket string, k []byte, expected []uint64) {
 	t.Helper()
 	k = dbutils.CompositeKeyWithoutIncarnation(k)
 	m, err := bitmapdb.Get64(db, bucket, k, 0, math.MaxUint32)

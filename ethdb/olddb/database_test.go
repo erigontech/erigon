@@ -16,7 +16,7 @@
 
 // +build !js
 
-package kv
+package olddb
 
 import (
 	"bytes"
@@ -28,17 +28,18 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var testBucket = dbutils.HashedAccountsBucket
+var testBucket = kv.HashedAccounts
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
 func TestPutGet(t *testing.T) {
-	_, tx := NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	//for _, k := range testValues {
 	//	err := db.Put(testBucket, []byte(k), []byte{})
@@ -98,7 +99,7 @@ func TestPutGet(t *testing.T) {
 }
 
 func TestNoPanicAfterDbClosed(t *testing.T) {
-	db := NewTestKV(t)
+	db := memdb.NewTestDB(t)
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -114,11 +115,11 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 		})
 	}()
 	time.Sleep(time.Millisecond) // wait to check that db.Close doesn't panic, but wait when read tx finished
-	err = writeTx.Put(dbutils.Buckets[0], []byte{1}, []byte{1})
+	err = writeTx.Put(kv.ChaindataTables[0], []byte{1}, []byte{1})
 	require.NoError(t, err)
 	err = writeTx.Commit()
 	require.NoError(t, err)
-	_, err = tx.GetOne(dbutils.Buckets[0], []byte{1})
+	_, err = tx.GetOne(kv.ChaindataTables[0], []byte{1})
 	require.NoError(t, err)
 	tx.Rollback()
 
@@ -135,7 +136,7 @@ func TestNoPanicAfterDbClosed(t *testing.T) {
 }
 
 func TestParallelPutGet(t *testing.T) {
-	db := NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	const n = 8
 	var pending sync.WaitGroup
@@ -144,7 +145,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+			_ = db.Update(context.Background(), func(tx kv.RwTx) error {
 				err := tx.Put(testBucket, []byte(key), []byte("v"+key))
 				if err != nil {
 					panic("put failed: " + err.Error())
@@ -159,7 +160,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.View(context.Background(), func(tx ethdb.Tx) error {
+			_ = db.View(context.Background(), func(tx kv.Tx) error {
 				data, err := tx.GetOne(testBucket, []byte(key))
 				if err != nil {
 					panic("get failed: " + err.Error())
@@ -177,7 +178,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+			_ = db.Update(context.Background(), func(tx kv.RwTx) error {
 				err := tx.Delete(testBucket, []byte(key), nil)
 				if err != nil {
 					panic("delete failed: " + err.Error())
@@ -192,7 +193,7 @@ func TestParallelPutGet(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_ = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+			_ = db.Update(context.Background(), func(tx kv.RwTx) error {
 				v, err := tx.GetOne(testBucket, []byte(key))
 				if err != nil {
 					panic(err)
@@ -222,7 +223,7 @@ var fixedBits = 3
 var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
 
 func TestWalk(t *testing.T) {
-	_, tx := NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 
 	for k, v := range hexEntries {
 		err := tx.Put(testBucket, common.FromHex(k), common.FromHex(v))

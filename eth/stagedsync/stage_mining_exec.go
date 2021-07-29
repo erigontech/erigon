@@ -13,12 +13,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 type MiningExecCfg struct {
-	db          ethdb.RwKV
+	db          kv.RwDB
 	miningState MiningState
 	notifier    ChainEventNotifier
 	chainConfig params.ChainConfig
@@ -28,7 +29,7 @@ type MiningExecCfg struct {
 }
 
 func StageMiningExecCfg(
-	db ethdb.RwKV,
+	db kv.RwDB,
 	miningState MiningState,
 	notifier ChainEventNotifier,
 	chainConfig params.ChainConfig,
@@ -50,7 +51,7 @@ func StageMiningExecCfg(
 // SpawnMiningExecStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
+func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-chan struct{}) error {
 	cfg.vmConfig.NoReceipts = false
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
@@ -58,7 +59,8 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit 
 	remoteTxs := current.RemoteTxs
 	noempty := true
 
-	ibs := state.New(state.NewPlainStateReader(tx))
+	stateReader := state.NewPlainStateReader(tx)
+	ibs := state.New(stateReader)
 	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
 	if cfg.chainConfig.DAOForkSupport && cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
@@ -104,7 +106,7 @@ func SpawnMiningExecStage(s *StageState, tx ethdb.RwTx, cfg MiningExecCfg, quit 
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(cfg.engine, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil, nil); err != nil {
+	if err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil, nil); err != nil {
 		return err
 	}
 

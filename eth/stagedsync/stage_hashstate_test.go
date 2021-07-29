@@ -6,15 +6,15 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
 func TestPromoteHashedStateClearState(t *testing.T) {
-	_, tx1 := kv.NewTestTx(t)
-	db2, tx2 := kv.NewTestTx(t)
+	_, tx1 := memdb.NewTestTx(t)
+	db2, tx2 := memdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
@@ -24,12 +24,12 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 		t.Errorf("error while promoting state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket, dbutils.ContractCodeBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage, kv.ContractCode)
 }
 
 func TestPromoteHashedStateIncremental(t *testing.T) {
-	_, tx1 := kv.NewTestTx(t)
-	db2, tx2 := kv.NewTestTx(t)
+	_, tx1 := memdb.NewTestTx(t)
+	db2, tx2 := memdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
@@ -48,12 +48,12 @@ func TestPromoteHashedStateIncremental(t *testing.T) {
 		t.Errorf("error while promoting state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
-	_, tx1 := kv.NewTestTx(t)
-	db2, tx2 := kv.NewTestTx(t)
+	_, tx1 := memdb.NewTestTx(t)
+	db2, tx2 := memdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 100, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
@@ -63,12 +63,12 @@ func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
 	if err != nil {
 		t.Errorf("error while promoting state: %v", err)
 	}
-	compareCurrentState(t, tx1, tx2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestUnwindHashed(t *testing.T) {
-	_, tx1 := kv.NewTestTx(t)
-	db2, tx2 := kv.NewTestTx(t)
+	_, tx1 := memdb.NewTestTx(t)
+	db2, tx2 := memdb.NewTestTx(t)
 
 	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
 	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
@@ -84,7 +84,7 @@ func TestUnwindHashed(t *testing.T) {
 		t.Errorf("error while unwind state: %v", err)
 	}
 
-	compareCurrentState(t, tx1, tx2, dbutils.HashedAccountsBucket, dbutils.HashedStorageBucket)
+	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestPromoteIncrementallyShutdown(t *testing.T) {
@@ -106,7 +106,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 			if tc.cancelFuncExec {
 				cancel()
 			}
-			db, tx := kv.NewTestTx(t)
+			db, tx := memdb.NewTestTx(t)
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 			if err := promoteHashedStateIncrementally("logPrefix", &StageState{BlockNumber: 1}, 1, 10, tx, StageHashStateCfg(db, t.TempDir()), ctx.Done()); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateIncrementally, got: %v, expected: %v", err, tc.errExp)
@@ -138,7 +138,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 				cancel()
 			}
 
-			db, tx := kv.NewTestTx(t)
+			db, tx := memdb.NewTestTx(t)
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 
@@ -172,7 +172,7 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 				cancel()
 			}
 
-			db, tx := kv.NewTestTx(t)
+			db, tx := memdb.NewTestTx(t)
 
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
 			cfg := StageHashStateCfg(db, t.TempDir())

@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"io/ioutil"
@@ -33,7 +34,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/stretchr/testify/require"
 )
 
 // TestTxPoolConfig is a transaction pool configuration without stateful disk
@@ -98,7 +101,7 @@ func setupTxPool(t testing.TB) (*TxPool, *ecdsa.PrivateKey) {
 }
 
 func setupTxPoolWithConfig(t testing.TB, config *params.ChainConfig) (*TxPool, *ecdsa.PrivateKey) {
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	key, _ := crypto.GenerateKey()
 	pool := NewTxPool(TestTxPoolConfig, config, db)
@@ -178,24 +181,25 @@ func deriveSender(tx types.Transaction) (common.Address, error) {
 // state reset and tests whether the pending state is in sync with the
 // block head event that initiated the resetState().
 func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
-	db := kv.NewTestDB(t)
+	db := memdb.NewTestDB(t)
 	var (
 		key, _  = crypto.GenerateKey()
 		address = crypto.PubkeyToAddress(key.PublicKey)
 	)
-	stateWriter := state.NewPlainStateWriter(db, nil, 1)
-	ibs := state.New(state.NewPlainStateReader(db))
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		stateWriter := state.NewPlainStateWriter(tx, nil, 1)
+		ibs := state.New(state.NewPlainStateReader(tx))
 
-	// setup pool with 2 transaction in it
-	// Using AddBalance instead of SetBalance to make it dirty
-	ibs.AddBalance(address, new(uint256.Int).SetUint64(params.Ether))
-	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
-		t.Fatal(err)
-	}
+		// setup pool with 2 transaction in it
+		// Using AddBalance instead of SetBalance to make it dirty
+		ibs.AddBalance(address, new(uint256.Int).SetUint64(params.Ether))
+		return ibs.CommitBlock(params.Rules{}, stateWriter)
+	})
+	require.NoError(t, err)
 	tx0 := transaction(0, 100000, key)
 	tx1 := transaction(1, 100000, key)
 
-	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db.RwKV())
+	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("start tx pool: %v", err)
 	}
@@ -347,15 +351,17 @@ func TestTransactionVeryHighValues(t *testing.T) {
 
 func TestTransactionChainFork(t *testing.T) {
 	pool, key := setupTxPool(t)
+	db := pool.chaindb.RwKV()
 
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	resetState := func() {
-		stateWriter := state.NewPlainStateWriter(pool.chaindb, nil, 1)
-		ibs := state.New(state.NewPlainStateReader(pool.chaindb))
-		ibs.AddBalance(addr, uint256.NewInt(100000000000000))
-		if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
-			t.Fatal(err)
-		}
+		err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			stateWriter := state.NewPlainStateWriter(tx, nil, 1)
+			ibs := state.New(state.NewPlainStateReader(tx))
+			ibs.AddBalance(addr, uint256.NewInt(100000000000000))
+			return ibs.CommitBlock(params.Rules{}, stateWriter)
+		})
+		require.NoError(t, err)
 		pool.ResetHead(1000000000, 1)
 	}
 	resetState()
@@ -577,7 +583,7 @@ func TestTransactionDropping(t *testing.T) {
 // postponed back into the future queue to prevent broadcasting them.
 func TestTransactionPostponing(t *testing.T) {
 	// Create the pool to test the postponing with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -786,7 +792,7 @@ func TestTransactionQueueGlobalLimitingNoLocals(t *testing.T) {
 
 func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
 	// Create the pool to test the limit enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.NoLocals = nolocals
@@ -880,7 +886,7 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 	evictionInterval = time.Millisecond * 100
 
 	// Create the pool to test the non-expiration enforcement
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.Lifetime = time.Second
@@ -998,7 +1004,7 @@ func TestTransactionPendingLimiting(t *testing.T) {
 // attacks.
 func TestTransactionPendingGlobalLimiting(t *testing.T) {
 	// Create the pool to test the limit enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = config.AccountSlots * 10
@@ -1099,7 +1105,7 @@ func TestTransactionAllowedTxSize(t *testing.T) {
 // Tests that if transactions start being capped, transactions are also removed from 'all'
 func TestTransactionCapClearsFromAll(t *testing.T) {
 	// Create the pool to test the limit enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.AccountSlots = 2
@@ -1135,7 +1141,7 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 // the transactions are still kept.
 func TestTransactionPendingMinimumAllowance(t *testing.T) {
 	// Create the pool to test the limit enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = 1
@@ -1186,7 +1192,7 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 func TestTransactionPoolRepricing(t *testing.T) {
 	t.Skip("deadlock")
 	// Create the pool to test the pricing enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1309,7 +1315,7 @@ func TestTransactionPoolRepricing(t *testing.T) {
 // remove local transactions.
 func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1373,7 +1379,7 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 // Note, local transactions are never allowed to be dropped.
 func TestTransactionPoolUnderpricing(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = 2
@@ -1481,7 +1487,7 @@ func TestTransactionPoolUnderpricing(t *testing.T) {
 // back and forth between queued/pending.
 func TestTransactionPoolStableUnderpricing(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.GlobalSlots = 128
@@ -1547,7 +1553,7 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 
 // Tests that the pool rejects duplicate transactions.
 func TestTransactionDeduplication(t *testing.T) {
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1615,7 +1621,7 @@ func TestTransactionDeduplication(t *testing.T) {
 // price bump required.
 func TestTransactionReplacement(t *testing.T) {
 	// Create the pool to test the pricing enforcement with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
@@ -1712,14 +1718,14 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	os.Remove(journal)
 
 	// Create the original pool to inject transaction into the journal
-	db := kv.NewTestDB(t)
+	db := memdb.NewTestDB(t)
 
 	config := TestTxPoolConfig
 	config.NoLocals = nolocals
 	config.Journal = journal
 	config.Rejournal = time.Second
 
-	pool := NewTxPool(config, params.TestChainConfig, db.RwKV())
+	pool := NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1731,13 +1737,14 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	local, _ := crypto.GenerateKey()
 	remote, _ := crypto.GenerateKey()
 
-	stateWriter := state.NewPlainStateWriter(db, nil, 1)
-	ibs := state.New(state.NewPlainStateReader(db))
-	ibs.AddBalance(crypto.PubkeyToAddress(local.PublicKey), uint256.NewInt(1000000000))
-	ibs.AddBalance(crypto.PubkeyToAddress(remote.PublicKey), uint256.NewInt(1000000000))
-	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
-		t.Fatal(err)
-	}
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		stateWriter := state.NewPlainStateWriter(tx, nil, 1)
+		ibs := state.New(state.NewPlainStateReader(tx))
+		ibs.AddBalance(crypto.PubkeyToAddress(local.PublicKey), uint256.NewInt(1000000000))
+		ibs.AddBalance(crypto.PubkeyToAddress(remote.PublicKey), uint256.NewInt(1000000000))
+		return ibs.CommitBlock(params.Rules{}, stateWriter)
+	})
+	require.NoError(t, err)
 
 	// Add three local and a remote transactions and ensure they are queued up
 	if err := pool.AddLocal(pricedTransaction(0, 100000, u256.Num1, local)); err != nil {
@@ -1766,14 +1773,14 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	// Terminate the old pool, bump the local nonce, create a new pool and ensure relevant transaction survive
 	pool.Stop()
 
-	stateWriter = state.NewPlainStateWriter(db, nil, 1)
-	ibs = state.New(state.NewPlainStateReader(db))
-	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
-	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
-		t.Fatal(err)
-	}
-
-	pool = NewTxPool(config, params.TestChainConfig, db.RwKV())
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		stateWriter := state.NewPlainStateWriter(tx, nil, 1)
+		ibs := state.New(state.NewPlainStateReader(tx))
+		ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
+		return ibs.CommitBlock(params.Rules{}, stateWriter)
+	})
+	require.NoError(t, err)
+	pool = NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1795,26 +1802,28 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 		t.Fatalf("pool internal state corrupted: %v", err)
 	}
 	// Bump the nonce temporarily and ensure the newly invalidated transaction is removed
-	stateWriter = state.NewPlainStateWriter(db, nil, 1)
-	ibs = state.New(state.NewPlainStateReader(db))
-	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 2)
-	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
-		t.Fatal(err)
-	}
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		stateWriter := state.NewPlainStateWriter(tx, nil, 1)
+		ibs := state.New(state.NewPlainStateReader(tx))
+		ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 2)
+		return ibs.CommitBlock(params.Rules{}, stateWriter)
+	})
+	require.NoError(t, err)
 	pool.ResetHead(1000000000, 1)
 	//<-pool.requestReset(nil, nil)
 	time.Sleep(2 * config.Rejournal)
 
 	pool.Stop()
 
-	stateWriter = state.NewPlainStateWriter(db, nil, 1)
-	ibs = state.New(state.NewPlainStateReader(db))
-	ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
-	if err := ibs.CommitBlock(params.Rules{}, stateWriter); err != nil {
-		t.Fatal(err)
-	}
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
+		stateWriter := state.NewPlainStateWriter(tx, nil, 1)
+		ibs := state.New(state.NewPlainStateReader(tx))
+		ibs.SetNonce(crypto.PubkeyToAddress(local.PublicKey), 1)
+		return ibs.CommitBlock(params.Rules{}, stateWriter)
+	})
+	require.NoError(t, err)
 
-	pool = NewTxPool(config, params.TestChainConfig, db.RwKV())
+	pool = NewTxPool(config, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {
 		t.Fatalf("starting tx pool: %v", err)
 	}
@@ -1841,7 +1850,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 // pending status of individual transactions.
 func TestTransactionStatusCheck(t *testing.T) {
 	// Create the pool to test the status retrievals with
-	db := kv.NewTestKV(t)
+	db := memdb.NewTestDB(t)
 
 	pool := NewTxPool(TestTxPoolConfig, params.TestChainConfig, db)
 	if err := pool.Start(1000000000, 0); err != nil {

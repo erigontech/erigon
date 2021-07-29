@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/stretchr/testify/assert"
 )
@@ -22,8 +21,8 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
-	db1 ethdb.Tx,
-	db2 ethdb.Tx,
+	db1 kv.Tx,
+	db2 kv.Tx,
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
@@ -31,30 +30,20 @@ func compareCurrentState(
 	}
 }
 
-func compareBucket(t *testing.T, db1, db2 ethdb.Tx, bucketName string) {
+func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {
 	var err error
 
 	bucket1 := make(map[string][]byte)
-	c1, err := db1.Cursor(bucketName)
-	if err != nil {
-		assert.NoError(t, err)
-	}
-	defer c1.Close()
-	err = ethdb.ForEach(c1, func(k, v []byte) (bool, error) {
+	err = db1.ForEach(bucketName, nil, func(k, v []byte) error {
 		bucket1[string(k)] = v
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 
 	bucket2 := make(map[string][]byte)
-	c2, err := db2.Cursor(bucketName)
-	if err != nil {
-		assert.NoError(t, err)
-	}
-	defer c2.Close()
-	err = ethdb.ForEach(c2, func(k, v []byte) (bool, error) {
+	err = db2.ForEach(bucketName, nil, func(k, v []byte) error {
 		bucket2[string(k)] = v
-		return true, nil
+		return nil
 	})
 	assert.NoError(t, err)
 
@@ -63,13 +52,13 @@ func compareBucket(t *testing.T, db1, db2 ethdb.Tx, bucketName string) {
 
 type stateWriterGen func(uint64) state.WriterWithChangeSets
 
-func hashedWriterGen(tx ethdb.RwTx) stateWriterGen {
+func hashedWriterGen(tx kv.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewDbStateWriter(kv.WrapIntoTxDB(tx), blockNum)
+		return state.NewDbStateWriter(tx, blockNum)
 	}
 }
 
-func plainWriterGen(tx ethdb.RwTx) stateWriterGen {
+func plainWriterGen(tx kv.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
 		return state.NewPlainStateWriter(tx, tx, blockNum)
 	}

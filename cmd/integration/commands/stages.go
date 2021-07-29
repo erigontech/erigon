@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -22,9 +21,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
@@ -38,7 +37,8 @@ var cmdStageBodies = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageBodies(db, ctx); err != nil {
@@ -53,8 +53,9 @@ var cmdStageSenders = &cobra.Command{
 	Use:   "stage_senders",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := log.New()
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageSenders(db, ctx); err != nil {
@@ -70,7 +71,8 @@ var cmdStageExec = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageExec(db, ctx); err != nil {
@@ -86,7 +88,8 @@ var cmdStageTrie = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageTrie(db, ctx); err != nil {
@@ -101,8 +104,9 @@ var cmdStageHashState = &cobra.Command{
 	Use:   "stage_hash_state",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := log.New()
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageHashState(db, ctx); err != nil {
@@ -118,7 +122,8 @@ var cmdStageHistory = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageHistory(db, ctx); err != nil {
@@ -134,7 +139,8 @@ var cmdLogIndex = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageLogIndex(db, ctx); err != nil {
@@ -150,7 +156,8 @@ var cmdCallTraces = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageCallTraces(db, ctx); err != nil {
@@ -166,7 +173,8 @@ var cmdStageTxLookup = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
 		if err := stageTxLookup(db, ctx); err != nil {
@@ -181,7 +189,8 @@ var cmdPrintStages = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, false)
+		logger := log.New()
+		db := openDB(chaindata, logger, false)
 		defer db.Close()
 
 		if err := printAllStages(db, ctx); err != nil {
@@ -197,7 +206,8 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, false)
+		logger := log.New()
+		db := openDB(chaindata, logger, false)
 		defer db.Close()
 		if err := printAppliedMigrations(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -212,7 +222,8 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, false)
+		logger := log.New()
+		db := openDB(chaindata, logger, false)
 		defer db.Close()
 		if err := removeMigration(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -226,7 +237,8 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 		// Nothing to do, migrations will be applied automatically
 		return nil
@@ -237,7 +249,8 @@ var cmdSetPrune = &cobra.Command{
 	Use:   "set_prune",
 	Short: "Override existing --prune flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 		return overrideStorageMode(db)
 	},
@@ -352,8 +365,8 @@ func init() {
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
-func stageBodies(db ethdb.RwKV, ctx context.Context) error {
-	return db.Update(ctx, func(tx ethdb.RwTx) error {
+func stageBodies(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
 		if unwind > 0 {
 			progress, err := stages.GetStageProgress(tx, stages.Bodies)
 			if err != nil {
@@ -377,7 +390,7 @@ func stageBodies(db ethdb.RwKV, ctx context.Context) error {
 	})
 }
 
-func stageSenders(db ethdb.RwKV, ctx context.Context) error {
+func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	_, _, chainConfig, _, _, sync, _, _ := newSync(ctx, db, nil)
 
@@ -415,12 +428,12 @@ func stageSenders(db ethdb.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageExec(db ethdb.RwKV, ctx context.Context) error {
+func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	if reset {
 		genesis, _ := byChain()
-		if err := db.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx, genesis) }); err != nil {
+		if err := db.Update(ctx, func(tx kv.RwTx) error { return resetExec(tx, genesis) }); err != nil {
 			return err
 		}
 		return nil
@@ -473,7 +486,7 @@ func stageExec(db ethdb.RwKV, ctx context.Context) error {
 	return nil
 }
 
-func stageTrie(db ethdb.RwKV, ctx context.Context) error {
+func stageTrie(db kv.RwDB, ctx context.Context) error {
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
@@ -523,7 +536,7 @@ func stageTrie(db ethdb.RwKV, ctx context.Context) error {
 	return nil
 }
 
-func stageHashState(db ethdb.RwKV, ctx context.Context) error {
+func stageHashState(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
@@ -576,7 +589,7 @@ func stageHashState(db ethdb.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageLogIndex(db ethdb.RwKV, ctx context.Context) error {
+func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
@@ -630,7 +643,7 @@ func stageLogIndex(db ethdb.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageCallTraces(kv ethdb.RwKV, ctx context.Context) error {
+func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
@@ -690,7 +703,7 @@ func stageCallTraces(kv ethdb.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageHistory(db ethdb.RwKV, ctx context.Context) error {
+func stageHistory(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	tx, err := db.BeginRw(ctx)
@@ -757,7 +770,7 @@ func stageHistory(db ethdb.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func stageTxLookup(db ethdb.RwKV, ctx context.Context) error {
+func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
@@ -809,12 +822,12 @@ func stageTxLookup(db ethdb.RwKV, ctx context.Context) error {
 	return tx.Commit()
 }
 
-func printAllStages(db ethdb.RoKV, ctx context.Context) error {
-	return db.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) })
+func printAllStages(db kv.RoDB, ctx context.Context) error {
+	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx) })
 }
 
-func printAppliedMigrations(db ethdb.RwKV, ctx context.Context) error {
-	return db.View(ctx, func(tx ethdb.Tx) error {
+func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
+	return db.View(ctx, func(tx kv.Tx) error {
 		applied, err := migrations.AppliedMigrations(tx, false /* withPayload */)
 		if err != nil {
 			return err
@@ -831,9 +844,9 @@ func printAppliedMigrations(db ethdb.RwKV, ctx context.Context) error {
 	})
 }
 
-func removeMigration(db ethdb.RwKV, ctx context.Context) error {
-	return db.Update(ctx, func(tx ethdb.RwTx) error {
-		return tx.Delete(dbutils.Migrations, []byte(migration), nil)
+func removeMigration(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Delete(kv.Migrations, []byte(migration), nil)
 	})
 }
 
@@ -864,13 +877,14 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	return genesis, chainConfig
 }
 
-func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
+func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	snapshotDir = path.Join(datadir, "erigon", "snapshot")
+	logger := log.New()
 
 	var pm prune.Mode
 	var err error
-	if err = db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err = db.View(context.Background(), func(tx kv.Tx) error {
 		pm, err = prune.Get(tx)
 		if err != nil {
 			return err
@@ -886,10 +900,10 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	engine = ethash.NewFaker()
 	switch chain {
 	case params.SokolChainName:
-		engine = ethconfig.CreateConsensusEngine(chainConfig, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
 	}
 
-	events := remotedbserver.NewEvents()
+	events := privateapi.NewEvents()
 
 	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db)
 
@@ -926,7 +940,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync2(context.Background(), db, cfg,
+	sync, err := stages2.NewStagedSync2(context.Background(), logger, db, cfg,
 		downloadServer,
 		tmpdir,
 		txPool,
@@ -953,7 +967,7 @@ func newSync(ctx context.Context, db ethdb.RwKV, miningConfig *params.MiningConf
 	return pm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
 }
 
-func progress(tx ethdb.KVGetter, stage stages.SyncStage) uint64 {
+func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
 	res, err := stages.GetStageProgress(tx, stage)
 	if err != nil {
 		panic(err)
@@ -961,7 +975,7 @@ func progress(tx ethdb.KVGetter, stage stages.SyncStage) uint64 {
 	return res
 }
 
-func stage(st *stagedsync.Sync, tx ethdb.Tx, db ethdb.RoKV, stage stages.SyncStage) *stagedsync.StageState {
+func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *stagedsync.StageState {
 	res, err := st.StageState(stage, tx, db)
 	if err != nil {
 		panic(err)
@@ -969,12 +983,12 @@ func stage(st *stagedsync.Sync, tx ethdb.Tx, db ethdb.RoKV, stage stages.SyncSta
 	return res
 }
 
-func overrideStorageMode(db ethdb.RwKV) error {
+func overrideStorageMode(db kv.RwDB) error {
 	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC, experiments)
 	if err != nil {
 		return err
 	}
-	return db.Update(context.Background(), func(tx ethdb.RwTx) error {
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = prune.Override(tx, pm); err != nil {
 			return err
 		}
@@ -982,7 +996,7 @@ func overrideStorageMode(db ethdb.RwKV) error {
 		if err != nil {
 			return err
 		}
-		log.Info("Storage mode in DB", "mode", pm.ToString())
+		log.Info("Storage mode in DB", "mode", pm.String())
 		return nil
 	})
 }

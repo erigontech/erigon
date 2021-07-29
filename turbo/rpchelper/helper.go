@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 )
@@ -22,7 +22,7 @@ func (e nonCanonocalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
-func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
+func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()
@@ -70,7 +70,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx ethdb.Tx, filters *f
 	return blockNumber, hash, nil
 }
 
-func GetAccount(tx ethdb.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
+func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
 	reader := adapter.NewStateReader(tx, blockNumber)
 	return reader.ReadAccountData(address)
 }
