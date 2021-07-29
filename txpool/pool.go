@@ -261,6 +261,94 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 	}
 }
 
+func CheckInvariants(pending, baseFee, queued *SubPool) {
+	//1. If top element in the worst green queue has SubPool != 0b1111 (binary), it needs to be removed from the green pool.
+	//   If SubPool < 0b1000 (not satisfying minimum fee), discard.
+	//   If SubPool == 0b1110, demote to the yellow pool, otherwise demote to the red pool.
+	for worst := pending.Worst(); pending.Len() > 0; worst = pending.Worst() {
+		if worst.SubPool >= 0b11110 {
+			break
+		}
+		if worst.SubPool >= 0b11100 {
+			baseFee.Add(pending.PopWorst())
+			continue
+		}
+		if worst.SubPool >= 0b11000 {
+			queued.Add(pending.PopWorst())
+			continue
+		}
+		pending.PopWorst()
+	}
+
+	//2. If top element in the worst green queue has SubPool == 0b1111, but there is not enough room in the pool, discard.
+	for worst := pending.Worst(); pending.Len() > PendingSubPoolLimit; worst = pending.Worst() {
+		if worst.SubPool >= 0b11110 { // TODO: here must 'SubPool == 0b1111' or 'SubPool <= 0b1111' ?
+			break
+		}
+		pending.PopWorst()
+	}
+
+	//3. If the top element in the best yellow queue has SubPool == 0b1111, promote to the green pool.
+	for best := baseFee.Best(); baseFee.Len() > 0; best = baseFee.Best() {
+		if best.SubPool < 0b11110 {
+			break
+		}
+		pending.Add(baseFee.PopWorst())
+	}
+
+	//4. If the top element in the worst yellow queue has SubPool != 0x1110, it needs to be removed from the yellow pool.
+	//   If SubPool < 0b1000 (not satisfying minimum fee), discard. Otherwise, demote to the red pool.
+	for worst := baseFee.Worst(); baseFee.Len() > 0; worst = baseFee.Worst() {
+		if worst.SubPool >= 0b11100 {
+			break
+		}
+		if worst.SubPool >= 0b11000 {
+			queued.Add(baseFee.PopWorst())
+			continue
+		}
+		baseFee.PopWorst()
+	}
+
+	//5. If the top element in the worst yellow queue has SubPool == 0x1110, but there is not enough room in the pool, discard.
+	for worst := baseFee.Worst(); baseFee.Len() > BaseFeeSubPoolLimit; worst = baseFee.Worst() {
+		if worst.SubPool >= 0b11110 {
+			break
+		}
+		baseFee.PopWorst()
+	}
+
+	//6. If the top element in the best red queue has SubPool == 0x1110, promote to the yellow pool. If SubPool == 0x1111, promote to the green pool.
+	for best := queued.Best(); queued.Len() > 0; best = queued.Best() {
+		if best.SubPool < 0b11100 {
+			break
+		}
+		if best.SubPool < 0b11110 {
+			baseFee.Add(queued.PopWorst())
+			continue
+		}
+
+		pending.Add(queued.PopWorst())
+	}
+
+	//7. If the top element in the worst red queue has SubPool < 0b1000 (not satisfying minimum fee), discard.
+	for worst := queued.Worst(); queued.Len() > 0; worst = queued.Worst() {
+		if worst.SubPool >= 0b10000 {
+			break
+		}
+
+		queued.PopWorst()
+	}
+
+	//8. If the top element in the worst red queue has SubPool >= 0b100, but there is not enough room in the pool, discard.
+	for worst := queued.Worst(); queued.Len() > QueuedSubPoolLimit; worst = queued.Worst() {
+		if worst.SubPool >= 0b10000 {
+			break
+		}
+
+		queued.PopWorst()
+	}
+}
+
 // Below is a draft code, will convert it to Loop and LoopStep funcs later
 
 type PoolImpl struct {
