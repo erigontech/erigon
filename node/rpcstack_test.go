@@ -28,8 +28,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon/internal/testlog"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/stretchr/testify/assert"
 )

@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	mdbx2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )

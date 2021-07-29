@@ -8,12 +8,12 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
 func main() {
-	log.SetupDefaultTerminalLogger(log.Lvl(3), "", "")
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	var (
 		needCompare bool

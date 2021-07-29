@@ -31,8 +31,8 @@ import (
 
 	_debug "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Fatalf formats a message to standard error and exits the program.

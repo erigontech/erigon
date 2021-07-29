@@ -7,7 +7,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var sigc chan os.Signal

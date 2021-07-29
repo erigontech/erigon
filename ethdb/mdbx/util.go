@@ -2,7 +2,7 @@ package mdbx
 
 import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	mdbxbind "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
