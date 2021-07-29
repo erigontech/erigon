@@ -1,10 +1,10 @@
 package adapter
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func NewBlockGetter(tx kv.Tx) *blockGetter {

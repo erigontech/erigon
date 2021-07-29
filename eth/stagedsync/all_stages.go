@@ -1,8 +1,8 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels

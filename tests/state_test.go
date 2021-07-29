@@ -25,8 +25,8 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 )
 
 func TestState(t *testing.T) {
