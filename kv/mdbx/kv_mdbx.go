@@ -288,7 +288,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 
 	if !opts.inMem {
 		if staleReaders, err := db.env.ReaderCheck(); err != nil {
-			db.log.Error("ReaderCheck", "err", err)
+			db.log.Error("failed ReaderCheck", "err", err)
 		} else if staleReaders > 0 {
 			db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
 		}
@@ -326,7 +326,7 @@ func (db *MdbxKV) Close() {
 
 	if db.opts.inMem {
 		if err := os.RemoveAll(db.opts.path); err != nil {
-			db.log.Warn("remove in-mem db file", "err", err)
+			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	} else {
 		db.log.Info("database closed (MDBX)")
@@ -470,97 +470,92 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 }
 
 func (tx *MdbxTx) CollectMetrics() {
-	/*
-		if tx.db.opts.label != kv.ChainDB {
-			return
-		}
+	if tx.db.opts.label != kv.ChainDB {
+		return
+	}
 
-		info, err := tx.db.env.Info(tx.tx)
+	info, err := tx.db.env.Info(tx.tx)
+	if err != nil {
+		return
+	}
+	if info.SinceReaderCheck.Hours() > 1 {
+		if staleReaders, err := tx.db.env.ReaderCheck(); err != nil {
+			tx.db.log.Error("failed ReaderCheck", "err", err)
+		} else if staleReaders > 0 {
+			tx.db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
+		}
+	}
+
+	kv.DbSize.Set(info.Geo.Current)
+	kv.DbPgopsNewly.Set(info.PageOps.Newly)
+	kv.DbPgopsCow.Set(info.PageOps.Cow)
+	kv.DbPgopsClone.Set(info.PageOps.Clone)
+	kv.DbPgopsSplit.Set(info.PageOps.Split)
+	kv.DbPgopsMerge.Set(info.PageOps.Merge)
+	kv.DbPgopsSpill.Set(info.PageOps.Spill)
+	kv.DbPgopsUnspill.Set(info.PageOps.Unspill)
+	kv.DbPgopsWops.Set(info.PageOps.Wops)
+
+	txInfo, err := tx.tx.Info(true)
+	if err != nil {
+		return
+	}
+
+	kv.TxDirty.Set(txInfo.SpaceDirty)
+	kv.TxLimit.Set(tx.db.txSize)
+	kv.TxSpill.Set(txInfo.Spill)
+	kv.TxUnspill.Set(txInfo.Unspill)
+
+	gc, err := tx.BucketStat("gc")
+	if err != nil {
+		return
+	}
+	kv.GcLeafMetric.Set(gc.LeafPages)
+	kv.GcOverflowMetric.Set(gc.OverflowPages)
+	kv.GcPagesMetric.Set((gc.LeafPages + gc.OverflowPages) * pageSize / 8)
+
+	{
+		st, err := tx.BucketStat(kv.PlainState)
 		if err != nil {
 			return
 		}
-		if info.SinceReaderCheck.Hours() > 1 {
-			if staleReaders, err := tx.db.env.ReaderCheck(); err != nil {
-				tx.db.log.Error("failed ReaderCheck", "err", err)
-			} else if staleReaders > 0 {
-				tx.db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
-			}
-		}
-
-		if !metrics.Enabled {
-			return
-		}
-		kv.DbSize.Update(int64(info.Geo.Current))
-		kv.DbPgopsNewly.Update(int64(info.PageOps.Newly))
-		kv.DbPgopsCow.Update(int64(info.PageOps.Cow))
-		kv.DbPgopsClone.Update(int64(info.PageOps.Clone))
-		kv.DbPgopsSplit.Update(int64(info.PageOps.Split))
-		kv.DbPgopsMerge.Update(int64(info.PageOps.Merge))
-		kv.DbPgopsSpill.Update(int64(info.PageOps.Spill))
-		kv.DbPgopsUnspill.Update(int64(info.PageOps.Unspill))
-		kv.DbPgopsWops.Update(int64(info.PageOps.Wops))
-
-		txInfo, err := tx.tx.Info(true)
+		kv.TableStateLeaf.Set(st.LeafPages)
+		kv.TableStateBranch.Set(st.BranchPages)
+		kv.TableStateEntries.Set(st.Entries)
+		kv.TableStateSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+	}
+	{
+		st, err := tx.BucketStat(kv.StorageChangeSet)
 		if err != nil {
 			return
 		}
-
-		kv.TxDirty.Update(int64(txInfo.SpaceDirty))
-		kv.TxLimit.Update(int64(tx.db.txSize))
-		kv.TxSpill.Update(int64(txInfo.Spill))
-		kv.TxUnspill.Update(int64(txInfo.Unspill))
-
-		gc, err := tx.BucketStat("gc")
+		kv.TableScsLeaf.Set(st.LeafPages)
+		kv.TableScsBranch.Set(st.BranchPages)
+		kv.TableScsEntries.Set(st.Entries)
+		kv.TableScsSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+	}
+	{
+		st, err := tx.BucketStat(kv.EthTx)
 		if err != nil {
 			return
 		}
-		kv.GcLeafMetric.Update(int64(gc.LeafPages))
-		kv.GcOverflowMetric.Update(int64(gc.OverflowPages))
-		kv.GcPagesMetric.Update(int64((gc.LeafPages + gc.OverflowPages) * pageSize / 8))
-
-		{
-			st, err := tx.BucketStat(kv.PlainState)
-			if err != nil {
-				return
-			}
-			kv.TableStateLeaf.Update(int64(st.LeafPages))
-			kv.TableStateBranch.Update(int64(st.BranchPages))
-			kv.TableStateEntries.Update(int64(st.Entries))
-			kv.TableStateSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
+		kv.TableTxLeaf.Set(st.LeafPages)
+		kv.TableTxBranch.Set(st.BranchPages)
+		kv.TableTxOverflow.Set(st.OverflowPages)
+		kv.TableTxEntries.Set(st.Entries)
+		kv.TableTxSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+	}
+	{
+		st, err := tx.BucketStat(kv.Log)
+		if err != nil {
+			return
 		}
-		{
-			st, err := tx.BucketStat(kv.StorageChangeSet)
-			if err != nil {
-				return
-			}
-			kv.TableScsLeaf.Update(int64(st.LeafPages))
-			kv.TableScsBranch.Update(int64(st.BranchPages))
-			kv.TableScsEntries.Update(int64(st.Entries))
-			kv.TableScsSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
-		}
-		{
-			st, err := tx.BucketStat(kv.EthTx)
-			if err != nil {
-				return
-			}
-			kv.TableTxLeaf.Update(int64(st.LeafPages))
-			kv.TableTxBranch.Update(int64(st.BranchPages))
-			kv.TableTxOverflow.Update(int64(st.OverflowPages))
-			kv.TableTxEntries.Update(int64(st.Entries))
-			kv.TableTxSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
-		}
-		{
-			st, err := tx.BucketStat(kv.Log)
-			if err != nil {
-				return
-			}
-			kv.TableLogLeaf.Update(int64(st.LeafPages))
-			kv.TableLogBranch.Update(int64(st.BranchPages))
-			kv.TableLogOverflow.Update(int64(st.OverflowPages))
-			kv.TableLogEntries.Update(int64(st.Entries))
-			kv.TableLogSize.Update(int64(st.LeafPages+st.BranchPages+st.OverflowPages) * pageSize)
-		}
-	*/
+		kv.TableLogLeaf.Set(st.LeafPages)
+		kv.TableLogBranch.Set(st.BranchPages)
+		kv.TableLogOverflow.Set(st.OverflowPages)
+		kv.TableLogEntries.Set(st.Entries)
+		kv.TableLogSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+	}
 }
 
 // ExistingBuckets - all buckets stored as keys of un-named bucket
@@ -717,48 +712,43 @@ func (tx *MdbxTx) Commit() error {
 	}()
 	tx.closeCursors()
 
-	_, err := tx.tx.Commit()
+	//slowTx := 10 * time.Second
+	//if debug.SlowCommit() > 0 {
+	//	slowTx = debug.SlowCommit()
+	//}
+	//
+	//if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
+	//	tx.PrintDebugInfo()
+	//}
+	tx.CollectMetrics()
+
+	latency, err := tx.tx.Commit()
 	if err != nil {
 		return err
 	}
-	/*
-		slowTx := 10 * time.Second
-		if debug.SlowCommit() > 0 {
-			slowTx = debug.SlowCommit()
-		}
 
-		if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-			tx.PrintDebugInfo()
-		}
-		tx.CollectMetrics()
+	if tx.db.opts.label == kv.ChainDB {
+		kv.DbCommitPreparation.Update(latency.Preparation.Seconds())
+		kv.DbCommitGc.Update(latency.GC.Seconds())
+		kv.DbCommitAudit.Update(latency.Audit.Seconds())
+		kv.DbCommitWrite.Update(latency.Write.Seconds())
+		kv.DbCommitSync.Update(latency.Sync.Seconds())
+		kv.DbCommitEnding.Update(latency.Ending.Seconds())
+		kv.DbCommitTotal.Update(latency.Whole.Seconds())
+	}
 
-		latency, err := tx.tx.Commit()
-		if err != nil {
-			return err
-		}
+	//if latency.Whole > slowTx {
+	//	log.Info("Commit",
+	//		"preparation", latency.Preparation,
+	//		"gc", latency.GC,
+	//		"audit", latency.Audit,
+	//		"write", latency.Write,
+	//		"fsync", latency.Sync,
+	//		"ending", latency.Ending,
+	//		"whole", latency.Whole,
+	//	)
+	//}
 
-		if tx.db.opts.label == kv.ChainDB {
-			kv.DbCommitPreparation.Update(latency.Preparation)
-			kv.DbCommitGc.Update(latency.GC)
-			kv.DbCommitAudit.Update(latency.Audit)
-			kv.DbCommitWrite.Update(latency.Write)
-			kv.DbCommitSync.Update(latency.Sync)
-			kv.DbCommitEnding.Update(latency.Ending)
-			kv.DbCommitBigBatchTimer.Update(latency.Whole)
-		}
-
-		if latency.Whole > slowTx {
-			log.Info("Commit",
-				"preparation", latency.Preparation,
-				"gc", latency.GC,
-				"audit", latency.Audit,
-				"write", latency.Write,
-				"fsync", latency.Sync,
-				"ending", latency.Ending,
-				"whole", latency.Whole,
-			)
-		}
-	*/
 	return nil
 }
 
@@ -810,7 +800,7 @@ func (tx *MdbxTx) PrintDebugInfo() {
 				"ro", tx.readOnly,
 				//"space_retired_mb", txInfo.SpaceRetired/1024/1024,
 				"space_dirty_mb", txInfo.SpaceDirty/1024/1024,
-				//"callers", callers(7),
+				//"callers", debug.Callers(7),
 			)
 		}
 	*/

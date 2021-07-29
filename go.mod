@@ -3,6 +3,7 @@ module github.com/ledgerwatch/erigon-lib
 go 1.16
 
 require (
+	github.com/VictoriaMetrics/metrics v1.17.3 // indirect
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
