@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1626967785916,
+  "iteration": 1627480859250,
   "links": [],
   "panels": [
     {
@@ -278,7 +278,8 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "chain_execution{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "chain_execution_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -294,10 +295,6 @@
     {
       "collapsed": false,
       "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -363,7 +360,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 0,
         "y": 6
@@ -382,7 +379,8 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "rate(db_commit_big_batch_count{instance=~\"$instance\"}[$__rate_interval])",
+          "exemplar": true,
+          "expr": "rate(db_commit_seconds_count{phase=\"total\",instance=~\"$instance\"}[$__rate_interval])",
           "interval": "",
           "legendFormat": "commit: {{instance}}",
           "refId": "A"
@@ -443,12 +441,12 @@
               }
             ]
           },
-          "unit": "ns"
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 8,
         "y": 6
@@ -469,27 +467,31 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "db_commit_big_batch{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "db_commit_seconds{phase=\"total\",quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "commit: {{instance}}",
+          "legendFormat": "commit_total: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "db_commit_gc{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "db_commit_seconds{phase=\"gc\",quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "commit_gc: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "db_commit_write{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "db_commit_seconds{phase=\"write\",quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "commit_write: {{instance}}",
           "refId": "C"
         },
         {
-          "expr": "db_commit_sync{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "db_commit_seconds{phase=\"sync\",quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
           "legendFormat": "commit_sync: {{instance}}",
@@ -555,7 +557,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 8,
         "x": 16,
         "y": 6
@@ -641,10 +643,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 6,
         "w": 8,
         "x": 0,
-        "y": 10
+        "y": 11
       },
       "id": 169,
       "options": {
@@ -752,10 +754,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 6,
         "w": 8,
         "x": 8,
-        "y": 10
+        "y": 11
       },
       "id": 168,
       "options": {
@@ -896,10 +898,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 6,
         "w": 8,
         "x": 16,
-        "y": 10
+        "y": 11
       },
       "id": 167,
       "options": {
@@ -938,15 +940,11 @@
     {
       "collapsed": false,
       "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 17
       },
       "id": 134,
       "panels": [],
@@ -970,10 +968,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 15,
+        "h": 18,
         "w": 8,
         "x": 0,
-        "y": 15
+        "y": 18
       },
       "id": 165,
       "options": {
@@ -1101,6 +1099,7 @@
     },
     {
       "datasource": "Prometheus",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1148,7 +1147,7 @@
               }
             ]
           },
-          "unit": "iops"
+          "unit": "none"
         },
         "overrides": []
       },
@@ -1156,7 +1155,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 15
+        "y": 18
       },
       "id": 155,
       "links": [],
@@ -1176,7 +1175,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(ru_inblock{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(process_io_write_syscalls_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "hide": false,
           "interval": "",
@@ -1186,7 +1185,7 @@
         },
         {
           "exemplar": true,
-          "expr": "rate(ru_outblock{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(process_io_read_syscalls_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "hide": false,
           "interval": "",
@@ -1197,7 +1196,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Disk io (same as rusage.inblock/outblock)",
+      "title": "Read/Write syscall/sec",
       "type": "timeseries"
     },
     {
@@ -1258,7 +1257,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 15
+        "y": 18
       },
       "id": 150,
       "options": {
@@ -1277,14 +1276,14 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(ru_minflt{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(process_minor_pagefaults_total{instance=~\"$instance\"}[$rate_interval])",
           "interval": "",
           "legendFormat": "soft: {{instance}}",
           "refId": "A"
         },
         {
           "exemplar": true,
-          "expr": "rate(ru_majflt{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(process_major_pagefaults_total{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "interval": "",
           "legendFormat": "hard: {{instance}}",
@@ -1353,7 +1352,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 21
+        "y": 24
       },
       "id": 85,
       "links": [],
@@ -1373,7 +1372,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(system_disk_readbytes{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(process_io_storage_read_bytes_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1382,7 +1381,7 @@
         },
         {
           "exemplar": true,
-          "expr": "rate(system_disk_writebytes{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(process_io_storage_written_bytes_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1453,7 +1452,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 21
+        "y": 24
       },
       "id": 153,
       "options": {
@@ -1472,23 +1471,15 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(ru_nvcsw{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(go_cgo_calls_count{instance=~\"$instance\"}[$rate_interval])",
           "interval": "",
-          "legendFormat": "voluntarily: {{instance}}",
+          "legendFormat": "go_cgo_calls_count: {{instance}}",
           "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "rate(ru_nivcsw{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "involuntarily: {{instance}}",
-          "refId": "B"
         }
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "getrusage: nvcsw/sec - context switch due to voluntarily giving up the processor (resource wait), nivcsw",
+      "title": "go_cgo_calls_count",
       "type": "timeseries"
     },
     {
@@ -1546,10 +1537,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 6,
         "w": 8,
         "x": 8,
-        "y": 27
+        "y": 30
       },
       "id": 154,
       "links": [],
@@ -1566,26 +1557,68 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "system_memory_held{instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "go_memstats_stack_sys_bytes{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "system: {{instance}}",
+          "legendFormat": "go_memstats_stack_sys_bytes",
           "refId": "A"
         },
         {
-          "expr": "system_memory_used{instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "go_memstats_sys_bytes{instance=~\"$instance\"}",
           "format": "time_series",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "alloc: {{instance}}",
+          "legendFormat": "go_memstats_sys_bytes",
           "refId": "B"
+        },
+        {
+          "exemplar": true,
+          "expr": "go_memstats_stack_inuse_bytes{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "go_memstats_stack_inuse_bytes",
+          "refId": "C"
+        },
+        {
+          "exemplar": true,
+          "expr": "go_memstats_mspan_sys_bytes{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "go_memstats_mspan_sys_bytes",
+          "refId": "D"
+        },
+        {
+          "exemplar": true,
+          "expr": "go_memstats_mcache_sys_bytes{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "go_memstats_mcache_sys_bytes",
+          "refId": "E"
+        },
+        {
+          "exemplar": true,
+          "expr": "go_memstats_heap_alloc_bytes{instance=~\"$instance\"}",
+          "format": "time_series",
+          "hide": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "go_memstats_heap_alloc_bytes",
+          "refId": "F"
         }
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Process Mem: system - obtained from OS,  alloc - allocated",
+      "title": "go memstat",
       "type": "timeseries"
     },
     {
@@ -1642,10 +1675,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 6,
         "w": 8,
         "x": 16,
-        "y": 27
+        "y": 30
       },
       "id": 128,
       "options": {
@@ -1738,7 +1771,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 30
+        "y": 36
       },
       "id": 148,
       "options": {
@@ -1756,24 +1789,27 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "mem_rss{instance=~\"$instance\"}",
-          "hide": false,
+          "exemplar": true,
+          "expr": "process_virtual_memory_bytes{instance=~\"$instance\"}",
+          "hide": true,
           "interval": "",
-          "legendFormat": "rss: {{instance}}",
+          "legendFormat": "resident virtual mem: {{instance}}",
           "refId": "A"
         },
         {
-          "expr": "mem_vms{instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "process_resident_memory_anon_bytes{instance=~\"$instance\"}",
           "hide": true,
           "interval": "",
-          "legendFormat": "vms: {{instance}}",
+          "legendFormat": "resident anon mem: {{instance}}",
           "refId": "B"
         },
         {
-          "expr": "mem_hwm{instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "process_resident_memory_bytes{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "hwm: {{instance}}",
+          "legendFormat": "resident mem: {{instance}}",
           "refId": "C"
         },
         {
@@ -1859,7 +1895,7 @@
               }
             ]
           },
-          "unit": "ns"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1867,7 +1903,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 32
+        "y": 36
       },
       "id": 124,
       "options": {
@@ -1884,10 +1920,10 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(system_memory_pauses{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(go_gc_duration_seconds{quantile=\"0.75\",instance=~\"$instance\"}[$rate_interval])",
           "instant": false,
           "interval": "",
-          "legendFormat": "system/memory/pauses: {{instance}}",
+          "legendFormat": "",
           "refId": "A"
         }
       ],
@@ -1954,7 +1990,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 35
+        "y": 41
       },
       "id": 86,
       "links": [],
@@ -1972,21 +2008,21 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(system_memory_allocs{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(go_memstats_mallocs_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "alloc: {{instance}}",
+          "legendFormat": "go_memstats_mallocs_total",
           "refId": "A"
         },
         {
           "exemplar": true,
-          "expr": "rate(system_memory_frees{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(go_memstats_frees_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "hide": false,
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "free: {{instance}}",
+          "legendFormat": "go_memstats_frees_total",
           "refId": "B"
         }
       ],
@@ -2052,7 +2088,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 40
+        "y": 46
       },
       "id": 106,
       "links": [],
@@ -2069,7 +2105,8 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "system_cpu_sysload{instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "increase(process_cpu_seconds_system_total{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -2077,7 +2114,8 @@
           "refId": "A"
         },
         {
-          "expr": "system_cpu_syswait{instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "increase(process_cpu_seconds_user_total{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -2093,15 +2131,11 @@
     {
       "collapsed": false,
       "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 51
       },
       "id": 82,
       "panels": [],
@@ -2166,7 +2200,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 46
+        "y": 52
       },
       "id": 157,
       "links": [],
@@ -2273,15 +2307,11 @@
     {
       "collapsed": true,
       "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 57
       },
       "id": 146,
       "panels": [
@@ -2297,7 +2327,7 @@
             "h": 5,
             "w": 8,
             "x": 0,
-            "y": 52
+            "y": 54
           },
           "hiddenSeries": false,
           "id": 122,
@@ -2401,7 +2431,7 @@
             "h": 5,
             "w": 8,
             "x": 8,
-            "y": 52
+            "y": 54
           },
           "hiddenSeries": false,
           "id": 162,
@@ -2542,7 +2572,7 @@
             "h": 4,
             "w": 8,
             "x": 16,
-            "y": 52
+            "y": 54
           },
           "hiddenSeries": false,
           "id": 156,
@@ -2634,7 +2664,7 @@
             "h": 5,
             "w": 8,
             "x": 0,
-            "y": 57
+            "y": 59
           },
           "hiddenSeries": false,
           "id": 143,
@@ -2776,7 +2806,7 @@
             "h": 5,
             "w": 8,
             "x": 8,
-            "y": 57
+            "y": 59
           },
           "hiddenSeries": false,
           "id": 142,
@@ -2976,15 +3006,11 @@
     {
       "collapsed": false,
       "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 52
+        "y": 58
       },
       "id": 75,
       "panels": [],
@@ -3048,7 +3074,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 53
+        "y": 59
       },
       "id": 96,
       "links": [],
@@ -3151,7 +3177,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 53
+        "y": 59
       },
       "id": 77,
       "links": [],
@@ -3205,15 +3231,11 @@
     {
       "collapsed": false,
       "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 65
       },
       "id": 4,
       "panels": [],
@@ -3257,7 +3279,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 60
+        "y": 66
       },
       "id": 108,
       "interval": null,
@@ -3336,7 +3358,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 60
+        "y": 66
       },
       "id": 111,
       "interval": null,
@@ -3365,6 +3387,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
+          "exemplar": true,
           "expr": "chain_head_receipt{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
@@ -3415,7 +3438,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 60
+        "y": 66
       },
       "id": 109,
       "interval": null,
@@ -3444,6 +3467,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
+          "exemplar": true,
           "expr": "stage_headers{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
@@ -3494,7 +3518,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 60
+        "y": 66
       },
       "id": 113,
       "interval": null,
@@ -3573,7 +3597,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 60
+        "y": 66
       },
       "id": 114,
       "interval": null,
@@ -3652,7 +3676,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 60
+        "y": 66
       },
       "id": 115,
       "interval": null,
@@ -3752,7 +3776,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 63
+        "y": 69
       },
       "id": 110,
       "links": [],
@@ -3856,7 +3880,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 63
+        "y": 69
       },
       "id": 116,
       "links": [],
@@ -3960,7 +3984,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 75
       },
       "id": 117,
       "links": [],
@@ -4084,15 +4108,11 @@
     {
       "collapsed": true,
       "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 76
+        "y": 82
       },
       "id": 138,
       "panels": [
@@ -4211,9 +4231,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": "0.95",
-          "value": "0.95"
+          "selected": false,
+          "text": "0.97",
+          "value": "0.97"
         },
         "description": null,
         "error": null,
@@ -4230,13 +4250,13 @@
           },
           {
             "selected": false,
-            "text": "0.75",
-            "value": "0.75"
+            "text": "0.9",
+            "value": "0.9"
           },
           {
             "selected": true,
-            "text": "0.95",
-            "value": "0.95"
+            "text": "0.97",
+            "value": "0.97"
           },
           {
             "selected": false,
@@ -4245,16 +4265,11 @@
           },
           {
             "selected": false,
-            "text": "0.999",
-            "value": "0.999"
-          },
-          {
-            "selected": false,
-            "text": "0.9999",
-            "value": "0.9999"
+            "text": "1",
+            "value": "1"
           }
         ],
-        "query": "0.5, 0.75, 0.95, 0.99, 0.999, 0.9999",
+        "query": "0.5, 0.9, 0.97, 0.99, 1",
         "queryValue": "",
         "skipUrlSync": false,
         "type": "custom"
@@ -4262,7 +4277,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
             "turbogeth16d.weblogix.it:6060"
           ],
@@ -4271,7 +4286,7 @@
           ]
         },
         "datasource": "Prometheus",
-        "definition": "system_cpu_sysload",
+        "definition": "go_goroutines",
         "description": null,
         "error": null,
         "hide": 0,
@@ -4281,7 +4296,7 @@
         "name": "instance",
         "options": [],
         "query": {
-          "query": "system_cpu_sysload",
+          "query": "go_goroutines",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
@@ -4299,8 +4314,8 @@
         "auto_min": "10s",
         "current": {
           "selected": false,
-          "text": "30m",
-          "value": "30m"
+          "text": "10m",
+          "value": "10m"
         },
         "description": null,
         "error": null,
@@ -4309,12 +4324,12 @@
         "name": "rate_interval",
         "options": [
           {
-            "selected": false,
+            "selected": true,
             "text": "10m",
             "value": "10m"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": "30m",
             "value": "30m"
           },
@@ -4368,7 +4383,7 @@
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {
@@ -4398,5 +4413,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 3
+  "version": 10
 }

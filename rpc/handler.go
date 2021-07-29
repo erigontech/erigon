@@ -430,14 +430,11 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter
 	// Collect the statistics for RPC calls if metrics is enabled.
 	// We only care about pure rpc call. Filter out subscription.
 	if callb != h.unsubscribeCb {
-		rpcRequestGauge.Inc(1)
+		rpcRequestGauge.Inc()
 		if answer != nil && answer.Error != nil {
-			failedReqeustGauge.Inc(1)
-		} else {
-			successfulRequestGauge.Inc(1)
+			failedReqeustGauge.Inc()
 		}
-		rpcServingTimer.UpdateSince(start)
-		newRPCServingTimer(msg.Method, answer == nil || answer.Error == nil).UpdateSince(start)
+		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).Update(float64(time.Since(start).Milliseconds()))
 	}
 	return answer
 }

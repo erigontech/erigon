@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/RoaringBitmap/roaring v0.6.0
 	github.com/VictoriaMetrics/fastcache v1.6.0
+	github.com/VictoriaMetrics/metrics v1.17.3
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
 	github.com/aws/aws-sdk-go v1.34.21
@@ -39,13 +40,12 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/ledgerwatch/erigon-lib v0.0.0-20210709133046-4df3c6b79da0
-	github.com/ledgerwatch/log/v3 v3.2.0 // indirect
+	github.com/ledgerwatch/log/v3 v3.2.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora v2.0.3+incompatible
-	github.com/mattn/go-colorable v0.1.8
 	github.com/pelletier/go-toml v1.9.3
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
-	github.com/prometheus/client_golang v1.9.0
+	github.com/prometheus/client_golang v1.9.0 // indirect
 	github.com/prometheus/tsdb v0.10.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
 	github.com/rs/cors v1.8.0

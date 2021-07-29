@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"sync"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/metrics"
-	"github.com/ledgerwatch/erigon/metrics/prometheus"
 	"github.com/ledgerwatch/log/v3"
-	prometheus2 "github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type exp struct {
@@ -38,20 +36,6 @@ func (exp *exp) expHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "\n}\n")
 }
 
-// Exp will register an expvar powered metrics handler with http.DefaultServeMux on "/debug/vars"
-func Exp(r metrics.Registry, mux *http.ServeMux) {
-	h := ExpHandler(r)
-	// this would cause a panic:
-	// panic: http: multiple registrations for /debug/vars
-	// http.HandleFunc("/debug/vars", e.expHandler)
-	// haven't found an elegant way, so just use a different endpoint
-	mux.Handle("/debug/metrics", h)
-	mux.Handle("/debug/metrics/prometheus", prometheus.Handler(r))
-	mux.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus2.DefaultGatherer, promhttp.HandlerOpts{
-		EnableOpenMetrics: true,
-	}))
-}
-
 // ExpHandler will return an expvar powered metrics handler.
 func ExpHandler(r metrics.Registry) http.Handler {
 	e := exp{sync.Mutex{}, r}
@@ -61,15 +45,16 @@ func ExpHandler(r metrics.Registry) http.Handler {
 // Setup starts a dedicated metrics server at the given address.
 // This function enables metrics reporting separate from pprof.
 func Setup(address string) {
-	m := http.NewServeMux()
-	m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))
-	m.Handle("/debug/metrics/prometheus", prometheus.Handler(metrics.DefaultRegistry))
-	m.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus2.DefaultGatherer, promhttp.HandlerOpts{
-		EnableOpenMetrics: true,
-	}))
-	log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/metrics", address))
+	http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, r *http.Request) {
+		metrics2.WritePrometheus(w, true)
+	})
+	//m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))
+	//m.Handle("/debug/metrics/prometheus2", promhttp.HandlerFor(prometheus2.DefaultGatherer, promhttp.HandlerOpts{
+	//	EnableOpenMetrics: true,
+	//}))
+	log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/metrics/prometheus", address))
 	go func() {
-		if err := http.ListenAndServe(address, m); err != nil {
+		if err := http.ListenAndServe(address, nil); err != nil {
 			log.Error("Failure in running metrics server", "err", err)
 		}
 	}()

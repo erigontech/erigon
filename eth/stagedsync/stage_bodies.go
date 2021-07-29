@@ -11,15 +11,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
-
-var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -194,7 +191,6 @@ Loop:
 			log.Debug("bodyLoop woken up by the incoming request")
 		}
 		d6 += time.Since(start)
-		stageBodiesGauge.Update(int64(bodyProgress))
 	}
 	if err := s.Update(tx, bodyProgress); err != nil {
 		return err
