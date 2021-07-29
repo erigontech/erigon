@@ -22,9 +22,5 @@ func UpdateMetrics(tx kv.Tx) error {
 	}
 	stageExecutionGauge.Set(progress)
 
-	progress, err = stages.GetStageProgress(tx, stages.Translation)
-	if err != nil {
-		return err
-	}
 	return nil
 }
