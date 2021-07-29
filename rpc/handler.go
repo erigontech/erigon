@@ -19,7 +19,6 @@ package rpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -492,31 +491,33 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		_, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
 			return msg.errorResponse(err)
-			stream.WriteMore()
-			stream.WriteObjectField("error")
-			stream.WriteObjectStart()
-			stream.WriteObjectField("code")
-			ec, ok := err.(Error)
-			if ok {
-				stream.WriteInt(ec.ErrorCode())
-			} else {
-				stream.WriteInt(defaultErrorCode)
-			}
-			stream.WriteMore()
-			stream.WriteObjectField("message")
-			stream.WriteString(fmt.Sprintf("%v", err))
-			de, ok := err.(DataError)
-			if ok {
+			/*
 				stream.WriteMore()
-				stream.WriteObjectField("data")
-				data, derr := json.Marshal(de.ErrorData())
-				if derr == nil {
-					stream.Write(data)
+				stream.WriteObjectField("error")
+				stream.WriteObjectStart()
+				stream.WriteObjectField("code")
+				ec, ok := err.(Error)
+				if ok {
+					stream.WriteInt(ec.ErrorCode())
 				} else {
-					stream.WriteString(fmt.Sprintf("%v", derr))
+					stream.WriteInt(defaultErrorCode)
 				}
-			}
-			stream.WriteObjectEnd()
+				stream.WriteMore()
+				stream.WriteObjectField("message")
+				stream.WriteString(fmt.Sprintf("%v", err))
+				de, ok := err.(DataError)
+				if ok {
+					stream.WriteMore()
+					stream.WriteObjectField("data")
+					data, derr := json.Marshal(de.ErrorData())
+					if derr == nil {
+						stream.Write(data)
+					} else {
+						stream.WriteString(fmt.Sprintf("%v", derr))
+					}
+				}
+				stream.WriteObjectEnd()
+			*/
 		}
 		stream.WriteObjectEnd()
 		stream.Flush()
