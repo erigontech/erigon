@@ -157,6 +157,10 @@ func TestManagedTx(t *testing.T) {
 }
 
 func TestRemoteKvVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
 	logger := log.New()
 	f := func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
