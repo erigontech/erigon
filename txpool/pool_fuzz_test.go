@@ -13,6 +13,8 @@ import (
 //gotip doc testing.F.Add
 //gotip doc testing.F.Fuzz
 
+// gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
+
 func FuzzPromoteStep(f *testing.F) {
 	f.Add([]uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000})
 	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8) {
@@ -34,8 +36,12 @@ func FuzzPromoteStep(f *testing.F) {
 		}
 		PromoteStep(pending, baseFee, queue)
 
-		if pending.Best() != nil && pending.Best().SubPool < 0b11110 {
-			t.Fatalf("Pending best too small %b", pending.Best().SubPool)
+		best, worst := pending.Best(), pending.Worst()
+		if best != nil && best.SubPool < 0b11110 {
+			t.Fatalf("Pending best too small %b", best.SubPool)
+		}
+		if worst != nil && worst.SubPool < 0b11000 {
+			t.Fatalf("Pending worst too big %b", worst.SubPool)
 		}
 	})
 }
