@@ -42,7 +42,7 @@ func FuzzPromoteStep(f *testing.F) {
 		//	t.Fatalf("Pending best too small %b", best.SubPool)
 		//}
 		if worst != nil && worst.SubPool < 0b11000 {
-			t.Fatalf("Pending worst too small %b,%b", worst.SubPool, s1)
+			t.Fatalf("Pending worst too small %b, input: %b", worst.SubPool, s1)
 		}
 	})
 }
