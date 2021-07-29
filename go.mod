@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/golang/protobuf v1.5.2
+	github.com/google/btree v1.0.1
 	github.com/holiman/uint256 v1.2.0
 	github.com/kr/pretty v0.2.1 // indirect
 	github.com/ledgerwatch/log/v3 v3.1.2
