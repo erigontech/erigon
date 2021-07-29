@@ -32,6 +32,7 @@ type HeadersCfg struct {
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
+	noP2PDiscovery    bool
 }
 
 func StageHeadersCfg(
@@ -42,6 +43,7 @@ func StageHeadersCfg(
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
+	noP2PDiscovery bool,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -51,6 +53,7 @@ func StageHeadersCfg(
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
 		batchSize:         batchSize,
+		noP2PDiscovery:    noP2PDiscovery,
 	}
 }
 
@@ -98,6 +101,11 @@ func HeadersForward(
 				return err
 			}
 		}
+		return nil
+	}
+
+	// Allow other stages to run 1 cycle if no network available
+	if initialCycle && cfg.noP2PDiscovery {
 		return nil
 	}
 

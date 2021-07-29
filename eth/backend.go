@@ -428,10 +428,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
 	config.BodyDownloadTimeoutSeconds = 30
 
-	backend.stagedSync, err = stages2.NewStagedSync2(
+	backend.stagedSync, err = stages2.NewStagedSync(
 		backend.downloadCtx,
 		backend.logger,
 		backend.chainKV,
+		stack.Config().P2P,
 		*config,
 		backend.downloadServer,
 		tmpdir,

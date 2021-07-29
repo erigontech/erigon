@@ -241,6 +241,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				propagateNewBlockHashes,
 				penalize,
 				cfg.BatchSize,
+				false,
 			),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
 			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil, mock.Log),
