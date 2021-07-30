@@ -185,7 +185,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 			baseFee.Add(pending.PopWorst())
 			continue
 		}
-		if worst.SubPool >= 0b11000 {
+		if worst.SubPool >= 0b10000 {
 			queued.Add(pending.PopWorst())
 			continue
 		}
@@ -194,7 +194,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 
 	//2. If top element in the worst green queue has SubPool == 0b1111, but there is not enough room in the pool, discard.
 	for worst := pending.Worst(); pending.Len() > PendingSubPoolLimit; worst = pending.Worst() {
-		if worst.SubPool >= 0b11110 { // TODO: here must 'SubPool == 0b1111' or 'SubPool <= 0b1111' ?
+		if worst.SubPool >= 0b11111 { // TODO: here must 'SubPool == 0b1111' or 'SubPool <= 0b1111' ?
 			break
 		}
 		pending.PopWorst()
@@ -214,7 +214,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 		if worst.SubPool >= 0b11100 {
 			break
 		}
-		if worst.SubPool >= 0b11000 {
+		if worst.SubPool >= 0b10000 {
 			queued.Add(baseFee.PopWorst())
 			continue
 		}
@@ -223,7 +223,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 
 	//5. If the top element in the worst yellow queue has SubPool == 0x1110, but there is not enough room in the pool, discard.
 	for worst := baseFee.Worst(); baseFee.Len() > BaseFeeSubPoolLimit; worst = baseFee.Worst() {
-		if worst.SubPool >= 0b11110 {
+		if worst.SubPool >= 0b11101 {
 			break
 		}
 		baseFee.PopWorst()
@@ -252,11 +252,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 	}
 
 	//8. If the top element in the worst red queue has SubPool >= 0b100, but there is not enough room in the pool, discard.
-	for worst := queued.Worst(); queued.Len() > QueuedSubPoolLimit; worst = queued.Worst() {
-		if worst.SubPool >= 0b10000 {
-			break
-		}
-
+	for _ = queued.Worst(); queued.Len() > QueuedSubPoolLimit; _ = queued.Worst() {
 		queued.PopWorst()
 	}
 }

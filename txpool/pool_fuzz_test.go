@@ -17,6 +17,7 @@ import (
 
 func FuzzPromoteStep(f *testing.F) {
 	f.Add([]uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000})
+	f.Add([]uint8{0b11111}, []uint8{0b11111}, []uint8{0b11110, 0b0, 0b1010})
 	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8) {
 		t.Parallel()
 		pending := NewSubPool()
@@ -38,11 +39,21 @@ func FuzzPromoteStep(f *testing.F) {
 
 		best, worst := pending.Best(), pending.Worst()
 		_ = best
-		//if best != nil && best.SubPool < 0b11110 {
-		//	t.Fatalf("Pending best too small %b", best.SubPool)
-		//}
-		if worst != nil && worst.SubPool < 0b11000 {
-			t.Fatalf("Pending worst too small %b, input: %b", worst.SubPool, s1)
+		if worst != nil && worst.SubPool < 0b01111 {
+			t.Fatalf("Pending worst too small %b, input: %b,%b,%b", worst.SubPool, s1, s2, s3)
 		}
+
+		best, worst = baseFee.Best(), baseFee.Worst()
+		_ = best
+		if worst != nil && worst.SubPool < 0b01111 {
+			t.Fatalf("Pending worst too small %b, input: %b,%b,%b", worst.SubPool, s1, s2, s3)
+		}
+
+		best, worst = queue.Best(), queue.Worst()
+		_ = best
+		if worst != nil && worst.SubPool < 0b01111 {
+			t.Fatalf("Pending worst too small %b, input: %b,%b,%b", worst.SubPool, s1, s2, s3)
+		}
+
 	})
 }
