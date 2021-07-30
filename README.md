@@ -197,10 +197,13 @@ Provide both `--datadir` and `--private.api.addr` options:
 
 ```
 > make erigon
-> ./build/bin/erigon --private.api.addr=localhost:9090
+> ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=localhost:9090
 > make rpcdaemon
 > ./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
 ```
+
+Note that it is mandatory to specify the `--datadir` option on `erigon` even if its path points to the default value `/home/user/.local/share/erigon`
+for `rpcdaemon` to work properly.
 
 #### **For remote DB**
 
