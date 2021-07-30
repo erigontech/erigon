@@ -59,6 +59,9 @@ func TestSubPoolOrder(t *testing.T) {
 	require.Equal(t, uint8(0b11110), uint8(sub.Best().SubPool))
 	require.Equal(t, uint8(0b10001), uint8(sub.Worst().SubPool))
 
+	require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
+	require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
+
 	sub = NewSubPool()
 	sub.Add(&MetaTx{SubPool: 0b00001})
 	sub.Add(&MetaTx{SubPool: 0b01110})
@@ -66,11 +69,16 @@ func TestSubPoolOrder(t *testing.T) {
 	sub.Add(&MetaTx{SubPool: 0b00101})
 	require.Equal(t, uint8(0b00001), uint8(sub.Worst().SubPool))
 	require.Equal(t, uint8(0b01110), uint8(sub.Best().SubPool))
+
+	require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
+	require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
+
 }
 
 func TestSubPoolsPromote(t *testing.T) {
 	pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
 	pending.Add(&MetaTx{SubPool: SubPoolMarker(0b11111)})
+
 	baseFee.Add(&MetaTx{SubPool: SubPoolMarker(0b11111)})
 
 	queued.Add(&MetaTx{SubPool: SubPoolMarker(0b11110)})

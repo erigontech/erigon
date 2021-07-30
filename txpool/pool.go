@@ -19,6 +19,7 @@ package txpool
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -74,33 +75,34 @@ type MetaTx struct {
 
 type BestQueue []*MetaTx
 
-func (p BestQueue) Len() int           { return len(p) }
-func (p BestQueue) Less(i, j int) bool { return p[i].SubPool > p[j].SubPool }
-func (p BestQueue) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-	p[i].bestIndex = i
-	p[j].bestIndex = j
+func (pq BestQueue) Len() int           { return len(pq) }
+func (pq BestQueue) Less(i, j int) bool { return pq[i].SubPool < pq[j].SubPool } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
+func (pq BestQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].bestIndex = i
+	pq[j].bestIndex = j
 }
-func (p *BestQueue) Push(x interface{}) {
-	n := len(*p)
+func (pq *BestQueue) Push(x interface{}) {
+	n := len(*pq)
 	item := x.(*MetaTx)
 	item.bestIndex = n
-	*p = append(*p, x.(*MetaTx))
+	*pq = append(*pq, item)
 }
-func (p *BestQueue) Pop() interface{} {
-	old := *p
+
+func (pq *BestQueue) Pop() interface{} {
+	old := *pq
 	n := len(old)
 	item := old[n-1]
 	old[n-1] = nil      // avoid memory leak
 	item.bestIndex = -1 // for safety
-	*p = old[0 : n-1]
+	*pq = old[0 : n-1]
 	return item
 }
 
 type WorstQueue []*MetaTx
 
 func (p WorstQueue) Len() int           { return len(p) }
-func (p WorstQueue) Less(i, j int) bool { return p[i].SubPool < p[j].SubPool }
+func (p WorstQueue) Less(i, j int) bool { return p[i].SubPool > p[j].SubPool }
 func (p WorstQueue) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 	p[i].worstIndex = i
@@ -138,13 +140,13 @@ func (p *SubPool) Best() *MetaTx {
 	if len(*p.best) == 0 {
 		return nil
 	}
-	return (*p.best)[0]
+	return (*p.best)[len(*p.best)-1]
 }
 func (p *SubPool) Worst() *MetaTx {
 	if len(*p.worst) == 0 {
 		return nil
 	}
-	return (*p.worst)[0]
+	return (*p.worst)[len(*p.worst)-1]
 }
 func (p *SubPool) PopBest() *MetaTx {
 	i := p.best.Pop().(*MetaTx)
@@ -158,8 +160,8 @@ func (p *SubPool) PopWorst() *MetaTx {
 }
 func (p *SubPool) Len() int { return p.best.Len() }
 func (p *SubPool) Add(i *MetaTx) {
-	heap.Push(p.best, i)
 	heap.Push(p.worst, i)
+	heap.Push(p.best, i)
 }
 
 const PendingSubPoolLimit = 1024
@@ -239,6 +241,9 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 			continue
 		}
 
+		fmt.Printf("from queued: %b\n", queued.Best().SubPool)
+		bb := queued.PopBest()
+		fmt.Printf("from queued2: %b\n", bb.SubPool)
 		pending.Add(queued.PopBest())
 	}
 
