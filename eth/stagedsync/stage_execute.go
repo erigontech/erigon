@@ -57,6 +57,7 @@ type ExecuteBlockCfg struct {
 	stateStream             bool
 	accumulator             *shards.Accumulator
 	stateSnapshotGeneration bool
+	snapshotEpochSize		uint64
 }
 
 func StageExecuteBlocksCfg(
@@ -288,8 +289,8 @@ Loop:
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
 
-		if snapshotsync.IsSnapshotBlock(blockNum, snapshotsync.EpochSize) &&
-			prevStageProgress-blockNum < snapshotsync.EpochSize &&
+		if snapshotsync.IsSnapshotBlock(blockNum, cfg.snapshotEpochSize) &&
+			prevStageProgress-blockNum < cfg.snapshotEpochSize &&
 			cfg.stateSnapshotGeneration {
 			if err = batch.Commit(); err != nil {
 				return err
@@ -310,7 +311,7 @@ Loop:
 				return err
 			}
 			//todo[Boris]: remove PlainContractCodeBucket
-			cfg.db.(*snapshotdb.SnapshotKV).SetTempDB(tmpDB, []string{kv.PlainState, kv.Code, kv.PlainContractCode})
+			cfg.db.(*snapshotdb.SnapshotKV).SetTempDB(tmpDB, snapshotsync.StateSnapshotBuckets)
 			tx, err = cfg.db.BeginRw(context.Background())
 			if err != nil {
 				return err
@@ -557,8 +558,8 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		return nil
 	}
 
-	snapshotBlock := snapshotsync.CurrentStateSnapshotBlock(s.BlockNumber, snapshotsync.EpochSize)
-	if !(cfg.stateSnapshotGeneration && (s.BlockNumber >= snapshotBlock && u.UnwindPoint < snapshotBlock)) {
+	snapshotBlock := snapshotsync.CurrentStateSnapshotBlock(s.BlockNumber, cfg.snapshotEpochSize)
+	if !(cfg.stateSnapshotGeneration && cfg.snapshotEpochSize>0 && (s.BlockNumber >= snapshotBlock && u.UnwindPoint < snapshotBlock)) {
 		errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 		if errRewind != nil {
 			return fmt.Errorf("getting rewind data: %w", errRewind)

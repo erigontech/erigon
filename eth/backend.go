@@ -677,7 +677,7 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go Loop(s.downloadCtx, s.logger, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
+	go Loop(s.downloadCtx, s.logger, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle, s.config.Snapshot.EpochSize)
 	return nil
 }
 
@@ -726,6 +726,7 @@ func Loop(
 	notifications *stagedsync.Notifications,
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
+	snapshotEpochSize uint64,
 ) {
 	defer debug.LogPanic()
 	stages2.StageLoop(
@@ -738,5 +739,6 @@ func Loop(
 		controlServer.UpdateHead,
 		waitForDone,
 		loopMinTime,
+		snapshotEpochSize,
 	)
 }

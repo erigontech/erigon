@@ -17,6 +17,7 @@ type SnapshotStateCfg struct {
 	db               kv.RwDB
 	snapshotDir      string
 	tmpDir           string
+	epochSize		uint64
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
 	log              log.Logger
@@ -34,8 +35,8 @@ func StageSnapshotStateCfg(db kv.RwDB, snapshot ethconfig.Snapshot, tmpDir strin
 	}
 }
 
-func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context, initialSync bool, epochSize uint64) (err error) {
-	if !initialSync {
+func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context, initialSync bool) (err error) {
+	if !initialSync || cfg.epochSize==0{
 		return nil
 	}
 	roTX, err := cfg.db.BeginRo(ctx)
@@ -50,14 +51,14 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 	}
 
 	//it's too early for snapshot
-	if to < epochSize {
+	if to < cfg.epochSize {
 		return nil
 	}
 	currentSnapshotBlock, err := stages.GetStageProgress(roTX, stages.CreateStateSnapshot)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
-	snapshotBlock := snapshotsync.CalculateEpoch(to, epochSize)
+	snapshotBlock := snapshotsync.CalculateEpoch(to, cfg.epochSize)
 	if snapshotBlock <= currentSnapshotBlock {
 		return nil
 	}

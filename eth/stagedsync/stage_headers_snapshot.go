@@ -16,6 +16,7 @@ import (
 type SnapshotHeadersCfg struct {
 	enabled          bool
 	db               kv.RwDB
+	epochSize		uint64
 	snapshotDir      string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
@@ -35,7 +36,7 @@ func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *sn
 
 func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
-	if !initial {
+	if !initial || cfg.epochSize==0 {
 		return nil
 	}
 
@@ -51,7 +52,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 	}
 
 	//it's too early for snapshot
-	if to < snapshotsync.EpochSize {
+	if to < cfg.epochSize {
 		return nil
 	}
 
@@ -59,7 +60,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
-	snapshotBlock := snapshotsync.CalculateEpoch(to, snapshotsync.EpochSize)
+	snapshotBlock := snapshotsync.CalculateEpoch(to, cfg.epochSize)
 
 	//Problem: we must inject this stage, because it's not possible to do compact mdbx after sync.
 	//So we have to move headers to snapshot right after headers stage.

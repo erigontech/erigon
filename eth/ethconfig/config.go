@@ -115,6 +115,7 @@ type Snapshot struct {
 	Enabled bool
 	Mode    snapshotsync.SnapshotMode
 	Dir     string
+	EpochSize uint64
 	Seeding bool
 }
 

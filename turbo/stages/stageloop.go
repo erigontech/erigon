@@ -36,6 +36,7 @@ func StageLoop(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
+	snapshotEpochBlock uint64,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -51,7 +52,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, logger, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
+		if err := StageLoopStep(ctx, logger, db, sync, height, notifications, initialCycle, updateHead, nil, 0); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -89,6 +90,7 @@ func StageLoopStep(
 	initialCycle bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx kv.Tx) error,
+	snapshotEpochBlocks uint64,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
 	var origin, hashStateStageProgress, finishProgressBefore uint64

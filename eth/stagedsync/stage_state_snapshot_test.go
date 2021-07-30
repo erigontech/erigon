@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"fmt"
 	"github.com/ledgerwatch/erigon/log"
 	"testing"
 
@@ -17,31 +18,34 @@ func TestSnapshotGeneration(t *testing.T) {
 	ctx, assert := context.Background(), assert.New(t)
 	db := memdb.NewTestDB(t)
 	db = snapshotdb.NewSnapshotKV().DB(db).Open()
-	_, tx2 := memdb.NewTestTx(t)
-	_, tx3 := memdb.NewTestTx(t)
+	_, tx1to4Expected := memdb.NewTestTx(t)
+	_, tx1to6Expected := memdb.NewTestTx(t)
+	_, txWriteDB4to6Expected := memdb.NewTestTx(t)
+	defer txWriteDB4to6Expected.Rollback()
 
 	//generate 50 block for snapshot and 50 in tmp db
-	tx1, err := db.BeginRw(ctx)
+	tx1to6WithSnapshot, err := db.BeginRw(ctx)
 	assert.NoError(err)
-	generateBlocks(t, 1, 50, plainWriterGen(tx1), changeCodeWithIncarnations)
-	err = tx1.Commit()
+	generateBlocks(t, 1, 3, plainWriterGen(tx1to6WithSnapshot), changeCodeWithIncarnations)
+	err = tx1to6WithSnapshot.Commit()
 	assert.NoError(err)
 	tmpDB := memdb.NewTestDB(t)
 	db.(*snapshotdb.SnapshotKV).SetTempDB(tmpDB, snapshotsync.StateSnapshotBuckets)
 
-	tx1, err = db.BeginRw(ctx)
+	tx1to6WithSnapshot, err = db.BeginRw(ctx)
 	assert.NoError(err)
-	generateBlocks(t, 51, 70, plainWriterGen(tx1), changeCodeWithIncarnations)
-	err = stages.SaveStageProgress(tx1, stages.Execution, 70)
+	generateBlocks(t, 1, 3, plainWriterGen(tx1to4Expected), changeCodeWithIncarnations)
+	generateBlocks(t, 4, 2, plainWriterGen(tx1to6WithSnapshot), changeCodeWithIncarnations)
+	generateBlocks(t, 4, 2, plainWriterGen(txWriteDB4to6Expected), changeCodeWithIncarnations)
+	err = stages.SaveStageProgress(tx1to6WithSnapshot, stages.Execution, 5)
 	assert.NoError(err)
 
-	err = tx1.Commit()
+	err = tx1to6WithSnapshot.Commit()
 	assert.NoError(err)
 
-	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
-	generateBlocks(t, 51, 70, plainWriterGen(tx3), changeCodeWithIncarnations)
+	generateBlocks(t, 1, 5, plainWriterGen(tx1to6Expected), changeCodeWithIncarnations)
 
-	s := &StageState{ID: stages.CreateStateSnapshot, BlockNumber: 50}
+	s := &StageState{ID: stages.CreateStateSnapshot, BlockNumber: 3}
 	err = SpawnStateSnapshotGenerationStage(s, nil, SnapshotStateCfg{
 		enabled:          true,
 		db:               db,
@@ -50,7 +54,8 @@ func TestSnapshotGeneration(t *testing.T) {
 		client:           nil,
 		snapshotMigrator: nil,
 		log:              log.New(),
-	}, ctx, true, 50)
+		epochSize: 3,
+	}, ctx, true,)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +63,18 @@ func TestSnapshotGeneration(t *testing.T) {
 	stateSnapshotTX, err := db.(*snapshotdb.SnapshotKV).StateSnapshot().BeginRo(ctx)
 	assert.NoError(err)
 	defer stateSnapshotTX.Rollback()
-	compareCurrentState(t, stateSnapshotTX, tx2, kv.PlainState, kv.PlainContractCode)
+	compareCurrentState(t, stateSnapshotTX, tx1to4Expected, kv.PlainState, kv.PlainContractCode)
+	fmt.Println("tx1to6WithSnapshot")
 
-	tx1, err = db.(*snapshotdb.SnapshotKV).WriteDB().BeginRw(ctx)
+	tx1to6WithSnapshot, err = db.(*snapshotdb.SnapshotKV).BeginRw(ctx)
 	assert.NoError(err)
-	defer tx1.Rollback()
+	defer tx1to6WithSnapshot.Rollback()
 
-	compareCurrentState(t, tx1, tx3, kv.PlainState)
+	compareCurrentState(t, tx1to6WithSnapshot, tx1to6Expected, kv.PlainState, kv.PlainContractCode)
+	tx1to6WithSnapshot.Rollback()
+	writeDB, err := db.(*snapshotdb.SnapshotKV).WriteDB().BeginRo(ctx)
+	assert.NoError(err)
+	defer writeDB.Rollback()
+
+	compareCurrentState(t, writeDB, txWriteDB4to6Expected, kv.PlainState, kv.PlainContractCode)
 }

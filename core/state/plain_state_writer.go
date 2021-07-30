@@ -122,6 +122,9 @@ func (w *PlainStateWriter) CreateContract(address common.Address) error {
 	return nil
 }
 
+// todo[Boris] unwind incarnation map
+// create selfdestruct create selfdestruct and unwind. It stores 2 to incarnation map but contract din't exsist.
+// it'll cause different infohashes for snapshots
 func (w *PlainStateWriter) WriteChangeSets() error {
 	if w.csw != nil {
 		return w.csw.WriteChangeSets()

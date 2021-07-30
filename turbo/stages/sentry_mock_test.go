@@ -58,7 +58,7 @@ func TestHeaderStep(t *testing.T) {
 
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -99,7 +99,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 
 		initialCycle := true
 		highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-		if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+		if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,7 +170,7 @@ func TestReorg(t *testing.T) {
 
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,7 +224,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,7 +268,7 @@ func TestReorg(t *testing.T) {
 
 	// This is unwind step
 	highestSeenHeader = uint64(long1.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -306,7 +306,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short2.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -405,7 +405,7 @@ func TestAnchorReplace(t *testing.T) {
 
 	highestSeenHeader := uint64(long.TopBlock.NumberU64())
 	initialCycle := true
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -512,7 +512,7 @@ func TestAnchorReplace2(t *testing.T) {
 
 	highestSeenHeader := uint64(long.TopBlock.NumberU64())
 	initialCycle := true
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }

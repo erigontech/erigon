@@ -354,11 +354,17 @@ func (sm *SnapshotMigrator) RemoveNonCurrentSnapshots() error {
 
 //IsSnapshotBlock - should we create temp database in execution stage
 func IsSnapshotBlock(block, epochSize uint64) bool {
+	if epochSize==0 {
+		return false
+	}
 	return block > 0 && block%epochSize == 0
 }
 
 //CurrentStateSnapshotBlock - what is the current state snapshot block
 func CurrentStateSnapshotBlock(block, epochSize uint64) uint64 {
+	if epochSize == 0 {
+		return 0
+	}
 	return block - block%epochSize
 }
 

@@ -11,6 +11,7 @@ import (
 type SnapshotBodiesCfg struct {
 	enabled          bool
 	db               kv.RwDB
+	epochSize		uint64
 	snapshotDir      string
 	tmpDir           string
 	client           *snapshotsync.Client

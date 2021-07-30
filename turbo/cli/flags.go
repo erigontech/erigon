@@ -112,6 +112,11 @@ var (
 		Name:  "snapshot.layout",
 		Usage: `Enable snapshot db layout(default: false)`,
 	}
+	SnapshotEpochSizeFlag = cli.Uint64Flag{
+		Name:  "snapshot.epoch",
+		Usage: `only for debug purposes(default 500000)`,
+		Value: 500000,
+	}
 
 	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
 		Name:  "snapshot.downloader.addr",
@@ -178,6 +183,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.Snapshot.Mode = snMode
 	cfg.Snapshot.Seeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
 	cfg.Snapshot.Enabled = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
+	cfg.Snapshot.EpochSize = ctx.GlobalUint64(SnapshotEpochSizeFlag.Name)
 
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
