@@ -19,7 +19,6 @@ package txpool
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -75,27 +74,30 @@ type MetaTx struct {
 
 type BestQueue []*MetaTx
 
-func (pq BestQueue) Len() int           { return len(pq) }
-func (pq BestQueue) Less(i, j int) bool { return pq[i].SubPool < pq[j].SubPool } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
-func (pq BestQueue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].bestIndex = i
-	pq[j].bestIndex = j
+func (p BestQueue) Len() int           { return len(p) }
+func (p BestQueue) Less(i, j int) bool { return p[i].SubPool < p[j].SubPool } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
+func (p BestQueue) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+	p[i].bestIndex = i
+	p[j].bestIndex = j
 }
-func (pq *BestQueue) Push(x interface{}) {
-	n := len(*pq)
+func (p *BestQueue) Push(x interface{}) {
+	n := len(*p)
 	item := x.(*MetaTx)
 	item.bestIndex = n
-	*pq = append(*pq, item)
+	*p = append(*p, item)
 }
 
-func (pq *BestQueue) Pop() interface{} {
-	old := *pq
+func (p *BestQueue) Pop() interface{} {
+	if len(*p) == 0 {
+		return nil
+	}
+	old := *p
 	n := len(old)
 	item := old[n-1]
 	old[n-1] = nil      // avoid memory leak
 	item.bestIndex = -1 // for safety
-	*pq = old[0 : n-1]
+	*p = old[0 : n-1]
 	return item
 }
 
@@ -115,6 +117,9 @@ func (p *WorstQueue) Push(x interface{}) {
 	*p = append(*p, x.(*MetaTx))
 }
 func (p *WorstQueue) Pop() interface{} {
+	if len(*p) == 0 {
+		return nil
+	}
 	old := *p
 	n := len(old)
 	item := old[n-1]
@@ -241,9 +246,6 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 			continue
 		}
 
-		fmt.Printf("from queued: %b\n", queued.Best().SubPool)
-		bb := queued.PopBest()
-		fmt.Printf("from queued2: %b\n", bb.SubPool)
 		pending.Add(queued.PopBest())
 	}
 
