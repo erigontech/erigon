@@ -103,6 +103,7 @@ func TestSubPoolsPromote(t *testing.T) {
 	// if limit reached, worst must be greater than X
 }
 
+//nolint
 func hexToSubPool(s string) []uint8 {
 	a, err := hex.DecodeString(s)
 	if err != nil {

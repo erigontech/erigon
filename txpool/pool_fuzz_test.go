@@ -23,6 +23,11 @@ func FuzzTwoQueue(f *testing.F) {
 	f.Add([]uint8{0b10101, 0b11110, 0b11101, 0b10001})
 	f.Fuzz(func(t *testing.T, in []uint8) {
 		t.Parallel()
+		for i := range in {
+			if in[i] > 0b11111 {
+				t.Skip()
+			}
+		}
 		assert := assert.New(t)
 		{
 			sub := NewSubPool()
@@ -80,6 +85,22 @@ func FuzzPromoteStep(f *testing.F) {
 	f.Add([]uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111})
 	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8) {
 		t.Parallel()
+		for i := range s1 {
+			if s1[i] > 0b11111 {
+				t.Skip()
+			}
+		}
+		for i := range s2 {
+			if s2[i] > 0b11111 {
+				t.Skip()
+			}
+		}
+		for i := range s3 {
+			if s3[i] > 0b11111 {
+				t.Skip()
+			}
+		}
+
 		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
 		for _, i := range s1 {
 			pending.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
