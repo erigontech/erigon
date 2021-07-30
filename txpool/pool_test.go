@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,56 +73,6 @@ func TestSubPoolOrder(t *testing.T) {
 
 	require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
 	require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
-}
-
-func TestSubPoolOrderInv(t *testing.T) {
-	//sub := NewSubPool()
-	//require.Equal(t, uint8(0b11110), uint8(sub.Best().SubPool))
-	//require.Equal(t, uint8(0b10001), uint8(sub.Worst().SubPool))
-	//
-	//require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
-	//require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
-
-	//s := fromHex("b8940c10a547")
-	s := []uint8{0b11000, 0b101, 0b111}
-
-	{
-		sub := NewSubPool()
-		for _, i := range s {
-			sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
-		}
-		var prevBest *uint8
-		i := sub.Len()
-		for sub.Len() > 0 {
-			best := uint8(sub.Best().SubPool)
-			assert.Equal(t, best, uint8(sub.PopBest().SubPool))
-			if prevBest != nil {
-				assert.Less(t, best, *prevBest)
-			}
-			prevBest = &best
-			i--
-		}
-		assert.Zero(t, i)
-	}
-
-	{
-		sub := NewSubPool()
-		for _, i := range s {
-			sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
-		}
-		var prev *uint8
-		i := sub.Len()
-		for sub.Len() > 0 {
-			worst := uint8(sub.Worst().SubPool)
-			assert.Equal(t, worst, uint8(sub.PopWorst().SubPool))
-			if prev != nil {
-				assert.Greater(t, worst, *prev)
-			}
-			prev = &worst
-			i--
-		}
-		assert.Zero(t, i)
-	}
 }
 
 func TestSubPoolsPromote(t *testing.T) {

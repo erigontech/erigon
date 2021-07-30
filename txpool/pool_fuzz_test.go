@@ -45,6 +45,9 @@ func FuzzTwoQueue(f *testing.F) {
 				i--
 			}
 			assert.Zero(i)
+			assert.Zero(sub.Len())
+			assert.Zero(sub.best.Len())
+			assert.Zero(sub.worst.Len())
 		}
 
 		{
@@ -64,6 +67,9 @@ func FuzzTwoQueue(f *testing.F) {
 				i--
 			}
 			assert.Zero(i)
+			assert.Zero(sub.Len())
+			assert.Zero(sub.best.Len())
+			assert.Zero(sub.worst.Len())
 		}
 	})
 }
