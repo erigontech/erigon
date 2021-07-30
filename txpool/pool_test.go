@@ -17,8 +17,10 @@
 package txpool
 
 import (
+	"encoding/hex"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,18 +74,72 @@ func TestSubPoolOrder(t *testing.T) {
 
 	require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
 	require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
+}
 
+func TestSubPoolOrderInv(t *testing.T) {
+	//sub := NewSubPool()
+	//require.Equal(t, uint8(0b11110), uint8(sub.Best().SubPool))
+	//require.Equal(t, uint8(0b10001), uint8(sub.Worst().SubPool))
+	//
+	//require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
+	//require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
+
+	//s := fromHex("b8940c10a547")
+	s := []uint8{0b11000, 0b101, 0b111}
+
+	{
+		sub := NewSubPool()
+		for _, i := range s {
+			sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		}
+		var prevBest *uint8
+		i := sub.Len()
+		for sub.Len() > 0 {
+			best := uint8(sub.Best().SubPool)
+			assert.Equal(t, best, uint8(sub.PopBest().SubPool))
+			if prevBest != nil {
+				assert.Less(t, best, *prevBest)
+			}
+			prevBest = &best
+			i--
+		}
+		assert.Zero(t, i)
+	}
+
+	{
+		sub := NewSubPool()
+		for _, i := range s {
+			sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		}
+		var prev *uint8
+		i := sub.Len()
+		for sub.Len() > 0 {
+			worst := uint8(sub.Worst().SubPool)
+			assert.Equal(t, worst, uint8(sub.PopWorst().SubPool))
+			if prev != nil {
+				assert.Greater(t, worst, *prev)
+			}
+			prev = &worst
+			i--
+		}
+		assert.Zero(t, i)
+	}
 }
 
 func TestSubPoolsPromote(t *testing.T) {
+	s1 := []uint8{0b11000, 0b101, 0b111}
+	s2 := []uint8{0b11000, 0b101, 0b111}
+	s3 := []uint8{0b11000, 0b101, 0b111}
 	pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
-	pending.Add(&MetaTx{SubPool: SubPoolMarker(0b11111)})
-
-	baseFee.Add(&MetaTx{SubPool: SubPoolMarker(0b11111)})
-
-	queued.Add(&MetaTx{SubPool: SubPoolMarker(0b11110)})
-	queued.Add(&MetaTx{SubPool: SubPoolMarker(0b0)})
-	queued.Add(&MetaTx{SubPool: SubPoolMarker(0b01010)})
+	for _, i := range s1 {
+		pending.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+	}
+	for _, i := range s2 {
+		baseFee.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+	}
+	for _, i := range s3 {
+		queued.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+	}
 	PromoteStep(pending, baseFee, queued)
 
 	if pending.Worst() != nil {
@@ -96,4 +152,16 @@ func TestSubPoolsPromote(t *testing.T) {
 		require.Less(t, uint8(0b01111), uint8(queued.Worst().SubPool))
 	}
 	// if limit reached, worst must be greater than X
+}
+
+func hexToSubPool(s string) []uint8 {
+	a, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	for i := range a {
+		a[i] &= 0b11111
+	}
+
+	return a
 }
