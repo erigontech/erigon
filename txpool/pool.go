@@ -19,6 +19,7 @@ package txpool
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -154,19 +155,33 @@ func (p *SubPool) Worst() *MetaTx {
 	return (*p.worst)[len(*p.worst)-1]
 }
 func (p *SubPool) PopBest() *MetaTx {
-	i := p.best.Pop().(*MetaTx)
+	i := heap.Pop(p.best).(*MetaTx)
+	if i.worstIndex != 0 {
+		panic("why?")
+	}
 	heap.Remove(p.worst, i.worstIndex)
 	return i
 }
 func (p *SubPool) PopWorst() *MetaTx {
-	i := p.worst.Pop().(*MetaTx)
+	i := heap.Pop(p.worst).(*MetaTx)
+	if i.bestIndex != 0 {
+		panic("why?")
+	}
 	heap.Remove(p.best, i.bestIndex)
 	return i
 }
 func (p *SubPool) Len() int { return p.best.Len() }
 func (p *SubPool) Add(i *MetaTx) {
-	heap.Push(p.worst, i)
 	heap.Push(p.best, i)
+	heap.Push(p.worst, i)
+}
+func (p *SubPool) DebugPrint() {
+	for i := range *p.best {
+		fmt.Printf("best: %b\n", (*p.best)[i].SubPool)
+	}
+	for i := range *p.worst {
+		fmt.Printf("worst: %b\n", (*p.worst)[i].SubPool)
+	}
 }
 
 const PendingSubPoolLimit = 1024
