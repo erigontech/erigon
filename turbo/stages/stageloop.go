@@ -90,11 +90,11 @@ func StageLoopStep(
 	initialCycle bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx kv.Tx) error,
-	snapshotEpochBlocks uint64,
+	snapshotEpochSize uint64,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
-	var origin, hashStateStageProgress, finishProgressBefore uint64
-	if err := db.View(ctx, func(tx kv.Tx) error {
+	var origin, hashStateStageProgress, finishProgressBefore, executionBefore uint64
+	if err = db.View(ctx, func(tx kv.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
 			return err
@@ -104,6 +104,10 @@ func StageLoopStep(
 			return err
 		}
 		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish) // TODO: shift this when more stages are added
+		if err != nil {
+			return err
+		}
+		executionBefore, err = stages.GetStageProgress(tx, stages.Execution) // TODO: shift this when more stages are added
 		if err != nil {
 			return err
 		}
@@ -117,7 +121,10 @@ func StageLoopStep(
 	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
-
+	snapshotBlock := snapshotsync.CurrentStateSnapshotBlock(highestSeenHeader, snapshotEpochSize)
+	if snapshotBlock > 0 && highestSeenHeader >= snapshotBlock && snapshotBlock > executionBefore {
+		canRunCycleInOneTransaction = false
+	}
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
 		tx, err = db.BeginRw(context.Background())
