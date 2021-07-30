@@ -135,13 +135,13 @@ func init() {
 
 func SetupCobra(cmd *cobra.Command) error {
 	flags := cmd.Flags()
+	lvl, err := flags.GetInt(verbosityFlag.Name)
+	if err != nil {
+		return err
+	}
 
 	/*
 		dbg, err := flags.GetBool(debugFlag.Name)
-		if err != nil {
-			return err
-		}
-		lvl, err := flags.GetInt(verbosityFlag.Name)
 		if err != nil {
 			return err
 		}
@@ -157,7 +157,7 @@ func SetupCobra(cmd *cobra.Command) error {
 		_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
 		log.PrintOrigins(dbg)
 	*/
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lvl), log.StderrHandler))
 
 	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
 	if err != nil {
