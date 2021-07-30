@@ -205,7 +205,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 		if best.SubPool < 0b11110 {
 			break
 		}
-		pending.Add(baseFee.PopWorst())
+		pending.Add(baseFee.PopBest())
 	}
 
 	//4. If the top element in the worst yellow queue has SubPool != 0x1110, it needs to be removed from the yellow pool.
@@ -235,11 +235,11 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 			break
 		}
 		if best.SubPool < 0b11110 {
-			baseFee.Add(queued.PopWorst())
+			baseFee.Add(queued.PopBest())
 			continue
 		}
 
-		pending.Add(queued.PopWorst())
+		pending.Add(queued.PopBest())
 	}
 
 	//7. If the top element in the worst red queue has SubPool < 0b1000 (not satisfying minimum fee), discard.
