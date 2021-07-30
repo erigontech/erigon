@@ -71,7 +71,7 @@ type MockSentry struct {
 	ReceiveWg       sync.WaitGroup
 	Address         common.Address
 
-	Notifications *stagedsync.Notifications
+	Notifications     *stagedsync.Notifications
 	SnapshotEpochSize uint64
 }
 

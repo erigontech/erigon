@@ -89,7 +89,7 @@ func DefaultStages(ctx context.Context,
 			Disabled:            snapshotBodies.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, ctx)
+				return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, firstCycle, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindBodiesSnapshotGenerationStage(u, tx, snapshotBodies, ctx)

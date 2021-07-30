@@ -12,11 +12,11 @@ import (
 )
 
 type FinishCfg struct {
-	db        kv.RwDB
-	tmpDir    string
-	btClient  *snapshotsync.Client
-	snBuilder *snapshotsync.SnapshotMigrator
-	log       log.Logger
+	db                kv.RwDB
+	tmpDir            string
+	btClient          *snapshotsync.Client
+	snBuilder         *snapshotsync.SnapshotMigrator
+	log               log.Logger
 	snapshotEpochSize uint64
 }
 

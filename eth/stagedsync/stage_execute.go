@@ -57,7 +57,7 @@ type ExecuteBlockCfg struct {
 	stateStream             bool
 	accumulator             *shards.Accumulator
 	stateSnapshotGeneration bool
-	snapshotEpochSize		uint64
+	snapshotEpochSize       uint64
 }
 
 func StageExecuteBlocksCfg(
@@ -559,7 +559,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 	}
 
 	snapshotBlock := snapshotsync.CurrentStateSnapshotBlock(s.BlockNumber, cfg.snapshotEpochSize)
-	if !(cfg.stateSnapshotGeneration && cfg.snapshotEpochSize>0 && (s.BlockNumber >= snapshotBlock && u.UnwindPoint < snapshotBlock)) {
+	if !(cfg.stateSnapshotGeneration && cfg.snapshotEpochSize > 0 && (s.BlockNumber >= snapshotBlock && u.UnwindPoint < snapshotBlock)) {
 		errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 		if errRewind != nil {
 			return fmt.Errorf("getting rewind data: %w", errRewind)

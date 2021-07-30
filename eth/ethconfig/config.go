@@ -112,11 +112,11 @@ func init() {
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
-	Enabled bool
-	Mode    snapshotsync.SnapshotMode
-	Dir     string
+	Enabled   bool
+	Mode      snapshotsync.SnapshotMode
+	Dir       string
 	EpochSize uint64
-	Seeding bool
+	Seeding   bool
 }
 
 // Config contains configuration options for ETH protocol.

@@ -17,7 +17,7 @@ type SnapshotStateCfg struct {
 	db               kv.RwDB
 	snapshotDir      string
 	tmpDir           string
-	epochSize		uint64
+	epochSize        uint64
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
 	log              log.Logger
@@ -36,7 +36,7 @@ func StageSnapshotStateCfg(db kv.RwDB, snapshot ethconfig.Snapshot, tmpDir strin
 }
 
 func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotStateCfg, ctx context.Context, initialSync bool) (err error) {
-	if !initialSync || cfg.epochSize==0{
+	if !initialSync || cfg.epochSize == 0 {
 		return nil
 	}
 	roTX, err := cfg.db.BeginRo(ctx)

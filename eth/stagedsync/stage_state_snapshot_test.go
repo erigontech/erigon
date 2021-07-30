@@ -54,8 +54,8 @@ func TestSnapshotGeneration(t *testing.T) {
 		client:           nil,
 		snapshotMigrator: nil,
 		log:              log.New(),
-		epochSize: 3,
-	}, ctx, true,)
+		epochSize:        3,
+	}, ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}

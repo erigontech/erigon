@@ -11,7 +11,7 @@ import (
 type SnapshotBodiesCfg struct {
 	enabled          bool
 	db               kv.RwDB
-	epochSize		uint64
+	epochSize        uint64
 	snapshotDir      string
 	tmpDir           string
 	client           *snapshotsync.Client
@@ -29,7 +29,10 @@ func StageSnapshotBodiesCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *sna
 	}
 }
 
-func SpawnBodiesSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotBodiesCfg, ctx context.Context) error {
+func SpawnBodiesSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotBodiesCfg, initialSync bool, ctx context.Context) error {
+	if !initialSync || cfg.epochSize == 0 {
+		return nil
+	}
 	return nil
 }
 

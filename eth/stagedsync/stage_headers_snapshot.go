@@ -16,7 +16,7 @@ import (
 type SnapshotHeadersCfg struct {
 	enabled          bool
 	db               kv.RwDB
-	epochSize		uint64
+	epochSize        uint64
 	snapshotDir      string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
@@ -36,7 +36,7 @@ func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *sn
 
 func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
-	if !initial || cfg.epochSize==0 {
+	if !initial || cfg.epochSize == 0 {
 		return nil
 	}
 
