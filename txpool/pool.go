@@ -76,7 +76,7 @@ type MetaTx struct {
 type BestQueue []*MetaTx
 
 func (p BestQueue) Len() int           { return len(p) }
-func (p BestQueue) Less(i, j int) bool { return p[i].SubPool < p[j].SubPool } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
+func (p BestQueue) Less(i, j int) bool { return p[i].SubPool > p[j].SubPool } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
 func (p BestQueue) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 	p[i].bestIndex = i
@@ -90,9 +90,6 @@ func (p *BestQueue) Push(x interface{}) {
 }
 
 func (p *BestQueue) Pop() interface{} {
-	if len(*p) == 0 {
-		return nil
-	}
 	old := *p
 	n := len(old)
 	item := old[n-1]
@@ -105,7 +102,7 @@ func (p *BestQueue) Pop() interface{} {
 type WorstQueue []*MetaTx
 
 func (p WorstQueue) Len() int           { return len(p) }
-func (p WorstQueue) Less(i, j int) bool { return p[i].SubPool > p[j].SubPool }
+func (p WorstQueue) Less(i, j int) bool { return p[i].SubPool < p[j].SubPool }
 func (p WorstQueue) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 	p[i].worstIndex = i
@@ -118,9 +115,6 @@ func (p *WorstQueue) Push(x interface{}) {
 	*p = append(*p, x.(*MetaTx))
 }
 func (p *WorstQueue) Pop() interface{} {
-	if len(*p) == 0 {
-		return nil
-	}
 	old := *p
 	n := len(old)
 	item := old[n-1]
@@ -136,37 +130,32 @@ type SubPool struct {
 }
 
 func NewSubPool() *SubPool {
-	p := &SubPool{best: &BestQueue{}, worst: &WorstQueue{}}
-	heap.Init(p.worst)
-	heap.Init(p.best)
-	return p
+	return &SubPool{best: &BestQueue{}, worst: &WorstQueue{}}
 }
 
+func (p *SubPool) EnforceInvariants() {
+	heap.Init(p.worst)
+	heap.Init(p.best)
+}
 func (p *SubPool) Best() *MetaTx {
 	if len(*p.best) == 0 {
 		return nil
 	}
-	return (*p.best)[len(*p.best)-1]
+	return (*p.best)[0]
 }
 func (p *SubPool) Worst() *MetaTx {
 	if len(*p.worst) == 0 {
 		return nil
 	}
-	return (*p.worst)[len(*p.worst)-1]
+	return (*p.worst)[0]
 }
 func (p *SubPool) PopBest() *MetaTx {
 	i := heap.Pop(p.best).(*MetaTx)
-	if i.worstIndex != 0 {
-		panic("why?")
-	}
 	heap.Remove(p.worst, i.worstIndex)
 	return i
 }
 func (p *SubPool) PopWorst() *MetaTx {
 	i := heap.Pop(p.worst).(*MetaTx)
-	if i.bestIndex != 0 {
-		panic("why?")
-	}
 	heap.Remove(p.best, i.bestIndex)
 	return i
 }
@@ -176,11 +165,11 @@ func (p *SubPool) Add(i *MetaTx) {
 	heap.Push(p.worst, i)
 }
 func (p *SubPool) DebugPrint() {
-	for i := range *p.best {
-		fmt.Printf("best: %b\n", (*p.best)[i].SubPool)
+	for i, it := range *p.best {
+		fmt.Printf("best: %d, %d, %d\n", i, it.SubPool, it.bestIndex)
 	}
-	for i := range *p.worst {
-		fmt.Printf("worst: %b\n", (*p.worst)[i].SubPool)
+	for i, it := range *p.worst {
+		fmt.Printf("worst: %d, %d, %d\n", i, it.SubPool, it.worstIndex)
 	}
 }
 
@@ -189,12 +178,9 @@ const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
 func PromoteStep(pending, baseFee, queued *SubPool) {
-	heap.Init(pending.worst)
-	heap.Init(pending.best)
-	heap.Init(baseFee.worst)
-	heap.Init(baseFee.best)
-	heap.Init(queued.worst)
-	heap.Init(queued.best)
+	pending.EnforceInvariants()
+	baseFee.EnforceInvariants()
+	queued.EnforceInvariants()
 
 	//1. If top element in the worst green queue has SubPool != 0b1111 (binary), it needs to be removed from the green pool.
 	//   If SubPool < 0b1000 (not satisfying minimum fee), discard.
@@ -245,7 +231,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 
 	//5. If the top element in the worst yellow queue has SubPool == 0x1110, but there is not enough room in the pool, discard.
 	for worst := baseFee.Worst(); baseFee.Len() > BaseFeeSubPoolLimit; worst = baseFee.Worst() {
-		if worst.SubPool >= 0b11101 {
+		if worst.SubPool >= 0b11110 {
 			break
 		}
 		baseFee.PopWorst()

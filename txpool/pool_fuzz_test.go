@@ -6,7 +6,7 @@ package txpool
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 // https://blog.golang.org/fuzz-beta
@@ -20,16 +20,61 @@ import (
 
 func FuzzTwoQueue(f *testing.F) {
 	f.Add([]uint8{0b11000, 0b00101, 0b000111})
+	f.Add([]uint8{0b10101, 0b11110, 0b11101, 0b10001})
 	f.Fuzz(func(t *testing.T, in []uint8) {
 		t.Parallel()
-		sub := NewSubPool()
-		for _, i := range in {
-			sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		for i := range in {
+			if in[i] > 0b11111 {
+				t.Skip()
+			}
 		}
-		for sub.Len() > 0 {
-			require.Equal(t, (*sub.worst)[0].SubPool, sub.Best().SubPool)
-			require.Equal(t, (*sub.best)[0].SubPool, sub.Worst().SubPool)
-			sub.PopBest()
+		assert := assert.New(t)
+		{
+			sub := NewSubPool()
+			for _, i := range in {
+				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+			}
+			assert.Equal(len(in), sub.best.Len())
+			assert.Equal(len(in), sub.worst.Len())
+			assert.Equal(len(in), sub.Len())
+
+			var prevBest *uint8
+			i := sub.Len()
+			for sub.Len() > 0 {
+				best := uint8(sub.Best().SubPool)
+				assert.Equal(best, uint8(sub.PopBest().SubPool))
+				if prevBest != nil {
+					assert.LessOrEqual(best, *prevBest)
+				}
+				prevBest = &best
+				i--
+			}
+			assert.Zero(i)
+			assert.Zero(sub.Len())
+			assert.Zero(sub.best.Len())
+			assert.Zero(sub.worst.Len())
+		}
+
+		{
+			sub := NewSubPool()
+			for _, i := range in {
+				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+			}
+			var prev *uint8
+			i := sub.Len()
+			for sub.Len() > 0 {
+				worst := uint8(sub.Worst().SubPool)
+				assert.Equal(worst, uint8(sub.PopWorst().SubPool))
+				if prev != nil {
+					assert.GreaterOrEqual(worst, *prev)
+				}
+				prev = &worst
+				i--
+			}
+			assert.Zero(i)
+			assert.Zero(sub.Len())
+			assert.Zero(sub.best.Len())
+			assert.Zero(sub.worst.Len())
 		}
 	})
 }
@@ -40,6 +85,22 @@ func FuzzPromoteStep(f *testing.F) {
 	f.Add([]uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111})
 	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8) {
 		t.Parallel()
+		for i := range s1 {
+			if s1[i] > 0b11111 {
+				t.Skip()
+			}
+		}
+		for i := range s2 {
+			if s2[i] > 0b11111 {
+				t.Skip()
+			}
+		}
+		for i := range s3 {
+			if s3[i] > 0b11111 {
+				t.Skip()
+			}
+		}
+
 		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
 		for _, i := range s1 {
 			pending.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
@@ -54,19 +115,19 @@ func FuzzPromoteStep(f *testing.F) {
 
 		best, worst := pending.Best(), pending.Worst()
 		_ = best
-		if worst != nil && worst.SubPool < 0b01111 {
+		if worst != nil && worst.SubPool < 0b11110 {
 			t.Fatalf("pending worst too small %b, input: \n%x\n%x\n%x", worst.SubPool, s1, s2, s3)
 		}
 
 		best, worst = baseFee.Best(), baseFee.Worst()
 		_ = best
-		if worst != nil && worst.SubPool < 0b01111 {
+		if worst != nil && worst.SubPool < 0b11100 {
 			t.Fatalf("baseFee worst too small %b, input: \n%x\n%x\n%x", worst.SubPool, s1, s2, s3)
 		}
 
 		best, worst = queued.Best(), queued.Worst()
 		_ = best
-		if worst != nil && worst.SubPool < 0b01111 {
+		if worst != nil && worst.SubPool < 0b10000 {
 			t.Fatalf("queued worst too small %b, input: \n%x\n%x\n%x", worst.SubPool, s1, s2, s3)
 		}
 

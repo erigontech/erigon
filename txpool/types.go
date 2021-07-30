@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"io"
 	"math/bits"
 
 	"github.com/holiman/uint256"
@@ -291,8 +292,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 			return nil, 0, fmt.Errorf("%s: computing idHash: %w", ParseTransactionErrorPrefix, err)
 		}
 	}
-	ctx.keccak1.Sum(slot.idHash[:0])
-	//ctx.keccak1.(io.Reader).Read(slot.idHash[:32])
+	//ctx.keccak1.Sum(slot.idHash[:0])
+	_, _ = ctx.keccak1.(io.Reader).Read(slot.idHash[:32])
 	// Computing sigHash (hash used to recover sender from the signature)
 	// Write len Prefix to the sighash
 	if sigHashLen < 56 {
@@ -337,8 +338,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		}
 	}
 	// Squeeze sighash
-	//ctx.keccak2.(io.Reader).Read(ctx.sighash[:32])
-	ctx.keccak2.Sum(ctx.sighash[:0])
+	_, _ = ctx.keccak2.(io.Reader).Read(ctx.sighash[:32])
+	//ctx.keccak2.Sum(ctx.sighash[:0])
 	binary.BigEndian.PutUint64(ctx.sig[0:8], ctx.r[3])
 	binary.BigEndian.PutUint64(ctx.sig[8:16], ctx.r[2])
 	binary.BigEndian.PutUint64(ctx.sig[16:24], ctx.r[1])
@@ -358,8 +359,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (*TxSlot, i
 		return nil, 0, fmt.Errorf("%s: computing sender from public key: %w", ParseTransactionErrorPrefix, err)
 	}
 	// squeeze the hash of the public key
-	ctx.keccak2.Sum(ctx.buf[:0])
-	//ctx.keccak2.(io.Reader).Read(ctx.buf[:32])
+	//ctx.keccak2.Sum(ctx.buf[:0])
+	_, _ = ctx.keccak2.(io.Reader).Read(ctx.buf[:32])
 	//take last 20 bytes as address
 	copy(slot.sender[:], ctx.buf[12:32])
 	return &slot, p, nil
