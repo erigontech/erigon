@@ -4,9 +4,8 @@
 package txpool
 
 import (
+	"encoding/binary"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // https://blog.golang.org/fuzz-beta
@@ -17,7 +16,7 @@ import (
 //gotip doc testing.F.Fuzz
 
 // gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
-
+/*
 func FuzzTwoQueue(f *testing.F) {
 	f.Add([]uint8{0b11000, 0b00101, 0b000111})
 	f.Add([]uint8{0b10101, 0b11110, 0b11101, 0b10001})
@@ -78,13 +77,20 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 	})
 }
+*/
 
-func FuzzPromoteStep(f *testing.F) {
-	f.Add([]uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000})
-	f.Add([]uint8{0b11111}, []uint8{0b11111}, []uint8{0b11110, 0b0, 0b1010})
-	f.Add([]uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111})
-	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8) {
+func FuzzPromoteStep2(f *testing.F) {
+	var nNonce = [8]byte{1}
+	var nAddr = [20]byte{1}
+
+	f.Add([]uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, nNonce[:], nAddr[:])
+	f.Add([]uint8{0b11111}, []uint8{0b11111}, []uint8{0b11110, 0b0, 0b1010}, nNonce[:], nAddr[:])
+	f.Add([]uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, nNonce[:], nAddr[:])
+	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8, nonce []byte, sender []byte) {
 		t.Parallel()
+		if len(nonce) == 0 || len(nonce)%8 != 0 || len(sender) == 0 || len(sender)%20 != 0 {
+			t.Skip()
+		}
 		for i := range s1 {
 			if s1[i] > 0b11111 {
 				t.Skip()
@@ -101,15 +107,26 @@ func FuzzPromoteStep(f *testing.F) {
 			}
 		}
 
+		iNonce, iSenders := 0, 0
 		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
-		for _, i := range s1 {
-			pending.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		var ss [20]byte
+		for _, s := range s1 {
+			copy(ss[:], sender[(iSenders*20)%len(sender):])
+			pending.Add(&MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}})
+			iNonce++
+			iSenders++
 		}
-		for _, i := range s2 {
-			baseFee.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		for _, s := range s2 {
+			copy(ss[:], sender[(iSenders*20)%len(sender):])
+			baseFee.Add(&MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}})
+			iNonce++
+			iSenders++
 		}
 		for _, i := range s3 {
-			queued.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+			copy(ss[:], sender[(iSenders*20)%len(sender):])
+			queued.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}})
+			iNonce++
+			iSenders++
 		}
 		PromoteStep(pending, baseFee, queued)
 
@@ -130,6 +147,5 @@ func FuzzPromoteStep(f *testing.F) {
 		if worst != nil && worst.SubPool < 0b10000 {
 			t.Fatalf("queued worst too small %b, input: \n%x\n%x\n%x", worst.SubPool, s1, s2, s3)
 		}
-
 	})
 }

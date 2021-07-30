@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"fmt"
@@ -75,8 +76,22 @@ type MetaTx struct {
 
 type BestQueue []*MetaTx
 
+func (mt *MetaTx) Less(than *MetaTx) bool {
+	if mt.SubPool != than.SubPool {
+		return mt.SubPool < than.SubPool
+	}
+	// means that strict nonce ordering of transactions from the same sender must be observed.
+	if mt.Tx.sender != than.Tx.sender {
+		return bytes.Compare(mt.Tx.sender[:], than.Tx.sender[:]) < 0
+	}
+	if mt.Tx.nonce != than.Tx.nonce {
+		return mt.Tx.nonce < than.Tx.nonce
+	}
+	return false
+}
+
 func (p BestQueue) Len() int           { return len(p) }
-func (p BestQueue) Less(i, j int) bool { return p[i].SubPool > p[j].SubPool } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
+func (p BestQueue) Less(i, j int) bool { return !p[i].Less(p[j]) } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
 func (p BestQueue) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 	p[i].bestIndex = i
@@ -102,7 +117,7 @@ func (p *BestQueue) Pop() interface{} {
 type WorstQueue []*MetaTx
 
 func (p WorstQueue) Len() int           { return len(p) }
-func (p WorstQueue) Less(i, j int) bool { return p[i].SubPool < p[j].SubPool }
+func (p WorstQueue) Less(i, j int) bool { return p[i].Less(p[j]) }
 func (p WorstQueue) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 	p[i].worstIndex = i
