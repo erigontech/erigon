@@ -51,8 +51,13 @@ func runErigon(cliCtx *cli.Context) {
 		chaindb.Close()
 	}
 
-	err := node.New(nodeCfg, ethCfg, logger).Serve()
+	ethNode, err := node.New(nodeCfg, ethCfg, logger)
 	if err != nil {
-		log.Error("error while serving a Erigon node", "err", err)
+		log.Error("Erigon startup", "err", err)
+		return
+	}
+	err = ethNode.Serve()
+	if err != nil {
+		log.Error("error while serving an Erigon node", "err", err)
 	}
 }

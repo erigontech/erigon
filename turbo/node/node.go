@@ -92,20 +92,19 @@ func New(
 	nodeConfig *node.Config,
 	ethConfig *ethconfig.Config,
 	logger log.Logger,
-) *ErigonNode {
+) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node := makeConfigNode(nodeConfig)
-	ethereum := RegisterEthService(node, ethConfig, logger)
-	return &ErigonNode{stack: node, backend: ethereum}
+	ethereum, err := RegisterEthService(node, ethConfig, logger)
+	if err != nil {
+		return nil, err
+	}
+	return &ErigonNode{stack: node, backend: ethereum}, nil
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg, logger)
-	if err != nil {
-		panic(err)
-	}
-	return backend
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) (*eth.Ethereum, error) {
+	return eth.New(stack, cfg, logger)
 }
 
 func NewNodeConfig() *node.Config {
