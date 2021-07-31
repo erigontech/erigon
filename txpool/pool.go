@@ -24,7 +24,8 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/google/btree"
+	"github.com/google/btree"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -46,12 +47,12 @@ type Pool interface {
 // 5. Local transaction. Set to 1 if transaction is local.
 type SubPoolMarker uint8
 
-func NewSubPoolMarker(enoughFeeCapProtocol, noNonCeGaps, enoughBalance, enoughFeeCapBlock, isLocal bool) SubPoolMarker {
+func NewSubPoolMarker(enoughFeeCapProtocol, noNonceGaps, enoughBalance, enoughFeeCapBlock, isLocal bool) SubPoolMarker {
 	var s SubPoolMarker
 	if enoughFeeCapProtocol {
 		s |= 1 << 4
 	}
-	if noNonCeGaps {
+	if noNonceGaps {
 		s |= 1 << 3
 	}
 	if enoughBalance {
@@ -66,13 +67,29 @@ func NewSubPoolMarker(enoughFeeCapProtocol, noNonCeGaps, enoughBalance, enoughFe
 	return s
 }
 
+const (
+	EnoughFeeCapProtocol = 0b10000
+	NoNonceGaps          = 0b01000
+	EnoughBalance        = 0b00100
+	EnoughFeeCapBlock    = 0b00010
+	IsLocal              = 0b00001
+)
+
 // MetaTx holds transaction and some metadata
 type MetaTx struct {
-	SubPool    SubPoolMarker
-	Tx         *TxSlot
-	bestIndex  int
-	worstIndex int
+	SubPool                SubPoolMarker // Aggregated field
+	SenderHasEnoughBalance bool          // Aggregated field; gasLimit x feeCap + transferred_value
+	Tx                     *TxSlot
+	bestIndex              int
+	worstIndex             int
+	currentSubPool         SubPoolType
 }
+
+type SubPoolType uint8
+
+const PendingSubPool SubPoolType = 1
+const BaseFeeSubPool SubPoolType = 2
+const QueuedSubPool SubPoolType = 3
 
 type BestQueue []*MetaTx
 
@@ -108,8 +125,9 @@ func (p *BestQueue) Pop() interface{} {
 	old := *p
 	n := len(old)
 	item := old[n-1]
-	old[n-1] = nil      // avoid memory leak
-	item.bestIndex = -1 // for safety
+	old[n-1] = nil          // avoid memory leak
+	item.bestIndex = -1     // for safety
+	item.currentSubPool = 0 // for safety
 	*p = old[0 : n-1]
 	return item
 }
@@ -133,8 +151,9 @@ func (p *WorstQueue) Pop() interface{} {
 	old := *p
 	n := len(old)
 	item := old[n-1]
-	old[n-1] = nil       // avoid memory leak
-	item.worstIndex = -1 // for safety
+	old[n-1] = nil          // avoid memory leak
+	item.worstIndex = -1    // for safety
+	item.currentSubPool = 0 // for safety
 	*p = old[0 : n-1]
 	return item
 }
@@ -175,9 +194,27 @@ func (p *SubPool) PopWorst() *MetaTx {
 	return i
 }
 func (p *SubPool) Len() int { return p.best.Len() }
-func (p *SubPool) Add(i *MetaTx) {
+func (p *SubPool) Add(i *MetaTx, subPoolType SubPoolType) {
+	i.currentSubPool = subPoolType
 	heap.Push(p.best, i)
 	heap.Push(p.worst, i)
+}
+
+// UnsafeRemove - does break Heap invariants, but it has O(1) instead of O(log(n)) complexity.
+// Must manually call heap.Init after such changes.
+// Make sense to batch unsafe changes
+func (p *SubPool) UnsafeRemove(i *MetaTx) *MetaTx {
+	// manually call funcs instead of heap.Pop
+	p.worst.Swap(i.worstIndex, p.worst.Len()-1)
+	p.worst.Pop()
+	p.best.Swap(i.bestIndex, p.best.Len()-1)
+	p.best.Pop()
+	return i
+}
+func (p *SubPool) UnsafeAdd(i *MetaTx, subPoolType SubPoolType) {
+	i.currentSubPool = subPoolType
+	p.worst.Push(i)
+	p.best.Push(i)
 }
 func (p *SubPool) DebugPrint() {
 	for i, it := range *p.best {
@@ -192,11 +229,160 @@ const PendingSubPoolLimit = 1024
 const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
-func PromoteStep(pending, baseFee, queued *SubPool) {
+type SenderInfo struct {
+	balance  uint256.Int
+	nonce    uint64
+	nonce2Tx *btree.BTree // sorted map of nonce => *MetaTx
+}
+
+type nonce2TxItem struct {
+	nonce  uint64
+	metaTx *MetaTx
+}
+
+func (i *nonce2TxItem) Less(than btree.Item) bool { return i.nonce < than.(*nonce2TxItem).nonce }
+
+// OnNewBlocks
+// 1. New best block arrives, which potentially changes the balance and the nonce of some senders.
+// We use senderIds data structure to find relevant senderId values, and then use senders data structure to
+// modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
+// included into a block), and finally, walk over the transaction records and update SubPool fields depending on
+// the actual presence of nonce gaps and what the balance is.
+func OnNewBlocks(senderIDs map[[20]byte]uint64, senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool) {
+	// TODO: change sender.nonce
+
+	for _, tx := range minedTxs {
+		senderID, ok := senderIDs[tx.sender]
+		if !ok {
+			panic("not implemented yet")
+		}
+
+		sender, ok := senderInfo[senderID]
+		if !ok {
+			panic("not implemented yet")
+		}
+		// delete mined transactions from everywhere
+		sender.nonce2Tx.Ascend(func(i btree.Item) bool {
+			it := i.(*nonce2TxItem)
+			if it.nonce > sender.nonce {
+				return false
+			}
+			// TODO: save local transactions to cache with TTL, in case of re-org - to restore isLocal flag of re-injected transactions
+
+			// del from nonce2tx mapping
+			sender.nonce2Tx.Delete(i)
+			// del from sub-pool
+			switch it.metaTx.currentSubPool {
+			case PendingSubPool:
+				pending.UnsafeRemove(it.metaTx)
+			case BaseFeeSubPool:
+				baseFee.UnsafeRemove(it.metaTx)
+			case QueuedSubPool:
+				queued.UnsafeRemove(it.metaTx)
+			default:
+				//already removed
+			}
+			return true
+		})
+
+		// TODO: aggregate changed senders before call this func
+		onSenderChange(sender, protocolBaseFee, blockBaseFee)
+	}
+
 	pending.EnforceInvariants()
 	baseFee.EnforceInvariants()
 	queued.EnforceInvariants()
 
+	PromoteStep(pending, baseFee, queued)
+}
+
+// Unwind
+// This can be thought of a reverse operation from the one described before.
+// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
+// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
+// be returned into the transaction pool.
+// An interesting note here is that if the block contained any transactions local to the node,
+// by being first removed from the pool (from the "local" part of it), and then re-injected,
+// they effective lose their priority over the "remote" transactions. In order to prevent that,
+// somehow the fact that certain transactions were local, needs to be remembered for some
+// time (up to some "immutability threshold").
+func Unwind(senderIDs map[[20]byte]uint64, senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *SubPool) {
+	// TODO: change sender.nonce
+
+	for _, tx := range unwindedTxs {
+		senderID, ok := senderIDs[tx.sender]
+		if !ok {
+			panic("not implemented yet")
+		}
+
+		sender, ok := senderInfo[senderID]
+		if !ok {
+			panic("not implemented yet")
+		}
+		//TODO: restore isLocal flag
+		mt := &MetaTx{Tx: tx}
+		sender.nonce2Tx.ReplaceOrInsert(&nonce2TxItem{nonce: tx.nonce, metaTx: mt})
+		pending.UnsafeAdd(mt, PendingSubPool)
+	}
+	pending.EnforceInvariants()
+}
+
+func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
+	prevNonce := -1
+	accumulatedSenderSpent := uint256.NewInt(0)
+	sender.nonce2Tx.Ascend(func(i btree.Item) bool {
+		it := i.(*nonce2TxItem)
+
+		// Sender has enough balance for: gasLimit x feeCap + transferred_value
+		balanceNeed := uint256.NewInt(0)
+		balanceNeed.Mul(uint256.NewInt(it.metaTx.Tx.gas), uint256.NewInt(it.metaTx.Tx.feeCap))
+		balanceNeed.Add(balanceNeed, &it.metaTx.Tx.value)
+		it.metaTx.SenderHasEnoughBalance = sender.balance.Gt(balanceNeed) || sender.balance.Eq(balanceNeed)
+
+		// 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol
+		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
+		// this transaction will never be included into this particular chain.
+		it.metaTx.SubPool &^= EnoughFeeCapProtocol
+		if it.metaTx.Tx.feeCap >= protocolBaseFee {
+			it.metaTx.SubPool &= EnoughFeeCapProtocol
+		}
+
+		// 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for
+		// the sender is M, and there are transactions for all nonces between M and N from the same
+		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
+		it.metaTx.SubPool &^= NoNonceGaps
+		if prevNonce == -1 || uint64(prevNonce)+1 == it.metaTx.Tx.nonce {
+			it.metaTx.SubPool &= NoNonceGaps
+		}
+		prevNonce = int(it.nonce)
+
+		// 3. Sufficient balance for gas. Set to 1 if the balance of sender's account in the
+		// state is B, nonce of the sender in the state is M, nonce of the transaction is N, and the
+		// sum of feeCap x gasLimit + transferred_value of all transactions from this sender with
+		// nonces N+1 ... M is no more than B. Set to 0 otherwise. In other words, this bit is
+		// set if there is currently a guarantee that the transaction and all its required prior
+		// transactions will be able to pay for gas.
+		it.metaTx.SubPool &^= EnoughBalance
+		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
+			it.metaTx.SubPool &= EnoughBalance
+		}
+		accumulatedSenderSpent.Add(accumulatedSenderSpent, balanceNeed) // already deleted all transactions with nonce <= sender.nonce
+
+		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
+		// baseFee of the currently pending block. Set to 0 otherwise.
+		it.metaTx.SubPool &^= EnoughFeeCapBlock
+		if it.metaTx.Tx.feeCap >= blockBaseFee {
+			it.metaTx.SubPool &= EnoughFeeCapBlock
+		}
+
+		// 5. Local transaction. Set to 1 if transaction is local.
+		// can't change
+
+		return true
+	})
+}
+
+func PromoteStep(pending, baseFee, queued *SubPool) {
 	//1. If top element in the worst green queue has SubPool != 0b1111 (binary), it needs to be removed from the green pool.
 	//   If SubPool < 0b1000 (not satisfying minimum fee), discard.
 	//   If SubPool == 0b1110, demote to the yellow pool, otherwise demote to the red pool.
@@ -205,11 +391,11 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 			break
 		}
 		if worst.SubPool >= 0b11100 {
-			baseFee.Add(pending.PopWorst())
+			baseFee.Add(pending.PopWorst(), BaseFeeSubPool)
 			continue
 		}
 		if worst.SubPool >= 0b10000 {
-			queued.Add(pending.PopWorst())
+			queued.Add(pending.PopWorst(), QueuedSubPool)
 			continue
 		}
 		pending.PopWorst()
@@ -228,7 +414,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 		if best.SubPool < 0b11110 {
 			break
 		}
-		pending.Add(baseFee.PopBest())
+		pending.Add(baseFee.PopBest(), PendingSubPool)
 	}
 
 	//4. If the top element in the worst yellow queue has SubPool != 0x1110, it needs to be removed from the yellow pool.
@@ -238,7 +424,7 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 			break
 		}
 		if worst.SubPool >= 0b10000 {
-			queued.Add(baseFee.PopWorst())
+			queued.Add(baseFee.PopWorst(), QueuedSubPool)
 			continue
 		}
 		baseFee.PopWorst()
@@ -258,11 +444,11 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 			break
 		}
 		if best.SubPool < 0b11110 {
-			baseFee.Add(queued.PopBest())
+			baseFee.Add(queued.PopBest(), BaseFeeSubPool)
 			continue
 		}
 
-		pending.Add(queued.PopBest())
+		pending.Add(queued.PopBest(), PendingSubPool)
 	}
 
 	//7. If the top element in the worst red queue has SubPool < 0b1000 (not satisfying minimum fee), discard.
@@ -289,11 +475,11 @@ func CheckInvariants(pending, baseFee, queued *SubPool) {
 			break
 		}
 		if worst.SubPool >= 0b11100 {
-			baseFee.Add(pending.PopWorst())
+			baseFee.Add(pending.PopWorst(), BaseFeeSubPool)
 			continue
 		}
 		if worst.SubPool >= 0b11000 {
-			queued.Add(pending.PopWorst())
+			queued.Add(pending.PopWorst(), QueuedSubPool)
 			continue
 		}
 		pending.PopWorst()
@@ -312,7 +498,7 @@ func CheckInvariants(pending, baseFee, queued *SubPool) {
 		if best.SubPool < 0b11110 {
 			break
 		}
-		pending.Add(baseFee.PopWorst())
+		pending.Add(baseFee.PopWorst(), PendingSubPool)
 	}
 
 	//4. If the top element in the worst yellow queue has SubPool != 0x1110, it needs to be removed from the yellow pool.
@@ -322,7 +508,7 @@ func CheckInvariants(pending, baseFee, queued *SubPool) {
 			break
 		}
 		if worst.SubPool >= 0b11000 {
-			queued.Add(baseFee.PopWorst())
+			queued.Add(baseFee.PopWorst(), QueuedSubPool)
 			continue
 		}
 		baseFee.PopWorst()
@@ -342,11 +528,11 @@ func CheckInvariants(pending, baseFee, queued *SubPool) {
 			break
 		}
 		if best.SubPool < 0b11110 {
-			baseFee.Add(queued.PopWorst())
+			baseFee.Add(queued.PopWorst(), BaseFeeSubPool)
 			continue
 		}
 
-		pending.Add(queued.PopWorst())
+		pending.Add(queued.PopWorst(), PendingSubPool)
 	}
 
 	//7. If the top element in the worst red queue has SubPool < 0b1000 (not satisfying minimum fee), discard.
