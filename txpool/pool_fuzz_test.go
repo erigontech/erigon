@@ -112,19 +112,22 @@ func FuzzPromoteStep2(f *testing.F) {
 		var ss [20]byte
 		for _, s := range s1 {
 			copy(ss[:], sender[(iSenders*20)%len(sender):])
-			pending.Add(&MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}})
+			mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}}
+			pending.Add(mt, PendingSubPool)
 			iNonce++
 			iSenders++
 		}
 		for _, s := range s2 {
 			copy(ss[:], sender[(iSenders*20)%len(sender):])
-			baseFee.Add(&MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}})
+			mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}}
+			baseFee.Add(mt, BaseFeeSubPool)
 			iNonce++
 			iSenders++
 		}
-		for _, i := range s3 {
+		for _, s := range s3 {
 			copy(ss[:], sender[(iSenders*20)%len(sender):])
-			queued.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}})
+			mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss}}
+			queued.Add(mt, QueuedSubPool)
 			iNonce++
 			iSenders++
 		}
