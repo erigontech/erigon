@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"bytes"
 	"container/heap"
 	"context"
 	"fmt"
@@ -50,19 +49,19 @@ type SubPoolMarker uint8
 func NewSubPoolMarker(enoughFeeCapProtocol, noNonceGaps, enoughBalance, enoughFeeCapBlock, isLocal bool) SubPoolMarker {
 	var s SubPoolMarker
 	if enoughFeeCapProtocol {
-		s |= 1 << 4
+		s |= EnoughFeeCapProtocol
 	}
 	if noNonceGaps {
-		s |= 1 << 3
+		s |= NoNonceGaps
 	}
 	if enoughBalance {
-		s |= 1 << 2
+		s |= EnoughBalance
 	}
 	if enoughFeeCapBlock {
-		s |= 1 << 1
+		s |= EnoughFeeCapBlock
 	}
 	if isLocal {
-		s |= 1 << 0
+		s |= IsLocal
 	}
 	return s
 }
@@ -98,17 +97,17 @@ func (mt *MetaTx) Less(than *MetaTx) bool {
 		return mt.SubPool < than.SubPool
 	}
 	// means that strict nonce ordering of transactions from the same sender must be observed.
-	if mt.Tx.sender != than.Tx.sender {
-		return bytes.Compare(mt.Tx.sender[:], than.Tx.sender[:]) < 0
-	}
-	if mt.Tx.nonce != than.Tx.nonce {
-		return mt.Tx.nonce < than.Tx.nonce
-	}
+	//if mt.Tx.sender != than.Tx.sender {
+	//	return bytes.Compare(mt.Tx.sender[:], than.Tx.sender[:]) < 0
+	//}
+	//if mt.Tx.nonce != than.Tx.nonce {
+	//	return mt.Tx.nonce < than.Tx.nonce
+	//}
 	return false
 }
 
 func (p BestQueue) Len() int           { return len(p) }
-func (p BestQueue) Less(i, j int) bool { return !p[i].Less(p[j]) } // We want Pop to give us the highest, not lowest, priority so we use greater than here.
+func (p BestQueue) Less(i, j int) bool { return !p[i].Less(p[j]) } // We want Pop to give us the highest, not lowest, priority so we use !less here.
 func (p BestQueue) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 	p[i].bestIndex = i
@@ -229,18 +228,23 @@ const PendingSubPoolLimit = 1024
 const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
+type Nonce2Tx struct {
+	btree.BTree
+}
+
 type SenderInfo struct {
 	balance  uint256.Int
 	nonce    uint64
-	nonce2Tx *btree.BTree // sorted map of nonce => *MetaTx
+	nonce2Tx *Nonce2Tx // sorted map of nonce => *MetaTx
 }
 
 type nonce2TxItem struct {
-	nonce  uint64
-	metaTx *MetaTx
+	*MetaTx
 }
 
-func (i *nonce2TxItem) Less(than btree.Item) bool { return i.nonce < than.(*nonce2TxItem).nonce }
+func (i *nonce2TxItem) Less(than btree.Item) bool {
+	return i.MetaTx.Tx.nonce < than.(*nonce2TxItem).MetaTx.Tx.nonce
+}
 
 // OnNewBlocks
 // 1. New best block arrives, which potentially changes the balance and the nonce of some senders.
@@ -248,23 +252,18 @@ func (i *nonce2TxItem) Less(than btree.Item) bool { return i.nonce < than.(*nonc
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func OnNewBlocks(senderIDs map[[20]byte]uint64, senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool) {
+func OnNewBlocks(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool) {
 	// TODO: change sender.nonce
 
 	for _, tx := range minedTxs {
-		senderID, ok := senderIDs[tx.sender]
-		if !ok {
-			panic("not implemented yet")
-		}
-
-		sender, ok := senderInfo[senderID]
+		sender, ok := senderInfo[tx.senderID]
 		if !ok {
 			panic("not implemented yet")
 		}
 		// delete mined transactions from everywhere
 		sender.nonce2Tx.Ascend(func(i btree.Item) bool {
 			it := i.(*nonce2TxItem)
-			if it.nonce > sender.nonce {
+			if it.MetaTx.Tx.nonce > sender.nonce {
 				return false
 			}
 			// TODO: save local transactions to cache with TTL, in case of re-org - to restore isLocal flag of re-injected transactions
@@ -272,13 +271,13 @@ func OnNewBlocks(senderIDs map[[20]byte]uint64, senderInfo map[uint64]SenderInfo
 			// del from nonce2tx mapping
 			sender.nonce2Tx.Delete(i)
 			// del from sub-pool
-			switch it.metaTx.currentSubPool {
+			switch it.MetaTx.currentSubPool {
 			case PendingSubPool:
-				pending.UnsafeRemove(it.metaTx)
+				pending.UnsafeRemove(it.MetaTx)
 			case BaseFeeSubPool:
-				baseFee.UnsafeRemove(it.metaTx)
+				baseFee.UnsafeRemove(it.MetaTx)
 			case QueuedSubPool:
-				queued.UnsafeRemove(it.metaTx)
+				queued.UnsafeRemove(it.MetaTx)
 			default:
 				//already removed
 			}
@@ -306,22 +305,22 @@ func OnNewBlocks(senderIDs map[[20]byte]uint64, senderInfo map[uint64]SenderInfo
 // they effective lose their priority over the "remote" transactions. In order to prevent that,
 // somehow the fact that certain transactions were local, needs to be remembered for some
 // time (up to some "immutability threshold").
-func Unwind(senderIDs map[[20]byte]uint64, senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *SubPool) {
+func Unwind(senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *SubPool) {
 	// TODO: change sender.nonce
 
 	for _, tx := range unwindedTxs {
-		senderID, ok := senderIDs[tx.sender]
-		if !ok {
-			panic("not implemented yet")
-		}
-
-		sender, ok := senderInfo[senderID]
+		sender, ok := senderInfo[tx.senderID]
 		if !ok {
 			panic("not implemented yet")
 		}
 		//TODO: restore isLocal flag
 		mt := &MetaTx{Tx: tx}
-		sender.nonce2Tx.ReplaceOrInsert(&nonce2TxItem{nonce: tx.nonce, metaTx: mt})
+		// TODO: Если у сендера много транзакций с одинаковым nonce, то из них выбирается одна
+		// с наибольшим effectiveTip. Кстати, интересно, как это правильно вычислять
+		// наверное нужно просто брать с наибольшим tip
+		// implement it for all inserts
+		sender.nonce2Tx.Has(&nonce2TxItem{mt})
+		sender.nonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		pending.UnsafeAdd(mt, PendingSubPool)
 	}
 	pending.EnforceInvariants()
@@ -335,26 +334,26 @@ func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
 
 		// Sender has enough balance for: gasLimit x feeCap + transferred_value
 		balanceNeed := uint256.NewInt(0)
-		balanceNeed.Mul(uint256.NewInt(it.metaTx.Tx.gas), uint256.NewInt(it.metaTx.Tx.feeCap))
-		balanceNeed.Add(balanceNeed, &it.metaTx.Tx.value)
-		it.metaTx.SenderHasEnoughBalance = sender.balance.Gt(balanceNeed) || sender.balance.Eq(balanceNeed)
+		balanceNeed.Mul(uint256.NewInt(it.MetaTx.Tx.gas), uint256.NewInt(it.MetaTx.Tx.feeCap))
+		balanceNeed.Add(balanceNeed, &it.MetaTx.Tx.value)
+		it.MetaTx.SenderHasEnoughBalance = sender.balance.Gt(balanceNeed) || sender.balance.Eq(balanceNeed)
 
 		// 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol
 		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
 		// this transaction will never be included into this particular chain.
-		it.metaTx.SubPool &^= EnoughFeeCapProtocol
-		if it.metaTx.Tx.feeCap >= protocolBaseFee {
-			it.metaTx.SubPool &= EnoughFeeCapProtocol
+		it.MetaTx.SubPool &^= EnoughFeeCapProtocol
+		if it.MetaTx.Tx.feeCap >= protocolBaseFee {
+			it.MetaTx.SubPool &= EnoughFeeCapProtocol
 		}
 
 		// 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for
 		// the sender is M, and there are transactions for all nonces between M and N from the same
 		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
-		it.metaTx.SubPool &^= NoNonceGaps
-		if prevNonce == -1 || uint64(prevNonce)+1 == it.metaTx.Tx.nonce {
-			it.metaTx.SubPool &= NoNonceGaps
+		it.MetaTx.SubPool &^= NoNonceGaps
+		if prevNonce == -1 || uint64(prevNonce)+1 == it.MetaTx.Tx.nonce {
+			it.MetaTx.SubPool &= NoNonceGaps
 		}
-		prevNonce = int(it.nonce)
+		prevNonce = int(it.Tx.nonce)
 
 		// 3. Sufficient balance for gas. Set to 1 if the balance of sender's account in the
 		// state is B, nonce of the sender in the state is M, nonce of the transaction is N, and the
@@ -362,17 +361,17 @@ func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// nonces N+1 ... M is no more than B. Set to 0 otherwise. In other words, this bit is
 		// set if there is currently a guarantee that the transaction and all its required prior
 		// transactions will be able to pay for gas.
-		it.metaTx.SubPool &^= EnoughBalance
+		it.MetaTx.SubPool &^= EnoughBalance
 		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
-			it.metaTx.SubPool &= EnoughBalance
+			it.MetaTx.SubPool &= EnoughBalance
 		}
 		accumulatedSenderSpent.Add(accumulatedSenderSpent, balanceNeed) // already deleted all transactions with nonce <= sender.nonce
 
 		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
 		// baseFee of the currently pending block. Set to 0 otherwise.
-		it.metaTx.SubPool &^= EnoughFeeCapBlock
-		if it.metaTx.Tx.feeCap >= blockBaseFee {
-			it.metaTx.SubPool &= EnoughFeeCapBlock
+		it.MetaTx.SubPool &^= EnoughFeeCapBlock
+		if it.MetaTx.Tx.feeCap >= blockBaseFee {
+			it.MetaTx.SubPool &= EnoughFeeCapBlock
 		}
 
 		// 5. Local transaction. Set to 1 if transaction is local.
