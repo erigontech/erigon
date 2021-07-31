@@ -151,8 +151,8 @@ func poolsFromFuzzBytes(s1, s2, s3 []uint8, rawTxNonce, rawValues, rawSender, ra
 		}
 
 		senders[id] = SenderInfo{
-			nonce:      senderNonce[int(id)%len(senderNonce)],
-			balance:    senderBalance[int(id)%len(senderBalance)],
+			nonce:      senderNonce[uint(id)%uint(len(senderNonce))],
+			balance:    senderBalance[uint(id)%uint(len(senderBalance))],
 			txNonce2Tx: &Nonce2Tx{btree.New(32)},
 		}
 	}
