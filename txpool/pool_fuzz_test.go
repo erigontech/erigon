@@ -85,7 +85,7 @@ func poolsFromFuzzBytes(s1, s2, s3 []uint8, nonce, sender, values []byte) (pendi
 	if len(nonce) == 0 || len(nonce)%8 != 0 {
 		return nil, nil, nil, false
 	}
-	if len(sender) == 0 || len(sender)%20 != 0 {
+	if len(sender) == 0 || len(sender)%8 != 0 {
 		return nil, nil, nil, false
 	}
 	if len(values) == 0 || len(values)%32 != 0 {
@@ -110,45 +110,47 @@ func poolsFromFuzzBytes(s1, s2, s3 []uint8, nonce, sender, values []byte) (pendi
 
 	iNonce, iSender, iValue := 0, 0, 0
 	pending, baseFee, queued = NewSubPool(), NewSubPool(), NewSubPool()
-	var ss [20]byte
 	var vb [4]uint64
 	for _, s := range s1 {
-		copy(ss[:], sender[(iSender*20)%len(sender):])
 		for i := 0; i < 4; i++ {
 			vb[i] = binary.BigEndian.Uint64(values[(iValue*8)%len(values):])
 			iValue++
 		}
 		value := uint256.Int(vb)
 		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss, value: value,
+			nonce:    binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]),
+			senderID: binary.BigEndian.Uint64(sender[(iSender*8)%len(sender):]),
+			value:    value,
 		}}
 		pending.Add(mt, PendingSubPool)
 		iNonce++
 		iSender++
 	}
 	for _, s := range s2 {
-		copy(ss[:], sender[(iSender*20)%len(sender):])
 		for i := 0; i < 4; i++ {
 			vb[i] = binary.BigEndian.Uint64(values[(iValue*8)%len(values):])
 			iValue++
 		}
 		value := uint256.Int(vb)
 		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss, value: value,
+			nonce:    binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]),
+			senderID: binary.BigEndian.Uint64(sender[(iSender*8)%len(sender):]),
+			value:    value,
 		}}
 		baseFee.Add(mt, BaseFeeSubPool)
 		iNonce++
 		iSender++
 	}
 	for _, s := range s3 {
-		copy(ss[:], sender[(iSender*20)%len(sender):])
 		for i := 0; i < 4; i++ {
 			vb[i] = binary.BigEndian.Uint64(values[(iValue*8)%len(values):])
 			iValue++
 		}
 		value := uint256.Int(vb)
 		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce: binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]), sender: ss, value: value,
+			nonce:    binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]),
+			senderID: binary.BigEndian.Uint64(sender[(iSender*8)%len(sender):]),
+			value:    value,
 		}}
 		queued.Add(mt, QueuedSubPool)
 		iNonce++
