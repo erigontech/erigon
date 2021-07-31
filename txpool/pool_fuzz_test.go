@@ -103,139 +103,128 @@ func u256Slice(in []byte) ([]uint256.Int, bool) {
 	return res, true
 }
 
-func poolsFromFuzzBytes(s1, s2, s3 []uint8, rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSenderBalance []byte) (pending, baseFee, queued *SubPool, ok bool) {
+func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSenderBalance []byte) (sendersInfo map[uint64]SenderInfo, txs []*TxSlot, ok bool) {
+	if len(rawTxNonce)/8 != len(rawValues)/32 {
+		return nil, nil, false
+	}
+	if len(rawSender)/8 != len(rawSenderNonce)/8 {
+		return nil, nil, false
+	}
+	if len(rawSender)/8 != len(rawSenderBalance)/32 {
+		return nil, nil, false
+	}
+
 	txNonce, ok := u64Slice(rawTxNonce)
 	if !ok {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	values, ok := u256Slice(rawValues)
 	if !ok {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	sender, ok := u64Slice(rawSender)
 	if !ok {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	senderNonce, ok := u64Slice(rawSenderNonce)
 	if !ok {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 	senderBalance, ok := u256Slice(rawSenderBalance)
 	if !ok {
-		return nil, nil, nil, false
+		return nil, nil, false
 	}
 
-	for i := range s1 {
-		if s1[i] > 0b11111 {
-			return nil, nil, nil, false
-		}
-	}
-	for i := range s2 {
-		if s2[i] > 0b11111 {
-			return nil, nil, nil, false
-		}
-	}
-	for i := range s3 {
-		if s3[i] > 0b11111 {
-			return nil, nil, nil, false
-		}
-	}
-
-	iTx, iSender := 0, 0
 	senders := map[uint64]SenderInfo{}
-
-	for _, id := range sender {
-		_, ok = senders[id]
-		if ok {
-			continue
-		}
-
+	for i, id := range sender {
 		senders[id] = SenderInfo{
-			nonce:      senderNonce[uint(id)%uint(len(senderNonce))],
-			balance:    senderBalance[uint(id)%uint(len(senderBalance))],
+			nonce:      senderNonce[i],
+			balance:    senderBalance[i],
 			txNonce2Tx: &Nonce2Tx{btree.New(32)},
 		}
 	}
-
-	pending, baseFee, queued = NewSubPool(), NewSubPool(), NewSubPool()
-	for _, s := range s1 {
-		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce:    txNonce[iTx%len(txNonce)],
-			senderID: sender[iTx%len(sender)],
-			value:    values[iTx%len(values)],
-		}}
-		senders[mt.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
-		pending.Add(mt, PendingSubPool)
-		iTx++
-		iSender++
+	for i := range txNonce {
+		txs = append(txs, &TxSlot{
+			nonce:    txNonce[i],
+			value:    values[i],
+			senderID: sender[i%len(sender)],
+		})
 	}
-	for _, s := range s2 {
-		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce:    txNonce[iTx%len(txNonce)],
-			senderID: sender[iTx%len(sender)],
-			value:    values[iTx%len(values)],
-		}}
-		senders[mt.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
-		baseFee.Add(mt, BaseFeeSubPool)
-		iTx++
-		iSender++
-	}
-	for _, s := range s3 {
-		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce:    txNonce[iTx%len(txNonce)],
-			senderID: sender[iTx%len(sender)],
-			value:    values[iTx%len(values)],
-		}}
-		senders[mt.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
-		queued.Add(mt, QueuedSubPool)
-		iTx++
-		iSender++
-	}
-
-	return pending, baseFee, queued, true
+	return senders, txs, true
 }
 
-func FuzzPromoteStep5(f *testing.F) {
+func iterateSubPoolUnordered(subPool *SubPool, f func(tx *MetaTx)) {
+	for i := 0; i < subPool.best.Len(); i++ {
+		f((*subPool.best)[i])
+	}
+}
+
+func FuzzOnNewBlocks3(f *testing.F) {
 	var u64 = [8]byte{1}
 	var u256 = [32]byte{1}
-	f.Add(
-		[]uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000},
-		u64[:], u64[:], u64[:], u256[:], u256[:])
-	f.Add(
-		[]uint8{0b11111}, []uint8{0b11111}, []uint8{0b11110, 0b0, 0b1010},
-		u64[:], u64[:], u64[:], u256[:], u256[:])
-	f.Add(
-		[]uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111},
-		u64[:], u64[:], u64[:], u256[:], u256[:])
-	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8, txNonce, values, sender, senderNonce, senderBalance []byte) {
+	f.Add(u64[:], u64[:], u64[:], u256[:], u256[:], 123, 456)
+	f.Add(u64[:], u64[:], u64[:], u256[:], u256[:], 78, 100)
+	f.Add(u64[:], u64[:], u64[:], u256[:], u256[:], 100_000, 101_000)
+	f.Fuzz(func(t *testing.T, txNonce, values, sender, senderNonce, senderBalance []byte, protocolBaseFee, blockBaseFee uint64) {
 		t.Parallel()
 		assert := assert.New(t)
 
-		pending, baseFee, queued, ok := poolsFromFuzzBytes(s1, s2, s3, txNonce, values, sender, senderNonce, senderBalance)
+		senders, txs, ok := poolsFromFuzzBytes(txNonce, values, sender, senderNonce, senderBalance)
 		if !ok {
 			t.Skip()
 		}
-		PromoteStep(pending, baseFee, queued)
+		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
+		OnNewBlocks(senders, txs, protocolBaseFee, blockBaseFee, pending, baseFee, queued)
 
 		best, worst := pending.Best(), pending.Worst()
-		if worst != nil && worst.SubPool < 0b11110 {
-			t.Fatalf("pending worst too small %b, input: \n%x\n%x\n%x", worst.SubPool, s1, s2, s3)
-		}
 		assert.False(worst != nil && best == nil)
 		assert.False(worst == nil && best != nil)
+		if worst != nil && worst.SubPool < 0b11110 {
+			t.Fatalf("pending worst too small %b", worst.SubPool)
+		}
+		iterateSubPoolUnordered(pending, func(tx *MetaTx) {
+			i := tx.Tx
+			assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+
+			need := uint256.NewInt(i.gas)
+			need = need.Mul(need, uint256.NewInt(i.feeCap))
+			assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
+			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+		})
 
 		best, worst = baseFee.Best(), baseFee.Worst()
-		if worst != nil && worst.SubPool < 0b11100 {
-			t.Fatalf("baseFee worst too small %b, input: \n%x\n%x\n%x", worst.SubPool, s1, s2, s3)
-		}
+
 		assert.False(worst != nil && best == nil)
 		assert.False(worst == nil && best != nil)
+		if worst != nil && worst.SubPool < 0b11100 {
+			t.Fatalf("baseFee worst too small %b", worst.SubPool)
+		}
+		iterateSubPoolUnordered(baseFee, func(tx *MetaTx) {
+			i := tx.Tx
+			assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+
+			need := uint256.NewInt(i.gas)
+			need = need.Mul(need, uint256.NewInt(i.feeCap))
+			assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
+			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+		})
 
 		best, worst = queued.Best(), queued.Worst()
-		if worst != nil && worst.SubPool < 0b10000 {
-			t.Fatalf("queued worst too small %b, input: \n%x\n%x\n%x", worst.SubPool, s1, s2, s3)
-		}
 		assert.False(worst != nil && best == nil)
 		assert.False(worst == nil && best != nil)
+		if worst != nil && worst.SubPool < 0b10000 {
+			t.Fatalf("queued worst too small %b", worst.SubPool)
+		}
+		iterateSubPoolUnordered(queued, func(tx *MetaTx) {
+			i := tx.Tx
+			assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+
+			need := uint256.NewInt(i.gas)
+			need = need.Mul(need, uint256.NewInt(i.feeCap))
+			assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
+			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+		})
+
 	})
+
 }
