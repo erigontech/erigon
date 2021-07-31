@@ -231,7 +231,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
 			if !reflect.DeepEqual(pm, config.Prune) {
-				return errors.New("prune is " + config.Prune.String() + " original prune is " + pm.String())
+				return errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 			}
 		} else {
 			config.Prune = pm
