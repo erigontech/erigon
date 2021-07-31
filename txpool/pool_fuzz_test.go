@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 )
@@ -81,14 +82,46 @@ func FuzzTwoQueue(f *testing.F) {
 	})
 }
 
-func poolsFromFuzzBytes(s1, s2, s3 []uint8, nonce, sender, values []byte) (pending, baseFee, queued *SubPool, ok bool) {
-	if len(nonce) == 0 || len(nonce)%8 != 0 {
+func u64Slice(in []byte) ([]uint64, bool) {
+	if len(in) == 0 || len(in)%8 != 0 {
+		return nil, false
+	}
+	res := make([]uint64, len(in)/8)
+	for i := 0; i < len(res)-1; i++ {
+		res[i] = binary.BigEndian.Uint64(in[i*8:])
+	}
+	return res, true
+}
+func u256Slice(in []byte) ([]uint256.Int, bool) {
+	if len(in) == 0 || len(in)%32 != 0 {
+		return nil, false
+	}
+	res := make([]uint256.Int, len(in)/32)
+	for i := 0; i < len(res)-1; i++ {
+		res[i].SetBytes(in[i*32 : (i+1)*32])
+	}
+	return res, true
+}
+
+func poolsFromFuzzBytes(s1, s2, s3 []uint8, rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSenderBalance []byte) (pending, baseFee, queued *SubPool, ok bool) {
+	txNonce, ok := u64Slice(rawTxNonce)
+	if !ok {
 		return nil, nil, nil, false
 	}
-	if len(sender) == 0 || len(sender)%8 != 0 {
+	values, ok := u256Slice(rawValues)
+	if !ok {
 		return nil, nil, nil, false
 	}
-	if len(values) == 0 || len(values)%32 != 0 {
+	sender, ok := u64Slice(rawSender)
+	if !ok {
+		return nil, nil, nil, false
+	}
+	senderNonce, ok := u64Slice(rawSenderNonce)
+	if !ok {
+		return nil, nil, nil, false
+	}
+	senderBalance, ok := u256Slice(rawSenderBalance)
+	if !ok {
 		return nil, nil, nil, false
 	}
 
@@ -108,69 +141,77 @@ func poolsFromFuzzBytes(s1, s2, s3 []uint8, nonce, sender, values []byte) (pendi
 		}
 	}
 
-	iNonce, iSender, iValue := 0, 0, 0
-	pending, baseFee, queued = NewSubPool(), NewSubPool(), NewSubPool()
-	var vb [4]uint64
-	for _, s := range s1 {
-		for i := 0; i < 4; i++ {
-			vb[i] = binary.BigEndian.Uint64(values[(iValue*8)%len(values):])
-			iValue++
+	iTx, iSender := 0, 0
+	senders := map[uint64]SenderInfo{}
+
+	for _, id := range sender {
+		_, ok = senders[id]
+		if ok {
+			continue
 		}
-		value := uint256.Int(vb)
+
+		senders[id] = SenderInfo{
+			nonce:      senderNonce[int(id)%len(senderNonce)],
+			balance:    senderBalance[int(id)%len(senderBalance)],
+			txNonce2Tx: &Nonce2Tx{btree.New(32)},
+		}
+	}
+
+	pending, baseFee, queued = NewSubPool(), NewSubPool(), NewSubPool()
+	for _, s := range s1 {
 		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce:    binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]),
-			senderID: binary.BigEndian.Uint64(sender[(iSender*8)%len(sender):]),
-			value:    value,
+			nonce:    txNonce[iTx%len(txNonce)],
+			senderID: sender[iTx%len(sender)],
+			value:    values[iTx%len(values)],
 		}}
+		senders[mt.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		pending.Add(mt, PendingSubPool)
-		iNonce++
+		iTx++
 		iSender++
 	}
 	for _, s := range s2 {
-		for i := 0; i < 4; i++ {
-			vb[i] = binary.BigEndian.Uint64(values[(iValue*8)%len(values):])
-			iValue++
-		}
-		value := uint256.Int(vb)
 		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce:    binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]),
-			senderID: binary.BigEndian.Uint64(sender[(iSender*8)%len(sender):]),
-			value:    value,
+			nonce:    txNonce[iTx%len(txNonce)],
+			senderID: sender[iTx%len(sender)],
+			value:    values[iTx%len(values)],
 		}}
+		senders[mt.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		baseFee.Add(mt, BaseFeeSubPool)
-		iNonce++
+		iTx++
 		iSender++
 	}
 	for _, s := range s3 {
-		for i := 0; i < 4; i++ {
-			vb[i] = binary.BigEndian.Uint64(values[(iValue*8)%len(values):])
-			iValue++
-		}
-		value := uint256.Int(vb)
 		mt := &MetaTx{SubPool: SubPoolMarker(s & 0b11111), Tx: &TxSlot{
-			nonce:    binary.BigEndian.Uint64(nonce[(iNonce*8)%len(nonce):]),
-			senderID: binary.BigEndian.Uint64(sender[(iSender*8)%len(sender):]),
-			value:    value,
+			nonce:    txNonce[iTx%len(txNonce)],
+			senderID: sender[iTx%len(sender)],
+			value:    values[iTx%len(values)],
 		}}
+		senders[mt.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		queued.Add(mt, QueuedSubPool)
-		iNonce++
+		iTx++
 		iSender++
 	}
 
 	return pending, baseFee, queued, true
 }
 
-func FuzzPromoteStep4(f *testing.F) {
-	var nNonce = [8]byte{1}
-	var nAddr = [20]byte{1}
-	f.Add([]uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, nNonce[:], nAddr[:], uint256.NewInt(123).Bytes())
-	f.Add([]uint8{0b11111}, []uint8{0b11111}, []uint8{0b11110, 0b0, 0b1010}, nNonce[:], nAddr[:], uint256.NewInt(678).Bytes())
-	f.Add([]uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, nNonce[:], nAddr[:], uint256.NewInt(987654321).Bytes())
-	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8, nonce, sender, values []byte) {
+func FuzzPromoteStep5(f *testing.F) {
+	var u64 = [8]byte{1}
+	var u256 = [32]byte{1}
+	f.Add(
+		[]uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000}, []uint8{0b11111, 0b10001, 0b10101, 0b00001, 0b00000},
+		u64[:], u64[:], u64[:], u256[:], u256[:])
+	f.Add(
+		[]uint8{0b11111}, []uint8{0b11111}, []uint8{0b11110, 0b0, 0b1010},
+		u64[:], u64[:], u64[:], u256[:], u256[:])
+	f.Add(
+		[]uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111}, []uint8{0b11000, 0b00101, 0b000111},
+		u64[:], u64[:], u64[:], u256[:], u256[:])
+	f.Fuzz(func(t *testing.T, s1, s2, s3 []uint8, txNonce, values, sender, senderNonce, senderBalance []byte) {
 		t.Parallel()
 		assert := assert.New(t)
 
-		pending, baseFee, queued, ok := poolsFromFuzzBytes(s1, s2, s3, nonce, sender, values)
+		pending, baseFee, queued, ok := poolsFromFuzzBytes(s1, s2, s3, txNonce, values, sender, senderNonce, senderBalance)
 		if !ok {
 			t.Skip()
 		}

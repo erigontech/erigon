@@ -229,13 +229,13 @@ const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
 type Nonce2Tx struct {
-	btree.BTree
+	*btree.BTree
 }
 
 type SenderInfo struct {
-	balance  uint256.Int
-	nonce    uint64
-	nonce2Tx *Nonce2Tx // sorted map of nonce => *MetaTx
+	balance    uint256.Int
+	nonce      uint64
+	txNonce2Tx *Nonce2Tx // sorted map of nonce => *MetaTx
 }
 
 type nonce2TxItem struct {
@@ -261,7 +261,7 @@ func OnNewBlocks(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolB
 			panic("not implemented yet")
 		}
 		// delete mined transactions from everywhere
-		sender.nonce2Tx.Ascend(func(i btree.Item) bool {
+		sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 			it := i.(*nonce2TxItem)
 			if it.MetaTx.Tx.nonce > sender.nonce {
 				return false
@@ -269,7 +269,7 @@ func OnNewBlocks(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolB
 			// TODO: save local transactions to cache with TTL, in case of re-org - to restore isLocal flag of re-injected transactions
 
 			// del from nonce2tx mapping
-			sender.nonce2Tx.Delete(i)
+			sender.txNonce2Tx.Delete(i)
 			// del from sub-pool
 			switch it.MetaTx.currentSubPool {
 			case PendingSubPool:
@@ -319,8 +319,8 @@ func Unwind(senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *Su
 		// с наибольшим effectiveTip. Кстати, интересно, как это правильно вычислять
 		// наверное нужно просто брать с наибольшим tip
 		// implement it for all inserts
-		sender.nonce2Tx.Has(&nonce2TxItem{mt})
-		sender.nonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
+		sender.txNonce2Tx.Has(&nonce2TxItem{mt})
+		sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		pending.UnsafeAdd(mt, PendingSubPool)
 	}
 	pending.EnforceInvariants()
@@ -329,7 +329,7 @@ func Unwind(senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *Su
 func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
 	prevNonce := -1
 	accumulatedSenderSpent := uint256.NewInt(0)
-	sender.nonce2Tx.Ascend(func(i btree.Item) bool {
+	sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 		it := i.(*nonce2TxItem)
 
 		// Sender has enough balance for: gasLimit x feeCap + transferred_value

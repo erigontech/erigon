@@ -94,6 +94,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (slot *TxSl
 	if len(payload) == 0 {
 		return nil, sender, 0, fmt.Errorf("%s: empty rlp", ParseTransactionErrorPrefix)
 	}
+	slot = &TxSlot{}
 	// Compute transaction hash
 	ctx.keccak1.Reset()
 	ctx.keccak2.Reset()
