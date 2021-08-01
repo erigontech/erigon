@@ -98,12 +98,12 @@ func (mt *MetaTx) Less(than *MetaTx) bool {
 		return mt.SubPool < than.SubPool
 	}
 	// means that strict nonce ordering of transactions from the same sender must be observed.
-	if mt.Tx.senderID != than.Tx.senderID {
-		return mt.Tx.senderID < than.Tx.senderID
-	}
-	if mt.Tx.nonce != than.Tx.nonce {
-		return mt.Tx.nonce < than.Tx.nonce
-	}
+	//if mt.Tx.senderID != than.Tx.senderID {
+	//	return mt.Tx.senderID < than.Tx.senderID
+	//}
+	//if mt.Tx.nonce != than.Tx.nonce {
+	//	return mt.Tx.nonce < than.Tx.nonce
+	//}
 	return false
 }
 
