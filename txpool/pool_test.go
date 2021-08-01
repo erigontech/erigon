@@ -89,7 +89,7 @@ func TestSubPoolsPromote(t *testing.T) {
 	for _, i := range s3 {
 		queued.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
 	}
-	PromoteStep(pending, baseFee, queued)
+	promote(pending, baseFee, queued)
 
 	if pending.Worst() != nil {
 		require.Less(t, uint8(0b01111), uint8(pending.Worst().SubPool))

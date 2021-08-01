@@ -26,6 +26,7 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 )
 
 // Pool is interface for the transaction pool
@@ -46,8 +47,7 @@ type Pool interface {
 // 5. Local transaction. Set to 1 if transaction is local.
 type SubPoolMarker uint8
 
-func NewSubPoolMarker(enoughFeeCapProtocol, noNonceGaps, enoughBalance, enoughFeeCapBlock, isLocal bool) SubPoolMarker {
-	var s SubPoolMarker
+func NewSubPoolMarker(enoughFeeCapProtocol, noNonceGaps, enoughBalance, enoughFeeCapBlock, isLocal bool) (s SubPoolMarker) {
 	if enoughFeeCapProtocol {
 		s |= EnoughFeeCapProtocol
 	}
@@ -91,147 +91,11 @@ const PendingSubPool SubPoolType = 1
 const BaseFeeSubPool SubPoolType = 2
 const QueuedSubPool SubPoolType = 3
 
-type BestQueue []*MetaTx
-
-func (mt *MetaTx) Less(than *MetaTx) bool {
-	if mt.SubPool != than.SubPool {
-		return mt.SubPool < than.SubPool
-	}
-	// means that strict nonce ordering of transactions from the same sender must be observed.
-	//if mt.Tx.senderID != than.Tx.senderID {
-	//	return mt.Tx.senderID < than.Tx.senderID
-	//}
-	//if mt.Tx.nonce != than.Tx.nonce {
-	//	return mt.Tx.nonce < than.Tx.nonce
-	//}
-	return false
-}
-
-func (p BestQueue) Len() int           { return len(p) }
-func (p BestQueue) Less(i, j int) bool { return !p[i].Less(p[j]) } // We want Pop to give us the highest, not lowest, priority so we use !less here.
-func (p BestQueue) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-	p[i].bestIndex = i
-	p[j].bestIndex = j
-}
-func (p *BestQueue) Push(x interface{}) {
-	n := len(*p)
-	item := x.(*MetaTx)
-	item.bestIndex = n
-	*p = append(*p, item)
-}
-
-func (p *BestQueue) Pop() interface{} {
-	old := *p
-	n := len(old)
-	item := old[n-1]
-	old[n-1] = nil          // avoid memory leak
-	item.bestIndex = -1     // for safety
-	item.currentSubPool = 0 // for safety
-	*p = old[0 : n-1]
-	return item
-}
-
-type WorstQueue []*MetaTx
-
-func (p WorstQueue) Len() int           { return len(p) }
-func (p WorstQueue) Less(i, j int) bool { return p[i].Less(p[j]) }
-func (p WorstQueue) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-	p[i].worstIndex = i
-	p[j].worstIndex = j
-}
-func (p *WorstQueue) Push(x interface{}) {
-	n := len(*p)
-	item := x.(*MetaTx)
-	item.worstIndex = n
-	*p = append(*p, x.(*MetaTx))
-}
-func (p *WorstQueue) Pop() interface{} {
-	old := *p
-	n := len(old)
-	item := old[n-1]
-	old[n-1] = nil          // avoid memory leak
-	item.worstIndex = -1    // for safety
-	item.currentSubPool = 0 // for safety
-	*p = old[0 : n-1]
-	return item
-}
-
-type SubPool struct {
-	best  *BestQueue
-	worst *WorstQueue
-}
-
-func NewSubPool() *SubPool {
-	return &SubPool{best: &BestQueue{}, worst: &WorstQueue{}}
-}
-
-func (p *SubPool) EnforceInvariants() {
-	heap.Init(p.worst)
-	heap.Init(p.best)
-}
-func (p *SubPool) Best() *MetaTx {
-	if len(*p.best) == 0 {
-		return nil
-	}
-	return (*p.best)[0]
-}
-func (p *SubPool) Worst() *MetaTx {
-	if len(*p.worst) == 0 {
-		return nil
-	}
-	return (*p.worst)[0]
-}
-func (p *SubPool) PopBest() *MetaTx {
-	i := heap.Pop(p.best).(*MetaTx)
-	heap.Remove(p.worst, i.worstIndex)
-	return i
-}
-func (p *SubPool) PopWorst() *MetaTx {
-	i := heap.Pop(p.worst).(*MetaTx)
-	heap.Remove(p.best, i.bestIndex)
-	return i
-}
-func (p *SubPool) Len() int { return p.best.Len() }
-func (p *SubPool) Add(i *MetaTx, subPoolType SubPoolType) {
-	i.currentSubPool = subPoolType
-	heap.Push(p.best, i)
-	heap.Push(p.worst, i)
-}
-
-// UnsafeRemove - does break Heap invariants, but it has O(1) instead of O(log(n)) complexity.
-// Must manually call heap.Init after such changes.
-// Make sense to batch unsafe changes
-func (p *SubPool) UnsafeRemove(i *MetaTx) *MetaTx {
-	// manually call funcs instead of heap.Pop
-	p.worst.Swap(i.worstIndex, p.worst.Len()-1)
-	p.worst.Pop()
-	p.best.Swap(i.bestIndex, p.best.Len()-1)
-	p.best.Pop()
-	return i
-}
-func (p *SubPool) UnsafeAdd(i *MetaTx, subPoolType SubPoolType) {
-	i.currentSubPool = subPoolType
-	p.worst.Push(i)
-	p.best.Push(i)
-}
-func (p *SubPool) DebugPrint() {
-	for i, it := range *p.best {
-		fmt.Printf("best: %d, %d, %d\n", i, it.SubPool, it.bestIndex)
-	}
-	for i, it := range *p.worst {
-		fmt.Printf("worst: %d, %d, %d\n", i, it.SubPool, it.worstIndex)
-	}
-}
-
 const PendingSubPoolLimit = 1024
 const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
-type Nonce2Tx struct {
-	*btree.BTree
-}
+type Nonce2Tx struct{ *btree.BTree }
 
 type SenderInfo struct {
 	balance    uint256.Int
@@ -239,21 +103,48 @@ type SenderInfo struct {
 	txNonce2Tx *Nonce2Tx // sorted map of nonce => *MetaTx
 }
 
-type nonce2TxItem struct {
-	*MetaTx
-}
+type nonce2TxItem struct{ *MetaTx }
 
 func (i *nonce2TxItem) Less(than btree.Item) bool {
 	return i.MetaTx.Tx.nonce < than.(*nonce2TxItem).MetaTx.Tx.nonce
 }
 
-// OnNewBlocks
+// PoolEnv - holds all pool-related data structures, but has no methods (or simple mutex-based methods)
+type PoolEnv struct {
+	logger log.Logger
+
+	protocolBaseFee atomic.Uint64
+
+	senderInfo               map[uint64]SenderInfo
+	pending, baseFee, queued *SubPool
+
+	// fields for transaction propagation
+	recentlyConnectedPeers     *recentlyConnectedPeers
+	lastTxPropagationTimestamp time.Time
+}
+
+func loopStep(env *PoolEnv) {
+	if false {
+		unwindedTxs := []*TxSlot{}
+		unwind(env.senderInfo, unwindedTxs, env.pending)
+	}
+	if false {
+		//TODO: get arrived blocks
+		minedTxs := []*TxSlot{}
+		blockBasedFee := env.protocolBaseFee.Load() + 123
+		onNewBlocks(env.senderInfo, minedTxs, env.protocolBaseFee.Load(), blockBasedFee, env.pending, env.baseFee, env.queued)
+	}
+
+}
+
+// onNewBlocks - apply new highest block (or batch of blocks)
+//
 // 1. New best block arrives, which potentially changes the balance and the nonce of some senders.
 // We use senderIds data structure to find relevant senderId values, and then use senders data structure to
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func OnNewBlocks(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool) {
+func onNewBlocks(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool) {
 	// TODO: change sender.nonce
 
 	for _, tx := range minedTxs {
@@ -293,10 +184,10 @@ func OnNewBlocks(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolB
 	baseFee.EnforceInvariants()
 	queued.EnforceInvariants()
 
-	PromoteStep(pending, baseFee, queued)
+	promote(pending, baseFee, queued)
 }
 
-// Unwind
+// unwind
 // This can be thought of a reverse operation from the one described before.
 // When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 // transactions contained in it, are now viable for inclusion in other blocks, and therefore should
@@ -306,7 +197,7 @@ func OnNewBlocks(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolB
 // they effective lose their priority over the "remote" transactions. In order to prevent that,
 // somehow the fact that certain transactions were local, needs to be remembered for some
 // time (up to some "immutability threshold").
-func Unwind(senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *SubPool) {
+func unwind(senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *SubPool) {
 	// TODO: change sender.nonce
 
 	for _, tx := range unwindedTxs {
@@ -384,7 +275,7 @@ func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
 	})
 }
 
-func PromoteStep(pending, baseFee, queued *SubPool) {
+func promote(pending, baseFee, queued *SubPool) {
 	//1. If top element in the worst green queue has SubPool != 0b1111 (binary), it needs to be removed from the green pool.
 	//   If SubPool < 0b1000 (not satisfying minimum fee), discard.
 	//   If SubPool == 0b1110, demote to the yellow pool, otherwise demote to the red pool.
@@ -468,92 +359,138 @@ func PromoteStep(pending, baseFee, queued *SubPool) {
 	}
 }
 
-func CheckInvariants(pending, baseFee, queued *SubPool) {
-	//1. If top element in the worst green queue has SubPool != 0b1111 (binary), it needs to be removed from the green pool.
-	//   If SubPool < 0b1000 (not satisfying minimum fee), discard.
-	//   If SubPool == 0b1110, demote to the yellow pool, otherwise demote to the red pool.
-	for worst := pending.Worst(); pending.Len() > 0; worst = pending.Worst() {
-		if worst.SubPool >= 0b11110 {
-			break
-		}
-		if worst.SubPool >= 0b11100 {
-			baseFee.Add(pending.PopWorst(), BaseFeeSubPool)
-			continue
-		}
-		if worst.SubPool >= 0b11000 {
-			queued.Add(pending.PopWorst(), QueuedSubPool)
-			continue
-		}
-		pending.PopWorst()
+type SubPool struct {
+	best  *BestQueue
+	worst *WorstQueue
+}
+
+func NewSubPool() *SubPool {
+	return &SubPool{best: &BestQueue{}, worst: &WorstQueue{}}
+}
+
+func (p *SubPool) EnforceInvariants() {
+	heap.Init(p.worst)
+	heap.Init(p.best)
+}
+func (p *SubPool) Best() *MetaTx {
+	if len(*p.best) == 0 {
+		return nil
 	}
-
-	//2. If top element in the worst green queue has SubPool == 0b1111, but there is not enough room in the pool, discard.
-	for worst := pending.Worst(); pending.Len() > PendingSubPoolLimit; worst = pending.Worst() {
-		if worst.SubPool >= 0b11110 { // TODO: here must 'SubPool == 0b1111' or 'SubPool <= 0b1111' ?
-			break
-		}
-		pending.PopWorst()
+	return (*p.best)[0]
+}
+func (p *SubPool) Worst() *MetaTx {
+	if len(*p.worst) == 0 {
+		return nil
 	}
+	return (*p.worst)[0]
+}
+func (p *SubPool) PopBest() *MetaTx {
+	i := heap.Pop(p.best).(*MetaTx)
+	heap.Remove(p.worst, i.worstIndex)
+	return i
+}
+func (p *SubPool) PopWorst() *MetaTx {
+	i := heap.Pop(p.worst).(*MetaTx)
+	heap.Remove(p.best, i.bestIndex)
+	return i
+}
+func (p *SubPool) Len() int { return p.best.Len() }
+func (p *SubPool) Add(i *MetaTx, subPoolType SubPoolType) {
+	i.currentSubPool = subPoolType
+	heap.Push(p.best, i)
+	heap.Push(p.worst, i)
+}
 
-	//3. If the top element in the best yellow queue has SubPool == 0b1111, promote to the green pool.
-	for best := baseFee.Best(); baseFee.Len() > 0; best = baseFee.Best() {
-		if best.SubPool < 0b11110 {
-			break
-		}
-		pending.Add(baseFee.PopWorst(), PendingSubPool)
+// UnsafeRemove - does break Heap invariants, but it has O(1) instead of O(log(n)) complexity.
+// Must manually call heap.Init after such changes.
+// Make sense to batch unsafe changes
+func (p *SubPool) UnsafeRemove(i *MetaTx) *MetaTx {
+	// manually call funcs instead of heap.Pop
+	p.worst.Swap(i.worstIndex, p.worst.Len()-1)
+	p.worst.Pop()
+	p.best.Swap(i.bestIndex, p.best.Len()-1)
+	p.best.Pop()
+	return i
+}
+func (p *SubPool) UnsafeAdd(i *MetaTx, subPoolType SubPoolType) {
+	i.currentSubPool = subPoolType
+	p.worst.Push(i)
+	p.best.Push(i)
+}
+func (p *SubPool) DebugPrint() {
+	for i, it := range *p.best {
+		fmt.Printf("best: %d, %d, %d\n", i, it.SubPool, it.bestIndex)
 	}
-
-	//4. If the top element in the worst yellow queue has SubPool != 0x1110, it needs to be removed from the yellow pool.
-	//   If SubPool < 0b1000 (not satisfying minimum fee), discard. Otherwise, demote to the red pool.
-	for worst := baseFee.Worst(); baseFee.Len() > 0; worst = baseFee.Worst() {
-		if worst.SubPool >= 0b11100 {
-			break
-		}
-		if worst.SubPool >= 0b11000 {
-			queued.Add(baseFee.PopWorst(), QueuedSubPool)
-			continue
-		}
-		baseFee.PopWorst()
+	for i, it := range *p.worst {
+		fmt.Printf("worst: %d, %d, %d\n", i, it.SubPool, it.worstIndex)
 	}
+}
 
-	//5. If the top element in the worst yellow queue has SubPool == 0x1110, but there is not enough room in the pool, discard.
-	for worst := baseFee.Worst(); baseFee.Len() > BaseFeeSubPoolLimit; worst = baseFee.Worst() {
-		if worst.SubPool >= 0b11110 {
-			break
-		}
-		baseFee.PopWorst()
+type BestQueue []*MetaTx
+
+func (mt *MetaTx) Less(than *MetaTx) bool {
+	if mt.SubPool != than.SubPool {
+		return mt.SubPool < than.SubPool
 	}
-
-	//6. If the top element in the best red queue has SubPool == 0x1110, promote to the yellow pool. If SubPool == 0x1111, promote to the green pool.
-	for best := queued.Best(); queued.Len() > 0; best = queued.Best() {
-		if best.SubPool < 0b11100 {
-			break
-		}
-		if best.SubPool < 0b11110 {
-			baseFee.Add(queued.PopWorst(), BaseFeeSubPool)
-			continue
-		}
-
-		pending.Add(queued.PopWorst(), PendingSubPool)
+	// means that strict nonce ordering of transactions from the same sender must be observed.
+	if mt.Tx.senderID != than.Tx.senderID {
+		return mt.Tx.senderID < than.Tx.senderID
 	}
-
-	//7. If the top element in the worst red queue has SubPool < 0b1000 (not satisfying minimum fee), discard.
-	for worst := queued.Worst(); queued.Len() > 0; worst = queued.Worst() {
-		if worst.SubPool >= 0b10000 {
-			break
-		}
-
-		queued.PopWorst()
+	if mt.Tx.nonce != than.Tx.nonce {
+		return mt.Tx.nonce < than.Tx.nonce
 	}
+	return false
+}
 
-	//8. If the top element in the worst red queue has SubPool >= 0b100, but there is not enough room in the pool, discard.
-	for worst := queued.Worst(); queued.Len() > QueuedSubPoolLimit; worst = queued.Worst() {
-		if worst.SubPool >= 0b10000 {
-			break
-		}
+func (p BestQueue) Len() int           { return len(p) }
+func (p BestQueue) Less(i, j int) bool { return !p[i].Less(p[j]) } // We want Pop to give us the highest, not lowest, priority so we use !less here.
+func (p BestQueue) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+	p[i].bestIndex = i
+	p[j].bestIndex = j
+}
+func (p *BestQueue) Push(x interface{}) {
+	n := len(*p)
+	item := x.(*MetaTx)
+	item.bestIndex = n
+	*p = append(*p, item)
+}
 
-		queued.PopWorst()
-	}
+func (p *BestQueue) Pop() interface{} {
+	old := *p
+	n := len(old)
+	item := old[n-1]
+	old[n-1] = nil          // avoid memory leak
+	item.bestIndex = -1     // for safety
+	item.currentSubPool = 0 // for safety
+	*p = old[0 : n-1]
+	return item
+}
+
+type WorstQueue []*MetaTx
+
+func (p WorstQueue) Len() int           { return len(p) }
+func (p WorstQueue) Less(i, j int) bool { return p[i].Less(p[j]) }
+func (p WorstQueue) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+	p[i].worstIndex = i
+	p[j].worstIndex = j
+}
+func (p *WorstQueue) Push(x interface{}) {
+	n := len(*p)
+	item := x.(*MetaTx)
+	item.worstIndex = n
+	*p = append(*p, x.(*MetaTx))
+}
+func (p *WorstQueue) Pop() interface{} {
+	old := *p
+	n := len(old)
+	item := old[n-1]
+	old[n-1] = nil          // avoid memory leak
+	item.worstIndex = -1    // for safety
+	item.currentSubPool = 0 // for safety
+	*p = old[0 : n-1]
+	return item
 }
 
 // Below is a draft code, will convert it to Loop and LoopStep funcs later

@@ -35,7 +35,7 @@ func FuzzTwoQueue(f *testing.F) {
 		{
 			sub := NewSubPool()
 			for _, i := range in {
-				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)}, PendingSubPool)
+				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
 			}
 			assert.Equal(len(in), sub.best.Len())
 			assert.Equal(len(in), sub.worst.Len())
@@ -61,7 +61,7 @@ func FuzzTwoQueue(f *testing.F) {
 		{
 			sub := NewSubPool()
 			for _, i := range in {
-				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)}, PendingSubPool)
+				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
 			}
 			var prev *uint8
 			i := sub.Len()
@@ -174,7 +174,7 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			t.Skip()
 		}
 		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
-		OnNewBlocks(senders, txs, protocolBaseFee, blockBaseFee, pending, baseFee, queued)
+		onNewBlocks(senders, txs, protocolBaseFee, blockBaseFee, pending, baseFee, queued)
 
 		best, worst := pending.Best(), pending.Worst()
 		assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)

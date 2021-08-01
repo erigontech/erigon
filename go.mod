@@ -15,6 +15,7 @@ require (
 	github.com/matryer/moq v0.2.3
 	github.com/stretchr/testify v1.7.0
 	github.com/torquem-ch/mdbx-go v0.17.0
+	go.uber.org/atomic v1.9.0 // indirect
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	golang.org/x/tools v0.1.1 // indirect
 	google.golang.org/genproto v0.0.0-20200825200019-8632dd797987 // indirect
