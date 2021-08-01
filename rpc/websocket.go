@@ -189,6 +189,7 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 		return nil, err
 	}
 	return newClient(ctx, func(ctx context.Context) (ServerCodec, error) {
+		//nolint
 		conn, resp, err := dialer.DialContext(ctx, endpoint, header)
 		if err != nil {
 			hErr := wsHandshakeError{err: err}
