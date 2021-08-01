@@ -177,6 +177,7 @@ func FuzzOnNewBlocks3(f *testing.F) {
 		OnNewBlocks(senders, txs, protocolBaseFee, blockBaseFee, pending, baseFee, queued)
 
 		best, worst := pending.Best(), pending.Worst()
+		assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)
 		assert.False(worst != nil && best == nil)
 		assert.False(worst == nil && best != nil)
 		if worst != nil && worst.SubPool < 0b11110 {
@@ -185,6 +186,9 @@ func FuzzOnNewBlocks3(f *testing.F) {
 		iterateSubPoolUnordered(pending, func(tx *MetaTx) {
 			i := tx.Tx
 			assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+			if tx.SubPool&EnoughBalance > 0 {
+				assert.True(tx.SenderHasEnoughBalance)
+			}
 
 			need := uint256.NewInt(i.gas)
 			need = need.Mul(need, uint256.NewInt(i.feeCap))
@@ -196,12 +200,16 @@ func FuzzOnNewBlocks3(f *testing.F) {
 
 		assert.False(worst != nil && best == nil)
 		assert.False(worst == nil && best != nil)
+		assert.LessOrEqual(baseFee.Len(), BaseFeeSubPoolLimit)
 		if worst != nil && worst.SubPool < 0b11100 {
 			t.Fatalf("baseFee worst too small %b", worst.SubPool)
 		}
 		iterateSubPoolUnordered(baseFee, func(tx *MetaTx) {
 			i := tx.Tx
 			assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+			if tx.SubPool&EnoughBalance > 0 {
+				assert.True(tx.SenderHasEnoughBalance)
+			}
 
 			need := uint256.NewInt(i.gas)
 			need = need.Mul(need, uint256.NewInt(i.feeCap))
@@ -210,6 +218,7 @@ func FuzzOnNewBlocks3(f *testing.F) {
 		})
 
 		best, worst = queued.Best(), queued.Worst()
+		assert.LessOrEqual(queued.Len(), QueuedSubPoolLimit)
 		assert.False(worst != nil && best == nil)
 		assert.False(worst == nil && best != nil)
 		if worst != nil && worst.SubPool < 0b10000 {
@@ -218,6 +227,9 @@ func FuzzOnNewBlocks3(f *testing.F) {
 		iterateSubPoolUnordered(queued, func(tx *MetaTx) {
 			i := tx.Tx
 			assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+			if tx.SubPool&EnoughBalance > 0 {
+				assert.True(tx.SenderHasEnoughBalance)
+			}
 
 			need := uint256.NewInt(i.gas)
 			need = need.Mul(need, uint256.NewInt(i.feeCap))

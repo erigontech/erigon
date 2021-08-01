@@ -77,6 +77,7 @@ const (
 // MetaTx holds transaction and some metadata
 type MetaTx struct {
 	SubPool                SubPoolMarker // Aggregated field
+	NeedBalance            uint256.Int   // Aggregated field; gasLimit x feeCap + transferred_value
 	SenderHasEnoughBalance bool          // Aggregated field; gasLimit x feeCap + transferred_value
 	Tx                     *TxSlot
 	bestIndex              int
@@ -313,13 +314,15 @@ func Unwind(senderInfo map[uint64]SenderInfo, unwindedTxs []*TxSlot, pending *Su
 		if !ok {
 			panic("not implemented yet")
 		}
+
 		//TODO: restore isLocal flag
 		mt := &MetaTx{Tx: tx}
-		// TODO: Если у сендера много транзакций с одинаковым nonce, то из них выбирается одна
-		// с наибольшим effectiveTip. Кстати, интересно, как это правильно вычислять
-		// наверное нужно просто брать с наибольшим tip
-		// implement it for all inserts
-		sender.txNonce2Tx.Has(&nonce2TxItem{mt})
+		// Insert to pending pool, if pool doesn't have tx with same Nonce and bigger Tip
+		if found := sender.txNonce2Tx.Get(&nonce2TxItem{mt}); found != nil {
+			if tx.tip <= found.(*nonce2TxItem).MetaTx.Tx.tip {
+				continue
+			}
+		}
 		sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		pending.UnsafeAdd(mt, PendingSubPool)
 	}
@@ -333,10 +336,10 @@ func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
 		it := i.(*nonce2TxItem)
 
 		// Sender has enough balance for: gasLimit x feeCap + transferred_value
-		balanceNeed := uint256.NewInt(0)
-		balanceNeed.Mul(uint256.NewInt(it.MetaTx.Tx.gas), uint256.NewInt(it.MetaTx.Tx.feeCap))
-		balanceNeed.Add(balanceNeed, &it.MetaTx.Tx.value)
-		it.MetaTx.SenderHasEnoughBalance = sender.balance.Gt(balanceNeed) || sender.balance.Eq(balanceNeed)
+		needBalance := (&it.MetaTx.NeedBalance).SetUint64(0)
+		needBalance.Mul(uint256.NewInt(it.MetaTx.Tx.gas), uint256.NewInt(it.MetaTx.Tx.feeCap))
+		needBalance.Add(&it.MetaTx.NeedBalance, &it.MetaTx.Tx.value)
+		it.MetaTx.SenderHasEnoughBalance = sender.balance.Gt(needBalance) || sender.balance.Eq(needBalance)
 
 		// 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol
 		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
@@ -365,7 +368,7 @@ func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
 		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
 			it.MetaTx.SubPool &= EnoughBalance
 		}
-		accumulatedSenderSpent.Add(accumulatedSenderSpent, balanceNeed) // already deleted all transactions with nonce <= sender.nonce
+		accumulatedSenderSpent.Add(accumulatedSenderSpent, needBalance) // already deleted all transactions with nonce <= sender.nonce
 
 		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
 		// baseFee of the currently pending block. Set to 0 otherwise.
