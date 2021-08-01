@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,6 +50,7 @@ func TestSubPoolMarkerOrder(t *testing.T) {
 	)
 }
 
+/*
 func TestSubPoolOrder(t *testing.T) {
 	sub := NewSubPool()
 	sub.Add(&MetaTx{SubPool: 0b10101})
@@ -115,3 +115,4 @@ func hexToSubPool(s string) []uint8 {
 
 	return a
 }
+*/

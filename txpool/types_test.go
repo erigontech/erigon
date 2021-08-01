@@ -61,12 +61,11 @@ func TestParseTransactionRLP(t *testing.T) {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
 			var payload []byte
 			var err error
-			var tx *TxSlot
-			var parseEnd int
 			if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
 				t.Fatal(err)
 			}
-			if tx, parseEnd, err = ctx.ParseTransaction(payload, 0); err != nil {
+			tx, txSender, parseEnd, err := ctx.ParseTransaction(payload, 0)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if parseEnd != len(payload) {
@@ -91,12 +90,12 @@ func TestParseTransactionRLP(t *testing.T) {
 				}
 			}
 			if tt.senderStr != "" {
-				var sender []byte
-				if sender, err = hex.DecodeString(tt.senderStr); err != nil {
+				var expectSender []byte
+				if expectSender, err = hex.DecodeString(tt.senderStr); err != nil {
 					t.Fatal(err)
 				}
-				if !bytes.Equal(sender, tx.sender[:]) {
-					t.Errorf("sender expected %x, got %x", sender, tx.sender)
+				if !bytes.Equal(expectSender, txSender[:]) {
+					t.Errorf("expectSender expected %x, got %x", expectSender, txSender)
 				}
 			}
 			if tt.nonce != tx.nonce {
