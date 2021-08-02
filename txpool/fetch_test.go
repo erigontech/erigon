@@ -72,7 +72,7 @@ func TestSendTxPropagate(t *testing.T) {
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
-	t.Run("few remote txs", func(t *testing.T) {
+	t.Run("few remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
 		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
@@ -83,7 +83,7 @@ func TestSendTxPropagate(t *testing.T) {
 		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, first.Id)
 		assert.Equal(t, 68, len(first.Data))
 	})
-	t.Run("much remote txs", func(t *testing.T) {
+	t.Run("much remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
 		list := make(Hashes, p2pTxPacketLimit*3)
@@ -100,7 +100,7 @@ func TestSendTxPropagate(t *testing.T) {
 			require.True(t, len(call.Data) > 0)
 		}
 	})
-	t.Run("few local txs", func(t *testing.T) {
+	t.Run("few local byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil

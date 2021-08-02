@@ -173,8 +173,9 @@ func FuzzOnNewBlocks3(f *testing.F) {
 		if !ok {
 			t.Skip()
 		}
+		byHash := map[string]*MetaTx{}
 		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
-		onNewBlocks(senders, txs, protocolBaseFee, blockBaseFee, pending, baseFee, queued)
+		onNewBlock(senders, txs, nil, protocolBaseFee, blockBaseFee, pending, baseFee, queued, byHash)
 
 		best, worst := pending.Best(), pending.Worst()
 		assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)
