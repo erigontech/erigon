@@ -36,7 +36,7 @@ func TestCallTrace(t *testing.T) {
 	genTestCallTraceSet(t, tx, 30)
 	addr := [20]byte{}
 	addr[19] = byte(1)
-	getIndexFrom := func() *roaring64.Bitmap {
+	froms := func() *roaring64.Bitmap {
 		b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr[:], 0, 30)
 		assert.NoError(err)
 		return b
@@ -48,15 +48,15 @@ func TestCallTrace(t *testing.T) {
 	// forward 0->20
 	err = promoteCallTraces("test", tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "")
 	assert.NoError(err)
-	assert.Equal([]uint64{6, 16}, getIndexFrom().ToArray())
+	assert.Equal([]uint64{6, 16}, froms().ToArray())
 
 	// unwind 20->10
 	err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "")
 	assert.NoError(err)
-	assert.Equal([]uint64{6}, getIndexFrom().ToArray())
+	assert.Equal([]uint64{6}, froms().ToArray())
 
 	// forward 10->30
 	err = promoteCallTraces("test", tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "")
 	assert.NoError(err)
-	assert.Equal([]uint64{6, 16, 26}, getIndexFrom().ToArray())
+	assert.Equal([]uint64{6, 16, 26}, froms().ToArray())
 }
