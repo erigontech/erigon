@@ -34,7 +34,6 @@ var migrations = map[kv.Label][]Migration{
 		headerPrefixToSeparateBuckets,
 		removeCliqueBucket,
 		dbSchemaVersion,
-		rebuilCallTraceIndex,
 		fixSequences,
 		storageMode,
 	},
