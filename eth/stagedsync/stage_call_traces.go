@@ -293,8 +293,8 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesC
 }
 
 func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx context.Context, cfg CallTracesCfg) error {
-	froms := map[string]struct{}{}
-	tos := map[string]struct{}{}
+	froms := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	tos := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -318,12 +318,16 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 		if len(v) != common.AddressLength+1 {
 			return fmt.Errorf("wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 		}
-		mapKey := string(v[:common.AddressLength])
+		mapKey := v[:common.AddressLength]
 		if v[common.AddressLength]&1 > 0 {
-			froms[mapKey] = struct{}{}
+			if err = froms.Collect(mapKey, nil); err != nil {
+				return nil
+			}
 		}
 		if v[common.AddressLength]&2 > 0 {
-			tos[mapKey] = struct{}{}
+			if err = tos.Collect(mapKey, nil); err != nil {
+				return nil
+			}
 		}
 		select {
 		case <-logEvery.C:
@@ -342,11 +346,16 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 		}
 	}
 
-	if err := truncateBitmaps64(db, kv.CallFromIndex, froms, to); err != nil {
-		return err
+	if err = froms.Load(logPrefix, db, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return bitmapdb.TruncateRange64(db, kv.CallFromIndex, k, to+1)
+	}, etl.TransformArgs{}); err != nil {
+		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallFromIndex, err)
 	}
-	if err := truncateBitmaps64(db, kv.CallToIndex, tos, to); err != nil {
-		return err
+
+	if err = tos.Load(logPrefix, db, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return bitmapdb.TruncateRange64(db, kv.CallToIndex, k, to+1)
+	}, etl.TransformArgs{}); err != nil {
+		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallFromIndex, err)
 	}
 	return nil
 }
