@@ -195,6 +195,21 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			need = need.Mul(need, uint256.NewInt(i.feeCap))
 			assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
 			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+
+			// side data structures must have all txs
+			assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
+			_, ok = byHash[string(i.idHash[:])]
+			assert.True(ok)
+
+			// pools can't have more then 1 tx with same SenderID+Nonce
+			iterateSubPoolUnordered(queued, func(mtx2 *MetaTx) {
+				tx2 := mtx2.Tx
+				assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce)
+			})
+			iterateSubPoolUnordered(pending, func(mtx2 *MetaTx) {
+				tx2 := mtx2.Tx
+				assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce)
+			})
 		})
 
 		best, worst = baseFee.Best(), baseFee.Worst()
@@ -216,6 +231,10 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			need = need.Mul(need, uint256.NewInt(i.feeCap))
 			assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
 			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+
+			assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
+			_, ok = byHash[string(i.idHash[:])]
+			assert.True(ok)
 		})
 
 		best, worst = queued.Best(), queued.Worst()
@@ -236,7 +255,26 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			need = need.Mul(need, uint256.NewInt(i.feeCap))
 			assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
 			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+
+			assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
+			_, ok = byHash[string(i.idHash[:])]
+			assert.True(ok)
 		})
+
+		// all txs in side data structures must be in some queue
+		for _, txn := range byHash {
+			assert.True(txn.bestIndex >= 0)
+			assert.True(txn.worstIndex >= 0)
+		}
+		for i := range senders {
+			//assert.True(senders[i].txNonce2Tx.Len() > 0)
+			senders[i].txNonce2Tx.Ascend(func(i btree.Item) bool {
+				mt := i.(*nonce2TxItem).MetaTx
+				assert.True(mt.worstIndex >= 0)
+				assert.True(mt.bestIndex >= 0)
+				return true
+			})
+		}
 
 	})
 

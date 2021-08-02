@@ -85,6 +85,10 @@ type MetaTx struct {
 	currentSubPool         SubPoolType
 }
 
+func newMetaTx(slot *TxSlot) *MetaTx {
+	return &MetaTx{Tx: slot, worstIndex: -1, bestIndex: -1}
+}
+
 type SubPoolType uint8
 
 const PendingSubPool SubPoolType = 1
@@ -264,7 +268,7 @@ func unwind(senderInfo map[uint64]SenderInfo, unwindTxs []*TxSlot, pending *SubP
 		}
 
 		//TODO: restore isLocal flag
-		mt := &MetaTx{Tx: tx}
+		mt := newMetaTx(tx)
 		// Insert to pending pool, if pool doesn't have tx with same Nonce and bigger Tip
 		if found := sender.txNonce2Tx.Get(&nonce2TxItem{mt}); found != nil {
 			if tx.tip <= found.(*nonce2TxItem).MetaTx.Tx.tip {
