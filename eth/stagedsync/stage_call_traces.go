@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"runtime"
 	"sort"
@@ -22,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -173,42 +171,10 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		return err
 	}
 
-	// Clean up before loading call traces to reclaim space
-	var prunedMin uint64 = math.MaxUint64
-	var prunedMax uint64 = 0
-	for k, _, err = traceCursor.First(); k != nil; k, _, err = traceCursor.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum+params.FullImmutabilityThreshold <= endBlock {
-			break
-		}
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Pruning call trace intermediate table", logPrefix), "number", blockNum,
-				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys))
-		}
-		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("remove trace call set for block %d: %w", blockNum, err)
-		}
-		if blockNum < prunedMin {
-			prunedMin = blockNum
-		}
-		if blockNum > prunedMax {
-			prunedMax = blockNum
-		}
-	}
-	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
-	}
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -275,6 +241,9 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesC
 	}
 
 	logPrefix := u.LogPrefix()
+	if s.BlockNumber-u.UnwindPoint > 16 {
+		log.Info(fmt.Sprintf("[%s] Unwind", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
+	}
 	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, ctx, cfg); err != nil {
 		return err
 	}
@@ -429,7 +398,7 @@ func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	}
 
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTraces(tx, logPrefix, cfg.tmpdir, cfg.prune.History.PruneTo(s.ForwardProgress), ctx); err != nil {
+		if err = pruneCallTraces(tx, logPrefix, cfg.tmpdir, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), ctx); err != nil {
 			return err
 		}
 	}
