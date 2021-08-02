@@ -156,6 +156,9 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	gpo.lastHead = headHash
 	gpo.lastPrice = price
 	gpo.cacheLock.Unlock()
+	if head.BaseFee != nil {
+		price.Add(price, head.BaseFee)
+	}
 	return price, nil
 }
 
