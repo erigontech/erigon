@@ -561,6 +561,7 @@ func print(client *http.Client, url, request string) {
 		fmt.Printf("Could not print: %v\n", err)
 		return
 	}
+	defer r.Body.Close()
 	if r.StatusCode != 200 {
 		fmt.Printf("Status %s", r.Status)
 		return

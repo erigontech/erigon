@@ -331,6 +331,7 @@ func (n *ExecNode) NodeInfo() *p2p.NodeInfo {
 // ServeRPC serves RPC requests over the given connection by dialling the
 // node's WebSocket address and joining the two connections
 func (n *ExecNode) ServeRPC(clientConn *websocket.Conn) error {
+	//nolint
 	conn, _, err := websocket.DefaultDialer.Dial(n.wsAddr, nil)
 	if err != nil {
 		return err
@@ -438,9 +439,12 @@ func execP2PNode() {
 
 	// Send status to the host.
 	statusJSON, _ := json.Marshal(status)
-	if _, err := http.Post(statusURL, "application/json", bytes.NewReader(statusJSON)); err != nil {
+	r, err := http.Post(statusURL, "application/json", bytes.NewReader(statusJSON))
+	if err != nil {
 		log.Crit("Can't post startup info", "url", statusURL, "err", err)
 	}
+	r.Body.Close()
+
 	if stackErr != nil {
 		os.Exit(1)
 	}
