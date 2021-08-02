@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -42,11 +41,7 @@ var rebuilCallTraceIndex = Migration{
 		}
 		logPrefix := "db migration rebuild_call_trace_index"
 
-		pm, err := prune.Get(tx)
-		if err != nil {
-			return err
-		}
-		if err = stagedsync.DoUnwindCallTraces(logPrefix, tx, 999_999_999, blockNum-1, context.Background(), stagedsync.StageCallTracesCfg(nil, pm, 0, tmpdir)); err != nil {
+		if err = stagedsync.DoUnwindCallTraces(logPrefix, tx, 999_999_999, blockNum-1, context.Background(), tmpdir); err != nil {
 			return err
 		}
 
