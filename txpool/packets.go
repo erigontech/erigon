@@ -162,9 +162,3 @@ func EncodePooledTransactions65(txsRlp [][]byte, encodeBuf []byte) []byte {
 	_ = pos
 	return encodeBuf
 }
-
-//type PooledTransactionsPacket66 struct {
-//	RequestId uint64
-//	PooledTransactionsPacket
-//}
-//type PooledTransactionsPacket []types.Transaction
