@@ -35,6 +35,7 @@ import (
 type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(hash []byte) bool
+	GetRlp(hash []byte) []byte
 
 	NotifyNewPeer(peerID PeerID)
 }

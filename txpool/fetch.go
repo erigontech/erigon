@@ -219,29 +219,48 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 			}
 		}
 	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66, sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
-		/*
-			var query eth.GetPooledTransactionsPacket66
-			if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-				return fmt.Errorf("decoding GetPooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
-			}
-			_, txs := eth.AnswerGetPooledTransactions(tp.TxPool, query.GetPooledTransactionsPacket)
-			b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
-				RequestId:                   query.RequestId,
-				PooledTransactionsRLPPacket: txs,
-			})
+		var encodedRequest []byte
+		messageId := sentry.MessageId_POOLED_TRANSACTIONS_66
+		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_65 {
+			messageId = sentry.MessageId_POOLED_TRANSACTIONS_65
+		}
+		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
+			requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 			if err != nil {
-				return fmt.Errorf("encode GetPooledTransactionsPacket66 response: %v", err)
+				return err
 			}
-			// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
-			outreq := proto_sentry.SendMessageByIdRequest{
-				PeerId: inreq.PeerId,
-				Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_POOLED_TRANSACTIONS_66, Data: b},
+			_ = requestID
+			var txs [][]byte
+			for i := 0; i < len(hashes); i += 32 {
+				txn := f.pool.GetRlp(hashes[i : i+32])
+				if txn == nil {
+					continue
+				}
+				txs = append(txs, txn)
 			}
-			_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+
+			encodedRequest = EncodePooledTransactions66(txs, requestID, nil)
+		} else {
+			hashes, _, err := ParseGetPooledTransactions65(req.Data, 0, nil)
 			if err != nil {
-				return fmt.Errorf("send pooled transactions response: %v", err)
+				return err
 			}
-		*/
+			var txs [][]byte
+			for i := 0; i < len(hashes); i += 32 {
+				txn := f.pool.GetRlp(hashes[i : i+32])
+				if txn == nil {
+					continue
+				}
+				txs = append(txs, txn)
+			}
+			encodedRequest = EncodePooledTransactions65(txs, nil)
+		}
+		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
+			Data:   &sentry.OutboundMessageData{Id: messageId, Data: encodedRequest},
+			PeerId: req.PeerId,
+		}, &grpc.EmptyCallOption{}); err != nil {
+			return err
+		}
 	}
 
 	return nil
