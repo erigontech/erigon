@@ -310,7 +310,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	st.gas -= gas
 
 	var bailout bool
-	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to performa transfer
+	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
 		if !msg.Value().IsZero() && !st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value()) {
 			bailout = true
