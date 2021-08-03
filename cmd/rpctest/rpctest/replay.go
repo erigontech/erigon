@@ -10,7 +10,7 @@ import (
 	"github.com/valyala/fastjson"
 )
 
-func Replay(erigonURL string, recordFile string) {
+func Replay(erigonURL string, recordFile string) error {
 	setRoutes(erigonURL, "")
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -18,7 +18,7 @@ func Replay(erigonURL string, recordFile string) {
 	f, err := os.Open(recordFile)
 	if err != nil {
 		fmt.Printf("Cannot open file %s for replay: %v\n", recordFile, err)
-		return
+		return err
 	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
@@ -33,26 +33,24 @@ func Replay(erigonURL string, recordFile string) {
 		request := s.Text()
 		res = reqGen.Erigon2("", request)
 		if res.Err != nil {
-			fmt.Printf("Could not get replay for %s: %v\n", request, res.Err)
-			return
+			return fmt.Errorf("Could not get replay for %s: %w", request, res.Err)
 		}
 		if errVal := res.Result.Get("error"); errVal != nil {
-			fmt.Printf("Error getting replay for %s: %d %s\n", request, errVal.GetInt("code"), errVal.GetStringBytes("message"))
-			return
+			return fmt.Errorf("Error getting replay for %s: %d %s", request, errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
 		s.Scan() // Advance to the expected response
 		expectedResult, err1 := fastjson.ParseBytes(s.Bytes())
 		if err1 != nil {
-			fmt.Printf("Could not parse expected result %s: %v\n", request, err1)
-			return
+			return fmt.Errorf("Could not parse expected result %s: %w", request, err1)
 		}
 		if err := compareResults(res.Result, expectedResult); err != nil {
 			fmt.Printf("Different results for %s:\n %v\n", request, err)
 			fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
 			fmt.Printf("\n\nG response=================================\n%s\n", s.Bytes())
-			return
+			return fmt.Errorf("Different results for %s:\n %w", request, err)
 		}
 		s.Scan()
 		s.Scan() // Skip the extra new line between response and the next request
 	}
+	return nil
 }

@@ -222,8 +222,8 @@ func main() {
 		Use:   "replay",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Replay(erigonURL, recordFile)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Replay(erigonURL, recordFile)
 		},
 	}
 	with(replayCmd, withErigonUrl, withRecord)
