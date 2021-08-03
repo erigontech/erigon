@@ -47,25 +47,6 @@ type Pool interface {
 // 5. Local transaction. Set to 1 if transaction is local.
 type SubPoolMarker uint8
 
-func NewSubPoolMarker(enoughFeeCapProtocol, noNonceGaps, enoughBalance, enoughFeeCapBlock, isLocal bool) (s SubPoolMarker) {
-	if enoughFeeCapProtocol {
-		s |= EnoughFeeCapProtocol
-	}
-	if noNonceGaps {
-		s |= NoNonceGaps
-	}
-	if enoughBalance {
-		s |= EnoughBalance
-	}
-	if enoughFeeCapBlock {
-		s |= EnoughFeeCapBlock
-	}
-	if isLocal {
-		s |= IsLocal
-	}
-	return s
-}
-
 const (
 	EnoughFeeCapProtocol = 0b10000
 	NoNonceGaps          = 0b01000

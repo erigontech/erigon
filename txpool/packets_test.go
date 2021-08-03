@@ -100,6 +100,5 @@ func TestEncodeGPT66(t *testing.T) {
 		require.Equal(tt.expectedErr, err != nil)
 		require.Equal(tt.requestId, requestID)
 		require.Equal(decodeHex(tt.hashesStr), hashes)
-
 	}
 }
