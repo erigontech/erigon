@@ -304,7 +304,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (slot *TxSl
 			return nil, sender, 0, fmt.Errorf("%s: computing signHash (hashing len Prefix): %w", ParseTransactionErrorPrefix, err)
 		}
 	} else {
-		beLen := (bits.Len(uint(sigHashLen)) + 7) / 8
+		beLen := (bits.Len(sigHashLen) + 7) / 8
 		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
 		ctx.buf[8-beLen] = byte(beLen) + 247
 		if _, err := ctx.keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {

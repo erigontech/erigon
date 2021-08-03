@@ -19,6 +19,7 @@ package txpool
 import (
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,14 +42,16 @@ var hashParseTests = []struct {
 }
 
 func TestParseHash(t *testing.T) {
-	require := require.New(t)
-	for _, tt := range hashParseTests {
-		var hashBuf [32]byte
-		payload := decodeHex(tt.payloadStr)
-		_, parseEnd, err := ParseHash(payload, 0, hashBuf[:0])
-		require.Equal(tt.expectedErr, err != nil)
-		require.Equal(len(payload), parseEnd)
-		require.Equal(decodeHex(tt.hashStr), hashBuf[:])
+	for i, tt := range hashParseTests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			require := require.New(t)
+			var hashBuf [32]byte
+			payload := decodeHex(tt.payloadStr)
+			_, parseEnd, err := ParseHash(payload, 0, hashBuf[:0])
+			require.Equal(tt.expectedErr, err != nil)
+			require.Equal(len(payload), parseEnd)
+			require.Equal(decodeHex(tt.hashStr), hashBuf[:])
+		})
 	}
 }
 
@@ -65,11 +68,13 @@ var hashEncodeTests = []struct {
 }
 
 func TestEncodeHash(t *testing.T) {
-	require := require.New(t)
-	for _, tt := range hashEncodeTests {
-		var encodeBuf []byte
-		encodeBuf = EncodeHashes(decodeHex(tt.hashesStr), encodeBuf)
-		require.Equal(decodeHex(tt.payloadStr), encodeBuf)
+	for i, tt := range hashEncodeTests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			require := require.New(t)
+			var encodeBuf []byte
+			encodeBuf = EncodeHashes(decodeHex(tt.hashesStr), encodeBuf)
+			require.Equal(decodeHex(tt.payloadStr), encodeBuf)
+		})
 	}
 }
 
@@ -86,19 +91,21 @@ var gpt66EncodeTests = []struct {
 
 // TestEncodeGPT66 tests the encoding of GetPoolTransactions66 packet
 func TestEncodeGPT66(t *testing.T) {
-	require := require.New(t)
-	for _, tt := range gpt66EncodeTests {
-		var encodeBuf []byte
-		var err error
-		encodeBuf, err = EncodeGetPooledTransactions66(decodeHex(tt.hashesStr), tt.requestId, encodeBuf)
-		require.Equal(tt.expectedErr, err != nil)
-		require.Equal(decodeHex(tt.payloadStr), encodeBuf)
-		if err != nil {
-			continue
-		}
-		requestID, hashes, _, err := ParseGetPooledTransactions66(encodeBuf, 0, nil)
-		require.Equal(tt.expectedErr, err != nil)
-		require.Equal(tt.requestId, requestID)
-		require.Equal(decodeHex(tt.hashesStr), hashes)
+	for i, tt := range gpt66EncodeTests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			require := require.New(t)
+			var encodeBuf []byte
+			var err error
+			encodeBuf, err = EncodeGetPooledTransactions66(decodeHex(tt.hashesStr), tt.requestId, encodeBuf)
+			require.Equal(tt.expectedErr, err != nil)
+			require.Equal(decodeHex(tt.payloadStr), encodeBuf)
+			if err != nil {
+				return
+			}
+			requestID, hashes, _, err := ParseGetPooledTransactions66(encodeBuf, 0, nil)
+			require.Equal(tt.expectedErr, err != nil)
+			require.Equal(tt.requestId, requestID)
+			require.Equal(decodeHex(tt.hashesStr), hashes)
+		})
 	}
 }
