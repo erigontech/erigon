@@ -16,40 +16,6 @@
 
 package txpool
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
-)
-
-func TestSubPoolMarkerOrder(t *testing.T) {
-	require := require.New(t)
-	require.Less(
-		NewSubPoolMarker(true, true, true, true, false),
-		NewSubPoolMarker(true, true, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(true, true, true, false, true),
-		NewSubPoolMarker(true, true, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(true, true, true, false, true),
-		NewSubPoolMarker(true, true, true, true, false),
-	)
-	require.Less(
-		NewSubPoolMarker(false, true, true, true, true),
-		NewSubPoolMarker(true, false, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(false, false, false, true, true),
-		NewSubPoolMarker(false, false, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(false, false, true, true, false),
-		NewSubPoolMarker(false, false, true, true, true),
-	)
-}
-
 /*
 func TestSubPoolOrder(t *testing.T) {
 	sub := NewSubPool()

@@ -33,7 +33,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Fetch connects to sentry and impements eth/65 or eth/66 protocol regarding the transaction
+// Fetch connects to sentry and implements eth/65 or eth/66 protocol regarding the transaction
 // messages. It tries to "prime" the sentry with StatusData message containing given
 // genesis hash and list of forks, but with zero max block and total difficulty
 // Sentry should have a logic not to overwrite statusData with messages from tx pool
@@ -42,7 +42,7 @@ type Fetch struct {
 	sentryClients []sentry.SentryClient // sentry clients that will be used for accessing the network
 	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
 	pool          Pool                  // Transaction pool implementation
-	wg            *sync.WaitGroup       // Waitgroup used for synchronisation in the tests (nil when not in tests)
+	wg            *sync.WaitGroup       // used for synchronisation in the tests (nil when not in tests)
 	logger        log.Logger
 }
 
