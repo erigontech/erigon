@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync"
 	"testing"
@@ -52,10 +51,9 @@ func TestFetch(t *testing.T) {
 	m.StreamWg.Wait()
 	// Send one transaction id
 	wg.Add(1)
-	data, _ := hex.DecodeString("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328")
 	errs := m.Send(&sentry.InboundMessage{
 		Id:     sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-		Data:   data,
+		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
 		PeerId: PeerId,
 	})
 	for i, err := range errs {

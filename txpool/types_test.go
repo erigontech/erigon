@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"testing"
 )
@@ -59,11 +58,8 @@ func TestParseTransactionRLP(t *testing.T) {
 	ctx := NewTxParseContext()
 	for i, tt := range txParseTests {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			var payload []byte
 			var err error
-			if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
-				t.Fatal(err)
-			}
+			payload := decodeHex(tt.payloadStr)
 			tx, txSender, parseEnd, err := ctx.ParseTransaction(payload, 0)
 			if err != nil {
 				t.Fatal(err)
@@ -73,27 +69,19 @@ func TestParseTransactionRLP(t *testing.T) {
 			}
 			if tt.signHashStr != "" {
 				var signHash []byte
-				if signHash, err = hex.DecodeString(tt.signHashStr); err != nil {
-					t.Fatal(err)
-				}
+				signHash = decodeHex(tt.signHashStr)
 				if !bytes.Equal(signHash, ctx.sighash[:]) {
 					t.Errorf("signHash expected %x, got %x", signHash, ctx.sighash)
 				}
 			}
 			if tt.idHashStr != "" {
-				var idHash []byte
-				if idHash, err = hex.DecodeString(tt.idHashStr); err != nil {
-					t.Fatal(err)
-				}
+				idHash := decodeHex(tt.idHashStr)
 				if !bytes.Equal(idHash, tx.idHash[:]) {
 					t.Errorf("idHash expected %x, got %x", idHash, tx.idHash)
 				}
 			}
 			if tt.senderStr != "" {
-				var expectSender []byte
-				if expectSender, err = hex.DecodeString(tt.senderStr); err != nil {
-					t.Fatal(err)
-				}
+				expectSender := decodeHex(tt.senderStr)
 				if !bytes.Equal(expectSender, txSender[:]) {
 					t.Errorf("expectSender expected %x, got %x", expectSender, txSender)
 				}

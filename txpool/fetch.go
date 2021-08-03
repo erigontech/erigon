@@ -218,7 +218,32 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 				return err
 			}
 		}
+	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66, sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
+		/*
+			var query eth.GetPooledTransactionsPacket66
+			if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+				return fmt.Errorf("decoding GetPooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
+			}
+			_, txs := eth.AnswerGetPooledTransactions(tp.TxPool, query.GetPooledTransactionsPacket)
+			b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
+				RequestId:                   query.RequestId,
+				PooledTransactionsRLPPacket: txs,
+			})
+			if err != nil {
+				return fmt.Errorf("encode GetPooledTransactionsPacket66 response: %v", err)
+			}
+			// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
+			outreq := proto_sentry.SendMessageByIdRequest{
+				PeerId: inreq.PeerId,
+				Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_POOLED_TRANSACTIONS_66, Data: b},
+			}
+			_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+			if err != nil {
+				return fmt.Errorf("send pooled transactions response: %v", err)
+			}
+		*/
 	}
+
 	return nil
 }
 
