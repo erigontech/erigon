@@ -1,3 +1,3 @@
 package gointerfaces
 
-//go:generate moq -stub -out ./sentry/mocks.go ./sentry SentryServer SentryClient
+//go:generate moq -stub -out ./sentry/mocks_test.go ./sentry SentryServer SentryClient

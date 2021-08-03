@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 )
 
-//go:generate moq -stub -out mocks.go . Pool
+//go:generate moq -stub -out mocks_test.go . Pool
 
 type MockSentry struct {
 	*sentry.SentryServerMock
