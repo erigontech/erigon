@@ -219,7 +219,7 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 			}
 		}
 	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66, sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
-		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway.
+		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
 		messageId := sentry.MessageId_POOLED_TRANSACTIONS_66
 		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_65 {
