@@ -638,6 +638,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		tr.Output = trace.Output
 		if traceTypeTrace {
 			tr.Trace = trace.Trace
+		} else {
+			tr.Trace = []*ParityTrace{}
 		}
 		if traceTypeStateDiff {
 			tr.StateDiff = trace.StateDiff
