@@ -152,6 +152,9 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	if price.Cmp(gpo.maxPrice) > 0 {
 		price = new(big.Int).Set(gpo.maxPrice)
 	}
+	if head.BaseFee != nil {
+		price.Add(price, head.BaseFee)
+	}
 	gpo.cacheLock.Lock()
 	gpo.lastHead = headHash
 	gpo.lastPrice = price
