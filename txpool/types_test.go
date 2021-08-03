@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 var txParseTests = []struct {
@@ -58,15 +60,12 @@ func TestParseTransactionRLP(t *testing.T) {
 	ctx := NewTxParseContext()
 	for i, tt := range txParseTests {
 		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			require := require.New(t)
 			var err error
 			payload := decodeHex(tt.payloadStr)
 			tx, txSender, parseEnd, err := ctx.ParseTransaction(payload, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if parseEnd != len(payload) {
-				t.Errorf("parsing ended at %d, expected %d", parseEnd, len(payload))
-			}
+			require.NoError(err)
+			require.Equal(len(payload), parseEnd)
 			if tt.signHashStr != "" {
 				signHash := decodeHex(tt.signHashStr)
 				if !bytes.Equal(signHash, ctx.sighash[:]) {
@@ -85,9 +84,7 @@ func TestParseTransactionRLP(t *testing.T) {
 					t.Errorf("expectSender expected %x, got %x", expectSender, txSender)
 				}
 			}
-			if tt.nonce != tx.nonce {
-				t.Errorf("nonce expected: %d, got %d", tt.nonce, tx.nonce)
-			}
+			require.Equal(tt.nonce, tx.nonce)
 		})
 	}
 }
