@@ -68,8 +68,7 @@ func TestParseTransactionRLP(t *testing.T) {
 				t.Errorf("parsing ended at %d, expected %d", parseEnd, len(payload))
 			}
 			if tt.signHashStr != "" {
-				var signHash []byte
-				signHash = decodeHex(tt.signHashStr)
+				signHash := decodeHex(tt.signHashStr)
 				if !bytes.Equal(signHash, ctx.sighash[:]) {
 					t.Errorf("signHash expected %x, got %x", signHash, ctx.sighash)
 				}

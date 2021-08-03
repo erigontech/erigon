@@ -99,7 +99,7 @@ func (i *nonce2TxItem) Less(than btree.Item) bool {
 // most of logic implemented by pure tests-friendly functions
 type TxPool struct {
 	lock   *sync.RWMutex
-	logger log.Logger
+	logger log.Logger //nolint
 
 	protocolBaseFee atomic.Uint64
 	blockBaseFee    atomic.Uint64
@@ -109,8 +109,8 @@ type TxPool struct {
 	pending, baseFee, queued *SubPool
 
 	// fields for transaction propagation
-	recentlyConnectedPeers     *recentlyConnectedPeers
-	lastTxPropagationTimestamp time.Time
+	recentlyConnectedPeers *recentlyConnectedPeers
+	//lastTxPropagationTimestamp time.Time
 }
 
 func (p *TxPool) GetRlp(hash []byte) []byte {

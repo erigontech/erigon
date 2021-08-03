@@ -96,7 +96,11 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 	if err != nil {
 		return 0, hashes, 0, err
 	}
-	hashesCount, pos, err := ParseHashesCount(payload, pos)
+	var hashesCount int
+	hashesCount, pos, err = ParseHashesCount(payload, pos)
+	if err != nil {
+		return 0, hashes, 0, err
+	}
 	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
 
 	for i := 0; pos != len(payload); i++ {
@@ -114,7 +118,11 @@ func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hash
 		return hashes, 0, err
 	}
 
-	hashesCount, pos, err := ParseHashesCount(payload, pos)
+	var hashesCount int
+	hashesCount, pos, err = ParseHashesCount(payload, pos)
+	if err != nil {
+		return hashes, 0, err
+	}
 	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
 
 	for i := 0; pos != len(payload); i++ {
@@ -137,7 +145,7 @@ func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []b
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
 	pos += rlp.EncodeU64(requestId, encodeBuf[pos:])
-	dataLen += rlp.ListPrefixLen(txsRlpLen)
+	pos += rlp.ListPrefixLen(txsRlpLen)
 	for i := range txsRlp {
 		copy(encodeBuf[pos:], txsRlp[i])
 		pos += len(txsRlp[i])
