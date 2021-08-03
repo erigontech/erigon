@@ -17,6 +17,9 @@ var _ Pool = &PoolMock{}
 //
 // 		// make and configure a mocked Pool
 // 		mockedPool := &PoolMock{
+// 			GetRlpFunc: func(hash []byte) []byte {
+// 				panic("mock out the GetRlp method")
+// 			},
 // 			IdHashKnownFunc: func(hash []byte) bool {
 // 				panic("mock out the IdHashKnown method")
 // 			},
@@ -30,6 +33,9 @@ var _ Pool = &PoolMock{}
 //
 // 	}
 type PoolMock struct {
+	// GetRlpFunc mocks the GetRlp method.
+	GetRlpFunc func(hash []byte) []byte
+
 	// IdHashKnownFunc mocks the IdHashKnown method.
 	IdHashKnownFunc func(hash []byte) bool
 
@@ -38,6 +44,11 @@ type PoolMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// GetRlp holds details about calls to the GetRlp method.
+		GetRlp []struct {
+			// Hash is the hash argument value.
+			Hash []byte
+		}
 		// IdHashKnown holds details about calls to the IdHashKnown method.
 		IdHashKnown []struct {
 			// Hash is the hash argument value.
@@ -49,8 +60,43 @@ type PoolMock struct {
 			PeerID PeerID
 		}
 	}
+	lockGetRlp        sync.RWMutex
 	lockIdHashKnown   sync.RWMutex
 	lockNotifyNewPeer sync.RWMutex
+}
+
+// GetRlp calls GetRlpFunc.
+func (mock *PoolMock) GetRlp(hash []byte) []byte {
+	callInfo := struct {
+		Hash []byte
+	}{
+		Hash: hash,
+	}
+	mock.lockGetRlp.Lock()
+	mock.calls.GetRlp = append(mock.calls.GetRlp, callInfo)
+	mock.lockGetRlp.Unlock()
+	if mock.GetRlpFunc == nil {
+		var (
+			bytesOut []byte
+		)
+		return bytesOut
+	}
+	return mock.GetRlpFunc(hash)
+}
+
+// GetRlpCalls gets all the calls that were made to GetRlp.
+// Check the length with:
+//     len(mockedPool.GetRlpCalls())
+func (mock *PoolMock) GetRlpCalls() []struct {
+	Hash []byte
+} {
+	var calls []struct {
+		Hash []byte
+	}
+	mock.lockGetRlp.RLock()
+	calls = mock.calls.GetRlp
+	mock.lockGetRlp.RUnlock()
+	return calls
 }
 
 // IdHashKnown calls IdHashKnownFunc.

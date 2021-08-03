@@ -78,6 +78,8 @@ type TxSlot struct {
 	//bestIdx     int         // Index of the transaction in the best priority queue (of whatever pool it currently belongs to)
 	//worstIdx    int         // Index of the transaction in the worst priority queue (of whatever pook it currently belongs to)
 	//local       bool        // Whether transaction has been injected locally (and hence needs priority when mining or proposing a block)
+
+	rlp []byte
 }
 
 const (
@@ -94,7 +96,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (slot *TxSl
 	if len(payload) == 0 {
 		return nil, sender, 0, fmt.Errorf("%s: empty rlp", ParseTransactionErrorPrefix)
 	}
-	slot = &TxSlot{}
+	slot = &TxSlot{rlp: payload}
 	// Compute transaction hash
 	ctx.keccak1.Reset()
 	ctx.keccak2.Reset()

@@ -17,11 +17,20 @@
 package txpool
 
 import (
-	"bytes"
 	"encoding/hex"
 	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+func decodeHex(in string) []byte {
+	payload, err := hex.DecodeString(in)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
 
 var hashParseTests = []struct {
 	payloadStr  string
@@ -32,35 +41,14 @@ var hashParseTests = []struct {
 }
 
 func TestParseHash(t *testing.T) {
-	for i, tt := range hashParseTests {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			var payload []byte
-			var err error
-			var hashBuf [32]byte
-			var parseEnd int
-			if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
-				t.Fatal(err)
-			}
-			if _, parseEnd, err = ParseHash(payload, 0, hashBuf[:0]); err != nil {
-				if !tt.expectedErr {
-					t.Fatal(err)
-				}
-			} else if tt.expectedErr {
-				t.Fatalf("expected error when parsing")
-			}
-			if parseEnd != len(payload) {
-				t.Errorf("parsing ended at %d, expected %d", parseEnd, len(payload))
-			}
-			if tt.hashStr != "" {
-				var hash []byte
-				if hash, err = hex.DecodeString(tt.hashStr); err != nil {
-					t.Fatal(err)
-				}
-				if !bytes.Equal(hash, hashBuf[:]) {
-					t.Errorf("hash expected %x, got %x", hash, hashBuf)
-				}
-			}
-		})
+	require := require.New(t)
+	for _, tt := range hashParseTests {
+		var hashBuf [32]byte
+		payload := decodeHex(tt.payloadStr)
+		_, parseEnd, err := ParseHash(payload, 0, hashBuf[:0])
+		require.Equal(tt.expectedErr, err != nil)
+		require.Equal(len(payload), parseEnd)
+		require.Equal(decodeHex(tt.hashStr), hashBuf[:])
 	}
 }
 
@@ -77,26 +65,11 @@ var hashEncodeTests = []struct {
 }
 
 func TestEncodeHash(t *testing.T) {
-	for i, tt := range hashEncodeTests {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			var payload []byte
-			var hashes []byte
-			var err error
-			var encodeBuf []byte
-			if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
-				t.Fatal(err)
-			}
-			if hashes, err = hex.DecodeString(tt.hashesStr); err != nil {
-				t.Fatal(err)
-			}
-			encodeBuf = EncodeHashes(hashes, encodeBuf)
-			if tt.expectedErr {
-				t.Fatalf("expected error when encoding")
-			}
-			if !bytes.Equal(payload, encodeBuf) {
-				t.Errorf("encoding expected %x, got %x", payload, encodeBuf)
-			}
-		})
+	require := require.New(t)
+	for _, tt := range hashEncodeTests {
+		var encodeBuf []byte
+		encodeBuf = EncodeHashes(decodeHex(tt.hashesStr), encodeBuf)
+		require.Equal(decodeHex(tt.payloadStr), encodeBuf)
 	}
 }
 
@@ -113,28 +86,19 @@ var gpt66EncodeTests = []struct {
 
 // TestEncodeGPT66 tests the encoding of GetPoolTransactions66 packet
 func TestEncodeGPT66(t *testing.T) {
-	for i, tt := range gpt66EncodeTests {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
-			var payload []byte
-			var hashes []byte
-			var err error
-			var encodeBuf []byte
-			if payload, err = hex.DecodeString(tt.payloadStr); err != nil {
-				t.Fatal(err)
-			}
-			if hashes, err = hex.DecodeString(tt.hashesStr); err != nil {
-				t.Fatal(err)
-			}
-			if encodeBuf, err = EncodeGetPooledTransactions66(hashes, tt.requestId, encodeBuf); err != nil {
-				if !tt.expectedErr {
-					t.Fatal(err)
-				}
-			} else if tt.expectedErr {
-				t.Fatalf("expected error when encoding")
-			}
-			if !bytes.Equal(payload, encodeBuf) {
-				t.Errorf("encoding expected %x, got %x", payload, encodeBuf)
-			}
-		})
+	require := require.New(t)
+	for _, tt := range gpt66EncodeTests {
+		var encodeBuf []byte
+		var err error
+		encodeBuf, err = EncodeGetPooledTransactions66(decodeHex(tt.hashesStr), tt.requestId, encodeBuf)
+		require.Equal(tt.expectedErr, err != nil)
+		require.Equal(decodeHex(tt.payloadStr), encodeBuf)
+		if err != nil {
+			continue
+		}
+		requestID, hashes, _, err := ParseGetPooledTransactions66(encodeBuf, 0, nil)
+		require.Equal(tt.expectedErr, err != nil)
+		require.Equal(tt.requestId, requestID)
+		require.Equal(decodeHex(tt.hashesStr), hashes)
 	}
 }

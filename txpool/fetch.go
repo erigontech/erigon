@@ -33,7 +33,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Fetch connects to sentry and impements eth/65 or eth/66 protocol regarding the transaction
+// Fetch connects to sentry and implements eth/65 or eth/66 protocol regarding the transaction
 // messages. It tries to "prime" the sentry with StatusData message containing given
 // genesis hash and list of forks, but with zero max block and total difficulty
 // Sentry should have a logic not to overwrite statusData with messages from tx pool
@@ -42,7 +42,7 @@ type Fetch struct {
 	sentryClients []sentry.SentryClient // sentry clients that will be used for accessing the network
 	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
 	pool          Pool                  // Transaction pool implementation
-	wg            *sync.WaitGroup       // Waitgroup used for synchronisation in the tests (nil when not in tests)
+	wg            *sync.WaitGroup       // used for synchronisation in the tests (nil when not in tests)
 	logger        log.Logger
 }
 
@@ -218,7 +218,52 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 				return err
 			}
 		}
+	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66, sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
+		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
+		var encodedRequest []byte
+		messageId := sentry.MessageId_POOLED_TRANSACTIONS_66
+		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_65 {
+			messageId = sentry.MessageId_POOLED_TRANSACTIONS_65
+		}
+		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
+			requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
+			if err != nil {
+				return err
+			}
+			_ = requestID
+			var txs [][]byte
+			for i := 0; i < len(hashes); i += 32 {
+				txn := f.pool.GetRlp(hashes[i : i+32])
+				if txn == nil {
+					continue
+				}
+				txs = append(txs, txn)
+			}
+
+			encodedRequest = EncodePooledTransactions66(txs, requestID, nil)
+		} else {
+			hashes, _, err := ParseGetPooledTransactions65(req.Data, 0, nil)
+			if err != nil {
+				return err
+			}
+			var txs [][]byte
+			for i := 0; i < len(hashes); i += 32 {
+				txn := f.pool.GetRlp(hashes[i : i+32])
+				if txn == nil {
+					continue
+				}
+				txs = append(txs, txn)
+			}
+			encodedRequest = EncodePooledTransactions65(txs, nil)
+		}
+		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
+			Data:   &sentry.OutboundMessageData{Id: messageId, Data: encodedRequest},
+			PeerId: req.PeerId,
+		}, &grpc.EmptyCallOption{}); err != nil {
+			return err
+		}
 	}
+
 	return nil
 }
 

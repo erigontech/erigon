@@ -26,7 +26,7 @@ type NewPooledTransactionHashesPacket [][32]byte
 
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
-func ParseHashesCount(payload Hashes, pos int) (int, int, error) {
+func ParseHashesCount(payload Hashes, pos int) (count int, dataPos int, err error) {
 	dataPos, dataLen, err := rlp.List(payload, pos)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: hashes len: %w", rlp.ParseHashErrorPrefix, err)
@@ -84,4 +84,89 @@ func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []
 	pos += rlp.EncodeHashes(hashes, encodeBuf[pos:])
 	_ = pos
 	return encodeBuf, nil
+}
+
+func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requestID uint64, hashes []byte, newPos int, err error) {
+	pos, _, err = rlp.List(payload, pos)
+	if err != nil {
+		return 0, hashes, 0, err
+	}
+
+	pos, requestID, err = rlp.U64(payload, pos)
+	if err != nil {
+		return 0, hashes, 0, err
+	}
+	var hashesCount int
+	hashesCount, pos, err = ParseHashesCount(payload, pos)
+	if err != nil {
+		return 0, hashes, 0, err
+	}
+	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
+
+	for i := 0; pos != len(payload); i++ {
+		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
+		if err != nil {
+			return 0, hashes, 0, err
+		}
+	}
+	return requestID, hashes, pos, nil
+}
+
+func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hashes []byte, newPos int, err error) {
+	pos, _, err = rlp.List(payload, pos)
+	if err != nil {
+		return hashes, 0, err
+	}
+
+	var hashesCount int
+	hashesCount, pos, err = ParseHashesCount(payload, pos)
+	if err != nil {
+		return hashes, 0, err
+	}
+	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
+
+	for i := 0; pos != len(payload); i++ {
+		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
+		if err != nil {
+			return hashes, 0, err
+		}
+	}
+	return hashes, pos, nil
+}
+func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []byte) []byte {
+	pos := 0
+	txsRlpLen := 0
+	for i := range txsRlp {
+		txsRlpLen += len(txsRlp[i])
+	}
+	dataLen := rlp.U64Len(requestId) + rlp.ListPrefixLen(txsRlpLen) + txsRlpLen
+
+	encodeBuf = ensureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
+	// Length Prefix for the entire structure
+	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
+	pos += rlp.EncodeU64(requestId, encodeBuf[pos:])
+	pos += rlp.ListPrefixLen(txsRlpLen)
+	for i := range txsRlp {
+		copy(encodeBuf[pos:], txsRlp[i])
+		pos += len(txsRlp[i])
+	}
+	_ = pos
+	return encodeBuf
+}
+func EncodePooledTransactions65(txsRlp [][]byte, encodeBuf []byte) []byte {
+	pos := 0
+	dataLen := 0
+	for i := range txsRlp {
+		dataLen += len(txsRlp[i])
+	}
+
+	encodeBuf = ensureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
+	// Length Prefix for the entire structure
+	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
+	for i := range txsRlp {
+		copy(encodeBuf[pos:], txsRlp[i])
+		pos += len(txsRlp[i])
+	}
+	_ = pos
+	return encodeBuf
 }

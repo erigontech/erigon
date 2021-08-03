@@ -16,40 +16,6 @@
 
 package txpool
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
-)
-
-func TestSubPoolMarkerOrder(t *testing.T) {
-	require := require.New(t)
-	require.Less(
-		NewSubPoolMarker(true, true, true, true, false),
-		NewSubPoolMarker(true, true, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(true, true, true, false, true),
-		NewSubPoolMarker(true, true, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(true, true, true, false, true),
-		NewSubPoolMarker(true, true, true, true, false),
-	)
-	require.Less(
-		NewSubPoolMarker(false, true, true, true, true),
-		NewSubPoolMarker(true, false, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(false, false, false, true, true),
-		NewSubPoolMarker(false, false, true, true, true),
-	)
-	require.Less(
-		NewSubPoolMarker(false, false, true, true, false),
-		NewSubPoolMarker(false, false, true, true, true),
-	)
-}
-
 /*
 func TestSubPoolOrder(t *testing.T) {
 	sub := NewSubPool()
@@ -89,7 +55,7 @@ func TestSubPoolsPromote(t *testing.T) {
 	for _, i := range s3 {
 		queued.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
 	}
-	PromoteStep(pending, baseFee, queued)
+	promote(pending, baseFee, queued)
 
 	if pending.Worst() != nil {
 		require.Less(t, uint8(0b01111), uint8(pending.Worst().SubPool))
