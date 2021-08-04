@@ -82,12 +82,22 @@ const PendingSubPoolLimit = 1024
 const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
-type Nonce2Tx struct{ *btree.BTree }
+type nonce2Tx struct{ *btree.BTree }
 
-type SenderInfo struct {
+type senderInfo struct {
 	balance    uint256.Int
 	nonce      uint64
-	txNonce2Tx *Nonce2Tx // sorted map of nonce => *MetaTx
+	txNonce2Tx *nonce2Tx // sorted map of nonce => *MetaTx
+}
+
+func newSenderInfo(nonce uint64, balance uint256.Int) *senderInfo {
+	return &senderInfo{nonce: nonce, balance: balance, txNonce2Tx: &nonce2Tx{btree.New(32)}}
+}
+
+type StateDiffItem struct {
+	addr    [20]byte
+	balance uint256.Int
+	nonce   uint64
 }
 
 type nonce2TxItem struct{ *MetaTx }
@@ -104,7 +114,8 @@ type TxPool struct {
 	protocolBaseFee atomic.Uint64
 	blockBaseFee    atomic.Uint64
 
-	senderInfo               map[uint64]SenderInfo
+	senderIDs                map[[20]byte]uint64
+	senderInfo               map[uint64]*senderInfo
 	byHash                   map[string]*MetaTx // tx_hash => tx
 	pending, baseFee, queued *SubPool
 
@@ -120,7 +131,7 @@ func New() *TxPool {
 	localsHistory, _ := lru.New(1024)
 	return &TxPool{
 		lock:                   &sync.RWMutex{},
-		senderInfo:             map[uint64]SenderInfo{},
+		senderInfo:             map[uint64]*senderInfo{},
 		byHash:                 map[string]*MetaTx{},
 		localsHistory:          localsHistory,
 		recentlyConnectedPeers: &recentlyConnectedPeers{},
@@ -173,16 +184,31 @@ func (p *TxPool) IdHashKnown(hash []byte) bool {
 	return ok
 }
 func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
-func (p *TxPool) OnNewBlock(unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64) {
+func (p *TxPool) OnNewBlock(stateDiff []StateDiffItem, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
+	for i := range stateDiff {
+		id, ok := p.senderIDs[stateDiff[i].addr]
+		if !ok {
+			for i := range p.senderInfo { //TODO: create field for it?
+				if id < i {
+					id = i
+				}
+			}
+			id++
+			p.senderInfo[id] = newSenderInfo(stateDiff[i].nonce, stateDiff[i].balance)
+		} else {
+			p.senderInfo[id].nonce = stateDiff[i].nonce
+			p.senderInfo[id].balance = stateDiff[i].balance
+		}
+	}
 	onNewBlock(p.senderInfo, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory)
 }
 
-func onNewBlock(senderInfo map[uint64]SenderInfo, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) {
+func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) {
 	if unwindTxs != nil {
 		unwind(senderInfo, unwindTxs, pending, func(i *MetaTx) {
 			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
@@ -209,7 +235,7 @@ func onNewBlock(senderInfo map[uint64]SenderInfo, unwindTxs, minedTxs []*TxSlot,
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func forward(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
+func forward(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
 	// TODO: change sender.nonce
 
 	for _, tx := range minedTxs {
@@ -265,7 +291,7 @@ func forward(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseF
 // they effective lose their priority over the "remote" transactions. In order to prevent that,
 // somehow the fact that certain transactions were local, needs to be remembered for some
 // time (up to some "immutability threshold").
-func unwind(senderInfo map[uint64]SenderInfo, unwindTxs []*TxSlot, pending *SubPool, beforeAdd func(tx *MetaTx)) {
+func unwind(senderInfo map[uint64]*senderInfo, unwindTxs []*TxSlot, pending *SubPool, beforeAdd func(tx *MetaTx)) {
 	// TODO: change sender.nonce
 
 	for _, tx := range unwindTxs {
@@ -289,7 +315,7 @@ func unwind(senderInfo map[uint64]SenderInfo, unwindTxs []*TxSlot, pending *SubP
 	pending.EnforceInvariants()
 }
 
-func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
+func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 	prevNonce := -1
 	accumulatedSenderSpent := uint256.NewInt(0)
 	sender.txNonce2Tx.Ascend(func(i btree.Item) bool {

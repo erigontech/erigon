@@ -104,7 +104,7 @@ func u256Slice(in []byte) ([]uint256.Int, bool) {
 	return res, true
 }
 
-func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSenderBalance []byte) (sendersInfo map[uint64]SenderInfo, txs []*TxSlot, ok bool) {
+func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSenderBalance []byte) (sendersInfo map[uint64]*senderInfo, txs []*TxSlot, ok bool) {
 	if len(rawTxNonce)/8 != len(rawValues)/32 {
 		return nil, nil, false
 	}
@@ -136,13 +136,9 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSen
 		return nil, nil, false
 	}
 
-	senders := map[uint64]SenderInfo{}
+	senders := map[uint64]*senderInfo{}
 	for i, id := range sender {
-		senders[id] = SenderInfo{
-			nonce:      senderNonce[i],
-			balance:    senderBalance[i],
-			txNonce2Tx: &Nonce2Tx{btree.New(32)},
-		}
+		senders[id] = newSenderInfo(senderNonce[i], senderBalance[i])
 	}
 	for i := range txNonce {
 		txs = append(txs, &TxSlot{
