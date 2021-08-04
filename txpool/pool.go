@@ -114,7 +114,7 @@ type TxPool struct {
 	protocolBaseFee atomic.Uint64
 	blockBaseFee    atomic.Uint64
 
-	senderIDs                map[[20]byte]uint64
+	senderIDs                map[string]uint64
 	senderInfo               map[uint64]*senderInfo
 	byHash                   map[string]*MetaTx // tx_hash => tx
 	pending, baseFee, queued *SubPool
@@ -184,14 +184,14 @@ func (p *TxPool) IdHashKnown(hash []byte) bool {
 	return ok
 }
 func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
-func (p *TxPool) OnNewBlock(stateDiff []StateDiffItem, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64) {
+func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
-	for i := range stateDiff {
-		id, ok := p.senderIDs[stateDiff[i].addr]
+	for i := range unwindTxs.txs {
+		id, ok := p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])]
 		if !ok {
 			for i := range p.senderInfo { //TODO: create field for it?
 				if id < i {
@@ -199,16 +199,35 @@ func (p *TxPool) OnNewBlock(stateDiff []StateDiffItem, unwindTxs, minedTxs []*Tx
 				}
 			}
 			id++
-			p.senderInfo[id] = newSenderInfo(stateDiff[i].nonce, stateDiff[i].balance)
-		} else {
-			p.senderInfo[id].nonce = stateDiff[i].nonce
-			p.senderInfo[id].balance = stateDiff[i].balance
+			p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])] = id
 		}
 	}
-	onNewBlock(p.senderInfo, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory)
+	/*
+		for i := range unwindTxs {
+			unwindTxs[i].senderID == 0
+			info, ok := s.cache[id]
+			if ok {
+				return info
+			}
+			p.tx.GetOne(kv.PlainState)
+		}
+	*/
+	// TODO: assign senderID to all transactions
+	return onNewBlock(p.senderInfo, unwindTxs.txs, minedTxs.txs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory)
 }
 
-func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) {
+func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) error {
+	for i := range unwindTxs {
+		if unwindTxs[i].senderID == 0 {
+			return fmt.Errorf("senderID can't be zero")
+		}
+	}
+	for i := range minedTxs {
+		if minedTxs[i].senderID == 0 {
+			return fmt.Errorf("senderID can't be zero")
+		}
+	}
+
 	if unwindTxs != nil {
 		unwind(senderInfo, unwindTxs, pending, func(i *MetaTx) {
 			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
@@ -226,6 +245,8 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs, minedTxs []*TxSlot
 			localsHistory.Add(i.Tx.idHash, struct{}{})
 		}
 	})
+
+	return nil
 }
 
 // forward - apply new highest block (or batch of blocks)

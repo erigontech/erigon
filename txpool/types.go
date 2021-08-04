@@ -82,6 +82,11 @@ type TxSlot struct {
 	rlp []byte
 }
 
+type TxSlots struct {
+	txs     []*TxSlot
+	senders []byte // plain 20-byte addresses
+}
+
 const (
 	LegacyTxType     int = 0
 	AccessListTxType int = 1
