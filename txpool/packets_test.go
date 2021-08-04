@@ -109,3 +109,30 @@ func TestEncodeGPT66(t *testing.T) {
 		})
 	}
 }
+
+var ptp66EncodeTests = []struct {
+	txs         [][]byte
+	encoded     string
+	requestId   uint64
+	expectedErr bool
+}{
+	{
+		txs: [][]byte{
+			decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
+			decodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
+		},
+		encoded: "f8d7820457f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", requestId: 1111, expectedErr: false},
+}
+
+func TestPooledTransactionsPacket66(t *testing.T) {
+	for i, tt := range ptp66EncodeTests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			require := require.New(t)
+			var encodeBuf []byte
+			var err error
+			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
+			require.Equal(tt.expectedErr, err != nil)
+			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
+		})
+	}
+}
