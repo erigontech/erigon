@@ -175,7 +175,13 @@ func FuzzOnNewBlocks3(f *testing.F) {
 		}
 		byHash := map[string]*MetaTx{}
 		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
-		onNewBlock(senders, txs, nil, protocolBaseFee, blockBaseFee, pending, baseFee, queued, byHash)
+		unwindTxs := txs
+		var minedTxs []*TxSlot
+		if len(txs) > 3 {
+			unwindTxs = txs[:len(txs)-3]
+			minedTxs = txs[len(txs)-3:]
+		}
+		onNewBlock(senders, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, byHash)
 
 		best, worst := pending.Best(), pending.Worst()
 		assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)
@@ -276,6 +282,11 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			})
 		}
 
+		// mined txs must be removed
+		for i := range minedTxs {
+			_, ok = byHash[string(minedTxs[i].idHash[:])]
+			assert.False(ok)
+		}
 	})
 
 }
