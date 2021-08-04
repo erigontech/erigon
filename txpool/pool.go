@@ -99,8 +99,7 @@ func (i *nonce2TxItem) Less(than btree.Item) bool {
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
 type TxPool struct {
-	lock   *sync.RWMutex
-	logger log.Logger //nolint
+	lock *sync.RWMutex
 
 	protocolBaseFee atomic.Uint64
 	blockBaseFee    atomic.Uint64
@@ -115,6 +114,20 @@ type TxPool struct {
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
 	//lastTxPropagationTimestamp time.Time
+}
+
+func New() *TxPool {
+	localsHistory, _ := lru.New(1024)
+	return &TxPool{
+		lock:                   &sync.RWMutex{},
+		senderInfo:             map[uint64]SenderInfo{},
+		byHash:                 map[string]*MetaTx{},
+		localsHistory:          localsHistory,
+		recentlyConnectedPeers: &recentlyConnectedPeers{},
+		pending:                NewSubPool(),
+		baseFee:                NewSubPool(),
+		queued:                 NewSubPool(),
+	}
 }
 
 func (p *TxPool) GetRlp(hash []byte) []byte {
@@ -555,12 +568,6 @@ type PoolImpl struct {
 	recentlyConnectedPeers     *recentlyConnectedPeers
 	lastTxPropagationTimestamp time.Time
 	logger                     log.Logger
-}
-
-func NewPool() *PoolImpl {
-	return &PoolImpl{
-		recentlyConnectedPeers: &recentlyConnectedPeers{},
-	}
 }
 
 // Loop - does:
