@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/btree"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 )
@@ -181,7 +182,8 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			unwindTxs = txs[:len(txs)-3]
 			minedTxs = txs[len(txs)-3:]
 		}
-		onNewBlock(senders, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, byHash)
+		localHistory, _ := lru.New(1024)
+		onNewBlock(senders, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, byHash, localHistory)
 
 		best, worst := pending.Best(), pending.Worst()
 		assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)

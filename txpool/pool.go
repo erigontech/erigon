@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
@@ -108,6 +109,9 @@ type TxPool struct {
 	byHash                   map[string]*MetaTx // tx_hash => tx
 	pending, baseFee, queued *SubPool
 
+	// track isLocal flag of already mined transactions. used at unwind.
+	localsHistory *lru.Cache
+
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
 	//lastTxPropagationTimestamp time.Time
@@ -162,18 +166,26 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs []*TxSlot, protocolBaseFee, bloc
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
-	onNewBlock(p.senderInfo, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash)
+	onNewBlock(p.senderInfo, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory)
 }
 
-func onNewBlock(senderInfo map[uint64]SenderInfo, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx) {
+func onNewBlock(senderInfo map[uint64]SenderInfo, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) {
 	if unwindTxs != nil {
 		unwind(senderInfo, unwindTxs, pending, func(i *MetaTx) {
+			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
+				//TODO: also check if sender is in list of local-senders
+				i.SubPool |= IsLocal
+			}
 			delete(byHash, string(i.Tx.idHash[:]))
 		})
 	}
 	forward(senderInfo, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, func(i *MetaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
+		if i.SubPool&IsLocal != 0 {
+			//TODO: only add to history if sender is not in list of local-senders
+			localsHistory.Add(i.Tx.idHash, struct{}{})
+		}
 	})
 }
 
@@ -240,7 +252,7 @@ func forward(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseF
 // they effective lose their priority over the "remote" transactions. In order to prevent that,
 // somehow the fact that certain transactions were local, needs to be remembered for some
 // time (up to some "immutability threshold").
-func unwind(senderInfo map[uint64]SenderInfo, unwindTxs []*TxSlot, pending *SubPool, onAdd func(tx *MetaTx)) {
+func unwind(senderInfo map[uint64]SenderInfo, unwindTxs []*TxSlot, pending *SubPool, beforeAdd func(tx *MetaTx)) {
 	// TODO: change sender.nonce
 
 	for _, tx := range unwindTxs {
@@ -257,8 +269,8 @@ func unwind(senderInfo map[uint64]SenderInfo, unwindTxs []*TxSlot, pending *SubP
 				continue
 			}
 		}
+		beforeAdd(mt)
 		sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
-		onAdd(mt)
 		pending.UnsafeAdd(mt, PendingSubPool)
 	}
 	pending.EnforceInvariants()
