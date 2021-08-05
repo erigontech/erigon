@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -17,12 +18,12 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // StageLoop runs the continuous loop of staged sync
@@ -194,10 +195,11 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func NewStagedSync2(
+func NewStagedSync(
 	ctx context.Context,
 	logger log.Logger,
 	db kv.RwDB,
+	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
@@ -220,6 +222,7 @@ func NewStagedSync2(
 				controlServer.PropagateNewBlockHashes,
 				controlServer.Penalize,
 				cfg.BatchSize,
+				p2pCfg.NoDiscovery,
 			),
 			stagedsync.StageBlockHashesCfg(db, tmpdir),
 			stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator, logger),

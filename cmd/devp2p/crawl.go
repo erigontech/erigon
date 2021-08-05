@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type crawler struct {

@@ -20,8 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 )
 
 func TestVM(t *testing.T) {

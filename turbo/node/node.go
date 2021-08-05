@@ -2,14 +2,14 @@
 package node
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/urfave/cli"
 )
@@ -92,20 +92,19 @@ func New(
 	nodeConfig *node.Config,
 	ethConfig *ethconfig.Config,
 	logger log.Logger,
-) *ErigonNode {
+) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node := makeConfigNode(nodeConfig)
-	ethereum := RegisterEthService(node, ethConfig, logger)
-	return &ErigonNode{stack: node, backend: ethereum}
+	ethereum, err := RegisterEthService(node, ethConfig, logger)
+	if err != nil {
+		return nil, err
+	}
+	return &ErigonNode{stack: node, backend: ethereum}, nil
 }
 
 // RegisterEthService adds an Ethereum client to the stack.
-func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) *eth.Ethereum {
-	backend, err := eth.New(stack, cfg, logger)
-	if err != nil {
-		panic(err)
-	}
-	return backend
+func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) (*eth.Ethereum, error) {
+	return eth.New(stack, cfg, logger)
 }
 
 func NewNodeConfig() *node.Config {

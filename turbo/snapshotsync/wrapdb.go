@@ -6,11 +6,11 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (

@@ -1,9 +1,9 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 // ExecFunc is the execution function for the stage to move forward.

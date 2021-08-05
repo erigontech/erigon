@@ -8,21 +8,21 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
 
-var stageHeadersGauge = metrics.NewRegisteredGauge("stage/headers", nil)
+var stageHeadersGauge = metrics.GetOrCreateCounter("stage_headers")
 
 type HeadersCfg struct {
 	db                kv.RwDB
@@ -32,6 +32,7 @@ type HeadersCfg struct {
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
+	noP2PDiscovery    bool
 }
 
 func StageHeadersCfg(
@@ -42,6 +43,7 @@ func StageHeadersCfg(
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
+	noP2PDiscovery bool,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -51,6 +53,7 @@ func StageHeadersCfg(
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
 		batchSize:         batchSize,
+		noP2PDiscovery:    noP2PDiscovery,
 	}
 }
 
@@ -98,6 +101,11 @@ func HeadersForward(
 				return err
 			}
 		}
+		return nil
+	}
+
+	// Allow other stages to run 1 cycle if no network available
+	if initialCycle && cfg.noP2PDiscovery {
 		return nil
 	}
 
@@ -200,7 +208,7 @@ func HeadersForward(
 	}
 	// We do not print the followin line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
-	stageHeadersGauge.Update(int64(cfg.hd.Progress()))
+	stageHeadersGauge.Set(cfg.hd.Progress())
 	return nil
 }
 

@@ -6,14 +6,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {

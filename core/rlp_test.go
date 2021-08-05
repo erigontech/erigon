@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"

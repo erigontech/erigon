@@ -34,6 +34,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -52,11 +53,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	remotedbserver2 "github.com/ledgerwatch/erigon/ethdb/remotedbserver"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
@@ -67,6 +66,7 @@ import (
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -231,7 +231,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
 			if !reflect.DeepEqual(pm, config.Prune) {
-				return errors.New("prune is " + config.Prune.String() + " original prune is " + pm.String())
+				return errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 			}
 		} else {
 			config.Prune = pm
@@ -428,10 +428,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
 	config.BodyDownloadTimeoutSeconds = 30
 
-	backend.stagedSync, err = stages2.NewStagedSync2(
+	backend.stagedSync, err = stages2.NewStagedSync(
 		backend.downloadCtx,
 		backend.logger,
 		backend.chainKV,
+		stack.Config().P2P,
 		*config,
 		backend.downloadServer,
 		tmpdir,
@@ -677,7 +678,13 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go Loop(s.downloadCtx, s.logger, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
+	go stages2.StageLoop(
+		s.downloadCtx, s.logger, s.chainKV,
+		s.stagedSync, s.downloadServer.Hd,
+		s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop,
+		s.config.SyncLoopThrottle,
+	)
+
 	return nil
 }
 
@@ -715,28 +722,4 @@ func (s *Ethereum) Stop() error {
 		<-s.waitForMiningStop
 	}
 	return nil
-}
-
-//Deprecated - use stages.StageLoop
-func Loop(
-	ctx context.Context,
-	logger log.Logger,
-	db kv.RwDB, sync *stagedsync.Sync,
-	controlServer *download.ControlServerImpl,
-	notifications *stagedsync.Notifications,
-	waitForDone chan struct{},
-	loopMinTime time.Duration,
-) {
-	defer debug.LogPanic()
-	stages2.StageLoop(
-		ctx,
-		logger,
-		db,
-		sync,
-		controlServer.Hd,
-		notifications,
-		controlServer.UpdateHead,
-		waitForDone,
-		loopMinTime,
-	)
 }

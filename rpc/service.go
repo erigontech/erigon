@@ -27,7 +27,7 @@ import (
 	"unicode"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (

@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/valyala/fastjson"
 )
 
@@ -561,6 +561,7 @@ func print(client *http.Client, url, request string) {
 		fmt.Printf("Could not print: %v\n", err)
 		return
 	}
+	defer r.Body.Close()
 	if r.StatusCode != 200 {
 		fmt.Printf("Status %s", r.Status)
 		return

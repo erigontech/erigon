@@ -8,12 +8,12 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
 func main() {
-	log.SetupDefaultTerminalLogger(log.Lvl(3), "", "")
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	var (
 		needCompare bool
@@ -222,8 +222,8 @@ func main() {
 		Use:   "replay",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Replay(erigonURL, recordFile)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Replay(erigonURL, recordFile)
 		},
 	}
 	with(replayCmd, withErigonUrl, withRecord)

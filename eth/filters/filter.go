@@ -26,8 +26,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/bloombits"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Backend interface {

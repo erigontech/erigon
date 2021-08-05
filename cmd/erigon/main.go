@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
 
@@ -51,8 +51,13 @@ func runErigon(cliCtx *cli.Context) {
 		chaindb.Close()
 	}
 
-	err := node.New(nodeCfg, ethCfg, logger).Serve()
+	ethNode, err := node.New(nodeCfg, ethCfg, logger)
 	if err != nil {
-		log.Error("error while serving a Erigon node", "err", err)
+		log.Error("Erigon startup", "err", err)
+		return
+	}
+	err = ethNode.Serve()
+	if err != nil {
+		log.Error("error while serving an Erigon node", "err", err)
 	}
 }

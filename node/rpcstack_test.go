@@ -28,8 +28,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon/internal/testlog"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -41,9 +41,11 @@ func TestCorsHandler(t *testing.T) {
 	url := "http://" + srv.listenAddr()
 
 	resp := rpcRequest(t, url, "origin", "test.com")
+	defer resp.Body.Close()
 	assert.Equal(t, "test.com", resp.Header.Get("Access-Control-Allow-Origin"))
 
 	resp2 := rpcRequest(t, url, "origin", "bad")
+	defer resp2.Body.Close()
 	assert.Equal(t, "", resp2.Header.Get("Access-Control-Allow-Origin"))
 }
 
@@ -54,9 +56,11 @@ func TestVhosts(t *testing.T) {
 	url := "http://" + srv.listenAddr()
 
 	resp := rpcRequest(t, url, "host", "test")
+	defer resp.Body.Close()
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 
 	resp2 := rpcRequest(t, url, "host", "bad")
+	defer resp2.Body.Close()
 	assert.Equal(t, resp2.StatusCode, http.StatusForbidden)
 }
 
@@ -269,6 +273,7 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 	if browserOrigin != "" {
 		headers.Set("Origin", browserOrigin)
 	}
+	//nolint
 	conn, _, err := websocket.DefaultDialer.Dial(url, headers)
 	if conn != nil {
 		conn.Close()
@@ -293,6 +298,7 @@ func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
 	if err != nil {
 		return false
 	}
+	defer resp.Body.Close()
 	respBody, err := ioutil.ReadAll(resp.Body)
 	assert.NoError(t, err)
 

@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
 )
@@ -37,7 +37,7 @@ var (
 	BlockDownloaderWindowFlag = cli.IntFlag{
 		Name:  "blockDownloaderWindow",
 		Usage: "Outstanding limit of block bodies being downloaded",
-		Value: 65536,
+		Value: 32768,
 	}
 
 	PrivateApiAddr = cli.StringFlag{

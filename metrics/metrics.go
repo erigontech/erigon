@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -66,13 +65,11 @@ func init() {
 
 		for _, enabler := range enablerFlags {
 			if !Enabled && flag == enabler {
-				log.Info("Enabling metrics collection")
 				Enabled = true
 			}
 		}
 		for _, enabler := range expensiveEnablerFlags {
 			if !EnabledExpensive && flag == enabler {
-				log.Info("Enabling expensive metrics collection")
 				EnabledExpensive = true
 			}
 		}

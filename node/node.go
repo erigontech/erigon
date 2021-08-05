@@ -27,13 +27,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/prometheus/tsdb/fileutil"
 )
 
@@ -506,7 +506,7 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 	dbPath := config.ResolvePath(name)
 
 	var openFunc func(exclusive bool) (kv.RwDB, error)
-	log.Info("Opening Database", "label", name)
+	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
 		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
 		if exclusive {

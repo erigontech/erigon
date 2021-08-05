@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -20,12 +21,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const callTimeout = 5 * time.Minute
@@ -638,6 +638,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		tr.Output = trace.Output
 		if traceTypeTrace {
 			tr.Trace = trace.Trace
+		} else {
+			tr.Trace = []*ParityTrace{}
 		}
 		if traceTypeStateDiff {
 			tr.StateDiff = trace.StateDiff

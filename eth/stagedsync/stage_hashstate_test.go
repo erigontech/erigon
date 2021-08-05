@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"

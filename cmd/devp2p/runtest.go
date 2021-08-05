@@ -21,7 +21,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devp2p/internal/v4test"
 	"github.com/ledgerwatch/erigon/internal/utesting"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
 
