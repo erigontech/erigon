@@ -202,6 +202,10 @@ func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(pee
 func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	protocolBaseFee, blockBaseFee := p.protocolBaseFee.Load(), p.blockBaseFee.Load()
+	if protocolBaseFee == 0 || blockBaseFee == 0 {
+		return fmt.Errorf("non-zero base fee")
+	}
 
 	for i := range newTxs.txs {
 		id, ok := p.senderIDs[string(newTxs.senders[i*20:(i+1)*20])]
@@ -216,7 +220,7 @@ func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 			newTxs.txs[i].senderID = id
 		}
 	}
-	if err := onNewTxs(p.senderInfo, newTxs, p.protocolBaseFee.Load(), p.blockBaseFee.Load(), p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+	if err := onNewTxs(p.senderInfo, newTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
 
@@ -321,7 +325,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 		}
 	}
 
-	removeMined(senderInfo, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, func(i *MetaTx) {
+	removeMined(senderInfo, minedTxs, pending, baseFee, queued, func(i *MetaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {
@@ -378,7 +382,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
+func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
 	for _, tx := range minedTxs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
