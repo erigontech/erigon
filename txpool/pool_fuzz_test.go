@@ -94,42 +94,75 @@ func u64Slice(in []byte) ([]uint64, bool) {
 	}
 	return res, true
 }
-func u256Slice(in []byte) ([]uint256.Int, bool) {
-	if len(in) < 32 {
+func u8Slice(in []byte) ([]uint64, bool) {
+	if len(in) < 1 {
 		return nil, false
 	}
-	res := make([]uint256.Int, len(in)/32)
+	res := make([]uint64, len(in))
 	for i := 0; i < len(res); i++ {
-		res[i].SetBytes(in[i*32 : (i+1)*32])
+		res[i] = uint64(in[i])
+	}
+	return res, true
+}
+func u16Slice(in []byte) ([]uint64, bool) {
+	if len(in) < 2 {
+		return nil, false
+	}
+	res := make([]uint64, len(in)/2)
+	for i := 0; i < len(res); i++ {
+		res[i] = uint64(binary.BigEndian.Uint16(in[i*2:]))
+	}
+	return res, true
+}
+func u256Slice(in []byte) ([]uint256.Int, bool) {
+	if len(in) < 1 {
+		return nil, false
+	}
+	res := make([]uint256.Int, len(in))
+	for i := 0; i < len(res); i++ {
+		res[i].SetUint64(uint64(in[i]))
 	}
 	return res, true
 }
 
-func parseSenders(rawSenders []byte) (senders Addresses, nonces []uint64, balances []uint256.Int) {
-	for i := 0; i < len(rawSenders)-(20+8+32-1); i += 20 + 8 + 32 {
-		senders = append(senders, rawSenders[i:i+20]...)
-		nonce := binary.BigEndian.Uint64(rawSenders[i+20:])
+func parseSenders(in []byte) (senders Addresses, nonces []uint64, balances []uint256.Int) {
+	zeroes := [19]byte{}
+	for i := 0; i < len(in)-(1+1+1-1); i += 1 + 1 + 1 {
+		senders = append(senders, zeroes[:]...)
+		senders = append(senders, in[i:i+1]...)
+		nonce := uint64(in[i+1])
 		if nonce == 0 {
 			nonce = 1
 		}
 		nonces = append(nonces, nonce)
-		balance := uint256.NewInt(0)
-		balance.SetBytes(rawSenders[i+20+8 : i+20+8+32])
-		balances = append(balances, *balance)
+		balances = append(balances, *uint256.NewInt(uint64(in[i+1+1])))
+	}
+	return
+}
+
+func parseTxs(in []byte) (nonces, tips []uint64, values []uint256.Int) {
+	for i := 0; i < len(in)-(1+1+1-1); i += 1 + 1 + 1 {
+		nonce := uint64(in[i])
+		if nonce == 0 {
+			nonce = 1
+		}
+		nonces = append(nonces, nonce)
+		tips = append(tips, uint64(in[i+1]))
+		values = append(values, *uint256.NewInt(uint64(in[i+1+1])))
 	}
 	return
 }
 
 func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawSender []byte) (sendersInfo map[uint64]*senderInfo, senderIDs map[string]uint64, txs TxSlots, ok bool) {
-	if len(rawTxNonce) < 8 || len(rawValues) < 32 || len(rawTips) < 8 || len(rawSender) < 20+8+32 {
+	if len(rawTxNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawSender) < 1+1+1 {
 		return nil, nil, txs, false
 	}
 	senders, senderNonce, senderBalance := parseSenders(rawSender)
-	txNonce, ok := u64Slice(rawTxNonce)
+	txNonce, ok := u8Slice(rawTxNonce)
 	if !ok {
 		return nil, nil, txs, false
 	}
-	tips, ok := u64Slice(rawTips)
+	tips, ok := u8Slice(rawTips)
 	if !ok {
 		return nil, nil, txs, false
 	}
@@ -188,8 +221,8 @@ func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
 }
 
 func FuzzOnNewBlocks7(f *testing.F) {
-	var u64 = [8 * 4]byte{1}
-	var sender = [20 + 8 + 32]byte{1}
+	var u64 = [1 * 4]byte{1}
+	var sender = [1 + 1 + 1]byte{1}
 	f.Add(u64[:], u64[:], u64[:], sender[:], 123, 456)
 	f.Add(u64[:], u64[:], u64[:], sender[:], 78, 100)
 	f.Add(u64[:], u64[:], u64[:], sender[:], 100_000, 101_000)
@@ -198,7 +231,7 @@ func FuzzOnNewBlocks7(f *testing.F) {
 		if protocolBaseFee == 0 || blockBaseFee == 0 {
 			t.Skip()
 		}
-		if len(sender) < 20+8+32 {
+		if len(sender) < 1+1+1 {
 			t.Skip()
 		}
 
