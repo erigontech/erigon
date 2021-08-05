@@ -12,6 +12,7 @@ import (
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 )
 
 // https://blog.golang.org/fuzz-beta
@@ -153,6 +154,8 @@ func parseTxs(in []byte) (nonces, tips []uint64, values []uint256.Int) {
 	return
 }
 
+var txId atomic.Uint64
+
 func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*senderInfo, senderIDs map[string]uint64, txs TxSlots, ok bool) {
 	if len(rawTxNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawFeeCap) < 1 || len(rawSender) < 1+1+1 {
 		return nil, nil, txs, false
@@ -183,6 +186,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		senderIDs[string(senders.At(i%senders.Len()))] = senderID
 	}
 	for i := range txNonce {
+		txId.Inc()
 		txs.txs = append(txs.txs, &TxSlot{
 			nonce:  txNonce[i],
 			value:  values[i%len(values)],
@@ -191,6 +195,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		})
 		txs.senders = append(txs.senders, senders.At(i%senders.Len())...)
 		txs.isLocal = append(txs.isLocal, false)
+		binary.BigEndian.PutUint64(txs.txs[i].idHash[:], txId.Load())
 	}
 
 	return sendersInfo, senderIDs, txs, true
@@ -312,6 +317,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 				i := tx.Tx
 				assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
 				if tx.SubPool&EnoughBalance != 0 {
+
 					assert.True(tx.SenderHasEnoughBalance)
 				}
 
@@ -389,7 +395,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 						}
 					}
 					for j := range minedTxs.txs {
-						if bytes.Equal(unwindTxs.txs[j].idHash[:], newHash) {
+						if bytes.Equal(minedTxs.txs[j].idHash[:], newHash) {
 							foundInMined = true
 							break
 						}

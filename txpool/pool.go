@@ -358,7 +358,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 				//TODO: also check if sender is in list of local-senders
 				i.SubPool |= IsLocal
 			}
-			delete(byHash, string(i.Tx.idHash[:]))
+			byHash[string(i.Tx.idHash[:])] = i
 		})
 	}
 
@@ -483,11 +483,12 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// nonces N+1 ... M is no more than B. Set to 0 otherwise. In other words, this bit is
 		// set if there is currently a guarantee that the transaction and all its required prior
 		// transactions will be able to pay for gas.
+		accumulatedSenderSpent = accumulatedSenderSpent.Add(accumulatedSenderSpent, needBalance) // already deleted all transactions with nonce <= sender.nonce
 		it.MetaTx.SubPool &^= EnoughBalance
 		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
 			it.MetaTx.SubPool |= EnoughBalance
+			fmt.Printf("a3: %b,%d,%d,%d,%t\n", it.MetaTx.SubPool, accumulatedSenderSpent.Uint64(), sender.balance.Uint64(), needBalance.Uint64(), it.MetaTx.SenderHasEnoughBalance)
 		}
-		accumulatedSenderSpent.Add(accumulatedSenderSpent, needBalance) // already deleted all transactions with nonce <= sender.nonce
 
 		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
 		// baseFee of the currently pending block. Set to 0 otherwise.
