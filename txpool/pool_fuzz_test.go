@@ -176,7 +176,8 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			minedTxs.senders = txs.senders[len(txs.txs)-3:]
 		}
 
-		pool := New()
+		ch := make(chan Hashes, 100)
+		pool := New(ch)
 		pool.senderInfo = senders
 		pool.senderIDs = senderIDs
 		err := pool.OnNewBlock(unwindTxs, minedTxs, protocolBaseFee, blockBaseFee)
@@ -287,6 +288,8 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			_, ok = pool.byHash[string(minedTxs.txs[i].idHash[:])]
 			assert.False(ok)
 		}
+		newHashes := <-ch
+		assert.Equal(len(unwindTxs.txs), newHashes.Len())
 	})
 
 }
