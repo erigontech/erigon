@@ -202,6 +202,10 @@ func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(pee
 func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	if err := newTxs.Valid(); err != nil {
+		return err
+	}
+
 	protocolBaseFee, blockBaseFee := p.protocolBaseFee.Load(), p.blockBaseFee.Load()
 	if protocolBaseFee == 0 || blockBaseFee == 0 {
 		return fmt.Errorf("non-zero base fee")
@@ -267,6 +271,13 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	if err := unwindTxs.Valid(); err != nil {
+		return err
+	}
+	if err := minedTxs.Valid(); err != nil {
+		return err
+	}
+
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 

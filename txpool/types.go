@@ -96,6 +96,16 @@ type TxSlots struct {
 	isLocal []bool
 }
 
+func (s TxSlots) Valid() error {
+	if len(s.txs) != len(s.isLocal) {
+		return fmt.Errorf("TxSlots: expect equal len of isLocal=%d and txs=%d", len(s.isLocal), len(s.txs))
+	}
+	if len(s.txs) != s.senders.Len() {
+		return fmt.Errorf("TxSlots: expect equal len of senders=%d and txs=%d", s.senders.Len(), len(s.txs))
+	}
+	return nil
+}
+
 const (
 	LegacyTxType     int = 0
 	AccessListTxType int = 1

@@ -217,6 +217,8 @@ func FuzzOnNewBlocks6(f *testing.F) {
 			t.Skip()
 		}
 		assert := assert.New(t)
+		err := txs.Valid()
+		assert.NoError(err)
 
 		ch := make(chan Hashes, 100)
 		pool := New(ch)
@@ -333,7 +335,7 @@ func FuzzOnNewBlocks6(f *testing.F) {
 
 		// go to first fork
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
-		err := pool.OnNewBlock(unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee)
+		err = pool.OnNewBlock(unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee)
 		assert.NoError(err)
 		check(unwindTxs, minedTxs1)
 		select {
