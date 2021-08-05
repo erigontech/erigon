@@ -15,13 +15,13 @@ db = ["once_cell", "serde", "toml"]
 
 [dependencies]
 arrayref = "0.3"
-ethereum-types = { version = "0.11", default-features = false }
+ethereum-types = { version = "0.12", default-features = false }
 once_cell = { version = "1", optional = true }
-prost = "0.7"
+prost = "0.8"
 serde = { version = "1", features = ["derive"], optional = true }
 toml = { version = "0.5", optional = true }
-tonic = "0.4"
+tonic = "0.5"
 
 [build-dependencies]
-prost-build = "0.7"
-tonic-build = "0.4"
+prost-build = "0.8"
+tonic-build = "0.5"
