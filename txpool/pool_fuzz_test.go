@@ -113,16 +113,21 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSen
 	if len(rawSender)/20 != len(rawSenderBalance)/32 {
 		return nil, nil, txs, false
 	}
+	senderNonce, ok := u64Slice(rawSenderNonce)
+	if !ok {
+		return nil, nil, txs, false
+	}
+	for i := 0; i < len(senderNonce); i++ {
+		if senderNonce[i] == 0 {
+			return nil, nil, txs, false
+		}
+	}
 
 	txNonce, ok := u64Slice(rawTxNonce)
 	if !ok {
 		return nil, nil, txs, false
 	}
 	values, ok := u256Slice(rawValues)
-	if !ok {
-		return nil, nil, txs, false
-	}
-	senderNonce, ok := u64Slice(rawSenderNonce)
 	if !ok {
 		return nil, nil, txs, false
 	}
@@ -133,9 +138,9 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSen
 
 	sendersInfo = map[uint64]*senderInfo{}
 	senderIDs = map[string]uint64{}
-	for i := 0; i < len(rawSender); i += 20 {
+	for i := 0; i < len(senderNonce); i++ {
 		sendersInfo[uint64(i)] = newSenderInfo(senderNonce[i], senderBalance[i])
-		senderIDs[string(rawSender[i:i+20])] = uint64(i)
+		senderIDs[string(rawSender[i*20:(i+1)*20])] = uint64(i)
 	}
 	for i := range txNonce {
 		txs.txs = append(txs.txs, &TxSlot{
