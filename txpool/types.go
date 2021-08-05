@@ -88,6 +88,7 @@ type TxSlot struct {
 type TxSlots struct {
 	txs     []*TxSlot
 	senders []byte // plain 20-byte addresses
+	isLocal []bool
 }
 
 const (
