@@ -207,19 +207,7 @@ func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 		return fmt.Errorf("non-zero base fee")
 	}
 
-	for i := range newTxs.txs {
-		id, ok := p.senderIDs[string(newTxs.senders[i*20:(i+1)*20])]
-		if !ok {
-			for i := range p.senderInfo { //TODO: create field for it?
-				if id < i {
-					id = i
-				}
-			}
-			id++
-			p.senderIDs[string(newTxs.senders[i*20:(i+1)*20])] = id
-			newTxs.txs[i].senderID = id
-		}
-	}
+	setTxSenderID(p.senderIDs, p.senderInfo, newTxs)
 	if err := onNewTxs(p.senderInfo, newTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
@@ -280,19 +268,8 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
-	for i := range unwindTxs.txs {
-		id, ok := p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])]
-		if !ok {
-			for i := range p.senderInfo { //TODO: create field for it?
-				if id < i {
-					id = i
-				}
-			}
-			id++
-			p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])] = id
-			unwindTxs.txs[i].senderID = id
-		}
-	}
+	setTxSenderID(p.senderIDs, p.senderInfo, unwindTxs)
+	setTxSenderID(p.senderIDs, p.senderInfo, minedTxs)
 	if err := onNewBlock(p.senderInfo, unwindTxs, minedTxs.txs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
@@ -312,16 +289,32 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 
 	return nil
 }
+func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInfo, txs TxSlots) {
+	for i := range txs.txs {
+		id, ok := senderIDs[string(txs.senders[i*20:(i+1)*20])]
+		if !ok {
+			panic(134)
+			for i := range senderInfo { //TODO: create field for it?
+				if id < i {
+					id = i
+				}
+			}
+			id++
+			senderIDs[string(txs.senders[i*20:(i+1)*20])] = id
+		}
+		txs.txs[i].senderID = id
+	}
+}
 
 func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) error {
 	for i := range unwindTxs.txs {
 		if unwindTxs.txs[i].senderID == 0 {
-			return fmt.Errorf("senderID can't be zero")
+			return fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero")
 		}
 	}
 	for i := range minedTxs {
 		if minedTxs[i].senderID == 0 {
-			return fmt.Errorf("senderID can't be zero")
+			return fmt.Errorf("onNewBlock.minedTxs: senderID can't be zero")
 		}
 	}
 
