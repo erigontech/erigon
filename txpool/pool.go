@@ -372,8 +372,8 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	queued.EnforceInvariants()
 
 	promote(pending, baseFee, queued, func(i *MetaTx) {
-		fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
-		fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
+		//fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
+		//fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {
