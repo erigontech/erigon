@@ -295,7 +295,7 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 }
 func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInfo, txs TxSlots) {
 	for i := range txs.txs {
-		id, ok := senderIDs[string(txs.senders[i*20:(i+1)*20])]
+		id, ok := senderIDs[string(txs.senders.At(i))]
 		if !ok {
 			for i := range senderInfo { //TODO: create field for it?
 				if id < i {
@@ -303,7 +303,7 @@ func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInf
 				}
 			}
 			id++
-			senderIDs[string(txs.senders[i*20:(i+1)*20])] = id
+			senderIDs[string(txs.senders.At(i))] = id
 		}
 		txs.txs[i].senderID = id
 	}

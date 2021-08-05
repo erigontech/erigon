@@ -37,6 +37,11 @@ type Hashes []byte // flatten list of 32-byte hashes
 func (h Hashes) At(i int) []byte { return h[i*32 : (i+1)*32] }
 func (h Hashes) Len() int        { return len(h) / 32 }
 
+type Addresses []byte // flatten list of 20-byte addresses
+
+func (h Addresses) At(i int) []byte { return h[i*20 : (i+1)*20] }
+func (h Addresses) Len() int        { return len(h) / 20 }
+
 // TxContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxParseContext struct {
@@ -87,7 +92,7 @@ type TxSlot struct {
 
 type TxSlots struct {
 	txs     []*TxSlot
-	senders []byte // plain 20-byte addresses
+	senders Addresses
 	isLocal []bool
 }
 
