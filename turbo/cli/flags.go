@@ -37,7 +37,7 @@ var (
 	BlockDownloaderWindowFlag = cli.IntFlag{
 		Name:  "blockDownloaderWindow",
 		Usage: "Outstanding limit of block bodies being downloaded",
-		Value: 65536,
+		Value: 32768,
 	}
 
 	PrivateApiAddr = cli.StringFlag{
