@@ -297,7 +297,6 @@ func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInf
 	for i := range txs.txs {
 		id, ok := senderIDs[string(txs.senders[i*20:(i+1)*20])]
 		if !ok {
-			panic(134)
 			for i := range senderInfo { //TODO: create field for it?
 				if id < i {
 					id = i
