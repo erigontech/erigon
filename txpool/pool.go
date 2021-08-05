@@ -40,10 +40,6 @@ type Pool interface {
 	NotifyNewPeer(peerID PeerID)
 }
 
-type Broadcaster interface {
-	OnNew(hashes Hashes)
-}
-
 // SubPoolMarker ordered bitset responsible to sort transactions by sub-pools. Bits meaning:
 // 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means this transaction will never be included into this particular chain.
 // 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for the sender is M, and there are transactions for all nonces between M and N from the same sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
@@ -97,14 +93,9 @@ type senderInfo struct {
 	txNonce2Tx *nonce2Tx // sorted map of nonce => *MetaTx
 }
 
+//nolint
 func newSenderInfo(nonce uint64, balance uint256.Int) *senderInfo {
 	return &senderInfo{nonce: nonce, balance: balance, txNonce2Tx: &nonce2Tx{btree.New(32)}}
-}
-
-type StateDiffItem struct {
-	addr    [20]byte
-	balance uint256.Int
-	nonce   uint64
 }
 
 type nonce2TxItem struct{ *MetaTx }
@@ -132,7 +123,6 @@ type TxPool struct {
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
 	newTxs                 chan Hashes
-	broadcaster            Broadcaster
 	//lastTxPropagationTimestamp time.Time
 }
 
