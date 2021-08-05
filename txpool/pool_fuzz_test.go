@@ -100,7 +100,7 @@ func u8Slice(in []byte) ([]uint64, bool) {
 	}
 	res := make([]uint64, len(in))
 	for i := 0; i < len(res); i++ {
-		res[i] = uint64(in[i])
+		res[i] = uint64(in[i] % 32)
 	}
 	return res, true
 }
@@ -120,17 +120,17 @@ func u256Slice(in []byte) ([]uint256.Int, bool) {
 	}
 	res := make([]uint256.Int, len(in))
 	for i := 0; i < len(res); i++ {
-		res[i].SetUint64(uint64(in[i]))
+		res[i].SetUint64(uint64(in[i] % 32))
 	}
 	return res, true
 }
 
 func parseSenders(in []byte) (senders Addresses, nonces []uint64, balances []uint256.Int) {
-	zeroes := [19]byte{}
+	zeroes := [20]byte{}
 	for i := 0; i < len(in)-(1+1+1-1); i += 1 + 1 + 1 {
+		zeroes[19] = in[i] % 8
 		senders = append(senders, zeroes[:]...)
-		senders = append(senders, in[i:i+1]...)
-		nonce := uint64(in[i+1])
+		nonce := uint64(in[i+1] % 8)
 		if nonce == 0 {
 			nonce = 1
 		}
@@ -153,12 +153,16 @@ func parseTxs(in []byte) (nonces, tips []uint64, values []uint256.Int) {
 	return
 }
 
-func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawSender []byte) (sendersInfo map[uint64]*senderInfo, senderIDs map[string]uint64, txs TxSlots, ok bool) {
-	if len(rawTxNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawSender) < 1+1+1 {
+func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*senderInfo, senderIDs map[string]uint64, txs TxSlots, ok bool) {
+	if len(rawTxNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawFeeCap) < 1 || len(rawSender) < 1+1+1 {
 		return nil, nil, txs, false
 	}
 	senders, senderNonce, senderBalance := parseSenders(rawSender)
 	txNonce, ok := u8Slice(rawTxNonce)
+	if !ok {
+		return nil, nil, txs, false
+	}
+	feeCap, ok := u8Slice(rawFeeCap)
 	if !ok {
 		return nil, nil, txs, false
 	}
@@ -180,9 +184,10 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawSender []byte) (sende
 	}
 	for i := range txNonce {
 		txs.txs = append(txs.txs, &TxSlot{
-			nonce: txNonce[i],
-			value: values[i%len(values)],
-			tip:   tips[i%len(tips)],
+			nonce:  txNonce[i],
+			value:  values[i%len(values)],
+			tip:    tips[i%len(tips)],
+			feeCap: feeCap[i%len(feeCap)],
 		})
 		txs.senders = append(txs.senders, senders.At(i%senders.Len())...)
 		txs.isLocal = append(txs.isLocal, false)
@@ -220,14 +225,19 @@ func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
 	return p1, p2, p3, p4
 }
 
-func FuzzOnNewBlocks7(f *testing.F) {
+func FuzzOnNewBlocks10(f *testing.F) {
 	var u64 = [1 * 4]byte{1}
 	var sender = [1 + 1 + 1]byte{1}
-	f.Add(u64[:], u64[:], u64[:], sender[:], 123, 456)
-	f.Add(u64[:], u64[:], u64[:], sender[:], 78, 100)
-	f.Add(u64[:], u64[:], u64[:], sender[:], 100_000, 101_000)
-	f.Fuzz(func(t *testing.T, txNonce, values, tips, sender []byte, protocolBaseFee, blockBaseFee uint64) {
+	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 1, 2)
+	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 3, 4)
+	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
+	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, blockBaseFee1 uint8) {
 		t.Parallel()
+		if protocolBaseFee1 > 4 || blockBaseFee1 > 4 {
+			t.Skip()
+		}
+		protocolBaseFee, blockBaseFee := uint64(protocolBaseFee1), uint64(blockBaseFee1)
+		protocolBaseFeeU256, blockBaseFeeU256 := uint256.NewInt(protocolBaseFee), uint256.NewInt(blockBaseFee)
 		if protocolBaseFee == 0 || blockBaseFee == 0 {
 			t.Skip()
 		}
@@ -235,7 +245,7 @@ func FuzzOnNewBlocks7(f *testing.F) {
 			t.Skip()
 		}
 
-		senders, senderIDs, txs, ok := poolsFromFuzzBytes(txNonce, values, tips, sender)
+		senders, senderIDs, txs, ok := poolsFromFuzzBytes(txNonce, values, tips, feeCap, sender)
 		if !ok {
 			t.Skip()
 		}
@@ -270,8 +280,9 @@ func FuzzOnNewBlocks7(f *testing.F) {
 
 				need := uint256.NewInt(i.gas)
 				need = need.Mul(need, uint256.NewInt(i.feeCap))
-				assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
-				assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+				need = need.Add(need, &i.value)
+				assert.True(need.Lt(protocolBaseFeeU256) || need.Eq(protocolBaseFeeU256))
+				assert.True(need.Lt(blockBaseFeeU256) || need.Eq(blockBaseFeeU256))
 
 				// side data structures must have all txs
 				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
@@ -300,14 +311,15 @@ func FuzzOnNewBlocks7(f *testing.F) {
 			iterateSubPoolUnordered(baseFee, func(tx *MetaTx) {
 				i := tx.Tx
 				assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
-				if tx.SubPool&EnoughBalance > 0 {
+				if tx.SubPool&EnoughBalance != 0 {
 					assert.True(tx.SenderHasEnoughBalance)
 				}
 
 				need := uint256.NewInt(i.gas)
 				need = need.Mul(need, uint256.NewInt(i.feeCap))
-				assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
-				assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+				need = need.Add(need, &i.value)
+				assert.True(need.Lt(protocolBaseFeeU256) || need.Eq(protocolBaseFeeU256))
+				assert.True(need.Lt(blockBaseFeeU256) || need.Eq(blockBaseFeeU256))
 
 				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
 				_, ok = pool.byHash[string(i.idHash[:])]
@@ -330,8 +342,9 @@ func FuzzOnNewBlocks7(f *testing.F) {
 
 				need := uint256.NewInt(i.gas)
 				need = need.Mul(need, uint256.NewInt(i.feeCap))
-				assert.GreaterOrEqual(uint256.NewInt(protocolBaseFee), need.Add(need, &i.value))
-				assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
+				need = need.Add(need, &i.value)
+				assert.True(need.Lt(protocolBaseFeeU256) || need.Eq(protocolBaseFeeU256))
+				assert.True(need.Lt(blockBaseFeeU256) || need.Eq(blockBaseFeeU256))
 
 				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
 				_, ok = pool.byHash[string(i.idHash[:])]

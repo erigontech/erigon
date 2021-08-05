@@ -465,7 +465,7 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// this transaction will never be included into this particular chain.
 		it.MetaTx.SubPool &^= EnoughFeeCapProtocol
 		if it.MetaTx.Tx.feeCap >= protocolBaseFee {
-			it.MetaTx.SubPool &= EnoughFeeCapProtocol
+			it.MetaTx.SubPool |= EnoughFeeCapProtocol
 		}
 
 		// 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for
@@ -473,7 +473,7 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
 		it.MetaTx.SubPool &^= NoNonceGaps
 		if prevNonce == -1 || uint64(prevNonce)+1 == it.MetaTx.Tx.nonce {
-			it.MetaTx.SubPool &= NoNonceGaps
+			it.MetaTx.SubPool |= NoNonceGaps
 		}
 		prevNonce = int(it.Tx.nonce)
 
@@ -485,7 +485,7 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// transactions will be able to pay for gas.
 		it.MetaTx.SubPool &^= EnoughBalance
 		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
-			it.MetaTx.SubPool &= EnoughBalance
+			it.MetaTx.SubPool |= EnoughBalance
 		}
 		accumulatedSenderSpent.Add(accumulatedSenderSpent, needBalance) // already deleted all transactions with nonce <= sender.nonce
 
@@ -493,7 +493,7 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// baseFee of the currently pending block. Set to 0 otherwise.
 		it.MetaTx.SubPool &^= EnoughFeeCapBlock
 		if it.MetaTx.Tx.feeCap >= blockBaseFee {
-			it.MetaTx.SubPool &= EnoughFeeCapBlock
+			it.MetaTx.SubPool |= EnoughFeeCapBlock
 		}
 
 		// 5. Local transaction. Set to 1 if transaction is local.
