@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
@@ -44,17 +45,34 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
 	}
 	defer tx.Rollback()
-	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
-	if err != nil {
-		return nil, err
+	var reader state.StateReader
+	var pending bool
+	if num, ok := blockNrOrHash.Number(); ok {
+		switch num {
+		case rpc.LatestBlockNumber:
+			reader = state.NewPlainStateReader(tx)
+		case rpc.PendingBlockNumber:
+			reader = state.NewPlainStateReader(tx)
+			pending = true
+		}
+	}
+	if reader == nil {
+		blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+		if err != nil {
+			return nil, err
+		}
+		reader = adapter.NewStateReader(tx, blockNumber)
 	}
 	nonce := hexutil.Uint64(0)
-	reader := adapter.NewStateReader(tx, blockNumber)
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return &nonce, err
 	}
-	return (*hexutil.Uint64)(&acc.Nonce), err
+	nonce = hexutil.Uint64(acc.Nonce)
+	if pending {
+		nonce++
+	}
+	return (*hexutil.Uint64)(&nonce), err
 }
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
