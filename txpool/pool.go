@@ -202,21 +202,13 @@ func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(pee
 func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-
-	for i := range newTxs.txs {
-		id, ok := p.senderIDs[string(newTxs.senders[i*20:(i+1)*20])]
-		if !ok {
-			for i := range p.senderInfo { //TODO: create field for it?
-				if id < i {
-					id = i
-				}
-			}
-			id++
-			p.senderIDs[string(newTxs.senders[i*20:(i+1)*20])] = id
-			newTxs.txs[i].senderID = id
-		}
+	protocolBaseFee, blockBaseFee := p.protocolBaseFee.Load(), p.blockBaseFee.Load()
+	if protocolBaseFee == 0 || blockBaseFee == 0 {
+		return fmt.Errorf("non-zero base fee")
 	}
-	if err := onNewTxs(p.senderInfo, newTxs, p.protocolBaseFee.Load(), p.blockBaseFee.Load(), p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+
+	setTxSenderID(p.senderIDs, p.senderInfo, newTxs)
+	if err := onNewTxs(p.senderInfo, newTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
 
@@ -228,9 +220,11 @@ func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 		}
 		notifyNewTxs = append(notifyNewTxs, newTxs.txs[i].idHash[:]...)
 	}
-	select {
-	case p.newTxs <- notifyNewTxs:
-	default:
+	if len(notifyNewTxs) > 0 {
+		select {
+		case p.newTxs <- notifyNewTxs:
+		default:
+		}
 	}
 
 	return nil
@@ -276,19 +270,8 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
-	for i := range unwindTxs.txs {
-		id, ok := p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])]
-		if !ok {
-			for i := range p.senderInfo { //TODO: create field for it?
-				if id < i {
-					id = i
-				}
-			}
-			id++
-			p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])] = id
-			unwindTxs.txs[i].senderID = id
-		}
-	}
+	setTxSenderID(p.senderIDs, p.senderInfo, unwindTxs)
+	setTxSenderID(p.senderIDs, p.senderInfo, minedTxs)
 	if err := onNewBlock(p.senderInfo, unwindTxs, minedTxs.txs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
@@ -301,27 +284,44 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 		}
 		notifyNewTxs = append(notifyNewTxs, unwindTxs.txs[i].idHash[:]...)
 	}
-	select {
-	case p.newTxs <- notifyNewTxs:
-	default:
+	if len(notifyNewTxs) > 0 {
+		select {
+		case p.newTxs <- notifyNewTxs:
+		default:
+		}
 	}
 
 	return nil
+}
+func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInfo, txs TxSlots) {
+	for i := range txs.txs {
+		id, ok := senderIDs[string(txs.senders[i*20:(i+1)*20])]
+		if !ok {
+			for i := range senderInfo { //TODO: create field for it?
+				if id < i {
+					id = i
+				}
+			}
+			id++
+			senderIDs[string(txs.senders[i*20:(i+1)*20])] = id
+		}
+		txs.txs[i].senderID = id
+	}
 }
 
 func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) error {
 	for i := range unwindTxs.txs {
 		if unwindTxs.txs[i].senderID == 0 {
-			return fmt.Errorf("senderID can't be zero")
+			return fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero")
 		}
 	}
 	for i := range minedTxs {
 		if minedTxs[i].senderID == 0 {
-			return fmt.Errorf("senderID can't be zero")
+			return fmt.Errorf("onNewBlock.minedTxs: senderID can't be zero")
 		}
 	}
 
-	removeMined(senderInfo, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, func(i *MetaTx) {
+	removeMined(senderInfo, minedTxs, pending, baseFee, queued, func(i *MetaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {
@@ -342,6 +342,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	if len(unwindTxs.txs) > 0 {
 		//TODO: restore isLocal flag in unwindTxs
 		unsafeAddToPool(senderInfo, unwindTxs, pending, func(i *MetaTx) {
+			//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
 			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 				//TODO: also check if sender is in list of local-senders
 				i.SubPool |= IsLocal
@@ -360,6 +361,8 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	queued.EnforceInvariants()
 
 	promote(pending, baseFee, queued, func(i *MetaTx) {
+		//fmt.Printf("del1 nonce: %d, %t\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce < i.Tx.nonce)
+		//fmt.Printf("del2 balance: %x,%x,%x\n", i.Tx.value, i.Tx.tip, senderInfo[i.Tx.senderID].balance)
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {
@@ -378,7 +381,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
+func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
 	for _, tx := range minedTxs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
