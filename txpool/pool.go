@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 )
 
@@ -67,8 +67,12 @@ type MetaTx struct {
 	currentSubPool         SubPoolType
 }
 
-func newMetaTx(slot *TxSlot) *MetaTx {
-	return &MetaTx{Tx: slot, worstIndex: -1, bestIndex: -1}
+func newMetaTx(slot *TxSlot, isLocal bool) *MetaTx {
+	mt := &MetaTx{Tx: slot, worstIndex: -1, bestIndex: -1}
+	if isLocal {
+		mt.SubPool = IsLocal
+	}
+	return mt
 }
 
 type SubPoolType uint8
@@ -81,12 +85,17 @@ const PendingSubPoolLimit = 1024
 const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
-type Nonce2Tx struct{ *btree.BTree }
+type nonce2Tx struct{ *btree.BTree }
 
-type SenderInfo struct {
+type senderInfo struct {
 	balance    uint256.Int
 	nonce      uint64
-	txNonce2Tx *Nonce2Tx // sorted map of nonce => *MetaTx
+	txNonce2Tx *nonce2Tx // sorted map of nonce => *MetaTx
+}
+
+//nolint
+func newSenderInfo(nonce uint64, balance uint256.Int) *senderInfo {
+	return &senderInfo{nonce: nonce, balance: balance, txNonce2Tx: &nonce2Tx{btree.New(32)}}
 }
 
 type nonce2TxItem struct{ *MetaTx }
@@ -98,19 +107,38 @@ func (i *nonce2TxItem) Less(than btree.Item) bool {
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
 type TxPool struct {
-	lock   *sync.RWMutex
-	logger log.Logger //nolint
+	lock *sync.RWMutex
 
 	protocolBaseFee atomic.Uint64
 	blockBaseFee    atomic.Uint64
 
-	senderInfo               map[uint64]SenderInfo
+	senderIDs                map[string]uint64
+	senderInfo               map[uint64]*senderInfo
 	byHash                   map[string]*MetaTx // tx_hash => tx
 	pending, baseFee, queued *SubPool
 
+	// track isLocal flag of already mined transactions. used at unwind.
+	localsHistory *lru.Cache
+
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
+	newTxs                 chan Hashes
 	//lastTxPropagationTimestamp time.Time
+}
+
+func New(newTxs chan Hashes) *TxPool {
+	localsHistory, _ := lru.New(1024)
+	return &TxPool{
+		lock:                   &sync.RWMutex{},
+		senderInfo:             map[uint64]*senderInfo{},
+		byHash:                 map[string]*MetaTx{},
+		localsHistory:          localsHistory,
+		recentlyConnectedPeers: &recentlyConnectedPeers{},
+		pending:                NewSubPool(),
+		baseFee:                NewSubPool(),
+		queued:                 NewSubPool(),
+		newTxs:                 newTxs,
+	}
 }
 
 func (p *TxPool) GetRlp(hash []byte) []byte {
@@ -148,6 +176,10 @@ func (p *TxPool) AppendRemoteHashes(buf []byte) {
 		i++
 	}
 }
+func (p *TxPool) AppendAllHashes(buf []byte) {
+	p.AppendLocalHashes(buf)
+	p.AppendRemoteHashes(buf[len(buf):])
+}
 func (p *TxPool) IdHashKnown(hash []byte) bool {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -155,38 +187,198 @@ func (p *TxPool) IdHashKnown(hash []byte) bool {
 	_, ok := p.byHash[string(hash)]
 	return ok
 }
+func (p *TxPool) IdHashIsLocal(hash []byte) bool {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+
+	txn, ok := p.byHash[string(hash)]
+	if !ok {
+		return false
+	}
+	return txn.SubPool&IsLocal != 0
+}
 func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
-func (p *TxPool) OnNewBlock(unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64) {
+
+func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	for i := range newTxs.txs {
+		id, ok := p.senderIDs[string(newTxs.senders[i*20:(i+1)*20])]
+		if !ok {
+			for i := range p.senderInfo { //TODO: create field for it?
+				if id < i {
+					id = i
+				}
+			}
+			id++
+			p.senderIDs[string(newTxs.senders[i*20:(i+1)*20])] = id
+			newTxs.txs[i].senderID = id
+		}
+	}
+	if err := onNewTxs(p.senderInfo, newTxs, p.protocolBaseFee.Load(), p.blockBaseFee.Load(), p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+		return err
+	}
+
+	notifyNewTxs := make(Hashes, 0, 32*len(newTxs.txs))
+	for i := range newTxs.txs {
+		_, ok := p.byHash[string(newTxs.txs[i].idHash[:])]
+		if !ok {
+			continue
+		}
+		notifyNewTxs = append(notifyNewTxs, newTxs.txs[i].idHash[:]...)
+	}
+	select {
+	case p.newTxs <- notifyNewTxs:
+	default:
+	}
+
+	return nil
+}
+func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) error {
+	for i := range newTxs.txs {
+		if newTxs.txs[i].senderID == 0 {
+			return fmt.Errorf("senderID can't be zero")
+		}
+	}
+
+	unsafeAddToPool(senderInfo, newTxs, queued, func(i *MetaTx) {
+		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
+			//TODO: also check if sender is in list of local-senders
+			i.SubPool |= IsLocal
+		}
+		delete(byHash, string(i.Tx.idHash[:]))
+	})
+
+	for i := range senderInfo {
+		// TODO: aggregate changed senders before call this func
+		onSenderChange(senderInfo[i], protocolBaseFee, blockBaseFee)
+	}
+
+	pending.EnforceInvariants()
+	baseFee.EnforceInvariants()
+	queued.EnforceInvariants()
+
+	promote(pending, baseFee, queued, func(i *MetaTx) {
+		delete(byHash, string(i.Tx.idHash[:]))
+		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
+		if i.SubPool&IsLocal != 0 {
+			//TODO: only add to history if sender is not in list of local-senders
+			localsHistory.Add(i.Tx.idHash, struct{}{})
+		}
+	})
+
+	return nil
+}
+func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
-	onNewBlock(p.senderInfo, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash)
+	for i := range unwindTxs.txs {
+		id, ok := p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])]
+		if !ok {
+			for i := range p.senderInfo { //TODO: create field for it?
+				if id < i {
+					id = i
+				}
+			}
+			id++
+			p.senderIDs[string(unwindTxs.senders[i*20:(i+1)*20])] = id
+			unwindTxs.txs[i].senderID = id
+		}
+	}
+	if err := onNewBlock(p.senderInfo, unwindTxs, minedTxs.txs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+		return err
+	}
+
+	notifyNewTxs := make(Hashes, 0, 32*len(unwindTxs.txs))
+	for i := range unwindTxs.txs {
+		_, ok := p.byHash[string(unwindTxs.txs[i].idHash[:])]
+		if !ok {
+			continue
+		}
+		notifyNewTxs = append(notifyNewTxs, unwindTxs.txs[i].idHash[:]...)
+	}
+	select {
+	case p.newTxs <- notifyNewTxs:
+	default:
+	}
+
+	return nil
 }
 
-func onNewBlock(senderInfo map[uint64]SenderInfo, unwindTxs, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx) {
-	if unwindTxs != nil {
-		unwind(senderInfo, unwindTxs, pending, func(i *MetaTx) {
+func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) error {
+	for i := range unwindTxs.txs {
+		if unwindTxs.txs[i].senderID == 0 {
+			return fmt.Errorf("senderID can't be zero")
+		}
+	}
+	for i := range minedTxs {
+		if minedTxs[i].senderID == 0 {
+			return fmt.Errorf("senderID can't be zero")
+		}
+	}
+
+	removeMined(senderInfo, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, func(i *MetaTx) {
+		delete(byHash, string(i.Tx.idHash[:]))
+		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
+		if i.SubPool&IsLocal != 0 {
+			//TODO: only add to history if sender is not in list of local-senders
+			localsHistory.Add(i.Tx.idHash, struct{}{})
+		}
+	})
+
+	// This can be thought of a reverse operation from the one described before.
+	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
+	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
+	// be returned into the transaction pool.
+	// An interesting note here is that if the block contained any transactions local to the node,
+	// by being first removed from the pool (from the "local" part of it), and then re-injected,
+	// they effective lose their priority over the "remote" transactions. In order to prevent that,
+	// somehow the fact that certain transactions were local, needs to be remembered for some
+	// time (up to some "immutability threshold").
+	if len(unwindTxs.txs) > 0 {
+		//TODO: restore isLocal flag in unwindTxs
+		unsafeAddToPool(senderInfo, unwindTxs, pending, func(i *MetaTx) {
+			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
+				//TODO: also check if sender is in list of local-senders
+				i.SubPool |= IsLocal
+			}
 			delete(byHash, string(i.Tx.idHash[:]))
 		})
 	}
-	forward(senderInfo, minedTxs, protocolBaseFee, blockBaseFee, pending, baseFee, queued, func(i *MetaTx) {
+
+	for i := range senderInfo {
+		// TODO: aggregate changed senders before call this func
+		onSenderChange(senderInfo[i], protocolBaseFee, blockBaseFee)
+	}
+
+	pending.EnforceInvariants()
+	baseFee.EnforceInvariants()
+	queued.EnforceInvariants()
+
+	promote(pending, baseFee, queued, func(i *MetaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
+		if i.SubPool&IsLocal != 0 {
+			//TODO: only add to history if sender is not in list of local-senders
+			localsHistory.Add(i.Tx.idHash, struct{}{})
+		}
 	})
+
+	return nil
 }
 
-// forward - apply new highest block (or batch of blocks)
+// removeMined - apply new highest block (or batch of blocks)
 //
 // 1. New best block arrives, which potentially changes the balance and the nonce of some senders.
 // We use senderIds data structure to find relevant senderId values, and then use senders data structure to
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func forward(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
-	// TODO: change sender.nonce
-
+func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
 	for _, tx := range minedTxs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
@@ -218,53 +410,31 @@ func forward(senderInfo map[uint64]SenderInfo, minedTxs []*TxSlot, protocolBaseF
 			}
 			return true
 		})
-
-		// TODO: aggregate changed senders before call this func
-		onSenderChange(sender, protocolBaseFee, blockBaseFee)
 	}
-
-	pending.EnforceInvariants()
-	baseFee.EnforceInvariants()
-	queued.EnforceInvariants()
-
-	promote(pending, baseFee, queued, discard)
 }
 
 // unwind
-// This can be thought of a reverse operation from the one described before.
-// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
-// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
-// be returned into the transaction pool.
-// An interesting note here is that if the block contained any transactions local to the node,
-// by being first removed from the pool (from the "local" part of it), and then re-injected,
-// they effective lose their priority over the "remote" transactions. In order to prevent that,
-// somehow the fact that certain transactions were local, needs to be remembered for some
-// time (up to some "immutability threshold").
-func unwind(senderInfo map[uint64]SenderInfo, unwindTxs []*TxSlot, pending *SubPool, onAdd func(tx *MetaTx)) {
-	// TODO: change sender.nonce
-
-	for _, tx := range unwindTxs {
+func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *SubPool, beforeAdd func(tx *MetaTx)) {
+	for i, tx := range unwindTxs.txs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
 			panic("not implemented yet")
 		}
 
-		//TODO: restore isLocal flag
-		mt := newMetaTx(tx)
+		mt := newMetaTx(tx, unwindTxs.isLocal[i])
 		// Insert to pending pool, if pool doesn't have tx with same Nonce and bigger Tip
 		if found := sender.txNonce2Tx.Get(&nonce2TxItem{mt}); found != nil {
 			if tx.tip <= found.(*nonce2TxItem).MetaTx.Tx.tip {
 				continue
 			}
 		}
+		beforeAdd(mt)
 		sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
-		onAdd(mt)
-		pending.UnsafeAdd(mt, PendingSubPool)
+		to.UnsafeAdd(mt, PendingSubPool)
 	}
-	pending.EnforceInvariants()
 }
 
-func onSenderChange(sender SenderInfo, protocolBaseFee, blockBaseFee uint64) {
+func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 	prevNonce := -1
 	accumulatedSenderSpent := uint256.NewInt(0)
 	sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
@@ -537,28 +707,14 @@ func (p *WorstQueue) Pop() interface{} {
 	return item
 }
 
-// Below is a draft code, will convert it to Loop and LoopStep funcs later
-
-type PoolImpl struct {
-	recentlyConnectedPeers     *recentlyConnectedPeers
-	lastTxPropagationTimestamp time.Time
-	logger                     log.Logger
-}
-
-func NewPool() *PoolImpl {
-	return &PoolImpl{
-		recentlyConnectedPeers: &recentlyConnectedPeers{},
-	}
-}
-
-// Loop - does:
+// BroadcastLoop - does:
 // send pending byHash to p2p:
 //      - new byHash
 //      - all pooled byHash to recently connected peers
 //      - all local pooled byHash to random peers periodically
 // promote/demote transactions
 // reorgs
-func (p *PoolImpl) Loop(ctx context.Context, send *Send, timings Timings) {
+func BroadcastLoop(ctx context.Context, p *TxPool, newTxs chan Hashes, send *Send, timings Timings) {
 	propagateAllNewTxsEvery := time.NewTicker(timings.propagateAllNewTxsEvery)
 	defer propagateAllNewTxsEvery.Stop()
 
@@ -575,42 +731,31 @@ func (p *PoolImpl) Loop(ctx context.Context, send *Send, timings Timings) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-propagateAllNewTxsEvery.C: // new byHash
-			last := p.lastTxPropagationTimestamp
-			p.lastTxPropagationTimestamp = time.Now()
-
-			// first broadcast all local byHash to all peers, then non-local to random sqrt(peersAmount) peers
+		case h := <-newTxs:
+			// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
 			localTxHashes = localTxHashes[:0]
-			p.FillLocalHashesSince(last, localTxHashes)
-			initialAmount := len(localTxHashes)
-			sentToPeers := send.BroadcastLocalPooledTxs(localTxHashes)
-			if initialAmount == 1 {
-				p.logger.Info("local tx propagated", "to_peers_amount", sentToPeers, "tx_hash", localTxHashes)
-			} else {
-				p.logger.Info("local byHash propagated", "to_peers_amount", sentToPeers, "txs_amount", initialAmount)
+			remoteTxHashes = remoteTxHashes[:0]
+
+			for i := 0; i < h.Len(); i++ {
+				if p.IdHashIsLocal(h.At(i)) {
+					localTxHashes = append(localTxHashes, h.At(i)...)
+				} else {
+					remoteTxHashes = append(localTxHashes, h.At(i)...)
+				}
 			}
 
-			remoteTxHashes = remoteTxHashes[:0]
-			p.FillRemoteHashesSince(last, remoteTxHashes)
+			send.BroadcastLocalPooledTxs(localTxHashes)
 			send.BroadcastRemotePooledTxs(remoteTxHashes)
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := p.recentlyConnectedPeers.GetAndClean()
 			if len(newPeers) == 0 {
 				continue
 			}
-			p.FillRemoteHashes(remoteTxHashes[:0])
+			p.AppendAllHashes(remoteTxHashes[:0])
 			send.PropagatePooledTxsToPeersList(newPeers, remoteTxHashes)
-		case <-broadcastLocalTransactionsEvery.C: // periodically broadcast local byHash to random peers
-			p.FillLocalHashes(localTxHashes[:0])
-			send.BroadcastLocalPooledTxs(localTxHashes)
 		}
 	}
 }
-
-func (p *PoolImpl) FillLocalHashesSince(since time.Time, to []byte)  {}
-func (p *PoolImpl) FillRemoteHashesSince(since time.Time, to []byte) {}
-func (p *PoolImpl) FillLocalHashes(to []byte)                        {}
-func (p *PoolImpl) FillRemoteHashes(to []byte)                       {}
 
 // recentlyConnectedPeers does buffer IDs of recently connected good peers
 // then sync of pooled Transaction can happen to all of then at once

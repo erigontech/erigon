@@ -103,54 +103,53 @@ func u256Slice(in []byte) ([]uint256.Int, bool) {
 	return res, true
 }
 
-func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSenderBalance []byte) (sendersInfo map[uint64]SenderInfo, txs []*TxSlot, ok bool) {
+func poolsFromFuzzBytes(rawTxNonce, rawValues, rawSender, rawSenderNonce, rawSenderBalance []byte) (sendersInfo map[uint64]*senderInfo, senderIDs map[string]uint64, txs TxSlots, ok bool) {
 	if len(rawTxNonce)/8 != len(rawValues)/32 {
-		return nil, nil, false
+		return nil, nil, txs, false
 	}
-	if len(rawSender)/8 != len(rawSenderNonce)/8 {
-		return nil, nil, false
+	if len(rawSender)/20 != len(rawSenderNonce)/8 {
+		return nil, nil, txs, false
 	}
-	if len(rawSender)/8 != len(rawSenderBalance)/32 {
-		return nil, nil, false
+	if len(rawSender)/20 != len(rawSenderBalance)/32 {
+		return nil, nil, txs, false
+	}
+	senderNonce, ok := u64Slice(rawSenderNonce)
+	if !ok {
+		return nil, nil, txs, false
+	}
+	for i := 0; i < len(senderNonce); i++ {
+		if senderNonce[i] == 0 {
+			return nil, nil, txs, false
+		}
 	}
 
 	txNonce, ok := u64Slice(rawTxNonce)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, txs, false
 	}
 	values, ok := u256Slice(rawValues)
 	if !ok {
-		return nil, nil, false
-	}
-	sender, ok := u64Slice(rawSender)
-	if !ok {
-		return nil, nil, false
-	}
-	senderNonce, ok := u64Slice(rawSenderNonce)
-	if !ok {
-		return nil, nil, false
+		return nil, nil, txs, false
 	}
 	senderBalance, ok := u256Slice(rawSenderBalance)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, txs, false
 	}
 
-	senders := map[uint64]SenderInfo{}
-	for i, id := range sender {
-		senders[id] = SenderInfo{
-			nonce:      senderNonce[i],
-			balance:    senderBalance[i],
-			txNonce2Tx: &Nonce2Tx{btree.New(32)},
-		}
+	sendersInfo = map[uint64]*senderInfo{}
+	senderIDs = map[string]uint64{}
+	for i := 0; i < len(senderNonce); i++ {
+		sendersInfo[uint64(i)] = newSenderInfo(senderNonce[i], senderBalance[i])
+		senderIDs[string(rawSender[i*20:(i+1)*20])] = uint64(i)
 	}
 	for i := range txNonce {
-		txs = append(txs, &TxSlot{
-			nonce:    txNonce[i],
-			value:    values[i],
-			senderID: sender[i%len(sender)],
+		txs.txs = append(txs.txs, &TxSlot{
+			nonce: txNonce[i],
+			value: values[i],
 		})
+		txs.senders = rawSender
 	}
-	return senders, txs, true
+	return sendersInfo, senderIDs, txs, true
 }
 
 func iterateSubPoolUnordered(subPool *SubPool, f func(tx *MetaTx)) {
@@ -169,13 +168,26 @@ func FuzzOnNewBlocks3(f *testing.F) {
 		t.Parallel()
 		assert := assert.New(t)
 
-		senders, txs, ok := poolsFromFuzzBytes(txNonce, values, sender, senderNonce, senderBalance)
+		senders, senderIDs, txs, ok := poolsFromFuzzBytes(txNonce, values, sender, senderNonce, senderBalance)
 		if !ok {
 			t.Skip()
 		}
-		byHash := map[string]*MetaTx{}
-		pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
-		onNewBlock(senders, txs, nil, protocolBaseFee, blockBaseFee, pending, baseFee, queued, byHash)
+		unwindTxs := txs
+		minedTxs := TxSlots{}
+		if len(txs.txs) > 3 {
+			unwindTxs.txs = txs.txs[:len(txs.txs)-3]
+			unwindTxs.senders = txs.senders[:len(txs.txs)-3]
+			minedTxs.txs = txs.txs[len(txs.txs)-3:]
+			minedTxs.senders = txs.senders[len(txs.txs)-3:]
+		}
+
+		ch := make(chan Hashes, 100)
+		pool := New(ch)
+		pool.senderInfo = senders
+		pool.senderIDs = senderIDs
+		err := pool.OnNewBlock(unwindTxs, minedTxs, protocolBaseFee, blockBaseFee)
+		assert.NoError(err)
+		pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 
 		best, worst := pending.Best(), pending.Worst()
 		assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)
@@ -198,7 +210,7 @@ func FuzzOnNewBlocks3(f *testing.F) {
 
 			// side data structures must have all txs
 			assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
-			_, ok = byHash[string(i.idHash[:])]
+			_, ok = pool.byHash[string(i.idHash[:])]
 			assert.True(ok)
 
 			// pools can't have more then 1 tx with same SenderID+Nonce
@@ -233,7 +245,7 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
 
 			assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
-			_, ok = byHash[string(i.idHash[:])]
+			_, ok = pool.byHash[string(i.idHash[:])]
 			assert.True(ok)
 		})
 
@@ -257,12 +269,12 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			assert.GreaterOrEqual(uint256.NewInt(blockBaseFee), need.Add(need, &i.value))
 
 			assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
-			_, ok = byHash[string(i.idHash[:])]
+			_, ok = pool.byHash[string(i.idHash[:])]
 			assert.True(ok)
 		})
 
 		// all txs in side data structures must be in some queue
-		for _, txn := range byHash {
+		for _, txn := range pool.byHash {
 			assert.True(txn.bestIndex >= 0)
 			assert.True(txn.worstIndex >= 0)
 		}
@@ -276,6 +288,13 @@ func FuzzOnNewBlocks3(f *testing.F) {
 			})
 		}
 
+		// mined txs must be removed
+		for i := range minedTxs.txs {
+			_, ok = pool.byHash[string(minedTxs.txs[i].idHash[:])]
+			assert.False(ok)
+		}
+		newHashes := <-ch
+		assert.Equal(len(unwindTxs.txs), newHashes.Len())
 	})
 
 }

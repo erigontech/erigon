@@ -34,6 +34,9 @@ type PeerID *types.H512
 
 type Hashes []byte // flatten list of 32-byte hashes
 
+func (h Hashes) At(i int) []byte { return h[i*32 : (i+1)*32] }
+func (h Hashes) Len() int        { return len(h) / 32 }
+
 // TxContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxParseContext struct {
@@ -80,6 +83,12 @@ type TxSlot struct {
 	//local       bool        // Whether transaction has been injected locally (and hence needs priority when mining or proposing a block)
 
 	rlp []byte
+}
+
+type TxSlots struct {
+	txs     []*TxSlot
+	senders []byte // plain 20-byte addresses
+	isLocal []bool
 }
 
 const (
@@ -304,7 +313,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int) (slot *TxSl
 			return nil, sender, 0, fmt.Errorf("%s: computing signHash (hashing len Prefix): %w", ParseTransactionErrorPrefix, err)
 		}
 	} else {
-		beLen := (bits.Len(uint(sigHashLen)) + 7) / 8
+		beLen := (bits.Len(sigHashLen) + 7) / 8
 		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
 		ctx.buf[8-beLen] = byte(beLen) + 247
 		if _, err := ctx.keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {

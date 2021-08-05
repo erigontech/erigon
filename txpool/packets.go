@@ -142,10 +142,11 @@ func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []b
 	dataLen := rlp.U64Len(requestId) + rlp.ListPrefixLen(txsRlpLen) + txsRlpLen
 
 	encodeBuf = ensureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
+
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
 	pos += rlp.EncodeU64(requestId, encodeBuf[pos:])
-	pos += rlp.ListPrefixLen(txsRlpLen)
+	pos += rlp.EncodeListPrefix(txsRlpLen, encodeBuf[pos:])
 	for i := range txsRlp {
 		copy(encodeBuf[pos:], txsRlp[i])
 		pos += len(txsRlp[i])
