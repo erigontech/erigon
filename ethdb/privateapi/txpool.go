@@ -24,6 +24,7 @@ type txPool interface {
 	Get(hash common.Hash) types.Transaction
 	AddLocals(txs []types.Transaction) []error
 	Content() (map[common.Address]types.Transactions, map[common.Address]types.Transactions)
+	CountContent() (uint, uint)
 	SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription
 }
 
@@ -171,4 +172,12 @@ func (s *TxPoolServer) Transactions(ctx context.Context, in *proto_txpool.Transa
 	}
 
 	return reply, nil
+}
+
+func (s *TxPoolServer) Status(_ context.Context, _ *proto_txpool.StatusRequest) (*proto_txpool.StatusReply, error) {
+	pending, queued := s.txPool.CountContent()
+	return &proto_txpool.StatusReply{
+		PendingCount: uint32(pending),
+		QueuedCount:  uint32(queued),
+	}, nil
 }
