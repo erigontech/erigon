@@ -220,9 +220,11 @@ func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 		}
 		notifyNewTxs = append(notifyNewTxs, newTxs.txs[i].idHash[:]...)
 	}
-	select {
-	case p.newTxs <- notifyNewTxs:
-	default:
+	if len(notifyNewTxs) > 0 {
+		select {
+		case p.newTxs <- notifyNewTxs:
+		default:
+		}
 	}
 
 	return nil
@@ -282,9 +284,11 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 		}
 		notifyNewTxs = append(notifyNewTxs, unwindTxs.txs[i].idHash[:]...)
 	}
-	select {
-	case p.newTxs <- notifyNewTxs:
-	default:
+	if len(notifyNewTxs) > 0 {
+		select {
+		case p.newTxs <- notifyNewTxs:
+		default:
+		}
 	}
 
 	return nil
@@ -339,6 +343,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	if len(unwindTxs.txs) > 0 {
 		//TODO: restore isLocal flag in unwindTxs
 		unsafeAddToPool(senderInfo, unwindTxs, pending, func(i *MetaTx) {
+			//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
 			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 				//TODO: also check if sender is in list of local-senders
 				i.SubPool |= IsLocal
@@ -357,6 +362,8 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	queued.EnforceInvariants()
 
 	promote(pending, baseFee, queued, func(i *MetaTx) {
+		//fmt.Printf("del1 nonce: %d, %t\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce < i.Tx.nonce)
+		//fmt.Printf("del2 balance: %x,%x,%x\n", i.Tx.value, i.Tx.tip, senderInfo[i.Tx.senderID].balance)
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {

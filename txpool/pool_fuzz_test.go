@@ -329,9 +329,6 @@ func FuzzOnNewBlocks5(f *testing.F) {
 				_, ok = pool.byHash[string(minedTxs.txs[i].idHash[:])]
 				assert.False(ok)
 			}
-			newHashes := <-ch
-			//assert.Equal(len(unwindTxs.txs), newHashes.Len())
-			_ = newHashes
 		}
 
 		// go to first fork
@@ -339,13 +336,34 @@ func FuzzOnNewBlocks5(f *testing.F) {
 		err := pool.OnNewBlock(unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee)
 		assert.NoError(err)
 		check(unwindTxs, minedTxs1)
+		select {
+		case newHashes := <-ch:
+			assert.Greater(len(newHashes), 0)
+			//TODO: all notified hashes must be in given list
+		default:
+			//TODO: no notifications - means pools must be empty (unchanged)
+		}
+		//assert.Equal(len(unwindTxs.txs), newHashes.Len())
+
 		// unwind everything and switch to new fork (need unwind mined now)
 		err = pool.OnNewBlock(minedTxs1, minedTxs2, protocolBaseFee, blockBaseFee)
 		assert.NoError(err)
 		check(minedTxs1, minedTxs2)
+		select {
+		case newHashes := <-ch:
+			assert.Greater(len(newHashes), 0)
+		default:
+		}
+
 		// add some remote txs from p2p
 		err = pool.OnNewTxs(p2pReceived)
 		assert.NoError(err)
+		check(TxSlots{}, p2pReceived)
+		select {
+		case newHashes := <-ch:
+			assert.Greater(len(newHashes), 0)
+		default:
+		}
 	})
 
 }
