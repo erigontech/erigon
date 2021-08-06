@@ -240,7 +240,7 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 		}
 	}
 
-	unsafeAddToPool(senderInfo, newTxs, queued, func(i *MetaTx) {
+	unsafeAddToPool(senderInfo, newTxs, queued, QueuedSubPool, func(i *MetaTx) {
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
 			i.SubPool |= IsLocal
@@ -365,7 +365,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	unsafeAddToPool(senderInfo, unwindTxs, pending, func(i *MetaTx) {
+	unsafeAddToPool(senderInfo, unwindTxs, pending, PendingSubPool, func(i *MetaTx) {
 		//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
@@ -401,7 +401,6 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	promote(pending, baseFee, queued, func(i *MetaTx) {
 		//fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
 		//fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
-		fmt.Printf("del:  %d, %x\n", i.Tx.nonce, i.Tx.idHash)
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {
@@ -456,7 +455,7 @@ func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending,
 }
 
 // unwind
-func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *SubPool, beforeAdd func(tx *MetaTx)) {
+func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *SubPool, subPoolType SubPoolType, beforeAdd func(tx *MetaTx)) {
 	for i, tx := range unwindTxs.txs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
@@ -471,7 +470,7 @@ func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *S
 			}
 		}
 		beforeAdd(mt)
-		to.UnsafeAdd(mt, PendingSubPool)
+		to.UnsafeAdd(mt, subPoolType)
 	}
 }
 
@@ -669,7 +668,6 @@ func (p *SubPool) UnsafeRemove(i *MetaTx) {
 		p.best.Pop()
 		return
 	}
-	fmt.Printf("remove: %d,%d\n", p.Len(), i.bestIndex)
 	// manually call funcs instead of heap.Pop
 	p.worst.Swap(i.worstIndex, p.worst.Len()-1)
 	p.worst.Pop()
