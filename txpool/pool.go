@@ -246,6 +246,21 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 			i.SubPool |= IsLocal
 		}
 		byHash[string(i.Tx.idHash[:])] = i
+		replaced := senderInfo[i.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{i})
+		if replaced != nil {
+			replacedMT := replaced.(*nonce2TxItem).MetaTx
+			delete(byHash, string(replacedMT.Tx.idHash[:]))
+			switch replacedMT.currentSubPool {
+			case PendingSubPool:
+				pending.UnsafeRemove(replacedMT)
+			case BaseFeeSubPool:
+				baseFee.UnsafeRemove(replacedMT)
+			case QueuedSubPool:
+				queued.UnsafeRemove(replacedMT)
+			default:
+				//already removed
+			}
+		}
 	})
 
 	for i := range senderInfo {
@@ -357,6 +372,21 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 			i.SubPool |= IsLocal
 		}
 		byHash[string(i.Tx.idHash[:])] = i
+		replaced := senderInfo[i.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{i})
+		if replaced != nil {
+			replacedMT := replaced.(*nonce2TxItem).MetaTx
+			delete(byHash, string(replacedMT.Tx.idHash[:]))
+			switch replacedMT.currentSubPool {
+			case PendingSubPool:
+				pending.UnsafeRemove(replacedMT)
+			case BaseFeeSubPool:
+				baseFee.UnsafeRemove(replacedMT)
+			case QueuedSubPool:
+				queued.UnsafeRemove(replacedMT)
+			default:
+				//already removed
+			}
+		}
 	})
 
 	for i := range senderInfo {
@@ -371,6 +401,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	promote(pending, baseFee, queued, func(i *MetaTx) {
 		//fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
 		//fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
+		fmt.Printf("del:  %d, %x\n", i.Tx.nonce, i.Tx.idHash)
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {
@@ -439,11 +470,7 @@ func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *S
 				continue
 			}
 		}
-		//if sender.nonce > tx.nonce {
-		//	continue
-		//}
 		beforeAdd(mt)
-		sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		to.UnsafeAdd(mt, PendingSubPool)
 	}
 }
@@ -633,13 +660,22 @@ func (p *SubPool) Add(i *MetaTx, subPoolType SubPoolType) {
 // UnsafeRemove - does break Heap invariants, but it has O(1) instead of O(log(n)) complexity.
 // Must manually call heap.Init after such changes.
 // Make sense to batch unsafe changes
-func (p *SubPool) UnsafeRemove(i *MetaTx) *MetaTx {
+func (p *SubPool) UnsafeRemove(i *MetaTx) {
+	if p.Len() == 0 {
+		return
+	}
+	if p.Len() == 1 && i.bestIndex == 0 {
+		p.worst.Pop()
+		p.best.Pop()
+		return
+	}
+	fmt.Printf("remove: %d,%d\n", p.Len(), i.bestIndex)
 	// manually call funcs instead of heap.Pop
 	p.worst.Swap(i.worstIndex, p.worst.Len()-1)
 	p.worst.Pop()
 	p.best.Swap(i.bestIndex, p.best.Len()-1)
 	p.best.Pop()
-	return i
+	return
 }
 func (p *SubPool) UnsafeAdd(i *MetaTx, subPoolType SubPoolType) {
 	i.currentSubPool = subPoolType

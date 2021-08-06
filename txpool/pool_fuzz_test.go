@@ -356,7 +356,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), msg)
+				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
 			})
