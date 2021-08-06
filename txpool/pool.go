@@ -245,7 +245,7 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 			//TODO: also check if sender is in list of local-senders
 			i.SubPool |= IsLocal
 		}
-		delete(byHash, string(i.Tx.idHash[:]))
+		byHash[string(i.Tx.idHash[:])] = i
 	})
 
 	for i := range senderInfo {
@@ -350,17 +350,14 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	if len(unwindTxs.txs) > 0 {
-		//TODO: restore isLocal flag in unwindTxs
-		unsafeAddToPool(senderInfo, unwindTxs, pending, func(i *MetaTx) {
-			//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
-			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
-				//TODO: also check if sender is in list of local-senders
-				i.SubPool |= IsLocal
-			}
-			byHash[string(i.Tx.idHash[:])] = i
-		})
-	}
+	unsafeAddToPool(senderInfo, unwindTxs, pending, func(i *MetaTx) {
+		//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
+		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
+			//TODO: also check if sender is in list of local-senders
+			i.SubPool |= IsLocal
+		}
+		byHash[string(i.Tx.idHash[:])] = i
+	})
 
 	for i := range senderInfo {
 		// TODO: aggregate changed senders before call this func
@@ -442,6 +439,9 @@ func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *S
 				continue
 			}
 		}
+		//if sender.nonce > tx.nonce {
+		//	continue
+		//}
 		beforeAdd(mt)
 		sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		to.UnsafeAdd(mt, PendingSubPool)
@@ -449,7 +449,7 @@ func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *S
 }
 
 func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
-	prevNonce := -1
+	prevNonce := sender.nonce
 	accumulatedSenderSpent := uint256.NewInt(0)
 	sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 		it := i.(*nonce2TxItem)
@@ -459,12 +459,13 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		needBalance.Mul(uint256.NewInt(it.MetaTx.Tx.gas), uint256.NewInt(it.MetaTx.Tx.feeCap))
 		needBalance.Add(&it.MetaTx.NeedBalance, &it.MetaTx.Tx.value)
 		it.MetaTx.SenderHasEnoughBalance = sender.balance.Gt(needBalance) || sender.balance.Eq(needBalance)
-
 		// 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol
 		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
 		// this transaction will never be included into this particular chain.
 		it.MetaTx.SubPool &^= EnoughFeeCapProtocol
 		if it.MetaTx.Tx.feeCap >= protocolBaseFee {
+			//fmt.Printf("alex1: %d,%d,%d,%d\n", it.MetaTx.NeedBalance.Uint64(), it.MetaTx.Tx.gas, it.MetaTx.Tx.feeCap, it.MetaTx.Tx.value.Uint64())
+			//fmt.Printf("alex2: %d,%t\n", sender.balance.Uint64(), it.MetaTx.SenderHasEnoughBalance)
 			it.MetaTx.SubPool |= EnoughFeeCapProtocol
 		}
 
@@ -472,10 +473,10 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// the sender is M, and there are transactions for all nonces between M and N from the same
 		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
 		it.MetaTx.SubPool &^= NoNonceGaps
-		if prevNonce == -1 || uint64(prevNonce)+1 == it.MetaTx.Tx.nonce {
+		if uint64(prevNonce)+1 == it.MetaTx.Tx.nonce {
 			it.MetaTx.SubPool |= NoNonceGaps
+			prevNonce = it.Tx.nonce
 		}
-		prevNonce = int(it.Tx.nonce)
 
 		// 3. Sufficient balance for gas. Set to 1 if the balance of sender's account in the
 		// state is B, nonce of the sender in the state is M, nonce of the transaction is N, and the
@@ -487,7 +488,6 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		it.MetaTx.SubPool &^= EnoughBalance
 		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
 			it.MetaTx.SubPool |= EnoughBalance
-			fmt.Printf("a3: %b,%d,%d,%d,%t\n", it.MetaTx.SubPool, accumulatedSenderSpent.Uint64(), sender.balance.Uint64(), needBalance.Uint64(), it.MetaTx.SenderHasEnoughBalance)
 		}
 
 		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than

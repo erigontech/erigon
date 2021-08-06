@@ -6,7 +6,6 @@ package txpool
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"testing"
 
 	"github.com/google/btree"
@@ -242,7 +241,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 			t.Skip()
 		}
 		protocolBaseFee, blockBaseFee := uint64(protocolBaseFee1), uint64(blockBaseFee1)
-		protocolBaseFeeU256, blockBaseFeeU256 := uint256.NewInt(protocolBaseFee), uint256.NewInt(blockBaseFee)
+		//protocolBaseFeeU256, blockBaseFeeU256 := uint256.NewInt(protocolBaseFee), uint256.NewInt(blockBaseFee)
 		if protocolBaseFee == 0 || blockBaseFee == 0 {
 			t.Skip()
 		}
@@ -263,111 +262,116 @@ func FuzzOnNewBlocks10(f *testing.F) {
 		pool := New(ch)
 		pool.senderInfo = senders
 		pool.senderIDs = senderIDs
-		check := func(unwindTxs, minedTxs TxSlots) {
+		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
-			if pending.Len() > 0 || baseFee.Len() > 0 || queued.Len() > 0 {
-				fmt.Printf("len: %d,%d,%d\n", pending.Len(), baseFee.Len(), queued.Len())
-			}
+			//if pending.Len() > 0 || baseFee.Len() > 0 || queued.Len() > 0 {
+			//	fmt.Printf("len: %d,%d,%d\n", pending.Len(), baseFee.Len(), queued.Len())
+			//}
 
 			best, worst := pending.Best(), pending.Worst()
 			assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)
-			assert.False(worst != nil && best == nil)
-			assert.False(worst == nil && best != nil)
+			assert.False(worst != nil && best == nil, msg)
+			assert.False(worst == nil && best != nil, msg)
 			if worst != nil && worst.SubPool < 0b11110 {
 				t.Fatalf("pending worst too small %b", worst.SubPool)
 			}
 			iterateSubPoolUnordered(pending, func(tx *MetaTx) {
 				i := tx.Tx
-				assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+				if tx.SubPool&NoNonceGaps > 0 {
+					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
+				}
 				if tx.SubPool&EnoughBalance > 0 {
 					assert.True(tx.SenderHasEnoughBalance)
 				}
-
-				need := uint256.NewInt(i.gas)
-				need = need.Mul(need, uint256.NewInt(i.feeCap))
-				need = need.Add(need, &i.value)
-				assert.True(need.Lt(protocolBaseFeeU256) || need.Eq(protocolBaseFeeU256))
-				assert.True(need.Lt(blockBaseFeeU256) || need.Eq(blockBaseFeeU256))
+				if tx.SubPool&EnoughFeeCapProtocol > 0 {
+					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
+				}
+				if tx.SubPool&EnoughFeeCapBlock > 0 {
+					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
+				}
 
 				// side data structures must have all txs
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
+				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok)
 
 				// pools can't have more then 1 tx with same SenderID+Nonce
+				iterateSubPoolUnordered(baseFee, func(mtx2 *MetaTx) {
+					tx2 := mtx2.Tx
+					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce, msg)
+				})
 				iterateSubPoolUnordered(queued, func(mtx2 *MetaTx) {
 					tx2 := mtx2.Tx
-					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce)
-				})
-				iterateSubPoolUnordered(pending, func(mtx2 *MetaTx) {
-					tx2 := mtx2.Tx
-					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce)
+					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce, msg)
 				})
 			})
 
 			best, worst = baseFee.Best(), baseFee.Worst()
 
-			assert.False(worst != nil && best == nil)
-			assert.False(worst == nil && best != nil)
-			assert.LessOrEqual(baseFee.Len(), BaseFeeSubPoolLimit)
+			assert.False(worst != nil && best == nil, msg)
+			assert.False(worst == nil && best != nil, msg)
+			assert.LessOrEqual(baseFee.Len(), BaseFeeSubPoolLimit, msg)
 			if worst != nil && worst.SubPool < 0b11100 {
 				t.Fatalf("baseFee worst too small %b", worst.SubPool)
 			}
 			iterateSubPoolUnordered(baseFee, func(tx *MetaTx) {
 				i := tx.Tx
-				assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+				if tx.SubPool&NoNonceGaps > 0 {
+					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
+				}
 				if tx.SubPool&EnoughBalance != 0 {
-
-					assert.True(tx.SenderHasEnoughBalance)
+					assert.True(tx.SenderHasEnoughBalance, msg)
+				}
+				if tx.SubPool&EnoughFeeCapProtocol > 0 {
+					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
+				}
+				if tx.SubPool&EnoughFeeCapBlock > 0 {
+					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				need := uint256.NewInt(i.gas)
-				need = need.Mul(need, uint256.NewInt(i.feeCap))
-				need = need.Add(need, &i.value)
-				assert.True(need.Lt(protocolBaseFeeU256) || need.Eq(protocolBaseFeeU256))
-				assert.True(need.Lt(blockBaseFeeU256) || need.Eq(blockBaseFeeU256))
-
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
+				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
-				assert.True(ok)
+				assert.True(ok, msg)
 			})
 
 			best, worst = queued.Best(), queued.Worst()
 			assert.LessOrEqual(queued.Len(), QueuedSubPoolLimit)
-			assert.False(worst != nil && best == nil)
-			assert.False(worst == nil && best != nil)
+			assert.False(worst != nil && best == nil, msg)
+			assert.False(worst == nil && best != nil, msg)
 			if worst != nil && worst.SubPool < 0b10000 {
 				t.Fatalf("queued worst too small %b", worst.SubPool)
 			}
 			iterateSubPoolUnordered(queued, func(tx *MetaTx) {
 				i := tx.Tx
-				assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce)
+				if tx.SubPool&NoNonceGaps > 0 {
+					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
+				}
 				if tx.SubPool&EnoughBalance > 0 {
-					assert.True(tx.SenderHasEnoughBalance)
+					assert.True(tx.SenderHasEnoughBalance, msg)
+				}
+				if tx.SubPool&EnoughFeeCapProtocol > 0 {
+					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
+				}
+				if tx.SubPool&EnoughFeeCapBlock > 0 {
+					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				need := uint256.NewInt(i.gas)
-				need = need.Mul(need, uint256.NewInt(i.feeCap))
-				need = need.Add(need, &i.value)
-				assert.True(need.Lt(protocolBaseFeeU256) || need.Eq(protocolBaseFeeU256))
-				assert.True(need.Lt(blockBaseFeeU256) || need.Eq(blockBaseFeeU256))
-
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}))
+				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
-				assert.True(ok)
+				assert.True(ok, msg)
 			})
 
 			// all txs in side data structures must be in some queue
 			for _, txn := range pool.byHash {
-				assert.True(txn.bestIndex >= 0)
-				assert.True(txn.worstIndex >= 0)
+				assert.True(txn.bestIndex >= 0, msg)
+				assert.True(txn.worstIndex >= 0, msg)
 			}
 			for i := range senders {
 				//assert.True(senders[i].txNonce2Tx.Len() > 0)
 				senders[i].txNonce2Tx.Ascend(func(i btree.Item) bool {
 					mt := i.(*nonce2TxItem).MetaTx
-					assert.True(mt.worstIndex >= 0)
-					assert.True(mt.bestIndex >= 0)
+					assert.True(mt.worstIndex >= 0, msg)
+					assert.True(mt.bestIndex >= 0, msg)
 					return true
 				})
 			}
@@ -375,11 +379,11 @@ func FuzzOnNewBlocks10(f *testing.F) {
 			// mined txs must be removed
 			for i := range minedTxs.txs {
 				_, ok = pool.byHash[string(minedTxs.txs[i].idHash[:])]
-				assert.False(ok)
+				assert.False(ok, msg)
 			}
 		}
 
-		checkNotify := func(unwindTxs, minedTxs TxSlots) {
+		checkNotify := func(unwindTxs, minedTxs TxSlots, msg string) {
 			select {
 			case newHashes := <-ch:
 				//assert.Equal(len(unwindTxs.txs), newHashes.Len())
@@ -400,8 +404,8 @@ func FuzzOnNewBlocks10(f *testing.F) {
 							break
 						}
 					}
-					assert.True(foundInUnwind)
-					assert.False(foundInMined)
+					assert.True(foundInUnwind, msg)
+					assert.False(foundInMined, msg)
 				}
 			default:
 
@@ -413,20 +417,20 @@ func FuzzOnNewBlocks10(f *testing.F) {
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
 		err = pool.OnNewBlock(unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee)
 		assert.NoError(err)
-		check(unwindTxs, minedTxs1)
-		checkNotify(unwindTxs, minedTxs1)
+		check(unwindTxs, minedTxs1, "fork1")
+		checkNotify(unwindTxs, minedTxs1, "fork1")
 
 		// unwind everything and switch to new fork (need unwind mined now)
 		err = pool.OnNewBlock(minedTxs1, minedTxs2, protocolBaseFee, blockBaseFee)
 		assert.NoError(err)
-		check(minedTxs1, minedTxs2)
-		checkNotify(minedTxs1, minedTxs2)
+		check(minedTxs1, minedTxs2, "fork2")
+		checkNotify(minedTxs1, minedTxs2, "fork2")
 
 		// add some remote txs from p2p
 		err = pool.OnNewTxs(p2pReceived)
 		assert.NoError(err)
-		check(p2pReceived, TxSlots{})
-		checkNotify(p2pReceived, TxSlots{})
+		check(p2pReceived, TxSlots{}, "p2pmsg1")
+		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
 	})
 
 }
