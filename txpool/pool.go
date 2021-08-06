@@ -202,6 +202,10 @@ func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(pee
 func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	if err := newTxs.Valid(); err != nil {
+		return err
+	}
+
 	protocolBaseFee, blockBaseFee := p.protocolBaseFee.Load(), p.blockBaseFee.Load()
 	if protocolBaseFee == 0 || blockBaseFee == 0 {
 		return fmt.Errorf("non-zero base fee")
@@ -236,12 +240,27 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 		}
 	}
 
-	unsafeAddToPool(senderInfo, newTxs, queued, func(i *MetaTx) {
+	unsafeAddToPool(senderInfo, newTxs, queued, QueuedSubPool, func(i *MetaTx) {
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
 			i.SubPool |= IsLocal
 		}
-		delete(byHash, string(i.Tx.idHash[:]))
+		byHash[string(i.Tx.idHash[:])] = i
+		replaced := senderInfo[i.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{i})
+		if replaced != nil {
+			replacedMT := replaced.(*nonce2TxItem).MetaTx
+			delete(byHash, string(replacedMT.Tx.idHash[:]))
+			switch replacedMT.currentSubPool {
+			case PendingSubPool:
+				pending.UnsafeRemove(replacedMT)
+			case BaseFeeSubPool:
+				baseFee.UnsafeRemove(replacedMT)
+			case QueuedSubPool:
+				queued.UnsafeRemove(replacedMT)
+			default:
+				//already removed
+			}
+		}
 	})
 
 	for i := range senderInfo {
@@ -267,6 +286,13 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	if err := unwindTxs.Valid(); err != nil {
+		return err
+	}
+	if err := minedTxs.Valid(); err != nil {
+		return err
+	}
+
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
@@ -295,7 +321,7 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 }
 func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInfo, txs TxSlots) {
 	for i := range txs.txs {
-		id, ok := senderIDs[string(txs.senders[i*20:(i+1)*20])]
+		id, ok := senderIDs[string(txs.senders.At(i))]
 		if !ok {
 			for i := range senderInfo { //TODO: create field for it?
 				if id < i {
@@ -303,7 +329,7 @@ func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInf
 				}
 			}
 			id++
-			senderIDs[string(txs.senders[i*20:(i+1)*20])] = id
+			senderIDs[string(txs.senders.At(i))] = id
 		}
 		txs.txs[i].senderID = id
 	}
@@ -339,17 +365,29 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	if len(unwindTxs.txs) > 0 {
-		//TODO: restore isLocal flag in unwindTxs
-		unsafeAddToPool(senderInfo, unwindTxs, pending, func(i *MetaTx) {
-			//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
-			if _, ok := localsHistory.Get(i.Tx.idHash); ok {
-				//TODO: also check if sender is in list of local-senders
-				i.SubPool |= IsLocal
+	unsafeAddToPool(senderInfo, unwindTxs, pending, PendingSubPool, func(i *MetaTx) {
+		//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
+		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
+			//TODO: also check if sender is in list of local-senders
+			i.SubPool |= IsLocal
+		}
+		byHash[string(i.Tx.idHash[:])] = i
+		replaced := senderInfo[i.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{i})
+		if replaced != nil {
+			replacedMT := replaced.(*nonce2TxItem).MetaTx
+			delete(byHash, string(replacedMT.Tx.idHash[:]))
+			switch replacedMT.currentSubPool {
+			case PendingSubPool:
+				pending.UnsafeRemove(replacedMT)
+			case BaseFeeSubPool:
+				baseFee.UnsafeRemove(replacedMT)
+			case QueuedSubPool:
+				queued.UnsafeRemove(replacedMT)
+			default:
+				//already removed
 			}
-			delete(byHash, string(i.Tx.idHash[:]))
-		})
-	}
+		}
+	})
 
 	for i := range senderInfo {
 		// TODO: aggregate changed senders before call this func
@@ -361,8 +399,8 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	queued.EnforceInvariants()
 
 	promote(pending, baseFee, queued, func(i *MetaTx) {
-		//fmt.Printf("del1 nonce: %d, %t\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce < i.Tx.nonce)
-		//fmt.Printf("del2 balance: %x,%x,%x\n", i.Tx.value, i.Tx.tip, senderInfo[i.Tx.senderID].balance)
+		//fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
+		//fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.SubPool&IsLocal != 0 {
@@ -417,7 +455,7 @@ func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending,
 }
 
 // unwind
-func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *SubPool, beforeAdd func(tx *MetaTx)) {
+func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *SubPool, subPoolType SubPoolType, beforeAdd func(tx *MetaTx)) {
 	for i, tx := range unwindTxs.txs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
@@ -432,13 +470,12 @@ func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *S
 			}
 		}
 		beforeAdd(mt)
-		sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
-		to.UnsafeAdd(mt, PendingSubPool)
+		to.UnsafeAdd(mt, subPoolType)
 	}
 }
 
 func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
-	prevNonce := -1
+	prevNonce := sender.nonce
 	accumulatedSenderSpent := uint256.NewInt(0)
 	sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 		it := i.(*nonce2TxItem)
@@ -448,23 +485,24 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		needBalance.Mul(uint256.NewInt(it.MetaTx.Tx.gas), uint256.NewInt(it.MetaTx.Tx.feeCap))
 		needBalance.Add(&it.MetaTx.NeedBalance, &it.MetaTx.Tx.value)
 		it.MetaTx.SenderHasEnoughBalance = sender.balance.Gt(needBalance) || sender.balance.Eq(needBalance)
-
 		// 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol
 		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
 		// this transaction will never be included into this particular chain.
 		it.MetaTx.SubPool &^= EnoughFeeCapProtocol
 		if it.MetaTx.Tx.feeCap >= protocolBaseFee {
-			it.MetaTx.SubPool &= EnoughFeeCapProtocol
+			//fmt.Printf("alex1: %d,%d,%d,%d\n", it.MetaTx.NeedBalance.Uint64(), it.MetaTx.Tx.gas, it.MetaTx.Tx.feeCap, it.MetaTx.Tx.value.Uint64())
+			//fmt.Printf("alex2: %d,%t\n", sender.balance.Uint64(), it.MetaTx.SenderHasEnoughBalance)
+			it.MetaTx.SubPool |= EnoughFeeCapProtocol
 		}
 
 		// 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for
 		// the sender is M, and there are transactions for all nonces between M and N from the same
 		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
 		it.MetaTx.SubPool &^= NoNonceGaps
-		if prevNonce == -1 || uint64(prevNonce)+1 == it.MetaTx.Tx.nonce {
-			it.MetaTx.SubPool &= NoNonceGaps
+		if uint64(prevNonce)+1 == it.MetaTx.Tx.nonce {
+			it.MetaTx.SubPool |= NoNonceGaps
+			prevNonce = it.Tx.nonce
 		}
-		prevNonce = int(it.Tx.nonce)
 
 		// 3. Sufficient balance for gas. Set to 1 if the balance of sender's account in the
 		// state is B, nonce of the sender in the state is M, nonce of the transaction is N, and the
@@ -472,17 +510,17 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// nonces N+1 ... M is no more than B. Set to 0 otherwise. In other words, this bit is
 		// set if there is currently a guarantee that the transaction and all its required prior
 		// transactions will be able to pay for gas.
+		accumulatedSenderSpent = accumulatedSenderSpent.Add(accumulatedSenderSpent, needBalance) // already deleted all transactions with nonce <= sender.nonce
 		it.MetaTx.SubPool &^= EnoughBalance
 		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
-			it.MetaTx.SubPool &= EnoughBalance
+			it.MetaTx.SubPool |= EnoughBalance
 		}
-		accumulatedSenderSpent.Add(accumulatedSenderSpent, needBalance) // already deleted all transactions with nonce <= sender.nonce
 
 		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
 		// baseFee of the currently pending block. Set to 0 otherwise.
 		it.MetaTx.SubPool &^= EnoughFeeCapBlock
 		if it.MetaTx.Tx.feeCap >= blockBaseFee {
-			it.MetaTx.SubPool &= EnoughFeeCapBlock
+			it.MetaTx.SubPool |= EnoughFeeCapBlock
 		}
 
 		// 5. Local transaction. Set to 1 if transaction is local.
@@ -621,13 +659,20 @@ func (p *SubPool) Add(i *MetaTx, subPoolType SubPoolType) {
 // UnsafeRemove - does break Heap invariants, but it has O(1) instead of O(log(n)) complexity.
 // Must manually call heap.Init after such changes.
 // Make sense to batch unsafe changes
-func (p *SubPool) UnsafeRemove(i *MetaTx) *MetaTx {
+func (p *SubPool) UnsafeRemove(i *MetaTx) {
+	if p.Len() == 0 {
+		return
+	}
+	if p.Len() == 1 && i.bestIndex == 0 {
+		p.worst.Pop()
+		p.best.Pop()
+		return
+	}
 	// manually call funcs instead of heap.Pop
 	p.worst.Swap(i.worstIndex, p.worst.Len()-1)
 	p.worst.Pop()
 	p.best.Swap(i.bestIndex, p.best.Len()-1)
 	p.best.Pop()
-	return i
 }
 func (p *SubPool) UnsafeAdd(i *MetaTx, subPoolType SubPoolType) {
 	i.currentSubPool = subPoolType

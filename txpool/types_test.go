@@ -63,7 +63,8 @@ func TestParseTransactionRLP(t *testing.T) {
 			require := require.New(t)
 			var err error
 			payload := decodeHex(tt.payloadStr)
-			tx, txSender, parseEnd, err := ctx.ParseTransaction(payload, 0)
+			tx, txSender := &TxSlot{}, [20]byte{}
+			parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:])
 			require.NoError(err)
 			require.Equal(len(payload), parseEnd)
 			if tt.signHashStr != "" {
