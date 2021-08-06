@@ -63,7 +63,7 @@ type TraceCallResult struct {
 	Output          hexutil.Bytes                        `json:"output"`
 	StateDiff       map[common.Address]*StateDiffAccount `json:"stateDiff"`
 	Trace           []*ParityTrace                       `json:"trace"`
-	VmTrace         *TraceCallVmTrace                    `json:"vmTrace"`
+	VmTrace         *VmTrace                             `json:"vmTrace"`
 	TransactionHash *common.Hash                         `json:"transactionHash,omitempty"`
 }
 
@@ -95,8 +95,35 @@ type StateDiffStorage struct {
 	To   common.Hash `json:"to"`
 }
 
-// TraceCallVmTrace is the part of `trace_call` response that is under "vmTrace" tag
-type TraceCallVmTrace struct {
+// VmTrace is the part of `trace_call` response that is under "vmTrace" tag
+type VmTrace struct {
+	Code hexutil.Bytes `json:"code"`
+	Ops  []VmTraceOp   `json:"ops"`
+}
+
+// VmTraceOp is one element of the vmTrace ops trace
+type VmTraceOp struct {
+	Cost int       `json:"cost"`
+	Ex   VmTraceEx `json:"ex"`
+	Pc   int       `json:"pc"`
+	Sub  *VmTrace  `json:"sub"`
+}
+
+type VmTraceEx struct {
+	Mem   *VmTraceMem   `json:"mem"`
+	Push  []string      `json:"push"`
+	Store *VmTraceStore `json:"store"`
+	Used  int           `json:"used"`
+}
+
+type VmTraceMem struct {
+	Data hexutil.Bytes `json:"data"`
+	Off  int           `json:"off"`
+}
+
+type VmTraceStore struct {
+	Key common.Hash `json:"key"`
+	Val string      `json:"val"`
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -191,7 +218,6 @@ type OeTracer struct {
 	r          *TraceCallResult
 	traceAddr  []int
 	traceStack []*ParityTrace
-	lastTop    *ParityTrace
 	precompile bool // Whether the last CaptureStart was called with `precompile = true`
 	compat     bool // Bug for bug compatibility mode
 }
@@ -275,7 +301,6 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		ot.r.Output = common.CopyBytes(output)
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	ot.lastTop = topTrace
 	ignoreError := false
 	if ot.compat {
 		ignoreError = depth == 0 && topTrace.Type == CREATE
