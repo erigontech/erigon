@@ -264,7 +264,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 		pool.senderIDs = senderIDs
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
-			//if pending.Len() > 0 || baseFee.Len() > 0 || queued.Len() > 0 {
+			//if pending.Len() > 10 && baseFee.Len() > 10 && queued.Len() > 10 {
 			//	fmt.Printf("len: %d,%d,%d\n", pending.Len(), baseFee.Len(), queued.Len())
 			//}
 

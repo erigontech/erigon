@@ -673,7 +673,6 @@ func (p *SubPool) UnsafeRemove(i *MetaTx) {
 	p.worst.Pop()
 	p.best.Swap(i.bestIndex, p.best.Len()-1)
 	p.best.Pop()
-	return
 }
 func (p *SubPool) UnsafeAdd(i *MetaTx, subPoolType SubPoolType) {
 	i.currentSubPool = subPoolType
