@@ -196,6 +196,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | trace_transaction                          | Yes     |                                            |
 |                                            |         |                                            |
 | txpool_content                             | Yes     | remote only                                |
+| txpool_status                              | Yes     | remote only                                |
 |                                            |         |                                            |
 | eth_getCompilers                           | No      | deprecated                                 |
 | eth_compileLLL                             | No      | deprecated                                 |
