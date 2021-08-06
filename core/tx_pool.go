@@ -510,6 +510,16 @@ func (pool *TxPool) Content() (map[common.Address]types.Transactions, map[common
 	return pending, queued
 }
 
+// CountContent returns the number of pending and queued transactions
+// in the transaction pool.
+func (pool *TxPool) CountContent() (pending uint, queued uint) {
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	pending = uint(len(pool.pending))
+	queued = uint(len(pool.queue))
+	return
+}
+
 // Pending retrieves all currently processable transactions, grouped by origin
 // account and sorted by nonce. The returned transaction set is a copy and can be
 // freely modified by calling code.

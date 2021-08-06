@@ -39,7 +39,7 @@ require (
 	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20210730030258-1f46e8166b35
+	github.com/ledgerwatch/erigon-lib v0.0.0-20210805134345-01813294dd83
 	github.com/ledgerwatch/log/v3 v3.2.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora v2.0.3+incompatible
@@ -70,5 +70,6 @@ require (
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
+	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	pgregory.net/rapid v0.4.6
 )
