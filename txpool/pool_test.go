@@ -19,26 +19,26 @@ package txpool
 /*
 func TestSubPoolOrder(t *testing.T) {
 	sub := NewSubPool()
-	sub.Add(&MetaTx{SubPool: 0b10101})
-	sub.Add(&MetaTx{SubPool: 0b11110})
-	sub.Add(&MetaTx{SubPool: 0b11101})
-	sub.Add(&MetaTx{SubPool: 0b10001})
-	require.Equal(t, uint8(0b11110), uint8(sub.Best().SubPool))
-	require.Equal(t, uint8(0b10001), uint8(sub.Worst().SubPool))
+	sub.Add(&metaTx{subPool: 0b10101})
+	sub.Add(&metaTx{subPool: 0b11110})
+	sub.Add(&metaTx{subPool: 0b11101})
+	sub.Add(&metaTx{subPool: 0b10001})
+	require.Equal(t, uint8(0b11110), uint8(sub.Best().subPool))
+	require.Equal(t, uint8(0b10001), uint8(sub.Worst().subPool))
 
-	require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
-	require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
+	require.Equal(t, uint8(sub.Best().subPool), uint8(sub.PopBest().subPool))
+	require.Equal(t, uint8(sub.Worst().subPool), uint8(sub.PopWorst().subPool))
 
 	sub = NewSubPool()
-	sub.Add(&MetaTx{SubPool: 0b00001})
-	sub.Add(&MetaTx{SubPool: 0b01110})
-	sub.Add(&MetaTx{SubPool: 0b01101})
-	sub.Add(&MetaTx{SubPool: 0b00101})
-	require.Equal(t, uint8(0b00001), uint8(sub.Worst().SubPool))
-	require.Equal(t, uint8(0b01110), uint8(sub.Best().SubPool))
+	sub.Add(&metaTx{subPool: 0b00001})
+	sub.Add(&metaTx{subPool: 0b01110})
+	sub.Add(&metaTx{subPool: 0b01101})
+	sub.Add(&metaTx{subPool: 0b00101})
+	require.Equal(t, uint8(0b00001), uint8(sub.Worst().subPool))
+	require.Equal(t, uint8(0b01110), uint8(sub.Best().subPool))
 
-	require.Equal(t, uint8(sub.Worst().SubPool), uint8(sub.PopWorst().SubPool))
-	require.Equal(t, uint8(sub.Best().SubPool), uint8(sub.PopBest().SubPool))
+	require.Equal(t, uint8(sub.Worst().subPool), uint8(sub.PopWorst().subPool))
+	require.Equal(t, uint8(sub.Best().subPool), uint8(sub.PopBest().subPool))
 }
 
 func TestSubPoolsPromote(t *testing.T) {
@@ -47,24 +47,24 @@ func TestSubPoolsPromote(t *testing.T) {
 	s3 := []uint8{0b11000, 0b101, 0b111}
 	pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
 	for _, i := range s1 {
-		pending.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		pending.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
 	}
 	for _, i := range s2 {
-		baseFee.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		baseFee.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
 	}
 	for _, i := range s3 {
-		queued.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111)})
+		queued.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
 	}
 	promote(pending, baseFee, queued)
 
 	if pending.Worst() != nil {
-		require.Less(t, uint8(0b01111), uint8(pending.Worst().SubPool))
+		require.Less(t, uint8(0b01111), uint8(pending.Worst().subPool))
 	}
 	if baseFee.Worst() != nil {
-		require.Less(t, uint8(0b01111), uint8(baseFee.Worst().SubPool))
+		require.Less(t, uint8(0b01111), uint8(baseFee.Worst().subPool))
 	}
 	if queued.Worst() != nil {
-		require.Less(t, uint8(0b01111), uint8(queued.Worst().SubPool))
+		require.Less(t, uint8(0b01111), uint8(queued.Worst().subPool))
 	}
 	// if limit reached, worst must be greater than X
 }
