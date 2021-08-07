@@ -15,7 +15,7 @@ service KV {
   // Tx exposes read-only transactions for the key-value store
   rpc Tx(stream Cursor) returns (stream Pair);
 
-  rpc ReceiveStateChanges(google.protobuf.Empty) returns (stream StateChange);
+  rpc StateChanges(StateChangeRequest) returns (stream StateChange);
 }
 
 enum Op {
@@ -85,4 +85,10 @@ message StateChange {
   uint64 blockHeight = 2;
   types.H256 blockHash = 3;
   repeated AccountChange changes = 4;
+  repeated bytes txs = 5;
+}
+
+message StateChangeRequest {
+  bool withStorage = 1;
+  bool withTransactions = 2;
 }
