@@ -229,8 +229,6 @@ func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
 	return p1, p2, p3, p4
 }
 
-var i, j, k int
-
 func FuzzOnNewBlocks10(f *testing.F) {
 	var u64 = [1 * 4]byte{1}
 	var sender = [1 + 1 + 1]byte{1}
@@ -238,13 +236,11 @@ func FuzzOnNewBlocks10(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 3, 4)
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, blockBaseFee1 uint8) {
-		//t.Parallel()
-		i++
-		//if protocolBaseFee1 > 4 || blockBaseFee1 > 4 {
-		//	t.Skip()
-		//}
+		t.Parallel()
+		if protocolBaseFee1 > 8 || blockBaseFee1 > 8 {
+			t.Skip()
+		}
 		protocolBaseFee, blockBaseFee := uint64(protocolBaseFee1), uint64(blockBaseFee1)
-		//protocolBaseFeeU256, blockBaseFeeU256 := uint256.NewInt(protocolBaseFee), uint256.NewInt(blockBaseFee)
 		if protocolBaseFee == 0 || blockBaseFee == 0 {
 			t.Skip()
 		}
@@ -270,8 +266,6 @@ func FuzzOnNewBlocks10(f *testing.F) {
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 			//if pending.Len() > 5 && baseFee.Len() > 5 && queued.Len() > 5 {
-			//	j++
-			//	fmt.Printf("a: %d,%d\n", i, j)
 			//	fmt.Printf("len %s: %d,%d,%d\n", msg, pending.Len(), baseFee.Len(), queued.Len())
 			//}
 
