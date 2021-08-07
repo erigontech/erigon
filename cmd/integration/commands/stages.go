@@ -890,6 +890,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		if err != nil {
 			return err
 		}
+		if err = stagedsync.UpdateMetrics(tx); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		panic(err)

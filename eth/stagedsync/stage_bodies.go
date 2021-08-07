@@ -213,9 +213,9 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
-		"number committed", committed,
-		"delivery /second", common.StorageSize(speed),
-		"wasted /second", common.StorageSize(wastedSpeed),
+		"block number", committed,
+		"delivery/sec", common.StorageSize(speed),
+		"wasted/sec", common.StorageSize(wastedSpeed),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys))
 }
