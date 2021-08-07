@@ -215,14 +215,17 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 
 // OpenEthereum-style tracer
 type OeTracer struct {
-	r          *TraceCallResult
-	traceAddr  []int
-	traceStack []*ParityTrace
-	precompile bool // Whether the last CaptureStart was called with `precompile = true`
-	compat     bool // Bug for bug compatibility mode
+	r            *TraceCallResult
+	traceAddr    []int
+	traceStack   []*ParityTrace
+	precompile   bool // Whether the last CaptureStart was called with `precompile = true`
+	compat       bool // Bug for bug compatibility mode
+	lastVmOp     *VmTraceOp
+	lastOffStack *VmTraceOp
+	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
 }
 
-func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	if precompile {
 		ot.precompile = true
 		return nil
@@ -241,6 +244,17 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	} else {
 		trace.Result = &TraceResult{}
 		trace.Type = CALL
+	}
+	if ot.r.VmTrace != nil {
+		var vmTrace *VmTrace
+		if ot.lastVmOp != nil {
+			vmTrace = &VmTrace{}
+			ot.lastVmOp.Sub = vmTrace
+			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
+		} else {
+			vmTrace = ot.r.VmTrace
+		}
+		vmTrace.Code = code
 	}
 	if depth > 0 {
 		topTrace := ot.traceStack[len(ot.traceStack)-1]
@@ -292,13 +306,19 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	return nil
 }
 
-func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	if ot.precompile {
 		ot.precompile = false
 		return nil
 	}
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
+	}
+	if ot.r.VmTrace != nil {
+		if len(ot.vmOpStack) > 0 {
+			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
+			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+		}
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	ignoreError := false
@@ -338,10 +358,10 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		switch topTrace.Type {
 		case CALL:
 			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
 		case CREATE:
 			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -352,6 +372,23 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 }
 
 func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
+	if ot.r.VmTrace != nil {
+		var vmTrace *VmTrace
+		if len(ot.vmOpStack) > 0 {
+			vmTrace = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
+		} else {
+			vmTrace = ot.r.VmTrace
+		}
+		vmTrace.Ops = append(vmTrace.Ops, VmTraceOp{})
+		ot.lastVmOp = &vmTrace.Ops[len(vmTrace.Ops)-1]
+		ot.lastVmOp.Cost = int(cost)
+		ot.lastVmOp.Pc = int(pc)
+		ot.lastVmOp.Ex.Used = int(gas) - int(cost)
+		if ot.lastOffStack != nil {
+			ot.lastOffStack.Ex.Used = int(gas)
+			ot.lastOffStack = nil
+		}
+	}
 	return nil
 }
 
@@ -949,11 +986,16 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			}
 		}
 		vmConfig := vm.Config{}
-		if traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded) {
+		if (traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded)) || traceTypeVmTrace {
 			var ot OeTracer
 			ot.compat = api.compatibility
 			ot.r = traceResult
-			ot.traceAddr = []int{}
+			if traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded) {
+				ot.traceAddr = []int{}
+			}
+			if traceTypeVmTrace {
+				traceResult.VmTrace = &VmTrace{}
+			}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
 		}
@@ -1013,9 +1055,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			}
 		}
 
-		if traceTypeVmTrace {
-			return nil, fmt.Errorf("vmTrace not implemented yet")
-		}
 		results = append(results, traceResult)
 	}
 	return results, nil

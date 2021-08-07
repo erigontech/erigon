@@ -212,11 +212,15 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}
 	}
 	p, isPrecompile := evm.precompile(addr)
+	var code []byte
+	if !isPrecompile {
+		code = evm.IntraBlockState.GetCode(addr)
+	}
 	// Capture the tracer start/end events in debug mode
 	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig(), common.Hash{})
+		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig(), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 
@@ -237,7 +241,6 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	} else {
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		code := evm.IntraBlockState.GetCode(addr)
 		if len(code) == 0 {
 			ret, err = nil, nil // gas is unchanged
 		} else {
@@ -295,11 +298,15 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		return nil, gas, ErrInsufficientBalance
 	}
 	p, isPrecompile := evm.precompile(addr)
+	var code []byte
+	if !isPrecompile {
+		code = evm.IntraBlockState.GetCode(addr)
+	}
 	// Capture the tracer start/end events in debug mode
 	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig(), common.Hash{})
+		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig(), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 	var (
@@ -320,7 +327,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(caller.Address()), value, gas, evm.Config.SkipAnalysis, isTEVM)
-			contract.SetCallCode(&addrCopy, codeHash, evm.IntraBlockState.GetCode(addrCopy))
+			contract.SetCallCode(&addrCopy, codeHash, code)
 			ret, err = run(evm, contract, input, false)
 			gas = contract.Gas
 		}
@@ -348,11 +355,15 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		return nil, gas, ErrDepth
 	}
 	p, isPrecompile := evm.precompile(addr)
+	var code []byte
+	if !isPrecompile {
+		code = evm.IntraBlockState.GetCode(addr)
+	}
 	// Capture the tracer start/end events in debug mode
 	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1), common.Hash{})
+		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 	snapshot := evm.IntraBlockState.Snapshot()
@@ -369,7 +380,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(caller.Address()), nil, gas, evm.Config.SkipAnalysis, isTEVM).AsDelegate()
-			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
+			contract.SetCallCode(&addrCopy, codeHash, code)
 			ret, err = run(evm, contract, input, false)
 			gas = contract.Gas
 		}
@@ -396,11 +407,15 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		return nil, gas, ErrDepth
 	}
 	p, isPrecompile := evm.precompile(addr)
+	var code []byte
+	if !isPrecompile {
+		code = evm.IntraBlockState.GetCode(addr)
+	}
 	// Capture the tracer start/end events in debug mode
 	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2), common.Hash{})
+		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 	// We take a snapshot here. This is a bit counter-intuitive, and could probably be skipped.
@@ -431,7 +446,7 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 
 		if err == nil {
 			contract := NewContract(caller, AccountRef(addrCopy), new(uint256.Int), gas, evm.Config.SkipAnalysis, isTEVM)
-			contract.SetCallCode(&addrCopy, evm.IntraBlockState.GetCodeHash(addrCopy), evm.IntraBlockState.GetCode(addrCopy))
+			contract.SetCallCode(&addrCopy, codeHash, code)
 			// When an error was returned by the EVM or when setting the creation code
 			// above we revert to the snapshot and consume any gas remaining. Additionally
 			// when we're in Homestead this also counts for code storage gas errors.
@@ -473,9 +488,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
 	if evm.Config.Debug || evm.Config.EnableTEMV {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig(), codeAndHash.Hash())
+		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig(), nil)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 	nonce := evm.IntraBlockState.GetNonce(caller.Address())
