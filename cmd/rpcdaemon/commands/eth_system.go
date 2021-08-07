@@ -113,7 +113,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if head := rawdb.ReadCurrentHeader(tx); head.BaseFee != nil {
+	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
 		tipcap.Add(tipcap, head.BaseFee)
 	}
 	return (*hexutil.Big)(tipcap), err
