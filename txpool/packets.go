@@ -133,6 +133,9 @@ func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hash
 	}
 	return hashes, pos, nil
 }
+
+// == Pooled transactions ==
+
 func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []byte) []byte {
 	pos := 0
 	txsRlpLen := 0
@@ -170,4 +173,46 @@ func EncodePooledTransactions65(txsRlp [][]byte, encodeBuf []byte) []byte {
 	}
 	_ = pos
 	return encodeBuf
+}
+
+func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txSlots *TxSlots) (newPos int, err error) {
+	pos, _, err = rlp.List(payload, pos)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := 0; pos < len(payload); i++ {
+		txSlots.Growth(i + 1)
+		txSlots.txs[i] = &TxSlot{}
+		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
+		if err != nil {
+			return 0, err
+		}
+	}
+	return pos, nil
+}
+
+func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txSlots *TxSlots) (requestID uint64, newPos int, err error) {
+	pos, _, err = rlp.List(payload, pos)
+	if err != nil {
+		return requestID, 0, err
+	}
+	pos, requestID, err = rlp.U64(payload, pos)
+	if err != nil {
+		return requestID, 0, err
+	}
+	pos, _, err = rlp.List(payload, pos)
+	if err != nil {
+		return requestID, 0, err
+	}
+
+	for i := 0; pos < len(payload); i++ {
+		txSlots.Growth(i + 1)
+		txSlots.txs[i] = &TxSlot{}
+		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
+		if err != nil {
+			return requestID, 0, err
+		}
+	}
+	return requestID, pos, nil
 }

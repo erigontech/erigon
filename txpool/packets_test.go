@@ -133,6 +133,15 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
 			require.Equal(tt.expectedErr, err != nil)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
+
+			ctx := NewTxParseContext()
+			slots := &TxSlots{}
+			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
+			require.NoError(err)
+			require.Equal(tt.requestId, requestId)
+			require.Equal(len(tt.txs), len(slots.txs))
+			require.Equal(fmt.Sprintf("%x", tt.txs[0]), fmt.Sprintf("%x", slots.txs[0].rlp))
+			require.Equal(fmt.Sprintf("%x", tt.txs[1]), fmt.Sprintf("%x", slots.txs[1].rlp))
 		})
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,4 +89,23 @@ func TestParseTransactionRLP(t *testing.T) {
 			require.Equal(tt.nonce, tx.nonce)
 		})
 	}
+}
+
+func TestTxSlotsGrowth(t *testing.T) {
+	assert := assert.New(t)
+	s := &TxSlots{}
+	s.Growth(11)
+	assert.Equal(11, len(s.txs))
+	assert.Equal(11, s.senders.Len())
+	s.Growth(23)
+	assert.Equal(23, len(s.txs))
+	assert.Equal(23, s.senders.Len())
+
+	s = &TxSlots{txs: make([]*TxSlot, 20), senders: make(Addresses, 20*20)}
+	s.Growth(20)
+	assert.Equal(20, len(s.txs))
+	assert.Equal(20, s.senders.Len())
+	s.Growth(23)
+	assert.Equal(23, len(s.txs))
+	assert.Equal(23, s.senders.Len())
 }

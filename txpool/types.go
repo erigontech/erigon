@@ -30,19 +30,7 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-type PeerID *types.H512
-
-type Hashes []byte // flatten list of 32-byte hashes
-
-func (h Hashes) At(i int) []byte { return h[i*32 : (i+1)*32] }
-func (h Hashes) Len() int        { return len(h) / 32 }
-
-type Addresses []byte // flatten list of 20-byte addresses
-
-func (h Addresses) At(i int) []byte { return h[i*20 : (i+1)*20] }
-func (h Addresses) Len() int        { return len(h) / 20 }
-
-// TxContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
+// TxParseContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxParseContext struct {
 	recCtx        *secp256k1.Context // Context for sender recovery
@@ -90,22 +78,6 @@ type TxSlot struct {
 	rlp []byte
 }
 
-type TxSlots struct {
-	txs     []*TxSlot
-	senders Addresses
-	isLocal []bool
-}
-
-func (s TxSlots) Valid() error {
-	if len(s.txs) != len(s.isLocal) {
-		return fmt.Errorf("TxSlots: expect equal len of isLocal=%d and txs=%d", len(s.isLocal), len(s.txs))
-	}
-	if len(s.txs) != s.senders.Len() {
-		return fmt.Errorf("TxSlots: expect equal len of senders=%d and txs=%d", s.senders.Len(), len(s.txs))
-	}
-	return nil
-}
-
 const (
 	LegacyTxType     int = 0
 	AccessListTxType int = 1
@@ -117,13 +89,25 @@ const ParseTransactionErrorPrefix = "parse transaction payload"
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
 func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte) (p int, err error) {
+	const (
+		// txSlotSize is used to calculate how many data slots a single transaction
+		// takes up based on its size. The slots are used as DoS protection, ensuring
+		// that validating a new transaction remains a constant operation (in reality
+		// O(maxslots), where max slots are 4 currently).
+		txSlotSize = 32 * 1024
+
+		// txMaxSize is the maximum size a single transaction can have. This field has
+		// non-trivial consequences: larger transactions are significantly harder and
+		// more expensive to propagate; larger transactions also take more resources
+		// to validate whether they fit into the pool or not.
+		txMaxSize = 4 * txSlotSize // 128KB
+	)
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%s: empty rlp", ParseTransactionErrorPrefix)
 	}
 	if len(sender) != 20 {
 		return 0, fmt.Errorf("%s: expect sender buffer of len 20", ParseTransactionErrorPrefix)
 	}
-	slot.rlp = payload
 	// Compute transaction hash
 	ctx.keccak1.Reset()
 	ctx.keccak2.Reset()
@@ -133,9 +117,14 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if err != nil {
 		return 0, fmt.Errorf("%s: size Prefix: %v", ParseTransactionErrorPrefix, err)
 	}
-	if dataPos+dataLen != len(payload) {
-		return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
+	if dataLen > txMaxSize {
+		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
 	}
+	slot.rlp = payload[pos : dataPos+dataLen]
+
+	//if dataPos+dataLen != len(payload) {
+	//	return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
+	//}
 	p = dataPos
 
 	var txType int
@@ -394,3 +383,43 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	copy(sender[:], ctx.buf[12:32])
 	return p, nil
 }
+
+type PeerID *types.H512
+
+type Hashes []byte // flatten list of 32-byte hashes
+
+func (h Hashes) At(i int) []byte { return h[i*32 : (i+1)*32] }
+func (h Hashes) Len() int        { return len(h) / 32 }
+
+type Addresses []byte // flatten list of 20-byte addresses
+
+func (h Addresses) At(i int) []byte { return h[i*20 : (i+1)*20] }
+func (h Addresses) Len() int        { return len(h) / 20 }
+
+type TxSlots struct {
+	txs     []*TxSlot
+	senders Addresses
+	isLocal []bool
+}
+
+func (s TxSlots) Valid() error {
+	if len(s.txs) != len(s.isLocal) {
+		return fmt.Errorf("TxSlots: expect equal len of isLocal=%d and txs=%d", len(s.isLocal), len(s.txs))
+	}
+	if len(s.txs) != s.senders.Len() {
+		return fmt.Errorf("TxSlots: expect equal len of senders=%d and txs=%d", s.senders.Len(), len(s.txs))
+	}
+	return nil
+}
+
+// Growth all internal arrays to len=targetSize. It rely on `append` algorithm of realloc
+func (s *TxSlots) Growth(targetSize int) {
+	for len(s.txs) < targetSize {
+		s.txs = append(s.txs, nil)
+	}
+	for s.senders.Len() < targetSize {
+		s.senders = append(s.senders, addressesGrowth...)
+	}
+}
+
+var addressesGrowth = make([]byte, 20)
