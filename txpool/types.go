@@ -106,6 +106,17 @@ func (s TxSlots) Valid() error {
 	return nil
 }
 
+var addressesGrowth = make([]byte, 20)
+
+func (s *TxSlots) Growth(targetSize int) {
+	for len(s.txs) < targetSize {
+		s.txs = append(s.txs, &TxSlot{})
+	}
+	for s.senders.Len() < targetSize {
+		s.senders = append(s.senders, addressesGrowth...)
+	}
+}
+
 const (
 	LegacyTxType     int = 0
 	AccessListTxType int = 1
