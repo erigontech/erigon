@@ -19,7 +19,7 @@ require (
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200721192441-a695b0cdd498
 	github.com/edsrzf/mmap-go v1.0.0
-	github.com/emicklei/dot v0.11.0
+	github.com/emicklei/dot v0.16.0
 	github.com/fatih/color v1.7.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
@@ -50,7 +50,7 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
 	github.com/rs/cors v1.8.0
 	github.com/shirou/gopsutil/v3 v3.21.6
-	github.com/spf13/cobra v1.1.3
+	github.com/spf13/cobra v1.2.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.0
 	github.com/torquem-ch/mdbx-go v0.17.0
@@ -64,12 +64,11 @@ require (
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
 	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
-	golang.org/x/tools v0.1.1
+	golang.org/x/tools v0.1.2
 	google.golang.org/grpc v1.39.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
 	pgregory.net/rapid v0.4.6
 )
