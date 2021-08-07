@@ -97,19 +97,15 @@ func TestTxSlotsGrowth(t *testing.T) {
 	s.Growth(11)
 	assert.Equal(11, len(s.txs))
 	assert.Equal(11, s.senders.Len())
-	assert.NotNil(s.txs[0])
 	s.Growth(23)
 	assert.Equal(23, len(s.txs))
 	assert.Equal(23, s.senders.Len())
-	assert.NotNil(s.txs[12])
 
 	s = &TxSlots{txs: make([]*TxSlot, 20), senders: make(Addresses, 20*20)}
 	s.Growth(20)
 	assert.Equal(20, len(s.txs))
 	assert.Equal(20, s.senders.Len())
-	assert.NotNil(s.txs[0])
 	s.Growth(23)
 	assert.Equal(23, len(s.txs))
 	assert.Equal(23, s.senders.Len())
-	assert.NotNil(s.txs[21])
 }
