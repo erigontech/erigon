@@ -24,7 +24,7 @@ type KVClient interface {
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error)
 	// Tx exposes read-only transactions for the key-value store
 	Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error)
-	ReceiveStateChanges(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (KV_ReceiveStateChangesClient, error)
+	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
 }
 
 type kVClient struct {
@@ -75,12 +75,12 @@ func (x *kVTxClient) Recv() (*Pair, error) {
 	return m, nil
 }
 
-func (c *kVClient) ReceiveStateChanges(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (KV_ReceiveStateChangesClient, error) {
-	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[1], "/remote.KV/ReceiveStateChanges", opts...)
+func (c *kVClient) StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
+	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[1], "/remote.KV/StateChanges", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &kVReceiveStateChangesClient{stream}
+	x := &kVStateChangesClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -90,16 +90,16 @@ func (c *kVClient) ReceiveStateChanges(ctx context.Context, in *emptypb.Empty, o
 	return x, nil
 }
 
-type KV_ReceiveStateChangesClient interface {
+type KV_StateChangesClient interface {
 	Recv() (*StateChange, error)
 	grpc.ClientStream
 }
 
-type kVReceiveStateChangesClient struct {
+type kVStateChangesClient struct {
 	grpc.ClientStream
 }
 
-func (x *kVReceiveStateChangesClient) Recv() (*StateChange, error) {
+func (x *kVStateChangesClient) Recv() (*StateChange, error) {
 	m := new(StateChange)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ type KVServer interface {
 	Version(context.Context, *emptypb.Empty) (*types.VersionReply, error)
 	// Tx exposes read-only transactions for the key-value store
 	Tx(KV_TxServer) error
-	ReceiveStateChanges(*emptypb.Empty, KV_ReceiveStateChangesServer) error
+	StateChanges(*StateChangeRequest, KV_StateChangesServer) error
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -129,8 +129,8 @@ func (UnimplementedKVServer) Version(context.Context, *emptypb.Empty) (*types.Ve
 func (UnimplementedKVServer) Tx(KV_TxServer) error {
 	return status.Errorf(codes.Unimplemented, "method Tx not implemented")
 }
-func (UnimplementedKVServer) ReceiveStateChanges(*emptypb.Empty, KV_ReceiveStateChangesServer) error {
-	return status.Errorf(codes.Unimplemented, "method ReceiveStateChanges not implemented")
+func (UnimplementedKVServer) StateChanges(*StateChangeRequest, KV_StateChangesServer) error {
+	return status.Errorf(codes.Unimplemented, "method StateChanges not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -189,24 +189,24 @@ func (x *kVTxServer) Recv() (*Cursor, error) {
 	return m, nil
 }
 
-func _KV_ReceiveStateChanges_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(emptypb.Empty)
+func _KV_StateChanges_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(StateChangeRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(KVServer).ReceiveStateChanges(m, &kVReceiveStateChangesServer{stream})
+	return srv.(KVServer).StateChanges(m, &kVStateChangesServer{stream})
 }
 
-type KV_ReceiveStateChangesServer interface {
+type KV_StateChangesServer interface {
 	Send(*StateChange) error
 	grpc.ServerStream
 }
 
-type kVReceiveStateChangesServer struct {
+type kVStateChangesServer struct {
 	grpc.ServerStream
 }
 
-func (x *kVReceiveStateChangesServer) Send(m *StateChange) error {
+func (x *kVStateChangesServer) Send(m *StateChange) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -230,8 +230,8 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "ReceiveStateChanges",
-			Handler:       _KV_ReceiveStateChanges_Handler,
+			StreamName:    "StateChanges",
+			Handler:       _KV_StateChanges_Handler,
 			ServerStreams: true,
 		},
 	},
