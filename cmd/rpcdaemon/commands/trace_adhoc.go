@@ -218,18 +218,20 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 
 // OpenEthereum-style tracer
 type OeTracer struct {
-	r             *TraceCallResult
-	traceAddr     []int
-	traceStack    []*ParityTrace
-	precompile    bool // Whether the last CaptureStart was called with `precompile = true`
-	compat        bool // Bug for bug compatibility mode
-	lastVmOp      *VmTraceOp
-	lastOp        vm.OpCode
-	lastMemOffset uint64
-	lastMemLen    uint64
-	lastOffStack  *VmTraceOp
-	vmOpStack     []*VmTraceOp // Stack of vmTrace operations as call depth increases
-	idx           []string     // Prefix for the "idx" inside operations, for easier nativation
+	r            *TraceCallResult
+	traceAddr    []int
+	traceStack   []*ParityTrace
+	precompile   bool // Whether the last CaptureStart was called with `precompile = true`
+	compat       bool // Bug for bug compatibility mode
+	lastVmOp     *VmTraceOp
+	lastOp       vm.OpCode
+	lastMemOff   uint64
+	lastMemLen   uint64
+	memOffStack  []uint64
+	memLenStack  []uint64
+	lastOffStack *VmTraceOp
+	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
+	idx          []string     // Prefix for the "idx" inside operations, for easier nativation
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
@@ -330,19 +332,22 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
 	}
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+			if topTrace.Type == CALL {
+				ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
+				ot.memOffStack = ot.memOffStack[:len(ot.memOffStack)-1]
+				ot.lastMemLen = ot.memLenStack[len(ot.memLenStack)-1]
+				ot.memLenStack = ot.memLenStack[:len(ot.memLenStack)-1]
+			}
 		}
 		if depth > 0 {
 			ot.idx = ot.idx[:len(ot.idx)-1]
-			if len(output) > int(ot.lastMemLen) {
-				ot.lastMemLen = uint64(len(output))
-			}
 		}
 	}
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	ignoreError := false
 	if ot.compat {
 		ignoreError = depth == 0 && topTrace.Type == CREATE
@@ -413,9 +418,10 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				showStack = int(ot.lastOp-vm.DUP1) + 2
 			}
 			switch ot.lastOp {
-			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
+			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.SDIV, vm.SAR, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
 				vm.ADD, vm.EXP, vm.CALLER, vm.SHA3, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL,
-				vm.EXTCODESIZE:
+				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
+				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -423,13 +429,13 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			}
 			// Set the "mem" of the last operation
 			switch ot.lastOp {
-			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.STATICCALL:
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
 				if ot.lastMemLen > 0 {
-					cpy := memory.GetCopy(ot.lastMemOffset, ot.lastMemLen)
+					cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
 					if len(cpy) == 0 {
 						cpy = make([]byte, ot.lastMemLen)
 					}
-					ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOffset)}
+					ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
 				}
 			}
 		}
@@ -450,6 +456,13 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		if ot.lastOffStack != nil {
 			ot.lastOffStack.Ex.Used = int(gas)
 			ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+			if ot.lastMemLen > 0 && memory != nil {
+				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				if len(cpy) == 0 {
+					cpy = make([]byte, ot.lastMemLen)
+				}
+				ot.lastOffStack.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
+			}
 			ot.lastOffStack = nil
 		}
 		if !ot.compat {
@@ -457,17 +470,20 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		}
 		switch op {
 		case vm.MSTORE, vm.MLOAD:
-			ot.lastMemOffset = st.Back(0).Uint64()
+			ot.lastMemOff = st.Back(0).Uint64()
 			ot.lastMemLen = 32
 		case vm.MSTORE8:
-			ot.lastMemOffset = st.Back(0).Uint64()
+			ot.lastMemOff = st.Back(0).Uint64()
 			ot.lastMemLen = 1
-		case vm.RETURNDATACOPY, vm.CALLDATACOPY:
-			ot.lastMemOffset = st.Back(0).Uint64()
+		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
+			ot.lastMemOff = st.Back(0).Uint64()
 			ot.lastMemLen = st.Back(2).Uint64()
-		case vm.STATICCALL:
-			ot.lastMemOffset = st.Back(4).Uint64()
-			ot.lastMemLen = st.Back(5).Uint64()
+		case vm.STATICCALL, vm.DELEGATECALL:
+			ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64())
+			ot.memLenStack = append(ot.memLenStack, st.Back(5).Uint64())
+		case vm.CALL, vm.CALLCODE:
+			ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
+			ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
 		case vm.SSTORE:
 			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
 		}
