@@ -107,6 +107,7 @@ type VmTraceOp struct {
 	Ex   VmTraceEx `json:"ex"`
 	Pc   int       `json:"pc"`
 	Sub  *VmTrace  `json:"sub"`
+	Op   string    `json:"op,omitempty"`
 }
 
 type VmTraceEx struct {
@@ -215,14 +216,17 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 
 // OpenEthereum-style tracer
 type OeTracer struct {
-	r            *TraceCallResult
-	traceAddr    []int
-	traceStack   []*ParityTrace
-	precompile   bool // Whether the last CaptureStart was called with `precompile = true`
-	compat       bool // Bug for bug compatibility mode
-	lastVmOp     *VmTraceOp
-	lastOffStack *VmTraceOp
-	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
+	r             *TraceCallResult
+	traceAddr     []int
+	traceStack    []*ParityTrace
+	precompile    bool // Whether the last CaptureStart was called with `precompile = true`
+	compat        bool // Bug for bug compatibility mode
+	lastVmOp      *VmTraceOp
+	lastOp        vm.OpCode
+	lastMemOffset uint64
+	lastMemLen    uint64
+	lastOffStack  *VmTraceOp
+	vmOpStack     []*VmTraceOp // Stack of vmTrace operations as call depth increases
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
@@ -379,14 +383,54 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		} else {
 			vmTrace = ot.r.VmTrace
 		}
+		if ot.lastVmOp != nil {
+			// Set the "push" of the last operation
+			var showStack int
+			switch {
+			case ot.lastOp >= vm.PUSH1 && ot.lastOp <= vm.PUSH32:
+				showStack = 1
+			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
+				showStack = int(ot.lastOp-vm.SWAP1) + 2
+			case ot.lastOp >= vm.DUP1 && ot.lastOp <= vm.DUP16:
+				showStack = int(ot.lastOp-vm.DUP1) + 2
+			case ot.lastOp == vm.CALLDATALOAD || ot.lastOp == vm.SLOAD || ot.lastOp == vm.MLOAD:
+				showStack = 1
+			}
+			for i := showStack - 1; i >= 0; i-- {
+				ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
+			}
+			// Set the "mem" of the last operation
+			switch ot.lastOp {
+			case vm.MSTORE, vm.MSTORE8, vm.CALLDATACOPY:
+				ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: memory.GetCopy(ot.lastMemOffset, ot.lastMemLen), Off: int(ot.lastMemOffset)}
+			}
+		}
 		vmTrace.Ops = append(vmTrace.Ops, VmTraceOp{})
 		ot.lastVmOp = &vmTrace.Ops[len(vmTrace.Ops)-1]
+		ot.lastOp = op
 		ot.lastVmOp.Cost = int(cost)
 		ot.lastVmOp.Pc = int(pc)
+		ot.lastVmOp.Ex.Push = []string{}
 		ot.lastVmOp.Ex.Used = int(gas) - int(cost)
 		if ot.lastOffStack != nil {
 			ot.lastOffStack.Ex.Used = int(gas)
 			ot.lastOffStack = nil
+		}
+		if !ot.compat {
+			ot.lastVmOp.Op = op.String()
+		}
+		switch op {
+		case vm.MSTORE:
+			ot.lastMemOffset = st.Back(0).Uint64()
+			ot.lastMemLen = 32
+		case vm.MSTORE8:
+			ot.lastMemOffset = st.Back(0).Uint64()
+			ot.lastMemLen = 1
+		case vm.CALLDATACOPY:
+			ot.lastMemOffset = st.Back(0).Uint64()
+			ot.lastMemLen = st.Back(2).Uint64()
+		case vm.SSTORE:
+			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: common.BytesToHash(st.Back(0).Bytes()), Val: st.Back(1).String()}
 		}
 	}
 	return nil
@@ -690,10 +734,6 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
-	if traceTypeVmTrace {
-		return nil, fmt.Errorf("vmTrace not implemented yet")
-	}
-
 	result := make([]*TraceCallResult, len(traces))
 	for i, trace := range traces {
 		tr := &TraceCallResult{}
@@ -778,6 +818,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 		}
 	}
+	if traceTypeVmTrace {
+		traceResult.VmTrace = &VmTrace{}
+	}
 	var ot OeTracer
 	ot.compat = api.compatibility
 	if traceTypeTrace {
@@ -830,9 +873,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
 		sd.CompareStates(initialIbs, ibs)
-	}
-	if traceTypeVmTrace {
-		return nil, fmt.Errorf("vmTrace not implemented yet")
 	}
 
 	// If the timer caused an abort, return an appropriate error message
