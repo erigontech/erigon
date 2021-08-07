@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -108,6 +109,7 @@ type VmTraceOp struct {
 	Pc   int       `json:"pc"`
 	Sub  *VmTrace  `json:"sub"`
 	Op   string    `json:"op,omitempty"`
+	Idx  string    `json:"idx,omitempty"`
 }
 
 type VmTraceEx struct {
@@ -118,13 +120,13 @@ type VmTraceEx struct {
 }
 
 type VmTraceMem struct {
-	Data hexutil.Bytes `json:"data"`
-	Off  int           `json:"off"`
+	Data string `json:"data"`
+	Off  int    `json:"off"`
 }
 
 type VmTraceStore struct {
-	Key common.Hash `json:"key"`
-	Val string      `json:"val"`
+	Key string `json:"key"`
+	Val string `json:"val"`
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -227,6 +229,7 @@ type OeTracer struct {
 	lastMemLen    uint64
 	lastOffStack  *VmTraceOp
 	vmOpStack     []*VmTraceOp // Stack of vmTrace operations as call depth increases
+	idx           []string     // Prefix for the "idx" inside operations, for easier nativation
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
@@ -251,8 +254,17 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	}
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
+		if depth > 0 {
+			var vmT *VmTrace
+			if len(ot.vmOpStack) > 0 {
+				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
+			} else {
+				vmT = ot.r.VmTrace
+			}
+			ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
+		}
 		if ot.lastVmOp != nil {
-			vmTrace = &VmTrace{}
+			vmTrace = &VmTrace{Ops: []VmTraceOp{}}
 			ot.lastVmOp.Sub = vmTrace
 			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
 		} else {
@@ -322,6 +334,12 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+		}
+		if depth > 0 {
+			ot.idx = ot.idx[:len(ot.idx)-1]
+			if len(output) > int(ot.lastMemLen) {
+				ot.lastMemLen = uint64(len(output))
+			}
 		}
 	}
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
@@ -393,7 +411,11 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				showStack = int(ot.lastOp-vm.SWAP1) + 2
 			case ot.lastOp >= vm.DUP1 && ot.lastOp <= vm.DUP16:
 				showStack = int(ot.lastOp-vm.DUP1) + 2
-			case ot.lastOp == vm.CALLDATALOAD || ot.lastOp == vm.SLOAD || ot.lastOp == vm.MLOAD:
+			}
+			switch ot.lastOp {
+			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
+				vm.ADD, vm.EXP, vm.CALLER, vm.SHA3, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL,
+				vm.EXTCODESIZE:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -401,12 +423,25 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			}
 			// Set the "mem" of the last operation
 			switch ot.lastOp {
-			case vm.MSTORE, vm.MSTORE8, vm.CALLDATACOPY:
-				ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: memory.GetCopy(ot.lastMemOffset, ot.lastMemLen), Off: int(ot.lastMemOffset)}
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.STATICCALL:
+				if ot.lastMemLen > 0 {
+					cpy := memory.GetCopy(ot.lastMemOffset, ot.lastMemLen)
+					if len(cpy) == 0 {
+						cpy = make([]byte, ot.lastMemLen)
+					}
+					ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOffset)}
+				}
 			}
 		}
 		vmTrace.Ops = append(vmTrace.Ops, VmTraceOp{})
 		ot.lastVmOp = &vmTrace.Ops[len(vmTrace.Ops)-1]
+		if !ot.compat {
+			var sb strings.Builder
+			for _, idx := range ot.idx {
+				sb.WriteString(idx)
+			}
+			ot.lastVmOp.Idx = fmt.Sprintf("%s%d", sb.String(), len(vmTrace.Ops)-1)
+		}
 		ot.lastOp = op
 		ot.lastVmOp.Cost = int(cost)
 		ot.lastVmOp.Pc = int(pc)
@@ -414,23 +449,27 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		ot.lastVmOp.Ex.Used = int(gas) - int(cost)
 		if ot.lastOffStack != nil {
 			ot.lastOffStack.Ex.Used = int(gas)
+			ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
 			ot.lastOffStack = nil
 		}
 		if !ot.compat {
 			ot.lastVmOp.Op = op.String()
 		}
 		switch op {
-		case vm.MSTORE:
+		case vm.MSTORE, vm.MLOAD:
 			ot.lastMemOffset = st.Back(0).Uint64()
 			ot.lastMemLen = 32
 		case vm.MSTORE8:
 			ot.lastMemOffset = st.Back(0).Uint64()
 			ot.lastMemLen = 1
-		case vm.CALLDATACOPY:
+		case vm.RETURNDATACOPY, vm.CALLDATACOPY:
 			ot.lastMemOffset = st.Back(0).Uint64()
 			ot.lastMemLen = st.Back(2).Uint64()
+		case vm.STATICCALL:
+			ot.lastMemOffset = st.Back(4).Uint64()
+			ot.lastMemLen = st.Back(5).Uint64()
 		case vm.SSTORE:
-			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: common.BytesToHash(st.Back(0).Bytes()), Val: st.Back(1).String()}
+			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
 		}
 	}
 	return nil
@@ -819,11 +858,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 	if traceTypeVmTrace {
-		traceResult.VmTrace = &VmTrace{}
+		traceResult.VmTrace = &VmTrace{Ops: []VmTraceOp{}}
 	}
 	var ot OeTracer
 	ot.compat = api.compatibility
-	if traceTypeTrace {
+	if traceTypeTrace || traceTypeVmTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
 	}
@@ -1030,11 +1069,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			var ot OeTracer
 			ot.compat = api.compatibility
 			ot.r = traceResult
+			ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 			if traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded) {
 				ot.traceAddr = []int{}
 			}
 			if traceTypeVmTrace {
-				traceResult.VmTrace = &VmTrace{}
+				traceResult.VmTrace = &VmTrace{Ops: []VmTraceOp{}}
 			}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
@@ -1094,7 +1134,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				return nil, err
 			}
 		}
-
+		if !traceTypeTrace {
+			traceResult.Trace = []*ParityTrace{}
+		}
 		results = append(results, traceResult)
 	}
 	return results, nil
