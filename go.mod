@@ -4,15 +4,13 @@ go 1.16
 
 require (
 	github.com/RoaringBitmap/roaring v0.6.0
-	github.com/VictoriaMetrics/fastcache v1.6.0
+	github.com/VictoriaMetrics/fastcache v1.5.7
 	github.com/VictoriaMetrics/metrics v1.17.3
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
-	github.com/aws/aws-sdk-go v1.34.21
-	github.com/blend/go-sdk v1.20210428.4 // indirect
+	github.com/blend/go-sdk v1.20210806.4 // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
-	github.com/cloudflare/cloudflare-go v0.13.2
 	github.com/consensys/gurvy v0.3.8
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
@@ -23,7 +21,7 @@ require (
 	github.com/fatih/color v1.7.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
-	github.com/goccy/go-json v0.4.11
+	github.com/goccy/go-json v0.7.4
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/golang/snappy v0.0.3
@@ -31,7 +29,6 @@ require (
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/gorilla/websocket v1.4.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
 	github.com/holiman/uint256 v1.2.0
 	github.com/huin/goupnp v1.0.1-0.20210626160114-33cdcbb30dda
@@ -45,7 +42,6 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/pelletier/go-toml v1.9.3
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
-	github.com/prometheus/client_golang v1.9.0 // indirect
 	github.com/prometheus/tsdb v0.10.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
 	github.com/rs/cors v1.8.0

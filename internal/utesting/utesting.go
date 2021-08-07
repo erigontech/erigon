@@ -175,7 +175,7 @@ func (t *tapOutput) testResult(r Result) {
 		status = "not ok"
 	}
 	fmt.Fprintln(t.out, status, t.counter, r.Name)
-	t.indented.Write([]byte(r.Output)) //nolint:errcheck
+	t.indented.Write([]byte(r.Output))
 	t.indented.flush()
 }
 
@@ -201,16 +201,16 @@ func (w *indentWriter) Write(b []byte) (n int, err error) {
 
 		end := bytes.IndexByte(b, '\n')
 		if end == -1 {
-			nn, err1 := w.out.Write(b)
+			nn, err := w.out.Write(b)
 			n += nn
-			return n, err1
+			return n, err
 		}
 
 		line := b[:end+1]
-		nn, err1 := w.out.Write(line)
+		nn, err := w.out.Write(line)
 		n += nn
 		if err != nil {
-			return n, err1
+			return n, err
 		}
 		b = b[end+1:]
 		w.inLine = false
