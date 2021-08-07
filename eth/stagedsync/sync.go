@@ -23,6 +23,7 @@ type Sync struct {
 	pruningOrder []*Stage
 	currentStage uint
 	timings      []Timing
+	logPrefixes  []string
 }
 type Timing struct {
 	isUnwind bool
@@ -117,7 +118,7 @@ func (s *Sync) LogPrefix() string {
 	if s == nil {
 		return ""
 	}
-	return fmt.Sprintf("%d/%d %s", s.currentStage+1, s.Len(), s.stages[s.currentStage].ID)
+	return s.logPrefixes[s.currentStage]
 }
 
 func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
@@ -149,12 +150,17 @@ func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder) *S
 			}
 		}
 	}
+	logPrefixes := make([]string, len(stagesList))
+	for i := range stagesList {
+		logPrefixes[i] = fmt.Sprintf("%d/%d %s", i+1, len(stagesList), stagesList[i].ID)
+	}
 
 	return &Sync{
 		stages:       stagesList,
 		currentStage: 0,
 		unwindOrder:  unwindStages,
 		pruningOrder: pruneStages,
+		logPrefixes:  logPrefixes,
 	}
 }
 

@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1627480859250,
+  "iteration": 1628303488982,
   "links": [],
   "panels": [
     {
@@ -84,7 +84,7 @@
       "options": {
         "legend": {
           "calcs": [
-            "lastNotNull"
+            "last"
           ],
           "displayMode": "list",
           "placement": "bottom"
@@ -96,17 +96,18 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "stage_execution{instance=~\"$instance\"}",
+          "exemplar": true,
+          "expr": "sync{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "execution: {{instance}}",
+          "legendFormat": "{{ stage }}: {{instance}}",
           "refId": "A"
         }
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Block Execution progress",
+      "title": "Sync Stages progress",
       "type": "timeseries"
     },
     {
@@ -174,8 +175,7 @@
       "options": {
         "legend": {
           "calcs": [
-            "mean",
-            "lastNotNull"
+            "mean"
           ],
           "displayMode": "list",
           "placement": "bottom"
@@ -187,17 +187,18 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "expr": "rate(stage_execution{instance=~\"$instance\"}[5m])",
+          "exemplar": true,
+          "expr": "rate(sync{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
-          "legendFormat": "execution:  {{instance}}",
+          "legendFormat": "{{ stage }}:  {{instance}}",
           "refId": "A"
         }
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "Blocks Execution rate",
+      "title": "Sync Stages progress rate",
       "type": "timeseries"
     },
     {
@@ -4277,13 +4278,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": [
-            "turbogeth16d.weblogix.it:6060"
-          ],
-          "value": [
-            "turbogeth16d.weblogix.it:6060"
-          ]
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": "Prometheus",
         "definition": "go_goroutines",
@@ -4314,8 +4311,8 @@
         "auto_min": "10s",
         "current": {
           "selected": false,
-          "text": "10m",
-          "value": "10m"
+          "text": "1m",
+          "value": "1m"
         },
         "description": null,
         "error": null,
@@ -4325,6 +4322,11 @@
         "options": [
           {
             "selected": true,
+            "text": "1m",
+            "value": "1m"
+          },
+          {
+            "selected": false,
             "text": "10m",
             "value": "10m"
           },
@@ -4374,7 +4376,7 @@
             "value": "30d"
           }
         ],
-        "query": "10m,30m,1h,3h,6h,12h,1d,7d,14d,30d",
+        "query": "1m,10m,30m,1h,3h,6h,12h,1d,7d,14d,30d",
         "queryValue": "",
         "refresh": 2,
         "skipUrlSync": false,
@@ -4413,5 +4415,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 10
+  "version": 7
 }
