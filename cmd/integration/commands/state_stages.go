@@ -551,7 +551,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 		return err
 	}
 	if expectedAccountChanges.Len() != i {
-		return fmt.Errorf("db has less changets")
+		return fmt.Errorf("db has less changesets")
 	}
 	if expectedStorageChanges == nil {
 		expectedStorageChanges = changeset.NewChangeSet()
@@ -577,7 +577,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 		return err
 	}
 	if expectedStorageChanges.Len() != i {
-		return fmt.Errorf("db has less changets")
+		return fmt.Errorf("db has less changesets")
 	}
 
 	return nil

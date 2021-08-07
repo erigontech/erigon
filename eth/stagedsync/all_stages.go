@@ -7,9 +7,9 @@ import (
 )
 
 var syncMetrics = map[stages.SyncStage]*metrics.Counter{
-	stages.Headers:   metrics.GetOrCreateCounter("sync{stage=headers}"),
-	stages.Execution: metrics.GetOrCreateCounter("sync{stage=execution}"),
-	stages.Finish:    metrics.GetOrCreateCounter("sync{stage=finish}"),
+	stages.Headers:   metrics.GetOrCreateCounter(`sync{stage="headers"}`),
+	stages.Execution: metrics.GetOrCreateCounter(`sync{stage="execution"}`),
+	stages.Finish:    metrics.GetOrCreateCounter(`sync{stage="finish"}`),
 }
 
 // UpdateMetrics - need update metrics manually because current "metrics" package doesn't support labels
