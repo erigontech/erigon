@@ -144,16 +144,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		// to validate whether they fit into the pool or not.
 		txMaxSize = 4 * txSlotSize // 128KB
 	)
-	if len(payload) > txMaxSize {
-		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
-	}
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%s: empty rlp", ParseTransactionErrorPrefix)
 	}
 	if len(sender) != 20 {
 		return 0, fmt.Errorf("%s: expect sender buffer of len 20", ParseTransactionErrorPrefix)
 	}
-	slot.rlp = payload
 	// Compute transaction hash
 	ctx.keccak1.Reset()
 	ctx.keccak2.Reset()
@@ -163,9 +159,14 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if err != nil {
 		return 0, fmt.Errorf("%s: size Prefix: %v", ParseTransactionErrorPrefix, err)
 	}
-	if dataPos+dataLen != len(payload) {
-		return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
+	if dataLen > txMaxSize {
+		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
 	}
+	slot.rlp = payload[pos : dataPos+dataLen]
+
+	//if dataPos+dataLen != len(payload) {
+	//	return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
+	//}
 	p = dataPos
 
 	var txType int

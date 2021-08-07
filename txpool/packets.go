@@ -181,8 +181,8 @@ func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txS
 		return 0, err
 	}
 
-	for i := 0; pos != len(payload); i++ {
-		txSlots.Growth(i)
+	for i := 0; pos < len(payload); i++ {
+		txSlots.Growth(i + 1)
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			return 0, err
@@ -205,8 +205,8 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txS
 		return requestID, 0, err
 	}
 
-	for i := 0; pos != len(payload); i++ {
-		txSlots.Growth(i)
+	for i := 0; pos < len(payload); i++ {
+		txSlots.Growth(i + 1)
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			return requestID, 0, err
