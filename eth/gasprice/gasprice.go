@@ -104,7 +104,7 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 	}
 }
 
-// SuggestPrice returns a TipCap so that newly created transaction can
+// SuggestTipCap returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
 // NODE: if caller wants legacy tx SuggestedPrice, we need to add
 // baseFee to the returned bigInt
