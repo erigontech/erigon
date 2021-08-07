@@ -20,6 +20,7 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -56,21 +57,20 @@ const (
 	IsLocal              = 0b00001
 )
 
-// MetaTx holds transaction and some metadata
-type MetaTx struct {
-	SubPool                SubPoolMarker // Aggregated field
-	NeedBalance            uint256.Int   // Aggregated field; gasLimit x feeCap + transferred_value
-	SenderHasEnoughBalance bool          // Aggregated field; gasLimit x feeCap + transferred_value
-	Tx                     *TxSlot
-	bestIndex              int
-	worstIndex             int
-	currentSubPool         SubPoolType
+// metaTx holds transaction and some metadata
+type metaTx struct {
+	subPool        SubPoolMarker
+	effectiveTip   uint64 // max(minTip, minFeeCap - baseFee)
+	Tx             *TxSlot
+	bestIndex      int
+	worstIndex     int
+	currentSubPool SubPoolType
 }
 
-func newMetaTx(slot *TxSlot, isLocal bool) *MetaTx {
-	mt := &MetaTx{Tx: slot, worstIndex: -1, bestIndex: -1}
+func newMetaTx(slot *TxSlot, isLocal bool) *metaTx {
+	mt := &metaTx{Tx: slot, worstIndex: -1, bestIndex: -1}
 	if isLocal {
-		mt.SubPool = IsLocal
+		mt.subPool = IsLocal
 	}
 	return mt
 }
@@ -90,7 +90,7 @@ type nonce2Tx struct{ *btree.BTree }
 type senderInfo struct {
 	balance    uint256.Int
 	nonce      uint64
-	txNonce2Tx *nonce2Tx // sorted map of nonce => *MetaTx
+	txNonce2Tx *nonce2Tx // sorted map of nonce => *metaTx
 }
 
 //nolint
@@ -98,10 +98,10 @@ func newSenderInfo(nonce uint64, balance uint256.Int) *senderInfo {
 	return &senderInfo{nonce: nonce, balance: balance, txNonce2Tx: &nonce2Tx{btree.New(32)}}
 }
 
-type nonce2TxItem struct{ *MetaTx }
+type nonce2TxItem struct{ *metaTx }
 
 func (i *nonce2TxItem) Less(than btree.Item) bool {
-	return i.MetaTx.Tx.nonce < than.(*nonce2TxItem).MetaTx.Tx.nonce
+	return i.metaTx.Tx.nonce < than.(*nonce2TxItem).metaTx.Tx.nonce
 }
 
 // TxPool - holds all pool-related data structures and lock-based tiny methods
@@ -114,7 +114,7 @@ type TxPool struct {
 
 	senderIDs                map[string]uint64
 	senderInfo               map[uint64]*senderInfo
-	byHash                   map[string]*MetaTx // tx_hash => tx
+	byHash                   map[string]*metaTx // tx_hash => tx
 	pending, baseFee, queued *SubPool
 
 	// track isLocal flag of already mined transactions. used at unwind.
@@ -131,7 +131,7 @@ func New(newTxs chan Hashes) *TxPool {
 	return &TxPool{
 		lock:                   &sync.RWMutex{},
 		senderInfo:             map[uint64]*senderInfo{},
-		byHash:                 map[string]*MetaTx{},
+		byHash:                 map[string]*metaTx{},
 		localsHistory:          localsHistory,
 		recentlyConnectedPeers: &recentlyConnectedPeers{},
 		pending:                NewSubPool(),
@@ -156,7 +156,7 @@ func (p *TxPool) AppendLocalHashes(buf []byte) {
 	defer p.lock.RUnlock()
 	i := 0
 	for hash, txn := range p.byHash {
-		if txn.SubPool&IsLocal == 0 {
+		if txn.subPool&IsLocal == 0 {
 			continue
 		}
 		copy(buf[i*32:(i+1)*32], hash)
@@ -169,7 +169,7 @@ func (p *TxPool) AppendRemoteHashes(buf []byte) {
 
 	i := 0
 	for hash, txn := range p.byHash {
-		if txn.SubPool&IsLocal != 0 {
+		if txn.subPool&IsLocal != 0 {
 			continue
 		}
 		copy(buf[i*32:(i+1)*32], hash)
@@ -195,7 +195,7 @@ func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 	if !ok {
 		return false
 	}
-	return txn.SubPool&IsLocal != 0
+	return txn.subPool&IsLocal != 0
 }
 func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 
@@ -233,22 +233,22 @@ func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
 
 	return nil
 }
-func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) error {
+func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *lru.Cache) error {
 	for i := range newTxs.txs {
 		if newTxs.txs[i].senderID == 0 {
 			return fmt.Errorf("senderID can't be zero")
 		}
 	}
 
-	unsafeAddToPool(senderInfo, newTxs, queued, QueuedSubPool, func(i *MetaTx) {
+	unsafeAddToPool(senderInfo, newTxs, queued, QueuedSubPool, func(i *metaTx) {
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
-			i.SubPool |= IsLocal
+			i.subPool |= IsLocal
 		}
 		byHash[string(i.Tx.idHash[:])] = i
 		replaced := senderInfo[i.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{i})
 		if replaced != nil {
-			replacedMT := replaced.(*nonce2TxItem).MetaTx
+			replacedMT := replaced.(*nonce2TxItem).metaTx
 			delete(byHash, string(replacedMT.Tx.idHash[:]))
 			switch replacedMT.currentSubPool {
 			case PendingSubPool:
@@ -272,10 +272,10 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 	baseFee.EnforceInvariants()
 	queued.EnforceInvariants()
 
-	promote(pending, baseFee, queued, func(i *MetaTx) {
+	promote(pending, baseFee, queued, func(i *metaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
-		if i.SubPool&IsLocal != 0 {
+		if i.subPool&IsLocal != 0 {
 			//TODO: only add to history if sender is not in list of local-senders
 			localsHistory.Add(i.Tx.idHash, struct{}{})
 		}
@@ -335,7 +335,7 @@ func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInf
 	}
 }
 
-func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*MetaTx, localsHistory *lru.Cache) error {
+func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *lru.Cache) error {
 	for i := range unwindTxs.txs {
 		if unwindTxs.txs[i].senderID == 0 {
 			return fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero")
@@ -347,10 +347,10 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 		}
 	}
 
-	removeMined(senderInfo, minedTxs, pending, baseFee, queued, func(i *MetaTx) {
+	removeMined(senderInfo, minedTxs, pending, baseFee, queued, func(i *metaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
-		if i.SubPool&IsLocal != 0 {
+		if i.subPool&IsLocal != 0 {
 			//TODO: only add to history if sender is not in list of local-senders
 			localsHistory.Add(i.Tx.idHash, struct{}{})
 		}
@@ -365,16 +365,16 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	unsafeAddToPool(senderInfo, unwindTxs, pending, PendingSubPool, func(i *MetaTx) {
+	unsafeAddToPool(senderInfo, unwindTxs, pending, PendingSubPool, func(i *metaTx) {
 		//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
-			i.SubPool |= IsLocal
+			i.subPool |= IsLocal
 		}
 		byHash[string(i.Tx.idHash[:])] = i
 		replaced := senderInfo[i.Tx.senderID].txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{i})
 		if replaced != nil {
-			replacedMT := replaced.(*nonce2TxItem).MetaTx
+			replacedMT := replaced.(*nonce2TxItem).metaTx
 			delete(byHash, string(replacedMT.Tx.idHash[:]))
 			switch replacedMT.currentSubPool {
 			case PendingSubPool:
@@ -398,12 +398,12 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 	baseFee.EnforceInvariants()
 	queued.EnforceInvariants()
 
-	promote(pending, baseFee, queued, func(i *MetaTx) {
+	promote(pending, baseFee, queued, func(i *metaTx) {
 		//fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
 		//fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
-		if i.SubPool&IsLocal != 0 {
+		if i.subPool&IsLocal != 0 {
 			//TODO: only add to history if sender is not in list of local-senders
 			localsHistory.Add(i.Tx.idHash, struct{}{})
 		}
@@ -419,7 +419,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
+func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending, baseFee, queued *SubPool, discard func(tx *metaTx)) {
 	for _, tx := range minedTxs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
@@ -428,7 +428,7 @@ func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending,
 		// delete mined transactions from everywhere
 		sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 			it := i.(*nonce2TxItem)
-			if it.MetaTx.Tx.nonce > sender.nonce {
+			if it.metaTx.Tx.nonce > sender.nonce {
 				return false
 			}
 			// TODO: save local transactions to cache with TTL, in case of re-org - to restore isLocal flag of re-injected transactions
@@ -436,16 +436,16 @@ func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending,
 			// del from nonce2tx mapping
 			sender.txNonce2Tx.Delete(i)
 			// del from sub-pool
-			switch it.MetaTx.currentSubPool {
+			switch it.metaTx.currentSubPool {
 			case PendingSubPool:
-				pending.UnsafeRemove(it.MetaTx)
-				discard(it.MetaTx)
+				pending.UnsafeRemove(it.metaTx)
+				discard(it.metaTx)
 			case BaseFeeSubPool:
-				baseFee.UnsafeRemove(it.MetaTx)
-				discard(it.MetaTx)
+				baseFee.UnsafeRemove(it.metaTx)
+				discard(it.metaTx)
 			case QueuedSubPool:
-				queued.UnsafeRemove(it.MetaTx)
-				discard(it.MetaTx)
+				queued.UnsafeRemove(it.metaTx)
+				discard(it.metaTx)
 			default:
 				//already removed
 			}
@@ -455,7 +455,7 @@ func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending,
 }
 
 // unwind
-func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *SubPool, subPoolType SubPoolType, beforeAdd func(tx *MetaTx)) {
+func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *SubPool, subPoolType SubPoolType, beforeAdd func(tx *metaTx)) {
 	for i, tx := range unwindTxs.txs {
 		sender, ok := senderInfo[tx.senderID]
 		if !ok {
@@ -465,7 +465,7 @@ func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *S
 		mt := newMetaTx(tx, unwindTxs.isLocal[i])
 		// Insert to pending pool, if pool doesn't have tx with same Nonce and bigger Tip
 		if found := sender.txNonce2Tx.Get(&nonce2TxItem{mt}); found != nil {
-			if tx.tip <= found.(*nonce2TxItem).MetaTx.Tx.tip {
+			if tx.tip <= found.(*nonce2TxItem).metaTx.Tx.tip {
 				continue
 			}
 		}
@@ -476,31 +476,39 @@ func unsafeAddToPool(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, to *S
 
 func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 	prevNonce := sender.nonce
-	accumulatedSenderSpent := uint256.NewInt(0)
+	cumulativeRequiredBalance := uint256.NewInt(0)
+	minFeeCap := uint64(math.MaxUint64)
+	minTip := uint64(math.MaxUint64)
 	sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 		it := i.(*nonce2TxItem)
 
 		// Sender has enough balance for: gasLimit x feeCap + transferred_value
-		needBalance := (&it.MetaTx.NeedBalance).SetUint64(0)
-		needBalance.Mul(uint256.NewInt(it.MetaTx.Tx.gas), uint256.NewInt(it.MetaTx.Tx.feeCap))
-		needBalance.Add(&it.MetaTx.NeedBalance, &it.MetaTx.Tx.value)
-		it.MetaTx.SenderHasEnoughBalance = sender.balance.Gt(needBalance) || sender.balance.Eq(needBalance)
+		needBalance := uint256.NewInt(it.metaTx.Tx.gas)
+		needBalance.Mul(needBalance, uint256.NewInt(it.metaTx.Tx.feeCap))
+		needBalance.Add(needBalance, &it.metaTx.Tx.value)
+		minFeeCap = min(minFeeCap, it.metaTx.Tx.feeCap)
+		minTip = min(minTip, it.metaTx.Tx.tip)
+		if blockBaseFee >= minFeeCap {
+			it.metaTx.effectiveTip = minTip
+		} else {
+			it.metaTx.effectiveTip = minFeeCap - blockBaseFee
+		}
 		// 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol
 		// parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means
 		// this transaction will never be included into this particular chain.
-		it.MetaTx.SubPool &^= EnoughFeeCapProtocol
-		if it.MetaTx.Tx.feeCap >= protocolBaseFee {
-			//fmt.Printf("alex1: %d,%d,%d,%d\n", it.MetaTx.NeedBalance.Uint64(), it.MetaTx.Tx.gas, it.MetaTx.Tx.feeCap, it.MetaTx.Tx.value.Uint64())
-			//fmt.Printf("alex2: %d,%t\n", sender.balance.Uint64(), it.MetaTx.SenderHasEnoughBalance)
-			it.MetaTx.SubPool |= EnoughFeeCapProtocol
+		it.metaTx.subPool &^= EnoughFeeCapProtocol
+		if it.metaTx.Tx.feeCap >= protocolBaseFee {
+			//fmt.Printf("alex1: %d,%d,%d,%d\n", it.metaTx.NeedBalance.Uint64(), it.metaTx.Tx.gas, it.metaTx.Tx.feeCap, it.metaTx.Tx.value.Uint64())
+			//fmt.Printf("alex2: %d,%t\n", sender.balance.Uint64(), it.metaTx.SenderHasEnoughBalance)
+			it.metaTx.subPool |= EnoughFeeCapProtocol
 		}
 
 		// 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for
 		// the sender is M, and there are transactions for all nonces between M and N from the same
 		// sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
-		it.MetaTx.SubPool &^= NoNonceGaps
-		if uint64(prevNonce)+1 == it.MetaTx.Tx.nonce {
-			it.MetaTx.SubPool |= NoNonceGaps
+		it.metaTx.subPool &^= NoNonceGaps
+		if uint64(prevNonce)+1 == it.metaTx.Tx.nonce {
+			it.metaTx.subPool |= NoNonceGaps
 			prevNonce = it.Tx.nonce
 		}
 
@@ -510,17 +518,17 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 		// nonces N+1 ... M is no more than B. Set to 0 otherwise. In other words, this bit is
 		// set if there is currently a guarantee that the transaction and all its required prior
 		// transactions will be able to pay for gas.
-		accumulatedSenderSpent = accumulatedSenderSpent.Add(accumulatedSenderSpent, needBalance) // already deleted all transactions with nonce <= sender.nonce
-		it.MetaTx.SubPool &^= EnoughBalance
-		if sender.balance.Gt(accumulatedSenderSpent) || sender.balance.Eq(accumulatedSenderSpent) {
-			it.MetaTx.SubPool |= EnoughBalance
+		cumulativeRequiredBalance = cumulativeRequiredBalance.Add(cumulativeRequiredBalance, needBalance) // already deleted all transactions with nonce <= sender.nonce
+		it.metaTx.subPool &^= EnoughBalance
+		if sender.balance.Gt(cumulativeRequiredBalance) || sender.balance.Eq(cumulativeRequiredBalance) {
+			it.metaTx.subPool |= EnoughBalance
 		}
 
 		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
 		// baseFee of the currently pending block. Set to 0 otherwise.
-		it.MetaTx.SubPool &^= EnoughFeeCapBlock
-		if it.MetaTx.Tx.feeCap >= blockBaseFee {
-			it.MetaTx.SubPool |= EnoughFeeCapBlock
+		it.metaTx.subPool &^= EnoughFeeCapBlock
+		if it.metaTx.Tx.feeCap >= blockBaseFee {
+			it.metaTx.subPool |= EnoughFeeCapBlock
 		}
 
 		// 5. Local transaction. Set to 1 if transaction is local.
@@ -530,68 +538,68 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, blockBaseFee uint64) {
 	})
 }
 
-func promote(pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
-	//1. If top element in the worst green queue has SubPool != 0b1111 (binary), it needs to be removed from the green pool.
-	//   If SubPool < 0b1000 (not satisfying minimum fee), discard.
-	//   If SubPool == 0b1110, demote to the yellow pool, otherwise demote to the red pool.
+func promote(pending, baseFee, queued *SubPool, discard func(tx *metaTx)) {
+	//1. If top element in the worst green queue has subPool != 0b1111 (binary), it needs to be removed from the green pool.
+	//   If subPool < 0b1000 (not satisfying minimum fee), discard.
+	//   If subPool == 0b1110, demote to the yellow pool, otherwise demote to the red pool.
 	for worst := pending.Worst(); pending.Len() > 0; worst = pending.Worst() {
-		if worst.SubPool >= 0b11110 {
+		if worst.subPool >= 0b11110 {
 			break
 		}
-		if worst.SubPool >= 0b11100 {
+		if worst.subPool >= 0b11100 {
 			baseFee.Add(pending.PopWorst(), BaseFeeSubPool)
 			continue
 		}
-		if worst.SubPool >= 0b10000 {
+		if worst.subPool >= 0b10000 {
 			queued.Add(pending.PopWorst(), QueuedSubPool)
 			continue
 		}
 		discard(pending.PopWorst())
 	}
 
-	//2. If top element in the worst green queue has SubPool == 0b1111, but there is not enough room in the pool, discard.
+	//2. If top element in the worst green queue has subPool == 0b1111, but there is not enough room in the pool, discard.
 	for worst := pending.Worst(); pending.Len() > PendingSubPoolLimit; worst = pending.Worst() {
-		if worst.SubPool >= 0b11111 { // TODO: here must 'SubPool == 0b1111' or 'SubPool <= 0b1111' ?
+		if worst.subPool >= 0b11111 { // TODO: here must 'subPool == 0b1111' or 'subPool <= 0b1111' ?
 			break
 		}
 		pending.PopWorst()
 	}
 
-	//3. If the top element in the best yellow queue has SubPool == 0b1111, promote to the green pool.
+	//3. If the top element in the best yellow queue has subPool == 0b1111, promote to the green pool.
 	for best := baseFee.Best(); baseFee.Len() > 0; best = baseFee.Best() {
-		if best.SubPool < 0b11110 {
+		if best.subPool < 0b11110 {
 			break
 		}
 		pending.Add(baseFee.PopBest(), PendingSubPool)
 	}
 
-	//4. If the top element in the worst yellow queue has SubPool != 0x1110, it needs to be removed from the yellow pool.
-	//   If SubPool < 0b1000 (not satisfying minimum fee), discard. Otherwise, demote to the red pool.
+	//4. If the top element in the worst yellow queue has subPool != 0x1110, it needs to be removed from the yellow pool.
+	//   If subPool < 0b1000 (not satisfying minimum fee), discard. Otherwise, demote to the red pool.
 	for worst := baseFee.Worst(); baseFee.Len() > 0; worst = baseFee.Worst() {
-		if worst.SubPool >= 0b11100 {
+		if worst.subPool >= 0b11100 {
 			break
 		}
-		if worst.SubPool >= 0b10000 {
+		if worst.subPool >= 0b10000 {
 			queued.Add(baseFee.PopWorst(), QueuedSubPool)
 			continue
 		}
 		discard(baseFee.PopWorst())
 	}
 
-	//5. If the top element in the worst yellow queue has SubPool == 0x1110, but there is not enough room in the pool, discard.
+	//5. If the top element in the worst yellow queue has subPool == 0x1110, but there is not enough room in the pool, discard.
 	for worst := baseFee.Worst(); baseFee.Len() > BaseFeeSubPoolLimit; worst = baseFee.Worst() {
-		if worst.SubPool >= 0b11110 {
+		if worst.subPool >= 0b11110 {
 			break
 		}
 		discard(baseFee.PopWorst())
 	}
 
-	//6. If the top element in the best red queue has SubPool == 0x1110, promote to the yellow pool. If SubPool == 0x1111, promote to the green pool.
+	//6. If the top element in the best red queue has subPool == 0x1110, promote to the yellow pool. If subPool == 0x1111, promote to the green pool.
 	for best := queued.Best(); queued.Len() > 0; best = queued.Best() {
-		if best.SubPool < 0b11100 {
+		if best.subPool < 0b11100 {
 			break
 		}
-		if best.SubPool < 0b11110 {
+		if best.subPool < 0b11110 {
 			baseFee.Add(queued.PopBest(), BaseFeeSubPool)
 			continue
 		}
@@ -599,16 +607,16 @@ func promote(pending, baseFee, queued *SubPool, discard func(tx *MetaTx)) {
 		pending.Add(queued.PopBest(), PendingSubPool)
 	}
 
-	//7. If the top element in the worst red queue has SubPool < 0b1000 (not satisfying minimum fee), discard.
+	//7. If the top element in the worst red queue has subPool < 0b1000 (not satisfying minimum fee), discard.
 	for worst := queued.Worst(); queued.Len() > 0; worst = queued.Worst() {
-		if worst.SubPool >= 0b10000 {
+		if worst.subPool >= 0b10000 {
 			break
 		}
 
 		discard(queued.PopWorst())
 	}
 
-	//8. If the top element in the worst red queue has SubPool >= 0b100, but there is not enough room in the pool, discard.
+	//8. If the top element in the worst red queue has subPool >= 0b100, but there is not enough room in the pool, discard.
 	for _ = queued.Worst(); queued.Len() > QueuedSubPoolLimit; _ = queued.Worst() {
 		discard(queued.PopWorst())
 	}
@@ -627,30 +635,30 @@ func (p *SubPool) EnforceInvariants() {
 	heap.Init(p.worst)
 	heap.Init(p.best)
 }
-func (p *SubPool) Best() *MetaTx {
+func (p *SubPool) Best() *metaTx {
 	if len(*p.best) == 0 {
 		return nil
 	}
 	return (*p.best)[0]
 }
-func (p *SubPool) Worst() *MetaTx {
+func (p *SubPool) Worst() *metaTx {
 	if len(*p.worst) == 0 {
 		return nil
 	}
 	return (*p.worst)[0]
 }
-func (p *SubPool) PopBest() *MetaTx {
-	i := heap.Pop(p.best).(*MetaTx)
+func (p *SubPool) PopBest() *metaTx {
+	i := heap.Pop(p.best).(*metaTx)
 	heap.Remove(p.worst, i.worstIndex)
 	return i
 }
-func (p *SubPool) PopWorst() *MetaTx {
-	i := heap.Pop(p.worst).(*MetaTx)
+func (p *SubPool) PopWorst() *metaTx {
+	i := heap.Pop(p.worst).(*metaTx)
 	heap.Remove(p.best, i.bestIndex)
 	return i
 }
 func (p *SubPool) Len() int { return p.best.Len() }
-func (p *SubPool) Add(i *MetaTx, subPoolType SubPoolType) {
+func (p *SubPool) Add(i *metaTx, subPoolType SubPoolType) {
 	i.currentSubPool = subPoolType
 	heap.Push(p.best, i)
 	heap.Push(p.worst, i)
@@ -659,7 +667,7 @@ func (p *SubPool) Add(i *MetaTx, subPoolType SubPoolType) {
 // UnsafeRemove - does break Heap invariants, but it has O(1) instead of O(log(n)) complexity.
 // Must manually call heap.Init after such changes.
 // Make sense to batch unsafe changes
-func (p *SubPool) UnsafeRemove(i *MetaTx) {
+func (p *SubPool) UnsafeRemove(i *metaTx) {
 	if p.Len() == 0 {
 		return
 	}
@@ -674,33 +682,37 @@ func (p *SubPool) UnsafeRemove(i *MetaTx) {
 	p.best.Swap(i.bestIndex, p.best.Len()-1)
 	p.best.Pop()
 }
-func (p *SubPool) UnsafeAdd(i *MetaTx, subPoolType SubPoolType) {
+func (p *SubPool) UnsafeAdd(i *metaTx, subPoolType SubPoolType) {
 	i.currentSubPool = subPoolType
 	p.worst.Push(i)
 	p.best.Push(i)
 }
 func (p *SubPool) DebugPrint() {
 	for i, it := range *p.best {
-		fmt.Printf("best: %d, %d, %d\n", i, it.SubPool, it.bestIndex)
+		fmt.Printf("best: %d, %d, %d\n", i, it.subPool, it.bestIndex)
 	}
 	for i, it := range *p.worst {
-		fmt.Printf("worst: %d, %d, %d\n", i, it.SubPool, it.worstIndex)
+		fmt.Printf("worst: %d, %d, %d\n", i, it.subPool, it.worstIndex)
 	}
 }
 
-type BestQueue []*MetaTx
+type BestQueue []*metaTx
 
-func (mt *MetaTx) Less(than *MetaTx) bool {
-	if mt.SubPool != than.SubPool {
-		return mt.SubPool < than.SubPool
+func (mt *metaTx) Less(than *metaTx) bool {
+	if mt.subPool != than.subPool {
+		return mt.subPool < than.subPool
 	}
-	// means that strict nonce ordering of transactions from the same sender must be observed.
-	if mt.Tx.senderID != than.Tx.senderID {
-		return mt.Tx.senderID < than.Tx.senderID
+
+	if mt.effectiveTip != than.effectiveTip {
+		return mt.effectiveTip < than.effectiveTip
 	}
+
 	if mt.Tx.nonce != than.Tx.nonce {
 		return mt.Tx.nonce < than.Tx.nonce
 	}
+	//if mt.Tx.senderID != than.Tx.senderID {
+	//	return mt.Tx.senderID < than.Tx.senderID
+	//}
 	return false
 }
 
@@ -713,7 +725,7 @@ func (p BestQueue) Swap(i, j int) {
 }
 func (p *BestQueue) Push(x interface{}) {
 	n := len(*p)
-	item := x.(*MetaTx)
+	item := x.(*metaTx)
 	item.bestIndex = n
 	*p = append(*p, item)
 }
@@ -729,7 +741,7 @@ func (p *BestQueue) Pop() interface{} {
 	return item
 }
 
-type WorstQueue []*MetaTx
+type WorstQueue []*metaTx
 
 func (p WorstQueue) Len() int           { return len(p) }
 func (p WorstQueue) Less(i, j int) bool { return p[i].Less(p[j]) }
@@ -740,9 +752,9 @@ func (p WorstQueue) Swap(i, j int) {
 }
 func (p *WorstQueue) Push(x interface{}) {
 	n := len(*p)
-	item := x.(*MetaTx)
+	item := x.(*metaTx)
 	item.worstIndex = n
-	*p = append(*p, x.(*MetaTx))
+	*p = append(*p, x.(*metaTx))
 }
 func (p *WorstQueue) Pop() interface{} {
 	old := *p
@@ -826,4 +838,11 @@ func (l *recentlyConnectedPeers) GetAndClean() []PeerID {
 	peers := l.peers
 	l.peers = nil
 	return peers
+}
+
+func min(a, b uint64) uint64 {
+	if a <= b {
+		return a
+	}
+	return b
 }

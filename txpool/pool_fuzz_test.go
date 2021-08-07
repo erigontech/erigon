@@ -37,7 +37,7 @@ func FuzzTwoQueue(f *testing.F) {
 		{
 			sub := NewSubPool()
 			for _, i := range in {
-				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
 			}
 			assert.Equal(len(in), sub.best.Len())
 			assert.Equal(len(in), sub.worst.Len())
@@ -46,8 +46,8 @@ func FuzzTwoQueue(f *testing.F) {
 			var prevBest *uint8
 			i := sub.Len()
 			for sub.Len() > 0 {
-				best := uint8(sub.Best().SubPool)
-				assert.Equal(best, uint8(sub.PopBest().SubPool))
+				best := uint8(sub.Best().subPool)
+				assert.Equal(best, uint8(sub.PopBest().subPool))
 				if prevBest != nil {
 					assert.LessOrEqual(best, *prevBest)
 				}
@@ -63,13 +63,13 @@ func FuzzTwoQueue(f *testing.F) {
 		{
 			sub := NewSubPool()
 			for _, i := range in {
-				sub.Add(&MetaTx{SubPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
 			}
 			var prev *uint8
 			i := sub.Len()
 			for sub.Len() > 0 {
-				worst := uint8(sub.Worst().SubPool)
-				assert.Equal(worst, uint8(sub.PopWorst().SubPool))
+				worst := uint8(sub.Worst().subPool)
+				assert.Equal(worst, uint8(sub.PopWorst().subPool))
 				if prev != nil {
 					assert.GreaterOrEqual(worst, *prev)
 				}
@@ -200,7 +200,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 	return sendersInfo, senderIDs, txs, true
 }
 
-func iterateSubPoolUnordered(subPool *SubPool, f func(tx *MetaTx)) {
+func iterateSubPoolUnordered(subPool *SubPool, f func(tx *metaTx)) {
 	for i := 0; i < subPool.best.Len(); i++ {
 		f((*subPool.best)[i])
 	}
@@ -237,11 +237,10 @@ func FuzzOnNewBlocks10(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, blockBaseFee1 uint8) {
 		t.Parallel()
-		if protocolBaseFee1 > 4 || blockBaseFee1 > 4 {
+		if protocolBaseFee1 > 8 || blockBaseFee1 > 8 {
 			t.Skip()
 		}
 		protocolBaseFee, blockBaseFee := uint64(protocolBaseFee1), uint64(blockBaseFee1)
-		//protocolBaseFeeU256, blockBaseFeeU256 := uint256.NewInt(protocolBaseFee), uint256.NewInt(blockBaseFee)
 		if protocolBaseFee == 0 || blockBaseFee == 0 {
 			t.Skip()
 		}
@@ -258,35 +257,37 @@ func FuzzOnNewBlocks10(f *testing.F) {
 		err := txs.Valid()
 		assert.NoError(err)
 
+		var prevTotal int
+
 		ch := make(chan Hashes, 100)
 		pool := New(ch)
 		pool.senderInfo = senders
 		pool.senderIDs = senderIDs
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
-			//if pending.Len() > 10 && baseFee.Len() > 10 && queued.Len() > 10 {
-			//	fmt.Printf("len: %d,%d,%d\n", pending.Len(), baseFee.Len(), queued.Len())
+			//if pending.Len() > 5 && baseFee.Len() > 5 && queued.Len() > 5 {
+			//	fmt.Printf("len %s: %d,%d,%d\n", msg, pending.Len(), baseFee.Len(), queued.Len())
 			//}
 
 			best, worst := pending.Best(), pending.Worst()
 			assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
-			if worst != nil && worst.SubPool < 0b11110 {
-				t.Fatalf("pending worst too small %b", worst.SubPool)
+			if worst != nil && worst.subPool < 0b11110 {
+				t.Fatalf("pending worst too small %b", worst.subPool)
 			}
-			iterateSubPoolUnordered(pending, func(tx *MetaTx) {
+			iterateSubPoolUnordered(pending, func(tx *metaTx) {
 				i := tx.Tx
-				if tx.SubPool&NoNonceGaps > 0 {
+				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
 				}
-				if tx.SubPool&EnoughBalance > 0 {
-					assert.True(tx.SenderHasEnoughBalance)
+				if tx.subPool&EnoughBalance > 0 {
+					//assert.True(tx.SenderHasEnoughBalance)
 				}
-				if tx.SubPool&EnoughFeeCapProtocol > 0 {
+				if tx.subPool&EnoughFeeCapProtocol > 0 {
 					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
 				}
-				if tx.SubPool&EnoughFeeCapBlock > 0 {
+				if tx.subPool&EnoughFeeCapBlock > 0 {
 					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
 				}
 
@@ -296,11 +297,11 @@ func FuzzOnNewBlocks10(f *testing.F) {
 				assert.True(ok)
 
 				// pools can't have more then 1 tx with same SenderID+Nonce
-				iterateSubPoolUnordered(baseFee, func(mtx2 *MetaTx) {
+				iterateSubPoolUnordered(baseFee, func(mtx2 *metaTx) {
 					tx2 := mtx2.Tx
 					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce, msg)
 				})
-				iterateSubPoolUnordered(queued, func(mtx2 *MetaTx) {
+				iterateSubPoolUnordered(queued, func(mtx2 *metaTx) {
 					tx2 := mtx2.Tx
 					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce, msg)
 				})
@@ -311,21 +312,21 @@ func FuzzOnNewBlocks10(f *testing.F) {
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
 			assert.LessOrEqual(baseFee.Len(), BaseFeeSubPoolLimit, msg)
-			if worst != nil && worst.SubPool < 0b11100 {
-				t.Fatalf("baseFee worst too small %b", worst.SubPool)
+			if worst != nil && worst.subPool < 0b11100 {
+				t.Fatalf("baseFee worst too small %b", worst.subPool)
 			}
-			iterateSubPoolUnordered(baseFee, func(tx *MetaTx) {
+			iterateSubPoolUnordered(baseFee, func(tx *metaTx) {
 				i := tx.Tx
-				if tx.SubPool&NoNonceGaps > 0 {
+				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
 				}
-				if tx.SubPool&EnoughBalance != 0 {
-					assert.True(tx.SenderHasEnoughBalance, msg)
+				if tx.subPool&EnoughBalance != 0 {
+					//assert.True(tx.SenderHasEnoughBalance, msg)
 				}
-				if tx.SubPool&EnoughFeeCapProtocol > 0 {
+				if tx.subPool&EnoughFeeCapProtocol > 0 {
 					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
 				}
-				if tx.SubPool&EnoughFeeCapBlock > 0 {
+				if tx.subPool&EnoughFeeCapBlock > 0 {
 					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
 				}
 
@@ -338,21 +339,21 @@ func FuzzOnNewBlocks10(f *testing.F) {
 			assert.LessOrEqual(queued.Len(), QueuedSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
-			if worst != nil && worst.SubPool < 0b10000 {
-				t.Fatalf("queued worst too small %b", worst.SubPool)
+			if worst != nil && worst.subPool < 0b10000 {
+				t.Fatalf("queued worst too small %b", worst.subPool)
 			}
-			iterateSubPoolUnordered(queued, func(tx *MetaTx) {
+			iterateSubPoolUnordered(queued, func(tx *metaTx) {
 				i := tx.Tx
-				if tx.SubPool&NoNonceGaps > 0 {
+				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
 				}
-				if tx.SubPool&EnoughBalance > 0 {
-					assert.True(tx.SenderHasEnoughBalance, msg)
+				if tx.subPool&EnoughBalance > 0 {
+					//assert.True(tx.SenderHasEnoughBalance, msg)
 				}
-				if tx.SubPool&EnoughFeeCapProtocol > 0 {
+				if tx.subPool&EnoughFeeCapProtocol > 0 {
 					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
 				}
-				if tx.SubPool&EnoughFeeCapBlock > 0 {
+				if tx.subPool&EnoughFeeCapBlock > 0 {
 					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
 				}
 
@@ -369,7 +370,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 			for i := range senders {
 				//assert.True(senders[i].txNonce2Tx.Len() > 0)
 				senders[i].txNonce2Tx.Ascend(func(i btree.Item) bool {
-					mt := i.(*nonce2TxItem).MetaTx
+					mt := i.(*nonce2TxItem).metaTx
 					assert.True(mt.worstIndex >= 0, msg)
 					assert.True(mt.bestIndex >= 0, msg)
 					return true
@@ -381,9 +382,19 @@ func FuzzOnNewBlocks10(f *testing.F) {
 				_, ok = pool.byHash[string(minedTxs.txs[i].idHash[:])]
 				assert.False(ok, msg)
 			}
+
+			if queued.Len() > 3 {
+				// Less func must be transitive (choose 3 semi-random elements)
+				i := queued.Len() - 1
+				a, b, c := (*queued.best)[i], (*queued.best)[i-1], (*queued.best)[i-2]
+				if a.Less(b) && b.Less(c) {
+					assert.True(a.Less(c))
+				}
+			}
 		}
 
 		checkNotify := func(unwindTxs, minedTxs TxSlots, msg string) {
+			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 			select {
 			case newHashes := <-ch:
 				//assert.Equal(len(unwindTxs.txs), newHashes.Len())
@@ -407,13 +418,15 @@ func FuzzOnNewBlocks10(f *testing.F) {
 					assert.True(foundInUnwind, msg)
 					assert.False(foundInMined, msg)
 				}
-			default:
-
-				//TODO: no notifications - means pools must be empty (unchanged)
+			default: // no notifications - means pools must be unchanged or drop some txs
+				assert.GreaterOrEqual(prevTotal, pending.Len()+baseFee.Len()+queued.Len(), msg)
 			}
+			prevTotal = pending.Len() + baseFee.Len() + queued.Len()
 		}
+		//fmt.Printf("-------\n")
 
 		// go to first fork
+		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
 		err = pool.OnNewBlock(unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee)
 		assert.NoError(err)
