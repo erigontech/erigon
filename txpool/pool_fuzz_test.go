@@ -184,14 +184,15 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		sendersInfo[senderID] = newSenderInfo(senderNonce[i], senderBalance[i%len(senderBalance)])
 		senderIDs[string(senders.At(i%senders.Len()))] = senderID
 	}
+	txs.txs = make([]*TxSlot, len(txNonce))
 	for i := range txNonce {
 		txId.Inc()
-		txs.txs = append(txs.txs, &TxSlot{
+		txs.txs[i] = &TxSlot{
 			nonce:  txNonce[i],
 			value:  values[i%len(values)],
 			tip:    tips[i%len(tips)],
 			feeCap: feeCap[i%len(feeCap)],
-		})
+		}
 		txs.senders = append(txs.senders, senders.At(i%senders.Len())...)
 		txs.isLocal = append(txs.isLocal, false)
 		binary.BigEndian.PutUint64(txs.txs[i].idHash[:], txId.Load())
@@ -237,10 +238,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, blockBaseFee1 uint8) {
 		t.Parallel()
-		if protocolBaseFee1 > 8 || blockBaseFee1 > 8 {
-			t.Skip()
-		}
-		protocolBaseFee, blockBaseFee := uint64(protocolBaseFee1), uint64(blockBaseFee1)
+		protocolBaseFee, blockBaseFee := uint64(protocolBaseFee1%16+1), uint64(blockBaseFee1%16+1)
 		if protocolBaseFee == 0 || blockBaseFee == 0 {
 			t.Skip()
 		}
