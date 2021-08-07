@@ -258,7 +258,7 @@ func FuzzOnNewBlocks10(f *testing.F) {
 		err := txs.Valid()
 		assert.NoError(err)
 
-		var pendingPrevLen, baseFeePrevLen, queuedPrevLen int
+		var prevTotal int
 
 		ch := make(chan Hashes, 100)
 		pool := New(ch)
@@ -419,24 +419,18 @@ func FuzzOnNewBlocks10(f *testing.F) {
 					assert.True(foundInUnwind, msg)
 					assert.False(foundInMined, msg)
 				}
-			default: // no notifications - means pools must be empty (unchanged)
-				//fmt.Printf("%s: %d,%d,%d\n", msg, pending.Len(), baseFee.Len(), queued.Len())
-				//assert.Equal(pendingPrevLen, pending.Len(), msg)
-				//assert.Equal(baseFeePrevLen, baseFee.Len(), msg)
-				//require.Equal(t, queuedPrevLen, queued.Len(), msg)
-				_, _, _ = pendingPrevLen, baseFeePrevLen, queuedPrevLen
+			default: // no notifications - means pools must be unchanged or drop some txs
+				assert.GreaterOrEqual(prevTotal, pending.Len()+baseFee.Len()+queued.Len(), msg)
 			}
-			pendingPrevLen, baseFeePrevLen, queuedPrevLen = pending.Len(), baseFee.Len(), queued.Len()
-			//fmt.Printf("%s: %d,%d,%d\n", msg, pendingPrevLen, baseFeePrevLen, queuedPrevLen)
+			prevTotal = pending.Len() + baseFee.Len() + queued.Len()
 		}
 		//fmt.Printf("-------\n")
 
 		// go to first fork
-		//fmt.Printf("ll: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
+		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
 		err = pool.OnNewBlock(unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee)
 		assert.NoError(err)
-		//fmt.Printf("ll: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		check(unwindTxs, minedTxs1, "fork1")
 		checkNotify(unwindTxs, minedTxs1, "fork1")
 
