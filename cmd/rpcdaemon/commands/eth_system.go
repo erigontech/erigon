@@ -104,8 +104,29 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	oracle := gasprice.NewOracle(api, ethconfig.Defaults.GPO)
-	price, err := oracle.SuggestPrice(ctx)
-	return (*hexutil.Big)(price), err
+	tipcap, err := oracle.SuggestTipCap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if head := rawdb.ReadCurrentHeader(tx); head.BaseFee != nil {
+		tipcap.Add(tipcap, head.BaseFee)
+	}
+	return (*hexutil.Big)(tipcap), err
+}
+
+// MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
+func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, error) {
+	oracle := gasprice.NewOracle(api, ethconfig.Defaults.GPO)
+	tipcap, err := oracle.SuggestTipCap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return (*hexutil.Big)(tipcap), err
 }
 
 // HeaderByNumber is necessary for gasprice.OracleBackend implementation
