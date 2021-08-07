@@ -230,7 +230,7 @@ func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
 	return p1, p2, p3, p4
 }
 
-func FuzzOnNewBlocks10(f *testing.F) {
+func FuzzOnNewBlocks11(f *testing.F) {
 	var u64 = [1 * 4]byte{1}
 	var sender = [1 + 1 + 1]byte{1}
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 1, 2)
