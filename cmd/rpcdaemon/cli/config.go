@@ -2,13 +2,18 @@ package cli
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"path"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
@@ -21,6 +26,10 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 )
 
 type Flags struct {
@@ -180,13 +189,19 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 	if cfg.PrivateApiAddr != "" {
-		remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		conn, err := connectErigon(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, cfg.PrivateApiAddr)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
-		remoteEth := services.NewRemoteBackend(remoteKv.GrpcConn())
-		mining = services.NewMiningService(remoteKv.GrpcConn())
-		txPool = services.NewTxPoolService(remoteKv.GrpcConn())
+
+		kvClient := remote.NewKVClient(conn)
+		remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+		}
+		remoteEth := services.NewRemoteBackend(conn)
+		mining = services.NewMiningService(conn)
+		txPool = services.NewTxPoolService(conn)
 		if db == nil {
 			db = remoteKv
 		}
@@ -207,6 +222,66 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 		}()
 	}
 	return db, eth, txPool, mining, err
+}
+
+func connectErigon(certFile, keyFile, caCert string, dialAddress string) (*grpc.ClientConn, error) {
+	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(15 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+	}
+	if certFile == "" {
+		dialOpts = append(dialOpts, grpc.WithInsecure())
+	} else {
+		var creds credentials.TransportCredentials
+		var err error
+		if caCert == "" {
+			creds, err = credentials.NewClientTLSFromFile(certFile, "")
+
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// load peer cert/key, ca cert
+			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				log.Error("load peer cert/key error:%v", err)
+				return nil, err
+			}
+			caCert, err := ioutil.ReadFile(caCert)
+			if err != nil {
+				log.Error("read ca cert file error:%v", err)
+				return nil, err
+			}
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(caCert)
+			creds = credentials.NewTLS(&tls.Config{
+				Certificates: []tls.Certificate{peerCert},
+				ClientCAs:    caCertPool,
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+				//nolint:gosec
+				InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
+			})
+		}
+
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+	}
+
+	//if opts.inMemConn != nil {
+	//	dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
+	//		return opts.inMemConn.Dial()
+	//	}))
+	//}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return grpc.DialContext(ctx, dialAddress, dialOpts...)
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
