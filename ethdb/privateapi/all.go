@@ -7,11 +7,10 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -32,10 +31,10 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
+	//if metrics.Enabled {
+	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	//}
 
 	var grpcServer *grpc.Server
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
@@ -64,9 +63,9 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	txpool.RegisterMiningServer(grpcServer, miningServer)
 	remote.RegisterKVServer(grpcServer, kv)
 
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
+	//if metrics.Enabled {
+	//	grpc_prometheus.Register(grpcServer)
+	//}
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
