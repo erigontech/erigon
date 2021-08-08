@@ -22,6 +22,7 @@ require (
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.7.4
+	github.com/gofrs/flock v0.8.1
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/golang/snappy v0.0.3
@@ -42,7 +43,6 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/pelletier/go-toml v1.9.3
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
-	github.com/prometheus/tsdb v0.10.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
 	github.com/rs/cors v1.8.0
 	github.com/shirou/gopsutil/v3 v3.21.6
@@ -58,7 +58,7 @@ require (
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
+	golang.org/x/sys v0.0.0-20210806184541-e5e7981a1069
 	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
 	golang.org/x/tools v0.1.2
 	google.golang.org/grpc v1.39.1
