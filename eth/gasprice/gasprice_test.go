@@ -131,7 +131,7 @@ func TestSuggestPrice(t *testing.T) {
 	oracle := gasprice.NewOracle(backend, config)
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
-	got, err := oracle.SuggestPrice(context.Background())
+	got, err := oracle.SuggestTipCap(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}

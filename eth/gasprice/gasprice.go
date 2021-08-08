@@ -104,11 +104,11 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 	}
 }
 
-// SuggestPrice returns a TipCap so that newly created transaction can
+// SuggestTipCap returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
 // NODE: if caller wants legacy tx SuggestedPrice, we need to add
 // baseFee to the returned bigInt
-func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
+func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	head, _ := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
 	headHash := head.Hash()
 
@@ -151,9 +151,6 @@ func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
 	}
 	if price.Cmp(gpo.maxPrice) > 0 {
 		price = new(big.Int).Set(gpo.maxPrice)
-	}
-	if head.BaseFee != nil {
-		price.Add(price, head.BaseFee)
 	}
 	gpo.cacheLock.Lock()
 	gpo.lastHead = headHash
