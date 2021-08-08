@@ -76,6 +76,24 @@ var (
 		*LatestSignerForChainID(big.NewInt(1)),
 		common.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
 	)
+
+	dynFeeTx = &DynamicFeeTransaction{
+		ChainID: u256.Num1,
+		CommonTx: CommonTx{
+			Nonce: 3,
+			To:    &testAddr,
+			Value: uint256.NewInt(10),
+			Gas:   25000,
+			Data:  common.FromHex("5544"),
+		},
+		Tip:    uint256.NewInt(1),
+		FeeCap: uint256.NewInt(1),
+	}
+
+	signedDynFeeTx, _ = dynFeeTx.WithSignature(
+		*LatestSignerForChainID(big.NewInt(1)),
+		common.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
+	)
 )
 
 func TestDecodeEmptyTypedTx(t *testing.T) {
@@ -219,6 +237,23 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 		want := common.FromHex("01f8630103018261a894b94f5374fce5edbc8e2a8697c15331677e6ebf0b0a825544c001a0c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b2660a032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d37521")
 		if !bytes.Equal(have, want) {
 			t.Errorf("encoded RLP mismatch, got %x", have)
+		}
+	}
+}
+func TestEIP1559TransactionEncode(t *testing.T) {
+	{
+		var buf bytes.Buffer
+		if err := signedDynFeeTx.MarshalBinary(&buf); err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+		have := buf.Bytes()
+		want := common.FromHex("02f864010301018261a894b94f5374fce5edbc8e2a8697c15331677e6ebf0b0a825544c001a0c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b2660a032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d37521")
+		if !bytes.Equal(have, want) {
+			t.Errorf("encoded RLP mismatch, got %x", have)
+		}
+		_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(buf.Bytes()), 0))
+		if err != nil {
+			t.Fatalf("decode error: %v", err)
 		}
 	}
 }
