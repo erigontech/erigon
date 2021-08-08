@@ -231,10 +231,32 @@ type OeTracer struct {
 	memLenStack  []uint64
 	lastOffStack *VmTraceOp
 	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
-	idx          []string     // Prefix for the "idx" inside operations, for easier nativation
+	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
+	if ot.r.VmTrace != nil {
+		var vmTrace *VmTrace
+		if depth > 0 {
+			var vmT *VmTrace
+			if len(ot.vmOpStack) > 0 {
+				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
+			} else {
+				vmT = ot.r.VmTrace
+			}
+			if !ot.compat {
+				ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
+			}
+		}
+		if ot.lastVmOp != nil {
+			vmTrace = &VmTrace{Ops: []VmTraceOp{}}
+			ot.lastVmOp.Sub = vmTrace
+			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
+		} else {
+			vmTrace = ot.r.VmTrace
+		}
+		vmTrace.Code = code
+	}
 	if precompile {
 		ot.precompile = true
 		return nil
@@ -253,26 +275,6 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	} else {
 		trace.Result = &TraceResult{}
 		trace.Type = CALL
-	}
-	if ot.r.VmTrace != nil {
-		var vmTrace *VmTrace
-		if depth > 0 {
-			var vmT *VmTrace
-			if len(ot.vmOpStack) > 0 {
-				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
-			} else {
-				vmT = ot.r.VmTrace
-			}
-			ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
-		}
-		if ot.lastVmOp != nil {
-			vmTrace = &VmTrace{Ops: []VmTraceOp{}}
-			ot.lastVmOp.Sub = vmTrace
-			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
-		} else {
-			vmTrace = ot.r.VmTrace
-		}
-		vmTrace.Code = code
 	}
 	if depth > 0 {
 		topTrace := ot.traceStack[len(ot.traceStack)-1]
@@ -325,28 +327,28 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 }
 
 func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
+	if ot.r.VmTrace != nil {
+		if len(ot.vmOpStack) > 0 {
+			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
+			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+		}
+		if !ot.compat && depth > 0 {
+			ot.idx = ot.idx[:len(ot.idx)-1]
+		}
+		if depth > 0 && topTrace.Type == CALL {
+			ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
+			ot.memOffStack = ot.memOffStack[:len(ot.memOffStack)-1]
+			ot.lastMemLen = ot.memLenStack[len(ot.memLenStack)-1]
+			ot.memLenStack = ot.memLenStack[:len(ot.memLenStack)-1]
+		}
+	}
 	if ot.precompile {
 		ot.precompile = false
 		return nil
 	}
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
-	}
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	if ot.r.VmTrace != nil {
-		if len(ot.vmOpStack) > 0 {
-			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
-			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
-			if topTrace.Type == CALL {
-				ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
-				ot.memOffStack = ot.memOffStack[:len(ot.memOffStack)-1]
-				ot.lastMemLen = ot.memLenStack[len(ot.memLenStack)-1]
-				ot.memLenStack = ot.memLenStack[:len(ot.memLenStack)-1]
-			}
-		}
-		if depth > 0 {
-			ot.idx = ot.idx[:len(ot.idx)-1]
-		}
 	}
 	ignoreError := false
 	if ot.compat {
@@ -421,22 +423,25 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.SDIV, vm.SAR, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
 				vm.ADD, vm.EXP, vm.CALLER, vm.SHA3, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL,
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
-				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE:
+				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY, vm.SGT, vm.GASPRICE,
+				vm.MSIZE:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
 				ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
 			}
 			// Set the "mem" of the last operation
+			var setMem bool
 			switch ot.lastOp {
 			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
-				if ot.lastMemLen > 0 {
-					cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
-					if len(cpy) == 0 {
-						cpy = make([]byte, ot.lastMemLen)
-					}
-					ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
+				setMem = true
+			}
+			if setMem && ot.lastMemLen > 0 {
+				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				if len(cpy) == 0 {
+					cpy = make([]byte, ot.lastMemLen)
 				}
+				ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
 			}
 		}
 		vmTrace.Ops = append(vmTrace.Ops, VmTraceOp{})
@@ -1061,6 +1066,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	defer cancel()
 	results := []*TraceCallResult{}
 
+	useParent := false
+	if header == nil {
+		header = parentHeader
+		useParent = true
+	}
 	for txIndex, msg := range msgs {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return nil, err
@@ -1097,11 +1107,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 
 		// Get a new instance of the EVM.
-		useParent := false
-		if header == nil {
-			header = parentHeader
-			useParent = true
-		}
 		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
