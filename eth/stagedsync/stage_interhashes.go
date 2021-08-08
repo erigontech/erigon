@@ -370,8 +370,6 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 	if cfg.checkRoot && hash != expectedRootHash {
 		return hash, nil
 	}
-	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix),
-		" hash", hash.Hex())
 
 	if err := accTrieCollector.Load(logPrefix, db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err

@@ -203,7 +203,9 @@ Loop:
 	if stopped {
 		return common.ErrStopped
 	}
-	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
+	if bodyProgress > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
+	}
 	return nil
 }
 

@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -40,10 +41,6 @@ const (
 	// maxFeeHistory is the maximum number of blocks that can be retrieved for a
 	// fee history request.
 	maxFeeHistory = 1024
-
-	// maxBlockFetchers is the max number of goroutines to spin up to pull blocks
-	// for the fee history calculation (mostly relevant for LES).
-	maxBlockFetchers = 4
 )
 
 // blockFees represents a single block for processing
@@ -235,42 +232,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, lastBlock rpc.
 	oldestBlock := lastBlock + 1 - rpc.BlockNumber(blocks)
 
 	var (
-		next    = int64(oldestBlock)
-		results = make(chan *blockFees, blocks)
+		next = int64(oldestBlock)
 	)
-	for i := 0; i < maxBlockFetchers && i < blocks; i++ {
-		go func() {
-			for {
-				// Retrieve the next block number to fetch with this goroutine
-				blockNumber := rpc.BlockNumber(atomic.AddInt64(&next, 1) - 1)
-				if blockNumber > lastBlock {
-					return
-				}
-
-				fees := &blockFees{blockNumber: blockNumber}
-				if pendingBlock != nil && blockNumber >= rpc.BlockNumber(pendingBlock.NumberU64()) {
-					fees.block, fees.receipts = pendingBlock, pendingReceipts
-				} else {
-					if len(rewardPercentiles) != 0 {
-						fees.block, fees.err = oracle.backend.BlockByNumber(ctx, blockNumber)
-						if fees.block != nil && fees.err == nil {
-							fees.receipts, fees.err = oracle.backend.GetReceipts(ctx, fees.block.Hash())
-						}
-					} else {
-						fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, blockNumber)
-					}
-				}
-				if fees.block != nil {
-					fees.header = fees.block.Header()
-				}
-				if fees.header != nil {
-					oracle.processBlock(fees, rewardPercentiles)
-				}
-				// send to results even if empty to guarantee that blocks items are sent in total
-				results <- fees
-			}
-		}()
-	}
 	var (
 		reward       = make([][]*big.Int, blocks)
 		baseFee      = make([]*big.Int, blocks+1)
@@ -278,7 +241,35 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, lastBlock rpc.
 		firstMissing = blocks
 	)
 	for ; blocks > 0; blocks-- {
-		fees := <-results
+		if err = common.Stopped(ctx.Done()); err != nil {
+			return 0, nil, nil, nil, err
+		}
+		// Retrieve the next block number to fetch with this goroutine
+		blockNumber := rpc.BlockNumber(atomic.AddInt64(&next, 1) - 1)
+		if blockNumber > lastBlock {
+			continue
+		}
+
+		fees := &blockFees{blockNumber: blockNumber}
+		if pendingBlock != nil && blockNumber >= rpc.BlockNumber(pendingBlock.NumberU64()) {
+			fees.block, fees.receipts = pendingBlock, pendingReceipts
+		} else {
+			if len(rewardPercentiles) != 0 {
+				fees.block, fees.err = oracle.backend.BlockByNumber(ctx, blockNumber)
+				if fees.block != nil && fees.err == nil {
+					fees.receipts, fees.err = oracle.backend.GetReceipts(ctx, fees.block.Hash())
+				}
+			} else {
+				fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, blockNumber)
+			}
+		}
+		if fees.block != nil {
+			fees.header = fees.block.Header()
+		}
+		if fees.header != nil {
+			oracle.processBlock(fees, rewardPercentiles)
+		}
+
 		if fees.err != nil {
 			return 0, nil, nil, nil, fees.err
 		}
