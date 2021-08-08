@@ -250,6 +250,22 @@ func (db *DB) setToCache(key, val []byte) {
 	}
 }
 
+func (db *DB) searchCache(key []byte) (foundKey, foundVal, nextKey []byte) {
+	db.kvCacheLock.RLock()
+	defer db.kvCacheLock.RUnlock()
+	db.kvCache.AscendGreaterOrEqual(&DbItem{key: key}, func(i btree.Item) bool {
+		di := i.(*DbItem)
+		if foundKey == nil {
+			foundKey = di.key
+			foundVal = di.val
+			return true
+		}
+		nextKey = di.key
+		return false
+	})
+	return
+}
+
 // fetchInt64 retrieves an integer associated with a particular key.
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
@@ -575,6 +591,80 @@ func (db *DB) storeLocalSeq(id ID, n uint64) {
 	db.storeUint64(localItemKey(id, dbLocalSeq), n)
 }
 
+type cachedIter struct {
+	c                                kv.Cursor
+	db                               *DB
+	cKey, cVal                       []byte
+	cacheKey, cacheVal, cacheNextKey []byte
+}
+
+func (ci *cachedIter) Seek(searchKey []byte) (k, v []byte, err error) {
+	ci.cKey, ci.cVal, err = ci.c.Seek(searchKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(searchKey)
+	if ci.cKey == nil {
+		k = ci.cacheKey
+		v = ci.cacheVal
+		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+		return
+	}
+	if ci.cacheKey == nil {
+		k = ci.cKey
+		v = ci.cVal
+		ci.cKey, ci.cVal, err = ci.c.Next()
+		return
+	}
+	switch bytes.Compare(ci.cKey, ci.cacheKey) {
+	case -1:
+		k = ci.cKey
+		v = ci.cVal
+		ci.cKey, ci.cVal, err = ci.c.Next()
+	case 0:
+		k = ci.cacheKey
+		v = ci.cacheVal
+		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+		ci.cKey, ci.cVal, err = ci.c.Next()
+	case 1:
+		k = ci.cacheKey
+		v = ci.cacheVal
+		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+	}
+	return
+}
+
+func (ci *cachedIter) Next() (k, v []byte, err error) {
+	if ci.cKey == nil {
+		k = ci.cacheKey
+		v = ci.cacheVal
+		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+		return
+	}
+	if ci.cacheKey == nil {
+		k = ci.cKey
+		v = ci.cVal
+		ci.cKey, ci.cVal, err = ci.c.Next()
+		return
+	}
+	switch bytes.Compare(ci.cKey, ci.cacheKey) {
+	case -1:
+		k = ci.cKey
+		v = ci.cVal
+		ci.cKey, ci.cVal, err = ci.c.Next()
+	case 0:
+		k = ci.cacheKey
+		v = ci.cacheVal
+		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+		ci.cKey, ci.cVal, err = ci.c.Next()
+	case 1:
+		k = ci.cacheKey
+		v = ci.cacheVal
+		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+	}
+	return
+}
+
 // QuerySeeds retrieves random nodes to be used as potential seed nodes
 // for bootstrapping.
 func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
@@ -589,6 +679,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		if err != nil {
 			return err
 		}
+		ci := &cachedIter{db: db, c: c}
 	seek:
 		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
 			// Seek to a random entry. The first byte is incremented by a
@@ -598,7 +689,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			rand.Read(id[:])
 			id[0] = ctr + id[0]%16
 			var n *Node
-			for k, v, err := c.Seek(nodeKey(id)); k != nil && n == nil; k, v, err = c.Next() {
+			for k, v, err := ci.Seek(nodeKey(id)); k != nil && n == nil; k, v, err = ci.Next() {
 				if err != nil {
 					return err
 				}
