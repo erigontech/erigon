@@ -99,7 +99,7 @@ type StateDiffStorage struct {
 // VmTrace is the part of `trace_call` response that is under "vmTrace" tag
 type VmTrace struct {
 	Code hexutil.Bytes `json:"code"`
-	Ops  []VmTraceOp   `json:"ops"`
+	Ops  []*VmTraceOp  `json:"ops"`
 }
 
 // VmTraceOp is one element of the vmTrace ops trace
@@ -249,7 +249,7 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 			}
 		}
 		if ot.lastVmOp != nil {
-			vmTrace = &VmTrace{Ops: []VmTraceOp{}}
+			vmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 			ot.lastVmOp.Sub = vmTrace
 			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
 		} else {
@@ -444,8 +444,8 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
 			}
 		}
-		vmTrace.Ops = append(vmTrace.Ops, VmTraceOp{})
-		ot.lastVmOp = &vmTrace.Ops[len(vmTrace.Ops)-1]
+		ot.lastVmOp = &VmTraceOp{}
+		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
 		if !ot.compat {
 			var sb strings.Builder
 			for _, idx := range ot.idx {
@@ -879,7 +879,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 	if traceTypeVmTrace {
-		traceResult.VmTrace = &VmTrace{Ops: []VmTraceOp{}}
+		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
 	var ot OeTracer
 	ot.compat = api.compatibility
@@ -1100,7 +1100,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				ot.traceAddr = []int{}
 			}
 			if traceTypeVmTrace {
-				traceResult.VmTrace = &VmTrace{Ops: []VmTraceOp{}}
+				traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 			}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot

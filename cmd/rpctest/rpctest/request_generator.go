@@ -137,7 +137,7 @@ func (g *RequestGenerator) traceCallMany(from []common.Address, to []*common.Add
 		if len(data[i]) > 0 {
 			fmt.Fprintf(&sb, `,"data":"%s"`, data[i])
 		}
-		fmt.Fprintf(&sb, `},["trace", "stateDiff"]]`)
+		fmt.Fprintf(&sb, `},["trace", "stateDiff", "vmTrace"]]`)
 	}
 	fmt.Fprintf(&sb, `],"0x%x"], "id":%d}`, bn, g.reqID)
 	return sb.String()
