@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/btree"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -73,9 +75,23 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	kv     kv.RwDB       // Interface to the database itself
-	runner sync.Once     // Ensures we can start at most one expirer
-	quit   chan struct{} // Channel to signal the expiring thread to stop
+	kvCache      *btree.BTree
+	kvCachesLock sync.RWMutex
+	path         string        // Remember path for log messages
+	kv           kv.RwDB       // Interface to the database itself
+	runner       sync.Once     // Ensures we can start at most one expirer
+	quit         chan struct{} // Channel to signal the expiring thread to stop
+}
+
+// DbItem is type of items stored in the kvCache's btrees
+type DbItem struct {
+	key []byte
+	val []byte
+}
+
+func (di *DbItem) Less(than btree.Item) bool {
+	i := than.(*DbItem)
+	return bytes.Compare(di.key, i.key) < 0
 }
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
@@ -102,6 +118,7 @@ func newMemoryDB(logger log.Logger) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.kvCache = btree.New(32)
 	return db, nil
 }
 
@@ -146,7 +163,7 @@ func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 		}
 		return newPersistentDB(logger, path)
 	}
-	return &DB{kv: db, quit: make(chan struct{})}, nil
+	return &DB{path: path, kvCache: btree.New(32), kv: db, quit: make(chan struct{})}, nil
 }
 
 // nodeKey returns the database key for a node record.
@@ -213,9 +230,32 @@ func localItemKey(id ID, field string) []byte {
 	return key
 }
 
+func (db *DB) getFromCache(table string, key []byte) []byte {
+	db.kvCachesLock.RLock()
+	defer db.kvCachesLock.RUnlock()
+	i := db.kvCache.Get(&DbItem{key: key})
+	if i != nil {
+		di := i.(*DbItem)
+		return di.val
+	}
+	return nil
+}
+
+func (db *DB) setToCache(table string, key, val []byte) {
+	db.kvCachesLock.Lock()
+	defer db.kvCachesLock.Unlock()
+	db.kvCache.ReplaceOrInsert(&DbItem{key: key, val: val})
+}
+
 // fetchInt64 retrieves an integer associated with a particular key.
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
+	if blob := db.getFromCache(kv.Inodes, key); blob != nil {
+		if v, read := binary.Varint(blob); read > 0 {
+			return v
+		}
+		return 0
+	}
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
 		blob, errGet := tx.GetOne(kv.Inodes, key)
 		if errGet != nil {
@@ -238,14 +278,17 @@ func (db *DB) fetchInt64(key []byte) int64 {
 func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
-	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, common.CopyBytes(key), blob)
-	})
+	db.setToCache(kv.Inodes, common.CopyBytes(key), blob)
+	return nil
 }
 
 // fetchUint64 retrieves an integer associated with a particular key.
 func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
+	if blob := db.getFromCache(kv.Inodes, key); blob != nil {
+		val, _ = binary.Uvarint(blob)
+		return val
+	}
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
 		blob, errGet := tx.GetOne(kv.Inodes, key)
 		if errGet != nil {
@@ -265,26 +308,28 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	return db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, common.CopyBytes(key), blob)
-	})
+	db.setToCache(kv.Inodes, common.CopyBytes(key), blob)
+	return nil
 }
 
 // Node retrieves a node with a given id from the database.
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
-	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		v, errGet := tx.GetOne(kv.Inodes, nodeKey(id))
-		if errGet != nil {
-			return errGet
+	blob = db.getFromCache(kv.Inodes, nodeKey(id))
+	if blob == nil {
+		if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
+			v, errGet := tx.GetOne(kv.Inodes, nodeKey(id))
+			if errGet != nil {
+				return errGet
+			}
+			if v != nil {
+				blob = make([]byte, len(v))
+				copy(blob, v)
+			}
+			return nil
+		}); err != nil {
+			return nil
 		}
-		if v != nil {
-			blob = make([]byte, len(v))
-			copy(blob, v)
-		}
-		return nil
-	}); err != nil {
-		return nil
 	}
 	if blob == nil {
 		return nil
@@ -311,11 +356,7 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, nodeKey(node.ID()), blob)
-	}); err != nil {
-		return err
-	}
+	db.setToCache(kv.Inodes, nodeKey(node.ID()), blob)
 	return db.storeUint64(nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
 }
 
@@ -335,12 +376,24 @@ func (db *DB) Resolve(n *Node) *Node {
 
 // DeleteNode deletes all information associated with a node.
 func (db *DB) DeleteNode(id ID) {
-	deleteRange(db.kv, nodeKey(id))
+	deleteRange(db, nodeKey(id))
 }
 
-func deleteRange(db kv.RwDB, prefix []byte) {
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.Inodes)
+func deleteRange(db *DB, prefix []byte) {
+	db.kvCachesLock.Lock()
+	defer db.kvCachesLock.Unlock()
+	// First delete relevant entries from the cache
+	db.kvCache.AscendGreaterOrEqual(&DbItem{key: prefix}, func(i btree.Item) bool {
+		di := i.(*DbItem)
+		if !bytes.HasPrefix(di.key, prefix) {
+			return false
+		}
+		di.val = nil // Mark for deletion
+		return true
+	})
+	// Now mark all other entries for deletion
+	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.Inodes)
 		if err != nil {
 			return err
 		}
@@ -348,8 +401,9 @@ func deleteRange(db kv.RwDB, prefix []byte) {
 			if err != nil {
 				return err
 			}
-			if err := c.Delete(k, nil); err != nil {
-				return nil
+			if f := db.kvCache.Get(&DbItem{key: k}); f == nil {
+				// Only copy key if item is missing in the cache
+				db.kvCache.ReplaceOrInsert(&DbItem{key: common.CopyBytes(k), val: nil})
 			}
 		}
 		return nil
@@ -437,7 +491,7 @@ func (db *DB) expireNodes() {
 		log.Warn("nodeDB.expireNodes failed", "err", err)
 	}
 	for _, td := range toDelete {
-		deleteRange(db.kv, td)
+		deleteRange(db, td)
 	}
 }
 
@@ -590,5 +644,33 @@ func (db *DB) Close() {
 	}
 	close(db.quit)
 	db.quit = nil
+	entriesUpdated := 0
+	entriesDeleted := 0
+	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
+		c, err := tx.RwCursor(kv.Inodes)
+		if err != nil {
+			return err
+		}
+		db.kvCache.Ascend(func(i btree.Item) bool {
+			di := i.(*DbItem)
+			if di.val == nil {
+				if err = c.Delete(di.key, nil); err != nil {
+					return false
+				}
+				entriesUpdated++
+			} else {
+				if err = c.Put(di.key, di.val); err != nil {
+					return false
+				}
+				entriesDeleted++
+			}
+			return true
+		})
+		return err
+	}); err != nil {
+		log.Warn("nodeDB.Close update failed", "path", db.path, "err", err)
+	} else {
+		log.Info("Successfully update p2p node database", "path", db.path, "updated", entriesUpdated, "deleted", entriesDeleted)
+	}
 	db.kv.Close()
 }
