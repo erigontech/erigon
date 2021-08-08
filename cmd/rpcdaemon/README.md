@@ -123,6 +123,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_protocolVersion                        | Yes     |                                            |
 | eth_syncing                                | Yes     |                                            |
 | eth_gasPrice                               | Yes     |                                            |
+| eth_maxPriorityFeePerGas                   | Yes     |                                            |
+| eth_feeHistory                             | Yes     |                                            |
 |                                            |         |                                            |
 | eth_getBlockByHash                         | Yes     |                                            |
 | eth_getBlockByNumber                       | Yes     |                                            |
