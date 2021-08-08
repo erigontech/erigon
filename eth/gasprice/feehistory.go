@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -40,10 +41,6 @@ const (
 	// maxFeeHistory is the maximum number of blocks that can be retrieved for a
 	// fee history request.
 	maxFeeHistory = 1024
-
-	// maxBlockFetchers is the max number of goroutines to spin up to pull blocks
-	// for the fee history calculation (mostly relevant for LES).
-	maxBlockFetchers = 4
 )
 
 // blockFees represents a single block for processing
@@ -244,6 +241,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, lastBlock rpc.
 		firstMissing = blocks
 	)
 	for ; blocks > 0; blocks-- {
+		if err = common.Stopped(ctx.Done()); err != nil {
+			return 0, nil, nil, nil, err
+		}
 		// Retrieve the next block number to fetch with this goroutine
 		blockNumber := rpc.BlockNumber(atomic.AddInt64(&next, 1) - 1)
 		if blockNumber > lastBlock {
