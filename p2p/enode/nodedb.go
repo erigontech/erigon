@@ -251,6 +251,9 @@ func (db *DB) setToCache(key, val []byte) {
 }
 
 func (db *DB) searchCache(key []byte) (foundKey, foundVal, nextKey []byte) {
+	if key == nil {
+		return nil, nil, nil
+	}
 	db.kvCacheLock.RLock()
 	defer db.kvCacheLock.RUnlock()
 	db.kvCache.AscendGreaterOrEqual(&DbItem{key: key}, func(i btree.Item) bool {
@@ -604,65 +607,55 @@ func (ci *cachedIter) Seek(searchKey []byte) (k, v []byte, err error) {
 		return nil, nil, err
 	}
 	ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(searchKey)
-	if ci.cKey == nil {
-		k = ci.cacheKey
-		v = ci.cacheVal
-		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
-		return
-	}
-	if ci.cacheKey == nil {
-		k = ci.cKey
-		v = ci.cVal
-		ci.cKey, ci.cVal, err = ci.c.Next()
-		return
-	}
-	switch bytes.Compare(ci.cKey, ci.cacheKey) {
-	case -1:
-		k = ci.cKey
-		v = ci.cVal
-		ci.cKey, ci.cVal, err = ci.c.Next()
-	case 0:
-		k = ci.cacheKey
-		v = ci.cacheVal
-		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
-		ci.cKey, ci.cVal, err = ci.c.Next()
-	case 1:
-		k = ci.cacheKey
-		v = ci.cacheVal
-		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
-	}
-	return
+	return ci.Next()
 }
 
 func (ci *cachedIter) Next() (k, v []byte, err error) {
-	if ci.cKey == nil {
-		k = ci.cacheKey
-		v = ci.cacheVal
-		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
-		return
+	for {
+		if ci.cKey == nil && ci.cacheKey == nil {
+			k = nil
+			v = nil
+			return
+		}
+		if ci.cKey == nil {
+			k = ci.cacheKey
+			v = ci.cacheVal
+			ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+			if v != nil {
+				return
+			}
+			continue
+		}
+		if ci.cacheKey == nil {
+			k = ci.cKey
+			v = ci.cVal
+			ci.cKey, ci.cVal, err = ci.c.Next()
+			return
+		}
+		switch bytes.Compare(ci.cKey, ci.cacheKey) {
+		case -1:
+			k = ci.cKey
+			v = ci.cVal
+			ci.cKey, ci.cVal, err = ci.c.Next()
+			return
+		case 0:
+			k = ci.cacheKey
+			v = ci.cacheVal
+			ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+			ci.cKey, ci.cVal, err = ci.c.Next()
+			if v != nil {
+				return
+			}
+		case 1:
+			k = ci.cacheKey
+			v = ci.cacheVal
+			ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
+			if v != nil {
+				// if v == nil, it is deleted entry and we try the next record
+				return
+			}
+		}
 	}
-	if ci.cacheKey == nil {
-		k = ci.cKey
-		v = ci.cVal
-		ci.cKey, ci.cVal, err = ci.c.Next()
-		return
-	}
-	switch bytes.Compare(ci.cKey, ci.cacheKey) {
-	case -1:
-		k = ci.cKey
-		v = ci.cVal
-		ci.cKey, ci.cVal, err = ci.c.Next()
-	case 0:
-		k = ci.cacheKey
-		v = ci.cacheVal
-		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
-		ci.cKey, ci.cVal, err = ci.c.Next()
-	case 1:
-		k = ci.cacheKey
-		v = ci.cacheVal
-		ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
-	}
-	return
 }
 
 // QuerySeeds retrieves random nodes to be used as potential seed nodes
@@ -693,6 +686,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 				if err != nil {
 					return err
 				}
+				fmt.Printf("seek %d, k %x, v %x\n", seeks, k, v)
 				id, rest := splitNodeKey(k)
 				if string(rest) == dbDiscoverRoot {
 					n = mustDecodeNode(id[:], v)
