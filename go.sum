@@ -604,8 +604,6 @@ github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+
 github.com/leanovate/gopter v0.2.8/go.mod h1:gNcbPWNEWRe4lm+bycKqxUYoH5uoVje5SkOJ3uoLer8=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210806050752-d5994794ab50 h1:pegPKqRv+4qVwDRTh6Jbsp5g3eAdCQwxteajtU8amT0=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210806050752-d5994794ab50/go.mod h1:AgDRPtcxUnVICv3XtfcHTzgSOYM/swXp5gI+W/xjD68=
 github.com/ledgerwatch/erigon-lib v0.0.0-20210807132941-e9d58fa19e21 h1:xQDqB/EJ37JfSopCSAP7i7Qq/4SUIB6z9lb1wrLE5pg=
 github.com/ledgerwatch/erigon-lib v0.0.0-20210807132941-e9d58fa19e21/go.mod h1:ph/g/4GqHdxeJaDtTfA0iEi2iuODC9/vJIZvo8dJhrY=
 github.com/ledgerwatch/log/v3 v3.2.0 h1:g0lVx5/hDQs+t+l7xzLTXDDlx+7W2JeTcoWQJQXhXJk=
@@ -1420,8 +1418,7 @@ google.golang.org/grpc v1.35.0/go.mod h1:qjiiYl8FncCW8feJPdyg3v6XW24KsRHe+dy9BAG
 google.golang.org/grpc v1.36.0/go.mod h1:qjiiYl8FncCW8feJPdyg3v6XW24KsRHe+dy9BAGRRjU=
 google.golang.org/grpc v1.36.1/go.mod h1:qjiiYl8FncCW8feJPdyg3v6XW24KsRHe+dy9BAGRRjU=
 google.golang.org/grpc v1.38.0/go.mod h1:NREThFqKR1f3iQ6oBuvc5LadQuXVGo9rkm5ZGrQdJfM=
-google.golang.org/grpc v1.39.0 h1:Klz8I9kdtkIN6EpHHUOMLCYhTn/2WAe5a0s1hcBkdTI=
-google.golang.org/grpc v1.39.0/go.mod h1:PImNr+rS9TWYb2O4/emRugxiyHZ5JyHW5F+RPnDzfrE=
+google.golang.org/grpc v1.39.1 h1:f37vZbBVTiJ6jKG5mWz8ySOBxNqy6ViPgyhSdVnxF3E=
 google.golang.org/grpc v1.39.1/go.mod h1:PImNr+rS9TWYb2O4/emRugxiyHZ5JyHW5F+RPnDzfrE=
 google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0 h1:M1YKkFIboKNieVO5DLUEVzQfGwJD30Nv2jfUgzb5UcE=
 google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0/go.mod h1:6Kw0yEErY5E/yWrBtf03jp27GLLJujG4z/JK95pnjjw=
