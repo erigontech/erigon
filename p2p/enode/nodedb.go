@@ -75,12 +75,12 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	kvCache      *btree.BTree
-	kvCachesLock sync.RWMutex
-	path         string        // Remember path for log messages
-	kv           kv.RwDB       // Interface to the database itself
-	runner       sync.Once     // Ensures we can start at most one expirer
-	quit         chan struct{} // Channel to signal the expiring thread to stop
+	kvCache     *btree.BTree
+	kvCacheLock sync.RWMutex
+	path        string        // Remember path for log messages
+	kv          kv.RwDB       // Interface to the database itself
+	runner      sync.Once     // Ensures we can start at most one expirer
+	quit        chan struct{} // Channel to signal the expiring thread to stop
 }
 
 // DbItem is type of items stored in the kvCache's btrees
@@ -230,9 +230,9 @@ func localItemKey(id ID, field string) []byte {
 	return key
 }
 
-func (db *DB) getFromCache(table string, key []byte) []byte {
-	db.kvCachesLock.RLock()
-	defer db.kvCachesLock.RUnlock()
+func (db *DB) getFromCache(key []byte) []byte {
+	db.kvCacheLock.RLock()
+	defer db.kvCacheLock.RUnlock()
 	i := db.kvCache.Get(&DbItem{key: key})
 	if i != nil {
 		di := i.(*DbItem)
@@ -241,16 +241,19 @@ func (db *DB) getFromCache(table string, key []byte) []byte {
 	return nil
 }
 
-func (db *DB) setToCache(table string, key, val []byte) {
-	db.kvCachesLock.Lock()
-	defer db.kvCachesLock.Unlock()
+func (db *DB) setToCache(key, val []byte) {
+	db.kvCacheLock.Lock()
+	defer db.kvCacheLock.Unlock()
 	db.kvCache.ReplaceOrInsert(&DbItem{key: key, val: val})
+	if db.kvCache.Len() > 16*1024 {
+		db.commitCache(false /* logit */)
+	}
 }
 
 // fetchInt64 retrieves an integer associated with a particular key.
 func (db *DB) fetchInt64(key []byte) int64 {
 	var val int64
-	if blob := db.getFromCache(kv.Inodes, key); blob != nil {
+	if blob := db.getFromCache(key); blob != nil {
 		if v, read := binary.Varint(blob); read > 0 {
 			return v
 		}
@@ -278,14 +281,14 @@ func (db *DB) fetchInt64(key []byte) int64 {
 func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
-	db.setToCache(kv.Inodes, common.CopyBytes(key), blob)
+	db.setToCache(common.CopyBytes(key), blob)
 	return nil
 }
 
 // fetchUint64 retrieves an integer associated with a particular key.
 func (db *DB) fetchUint64(key []byte) uint64 {
 	var val uint64
-	if blob := db.getFromCache(kv.Inodes, key); blob != nil {
+	if blob := db.getFromCache(key); blob != nil {
 		val, _ = binary.Uvarint(blob)
 		return val
 	}
@@ -308,14 +311,14 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	db.setToCache(kv.Inodes, common.CopyBytes(key), blob)
+	db.setToCache(common.CopyBytes(key), blob)
 	return nil
 }
 
 // Node retrieves a node with a given id from the database.
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
-	blob = db.getFromCache(kv.Inodes, nodeKey(id))
+	blob = db.getFromCache(nodeKey(id))
 	if blob == nil {
 		if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
 			v, errGet := tx.GetOne(kv.Inodes, nodeKey(id))
@@ -356,7 +359,7 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	db.setToCache(kv.Inodes, nodeKey(node.ID()), blob)
+	db.setToCache(nodeKey(node.ID()), blob)
 	return db.storeUint64(nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
 }
 
@@ -380,8 +383,8 @@ func (db *DB) DeleteNode(id ID) {
 }
 
 func deleteRange(db *DB, prefix []byte) {
-	db.kvCachesLock.Lock()
-	defer db.kvCachesLock.Unlock()
+	db.kvCacheLock.Lock()
+	defer db.kvCacheLock.Unlock()
 	// First delete relevant entries from the cache
 	db.kvCache.AscendGreaterOrEqual(&DbItem{key: prefix}, func(i btree.Item) bool {
 		di := i.(*DbItem)
@@ -637,13 +640,9 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	return nodes
 }
 
-// close flushes and closes the database files.
-func (db *DB) Close() {
-	if db.quit == nil {
-		return
-	}
-	close(db.quit)
-	db.quit = nil
+func (db *DB) commitCache(logit bool) {
+	db.kvCacheLock.Lock()
+	defer db.kvCacheLock.Unlock()
 	entriesUpdated := 0
 	entriesDeleted := 0
 	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
@@ -668,9 +667,22 @@ func (db *DB) Close() {
 		})
 		return err
 	}); err != nil {
-		log.Warn("nodeDB.Close update failed", "path", db.path, "err", err)
+		log.Warn("p2p node database update failed", "path", db.path, "err", err)
 	} else {
-		log.Info("Successfully update p2p node database", "path", db.path, "updated", entriesUpdated, "deleted", entriesDeleted)
+		if logit {
+			log.Info("Successfully update p2p node database", "path", db.path, "updated", entriesUpdated, "deleted", entriesDeleted)
+		}
+		db.kvCache.Clear(true)
 	}
+}
+
+// close flushes and closes the database files.
+func (db *DB) Close() {
+	if db.quit == nil {
+		return
+	}
+	close(db.quit)
+	db.quit = nil
+	db.commitCache(true /* logit */)
 	db.kv.Close()
 }
