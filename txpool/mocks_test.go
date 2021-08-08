@@ -17,14 +17,17 @@ var _ Pool = &PoolMock{}
 //
 // 		// make and configure a mocked Pool
 // 		mockedPool := &PoolMock{
+// 			AddFunc: func(newTxs TxSlots) error {
+// 				panic("mock out the Add method")
+// 			},
+// 			AddNewGoodPeerFunc: func(peerID PeerID)  {
+// 				panic("mock out the AddNewGoodPeer method")
+// 			},
 // 			GetRlpFunc: func(hash []byte) []byte {
 // 				panic("mock out the GetRlp method")
 // 			},
 // 			IdHashKnownFunc: func(hash []byte) bool {
 // 				panic("mock out the IdHashKnown method")
-// 			},
-// 			NotifyNewPeerFunc: func(peerID PeerID)  {
-// 				panic("mock out the NotifyNewPeer method")
 // 			},
 // 		}
 //
@@ -33,17 +36,30 @@ var _ Pool = &PoolMock{}
 //
 // 	}
 type PoolMock struct {
+	// AddFunc mocks the Add method.
+	AddFunc func(newTxs TxSlots) error
+
+	// AddNewGoodPeerFunc mocks the AddNewGoodPeer method.
+	AddNewGoodPeerFunc func(peerID PeerID)
+
 	// GetRlpFunc mocks the GetRlp method.
 	GetRlpFunc func(hash []byte) []byte
 
 	// IdHashKnownFunc mocks the IdHashKnown method.
 	IdHashKnownFunc func(hash []byte) bool
 
-	// NotifyNewPeerFunc mocks the NotifyNewPeer method.
-	NotifyNewPeerFunc func(peerID PeerID)
-
 	// calls tracks calls to the methods.
 	calls struct {
+		// Add holds details about calls to the Add method.
+		Add []struct {
+			// NewTxs is the newTxs argument value.
+			NewTxs TxSlots
+		}
+		// AddNewGoodPeer holds details about calls to the AddNewGoodPeer method.
+		AddNewGoodPeer []struct {
+			// PeerID is the peerID argument value.
+			PeerID PeerID
+		}
 		// GetRlp holds details about calls to the GetRlp method.
 		GetRlp []struct {
 			// Hash is the hash argument value.
@@ -54,15 +70,76 @@ type PoolMock struct {
 			// Hash is the hash argument value.
 			Hash []byte
 		}
-		// NotifyNewPeer holds details about calls to the NotifyNewPeer method.
-		NotifyNewPeer []struct {
-			// PeerID is the peerID argument value.
-			PeerID PeerID
-		}
 	}
-	lockGetRlp        sync.RWMutex
-	lockIdHashKnown   sync.RWMutex
-	lockNotifyNewPeer sync.RWMutex
+	lockAdd            sync.RWMutex
+	lockAddNewGoodPeer sync.RWMutex
+	lockGetRlp         sync.RWMutex
+	lockIdHashKnown    sync.RWMutex
+}
+
+// Add calls AddFunc.
+func (mock *PoolMock) Add(newTxs TxSlots) error {
+	callInfo := struct {
+		NewTxs TxSlots
+	}{
+		NewTxs: newTxs,
+	}
+	mock.lockAdd.Lock()
+	mock.calls.Add = append(mock.calls.Add, callInfo)
+	mock.lockAdd.Unlock()
+	if mock.AddFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.AddFunc(newTxs)
+}
+
+// AddCalls gets all the calls that were made to Add.
+// Check the length with:
+//     len(mockedPool.AddCalls())
+func (mock *PoolMock) AddCalls() []struct {
+	NewTxs TxSlots
+} {
+	var calls []struct {
+		NewTxs TxSlots
+	}
+	mock.lockAdd.RLock()
+	calls = mock.calls.Add
+	mock.lockAdd.RUnlock()
+	return calls
+}
+
+// AddNewGoodPeer calls AddNewGoodPeerFunc.
+func (mock *PoolMock) AddNewGoodPeer(peerID PeerID) {
+	callInfo := struct {
+		PeerID PeerID
+	}{
+		PeerID: peerID,
+	}
+	mock.lockAddNewGoodPeer.Lock()
+	mock.calls.AddNewGoodPeer = append(mock.calls.AddNewGoodPeer, callInfo)
+	mock.lockAddNewGoodPeer.Unlock()
+	if mock.AddNewGoodPeerFunc == nil {
+		return
+	}
+	mock.AddNewGoodPeerFunc(peerID)
+}
+
+// AddNewGoodPeerCalls gets all the calls that were made to AddNewGoodPeer.
+// Check the length with:
+//     len(mockedPool.AddNewGoodPeerCalls())
+func (mock *PoolMock) AddNewGoodPeerCalls() []struct {
+	PeerID PeerID
+} {
+	var calls []struct {
+		PeerID PeerID
+	}
+	mock.lockAddNewGoodPeer.RLock()
+	calls = mock.calls.AddNewGoodPeer
+	mock.lockAddNewGoodPeer.RUnlock()
+	return calls
 }
 
 // GetRlp calls GetRlpFunc.
@@ -130,36 +207,5 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 	mock.lockIdHashKnown.RLock()
 	calls = mock.calls.IdHashKnown
 	mock.lockIdHashKnown.RUnlock()
-	return calls
-}
-
-// NotifyNewPeer calls NotifyNewPeerFunc.
-func (mock *PoolMock) NotifyNewPeer(peerID PeerID) {
-	callInfo := struct {
-		PeerID PeerID
-	}{
-		PeerID: peerID,
-	}
-	mock.lockNotifyNewPeer.Lock()
-	mock.calls.NotifyNewPeer = append(mock.calls.NotifyNewPeer, callInfo)
-	mock.lockNotifyNewPeer.Unlock()
-	if mock.NotifyNewPeerFunc == nil {
-		return
-	}
-	mock.NotifyNewPeerFunc(peerID)
-}
-
-// NotifyNewPeerCalls gets all the calls that were made to NotifyNewPeer.
-// Check the length with:
-//     len(mockedPool.NotifyNewPeerCalls())
-func (mock *PoolMock) NotifyNewPeerCalls() []struct {
-	PeerID PeerID
-} {
-	var calls []struct {
-		PeerID PeerID
-	}
-	mock.lockNotifyNewPeer.RLock()
-	calls = mock.calls.NotifyNewPeer
-	mock.lockNotifyNewPeer.RUnlock()
 	return calls
 }

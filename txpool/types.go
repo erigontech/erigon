@@ -420,6 +420,9 @@ func (s *TxSlots) Growth(targetSize int) {
 	for s.senders.Len() < targetSize {
 		s.senders = append(s.senders, addressesGrowth...)
 	}
+	for len(s.isLocal) < targetSize {
+		s.isLocal = append(s.isLocal, false)
+	}
 }
 
 var addressesGrowth = make([]byte, 20)
