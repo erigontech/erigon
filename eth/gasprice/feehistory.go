@@ -32,8 +32,8 @@ import (
 )
 
 var (
-	errInvalidPercentile = errors.New("invalid reward percentile")
-	errRequestBeyondHead = errors.New("request beyond head block")
+	ErrInvalidPercentile = errors.New("invalid reward percentile")
+	ErrRequestBeyondHead = errors.New("request beyond head block")
 )
 
 const (
@@ -110,7 +110,10 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 	}
 
 	sorter := make(sortGasAndReward, len(bf.block.Transactions()))
-	baseFee, _ := uint256.FromBig(bf.block.BaseFee())
+	baseFee := uint256.NewInt(0)
+	if bf.block.BaseFee() != nil {
+		baseFee.SetFromBig(bf.block.BaseFee())
+	}
 	for i, tx := range bf.block.Transactions() {
 		reward := tx.GetEffectiveGasTip(baseFee)
 		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: reward.ToBig()}
@@ -166,7 +169,7 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 	if lastBlock == rpc.LatestBlockNumber {
 		lastBlock = headBlock
 	} else if pendingBlock == nil && lastBlock > headBlock {
-		return nil, nil, 0, 0, fmt.Errorf("%w: requested %d, head %d", errRequestBeyondHead, lastBlock, headBlock)
+		return nil, nil, 0, 0, fmt.Errorf("%w: requested %d, head %d", ErrRequestBeyondHead, lastBlock, headBlock)
 	}
 	if maxHistory != 0 {
 		// limit retrieval to the given number of latest blocks
@@ -209,10 +212,10 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, lastBlock rpc.
 	}
 	for i, p := range rewardPercentiles {
 		if p < 0 || p > 100 {
-			return 0, nil, nil, nil, fmt.Errorf("%w: %f", errInvalidPercentile, p)
+			return 0, nil, nil, nil, fmt.Errorf("%w: %f", ErrInvalidPercentile, p)
 		}
 		if i > 0 && p < rewardPercentiles[i-1] {
-			return 0, nil, nil, nil, fmt.Errorf("%w: #%d:%f > #%d:%f", errInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
+			return 0, nil, nil, nil, fmt.Errorf("%w: #%d:%f > #%d:%f", ErrInvalidPercentile, i-1, rewardPercentiles[i-1], i, p)
 		}
 	}
 	// Only process blocks if reward percentiles were requested
