@@ -40,7 +40,7 @@ require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20210807132941-e9d58fa19e21
 	github.com/ledgerwatch/log/v3 v3.2.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
-	github.com/logrusorgru/aurora v2.0.3+incompatible
+	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/pelletier/go-toml v1.9.3
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
