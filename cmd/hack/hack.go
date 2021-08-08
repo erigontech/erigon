@@ -1362,25 +1362,9 @@ func extractCode(chaindata string) error {
 func iterateOverCode(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	var contractCount int
-	var contractKeyTotalLength int
-	var contractValTotalLength int
-	var codeHashTotalLength int
-	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
+	hashes := make(map[common.Hash][]byte)
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainContractCode)
-		if err != nil {
-			return err
-		}
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			contractKeyTotalLength += len(k)
-			contractValTotalLength += len(v)
-		}
-		c, err = tx.Cursor(kv.Code)
+		c, err := tx.Cursor(kv.Code)
 		if err != nil {
 			return err
 		}
@@ -1389,16 +1373,29 @@ func iterateOverCode(chaindata string) error {
 			if err != nil {
 				return err
 			}
-			codeHashTotalLength += len(k)
-			codeTotalLength += len(v)
-			contractCount++
+			if len(v) > 0 && v[0] == 0xef {
+				fmt.Printf("Found code with hash %x: %x\n", k, v)
+				hashes[common.BytesToHash(k)] = common.CopyBytes(v)
+			}
+		}
+		c, err = tx.Cursor(kv.PlainContractCode)
+		if err != nil {
+			return err
+		}
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			hash := common.BytesToHash(v)
+			if code, ok := hashes[hash]; ok {
+				fmt.Printf("address: %x: %x\n", k[:20], code)
+			}
 		}
 		return nil
 	}); err1 != nil {
 		return err1
 	}
-	fmt.Printf("contractCount: %d,contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n",
-		contractCount, contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
 	return nil
 }
 

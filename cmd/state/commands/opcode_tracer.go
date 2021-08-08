@@ -154,7 +154,7 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
@@ -184,7 +184,7 @@ func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.A
 	return nil
 }
 
-func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	// When a CaptureEnd is called, a Tx has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]

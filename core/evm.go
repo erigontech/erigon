@@ -43,6 +43,7 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
+
 	if checkTEVM == nil {
 		checkTEVM = func(_ common.Hash) (bool, error) {
 			return false, nil

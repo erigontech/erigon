@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -213,9 +214,16 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					errs.Flush() // nolint:errcheck
 					// Keep going
 				} else {
-					fmt.Printf("TG response=================================\n%s\n", res.Response)
-					fmt.Printf("G response=================================\n%s\n", resg.Response)
-					return fmt.Errorf("different results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
+					reqFile, _ := os.Create("request.json")                //nolint:errcheck
+					reqFile.Write([]byte(request))                         //nolint:errcheck
+					reqFile.Close()                                        //nolint:errcheck
+					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
+					erigonRespFile.Write(res.Response)                     //nolint:errcheck
+					erigonRespFile.Close()                                 //nolint:errcheck
+					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
+					oeRespFile.Write(resg.Response)                        //nolint:errcheck
+					oeRespFile.Close()                                     //nolint:errcheck
+					return fmt.Errorf("different results for method %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
 				}
 			}
 		}
