@@ -110,7 +110,6 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 	if rlp.List == kind {
 		tx := &LegacyTx{}
 		if err = tx.DecodeRLP(s, size); err != nil {
-			panic(111)
 			return nil, err
 		}
 		return tx, nil
