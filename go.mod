@@ -11,9 +11,10 @@ require (
 	github.com/blend/go-sdk v1.20210806.4 // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
-	github.com/consensys/gurvy v0.3.8
+	github.com/consensys/gnark-crypto v0.4.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
+	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200721192441-a695b0cdd498
 	github.com/edsrzf/mmap-go v1.0.0
@@ -37,6 +38,7 @@ require (
 	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
+	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/erigon-lib v0.0.0-20210807132941-e9d58fa19e21
 	github.com/ledgerwatch/log/v3 v3.2.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
@@ -66,5 +68,6 @@ require (
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
+	gotest.tools v2.2.0+incompatible // indirect
 	pgregory.net/rapid v0.4.6
 )
