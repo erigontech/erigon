@@ -235,40 +235,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, lastBlock rpc.
 	oldestBlock := lastBlock + 1 - rpc.BlockNumber(blocks)
 
 	var (
-		next    = int64(oldestBlock)
-		results = make(chan *blockFees, blocks)
+		next = int64(oldestBlock)
 	)
-	for i := 0; i < maxBlockFetchers && i < blocks; i++ {
-		for {
-			// Retrieve the next block number to fetch with this goroutine
-			blockNumber := rpc.BlockNumber(atomic.AddInt64(&next, 1) - 1)
-			if blockNumber > lastBlock {
-				continue
-			}
-
-			fees := &blockFees{blockNumber: blockNumber}
-			if pendingBlock != nil && blockNumber >= rpc.BlockNumber(pendingBlock.NumberU64()) {
-				fees.block, fees.receipts = pendingBlock, pendingReceipts
-			} else {
-				if len(rewardPercentiles) != 0 {
-					fees.block, fees.err = oracle.backend.BlockByNumber(ctx, blockNumber)
-					if fees.block != nil && fees.err == nil {
-						fees.receipts, fees.err = oracle.backend.GetReceipts(ctx, fees.block.Hash())
-					}
-				} else {
-					fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, blockNumber)
-				}
-			}
-			if fees.block != nil {
-				fees.header = fees.block.Header()
-			}
-			if fees.header != nil {
-				oracle.processBlock(fees, rewardPercentiles)
-			}
-			// send to results even if empty to guarantee that blocks items are sent in total
-			results <- fees
-		}
-	}
 	var (
 		reward       = make([][]*big.Int, blocks)
 		baseFee      = make([]*big.Int, blocks+1)
@@ -276,7 +244,32 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, lastBlock rpc.
 		firstMissing = blocks
 	)
 	for ; blocks > 0; blocks-- {
-		fees := <-results
+		// Retrieve the next block number to fetch with this goroutine
+		blockNumber := rpc.BlockNumber(atomic.AddInt64(&next, 1) - 1)
+		if blockNumber > lastBlock {
+			continue
+		}
+
+		fees := &blockFees{blockNumber: blockNumber}
+		if pendingBlock != nil && blockNumber >= rpc.BlockNumber(pendingBlock.NumberU64()) {
+			fees.block, fees.receipts = pendingBlock, pendingReceipts
+		} else {
+			if len(rewardPercentiles) != 0 {
+				fees.block, fees.err = oracle.backend.BlockByNumber(ctx, blockNumber)
+				if fees.block != nil && fees.err == nil {
+					fees.receipts, fees.err = oracle.backend.GetReceipts(ctx, fees.block.Hash())
+				}
+			} else {
+				fees.header, fees.err = oracle.backend.HeaderByNumber(ctx, blockNumber)
+			}
+		}
+		if fees.block != nil {
+			fees.header = fees.block.Header()
+		}
+		if fees.header != nil {
+			oracle.processBlock(fees, rewardPercentiles)
+		}
+
 		if fees.err != nil {
 			return 0, nil, nil, nil, fees.err
 		}
