@@ -114,7 +114,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
-	case rlp.String:
+	default:
 		s.NewList(size) // Hack - convert String (envelope) into List
 		var b []byte
 		if b, err = s.Bytes(); err != nil {
@@ -144,8 +144,6 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
-	default:
-		return nil, fmt.Errorf("unexpected RLP kind: %v", kind)
 	}
 }
 
