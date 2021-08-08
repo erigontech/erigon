@@ -37,8 +37,9 @@ type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(hash []byte) bool
 	GetRlp(hash []byte) []byte
+	Add(newTxs TxSlots) error
 
-	NotifyNewPeer(peerID PeerID)
+	AddNewGoodPeer(peerID PeerID)
 }
 
 // SubPoolMarker ordered bitset responsible to sort transactions by sub-pools. Bits meaning:
@@ -199,7 +200,7 @@ func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 }
 func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 
-func (p *TxPool) OnNewTxs(newTxs TxSlots) error {
+func (p *TxPool) Add(newTxs TxSlots) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := newTxs.Valid(); err != nil {
@@ -710,9 +711,6 @@ func (mt *metaTx) Less(than *metaTx) bool {
 	if mt.Tx.nonce != than.Tx.nonce {
 		return mt.Tx.nonce < than.Tx.nonce
 	}
-	//if mt.Tx.senderID != than.Tx.senderID {
-	//	return mt.Tx.senderID < than.Tx.senderID
-	//}
 	return false
 }
 

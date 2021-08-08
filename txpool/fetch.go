@@ -262,6 +262,21 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 		}, &grpc.EmptyCallOption{}); err != nil {
 			return err
 		}
+	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66:
+		parseCtx := NewTxParseContext()
+		txs := TxSlots{}
+		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
+			if _, err := ParsePooledTransactions65(req.Data, 0, parseCtx, &txs); err != nil {
+				return err
+			}
+		} else {
+			if _, _, err := ParsePooledTransactions66(req.Data, 0, parseCtx, &txs); err != nil {
+				return err
+			}
+		}
+		if err := f.pool.Add(txs); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -341,7 +356,7 @@ func (f *Fetch) handleNewPeer(req *sentry.PeersReply) error {
 	}
 	switch req.Event {
 	case sentry.PeersReply_Connect:
-		f.pool.NotifyNewPeer(req.PeerId)
+		f.pool.AddNewGoodPeer(req.PeerId)
 	}
 
 	return nil
