@@ -8,7 +8,6 @@ require (
 	github.com/VictoriaMetrics/metrics v1.17.3
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
-	github.com/blend/go-sdk v1.20210806.4 // indirect
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/consensys/gnark-crypto v0.4.0
@@ -24,7 +23,6 @@ require (
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.7.4
 	github.com/gofrs/flock v0.8.1
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/golang/snappy v0.0.3
 	github.com/google/btree v1.0.1
@@ -56,7 +54,7 @@ require (
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.5
 	github.com/valyala/fastjson v1.6.3
-	github.com/wcharczuk/go-chart v2.0.1+incompatible
+	github.com/wcharczuk/go-chart/v2 v2.1.0
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c

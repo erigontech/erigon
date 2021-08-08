@@ -27,8 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/wcharczuk/go-chart"
-	"github.com/wcharczuk/go-chart/util"
+	"github.com/wcharczuk/go-chart/v2"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -66,7 +65,7 @@ var (
 )
 
 func readData(filename string) (blocks []float64, hours []float64, dbsize []float64, trienodes []float64, heap []float64) {
-	err := util.File.ReadByLines(filename, func(line string) error {
+	err := chart.ReadLines(filename, func(line string) error {
 		parts := strings.Split(line, ",")
 		blocks = append(blocks, tool.ParseFloat64(strings.Trim(parts[0], " ")))
 		hours = append(hours, tool.ParseFloat64(strings.Trim(parts[1], " ")))
@@ -115,7 +114,6 @@ func mychart() {
 	mainSeries := &chart.ContinuousSeries{
 		Name: "Cumulative sync time (bolt)",
 		Style: chart.Style{
-			Show:        true,
 			StrokeColor: chart.ColorBlue,
 			FillColor:   chart.ColorBlue.WithAlpha(100),
 		},
@@ -125,7 +123,6 @@ func mychart() {
 	badgerSeries := &chart.ContinuousSeries{
 		Name: "Cumulative sync time (badger)",
 		Style: chart.Style{
-			Show:        true,
 			StrokeColor: chart.ColorRed,
 			FillColor:   chart.ColorRed.WithAlpha(100),
 		},
@@ -135,7 +132,7 @@ func mychart() {
 	dbsizeSeries := &chart.ContinuousSeries{
 		Name: "Database size (bolt)",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorBlack,
 		},
 		YAxis:   chart.YAxisSecondary,
@@ -145,7 +142,7 @@ func mychart() {
 	dbsizeSeries0 := &chart.ContinuousSeries{
 		Name: "Database size (badger)",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorOrange,
 		},
 		YAxis:   chart.YAxisSecondary,
@@ -163,8 +160,8 @@ func mychart() {
 		},
 		YAxis: chart.YAxis{
 			Name:      "Elapsed time",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -172,15 +169,15 @@ func mychart() {
 				return fmt.Sprintf("%d h", int(v.(float64)))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorBlue,
 				StrokeWidth: 1.0,
 			},
 			GridLines: days(),
 		},
 		YAxisSecondary: chart.YAxis{
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -189,15 +186,13 @@ func mychart() {
 			},
 		},
 		XAxis: chart.XAxis{
-			Name: "Blocks, million",
-			Style: chart.Style{
-				Show: true,
-			},
+			Name:  "Blocks, million",
+			Style: chart.Style{},
 			ValueFormatter: func(v interface{}) string {
 				return fmt.Sprintf("%.3fm", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
@@ -222,7 +217,7 @@ func mychart() {
 	heapSeries := &chart.ContinuousSeries{
 		Name: "Allocated heap",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorYellow,
 			FillColor:   chart.ColorYellow.WithAlpha(100),
 		},
@@ -232,7 +227,7 @@ func mychart() {
 	trienodesSeries := &chart.ContinuousSeries{
 		Name: "Trie nodes",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorGreen,
 		},
 		YAxis:   chart.YAxisSecondary,
@@ -249,8 +244,8 @@ func mychart() {
 		},
 		YAxis: chart.YAxis{
 			Name:      "Allocated heap",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -258,15 +253,15 @@ func mychart() {
 				return fmt.Sprintf("%.1f G", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorYellow,
 				StrokeWidth: 1.0,
 			},
 			GridLines: days(),
 		},
 		YAxisSecondary: chart.YAxis{
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -275,15 +270,13 @@ func mychart() {
 			},
 		},
 		XAxis: chart.XAxis{
-			Name: "Blocks, million",
-			Style: chart.Style{
-				Show: true,
-			},
+			Name:  "Blocks, million",
+			Style: chart.Style{},
 			ValueFormatter: func(v interface{}) string {
 				return fmt.Sprintf("%.3fm", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
@@ -380,7 +373,7 @@ func trieChart() {
 	shortsSeries := &chart.ContinuousSeries{
 		Name: "Short nodes",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorBlue,
 			FillColor:   chart.ColorBlue.WithAlpha(100),
 		},
@@ -392,7 +385,7 @@ func trieChart() {
 		countSeries[i] = &chart.ContinuousSeries{
 			Name: fmt.Sprintf("%d-nodes", i),
 			Style: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.GetAlternateColor(i),
 			},
 			XValues: thresholds,
@@ -400,15 +393,13 @@ func trieChart() {
 		}
 	}
 	xaxis := &chart.XAxis{
-		Name: "Dust theshold",
-		Style: chart.Style{
-			Show: true,
-		},
+		Name:  "Dust theshold",
+		Style: chart.Style{},
 		ValueFormatter: func(v interface{}) string {
 			return fmt.Sprintf("%d wei", int(v.(float64)))
 		},
 		GridMajorStyle: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.DefaultStrokeColor,
 			StrokeWidth: 1.0,
 		},
@@ -445,8 +436,8 @@ func trieChart() {
 		XAxis: *xaxis,
 		YAxis: chart.YAxis{
 			Name:      "Node count",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -454,7 +445,7 @@ func trieChart() {
 				return fmt.Sprintf("%dm", int(v.(float64)/1e6))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.DefaultStrokeColor,
 				StrokeWidth: 1.0,
 			},
@@ -480,8 +471,8 @@ func trieChart() {
 		XAxis: *xaxis,
 		YAxis: chart.YAxis{
 			Name:      "Node count",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -489,7 +480,7 @@ func trieChart() {
 				return fmt.Sprintf("%.2fm", v.(float64)/1e6)
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.DefaultStrokeColor,
 				StrokeWidth: 1.0,
 			},
@@ -516,8 +507,8 @@ func trieChart() {
 		XAxis: *xaxis,
 		YAxis: chart.YAxis{
 			Name:      "Node count",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -525,7 +516,7 @@ func trieChart() {
 				return fmt.Sprintf("%.2fk", v.(float64)/1e3)
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.DefaultStrokeColor,
 				StrokeWidth: 1.0,
 			},
