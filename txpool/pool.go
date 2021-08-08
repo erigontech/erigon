@@ -710,9 +710,6 @@ func (mt *metaTx) Less(than *metaTx) bool {
 	if mt.Tx.nonce != than.Tx.nonce {
 		return mt.Tx.nonce < than.Tx.nonce
 	}
-	//if mt.Tx.senderID != than.Tx.senderID {
-	//	return mt.Tx.senderID < than.Tx.senderID
-	//}
 	return false
 }
 
