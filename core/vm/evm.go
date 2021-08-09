@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -77,10 +76,21 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 
 // run runs the given contract and takes care of running precompiles with a fallback to the byte code interpreter.
 func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, error) {
+	callback, err := selectInterpreter(evm, contract)
+	defer callback()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return evm.interpreter.Run(contract, input, readOnly)
+}
+
+func selectInterpreter(evm *EVM, contract *Contract) (func(), error) {
 	interpreter := evm.interpreter
-	defer func() {
+	callback := func() {
 		evm.interpreter = interpreter
-	}()
+	}
 
 	switch contract.vmType {
 	case EVMType:
@@ -91,7 +101,7 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 		return nil, errors.New("no compatible interpreter")
 	}
 
-	return evm.interpreter.Run(contract, input, readOnly)
+	return callback, nil
 }
 
 // BlockContext provides the EVM with auxiliary information. Once provided
@@ -176,9 +186,10 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, state IntraBlockState, chain
 		ChainRules:      chainConfig.Rules(blockCtx.BlockNumber),
 	}
 
+	evmInterp := NewEVMInterpreter(evm, vmConfig)
 	evm.interpreters = []Interpreter{
-		EVMType:  NewEVMInterpreter(evm, vmConfig),
-		TEVMType: NewTEVMInterpreter(evm, vmConfig),
+		EVMType:  evmInterp,
+		TEVMType: NewTEVMInterpreterByVM(evmInterp.VM),
 	}
 	evm.interpreter = evm.interpreters[EVMType]
 

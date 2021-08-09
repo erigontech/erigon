@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -47,11 +48,11 @@ type Config struct {
 	EVMConfig   vm.Config
 	BaseFee     *uint256.Int
 
-	State           *state.IntraBlockState
-	r               state.StateReader
-	w               state.StateWriter
-	GetHashFn       func(n uint64) common.Hash
-	contractHasTEVM func(common.Hash) (bool, error)
+	State     *state.IntraBlockState
+	r         state.StateReader
+	w         state.StateWriter
+	kv        ethdb.KVGetter
+	GetHashFn func(n uint64) common.Hash
 }
 
 // sets defaults on the config
@@ -99,9 +100,6 @@ func setDefaults(cfg *Config) {
 			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
-	if cfg.contractHasTEVM == nil {
-		cfg.contractHasTEVM = func(common.Hash) (bool, error) { return false, nil }
-	}
 }
 
 // Execute executes the code using the input as call data during the execution.
@@ -120,6 +118,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -158,6 +157,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (

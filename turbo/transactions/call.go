@@ -24,7 +24,7 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters, contractHasTEVM func(hash common.Hash) (bool, error)) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -112,7 +112,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
+	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -136,7 +136,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx ethdb.Tx, blockNrOrHas
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx ethdb.Tx) (vm.BlockContext, vm.TxContext) {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx ethdb.Tx, contractHasTEVM func(address common.Hash) (bool, error)) (vm.BlockContext, vm.TxContext) {
 	var baseFee uint256.Int
 	if header.Eip1559 {
 		overflow := baseFee.SetFromBig(header.BaseFee)
@@ -148,7 +148,7 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 			CanTransfer:     core.CanTransfer,
 			Transfer:        core.Transfer,
 			GetHash:         getHashGetter(requireCanonical, tx),
-			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
+			ContractHasTEVM: contractHasTEVM,
 			Coinbase:        header.Coinbase,
 			BlockNumber:     header.Number.Uint64(),
 			Time:            header.Time,
