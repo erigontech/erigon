@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
 
@@ -33,8 +34,8 @@ import (
 )
 
 func TestFetch(t *testing.T) {
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	var genesisHash [32]byte
 	var networkId uint64 = 1
@@ -135,13 +136,18 @@ func TestSendTxPropagate(t *testing.T) {
 }
 
 func TestOnNewBlock(t *testing.T) {
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var genesisHash [32]byte
 	var networkId uint64 = 1
 
+	i := 0
 	stream := &remote.KV_StateChangesClientMock{
 		RecvFunc: func() (*remote.StateChange, error) {
+			if i > 0 {
+				return nil, io.EOF
+			}
+			i++
 			return &remote.StateChange{Txs: [][]byte{decodeHex(txParseTests[0].payloadStr), decodeHex(txParseTests[1].payloadStr), decodeHex(txParseTests[2].payloadStr)}}, nil
 		},
 	}
@@ -152,11 +158,7 @@ func TestOnNewBlock(t *testing.T) {
 	}
 	pool := &PoolMock{}
 	fetch := NewFetch(ctx, nil, genesisHash, networkId, nil, pool, stateChanges)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	fetch.SetWaitGroup(&wg)
-	fetch.ConnectCore()
-	fetch.wg.Wait()
+	fetch.stateChangesStream(ctx, stateChanges)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
 	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.txs))
 }
