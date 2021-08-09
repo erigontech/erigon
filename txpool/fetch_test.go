@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/log/v3"
@@ -43,11 +44,11 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, logger)
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, &remote.KVClientMock{}, logger)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
-	fetch.Start()
+	fetch.ConnectSentries()
 	m.StreamWg.Wait()
 	// Send one transaction id
 	wg.Add(1)

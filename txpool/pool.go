@@ -38,6 +38,7 @@ type Pool interface {
 	IdHashKnown(hash []byte) bool
 	GetRlp(hash []byte) []byte
 	Add(newTxs TxSlots) error
+	OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error
 
 	AddNewGoodPeer(peerID PeerID)
 }
@@ -110,6 +111,7 @@ func (i *nonce2TxItem) Less(than btree.Item) bool {
 type TxPool struct {
 	lock *sync.RWMutex
 
+	blockHeight     atomic.Uint64
 	protocolBaseFee atomic.Uint64
 	blockBaseFee    atomic.Uint64
 
@@ -284,7 +286,7 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 
 	return nil
 }
-func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee uint64) error {
+func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := unwindTxs.Valid(); err != nil {
@@ -294,11 +296,17 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 		return err
 	}
 
+	p.blockHeight.Store(blockHeight)
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
 	setTxSenderID(p.senderIDs, p.senderInfo, unwindTxs)
 	setTxSenderID(p.senderIDs, p.senderInfo, minedTxs)
+	for addr, id := range p.senderIDs { // merge state changes
+		if v, ok := stateChanges[addr]; ok {
+			p.senderInfo[id] = &v
+		}
+	}
 	if err := onNewBlock(p.senderInfo, unwindTxs, minedTxs.txs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
@@ -322,7 +330,9 @@ func (p *TxPool) OnNewBlock(unwindTxs, minedTxs TxSlots, protocolBaseFee, blockB
 }
 func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInfo, txs TxSlots) {
 	for i := range txs.txs {
-		id, ok := senderIDs[string(txs.senders.At(i))]
+		addr := string(txs.senders.At(i))
+
+		id, ok := senderIDs[addr]
 		if !ok {
 			for i := range senderInfo { //TODO: create field for it?
 				if id < i {
@@ -330,7 +340,7 @@ func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInf
 				}
 			}
 			id++
-			senderIDs[string(txs.senders.At(i))] = id
+			senderIDs[addr] = id
 		}
 		txs.txs[i].senderID = id
 	}

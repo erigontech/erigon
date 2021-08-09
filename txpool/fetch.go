@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -38,12 +39,13 @@ import (
 // genesis hash and list of forks, but with zero max block and total difficulty
 // Sentry should have a logic not to overwrite statusData with messages from tx pool
 type Fetch struct {
-	ctx           context.Context       // Context used for cancellation and closing of the fetcher
-	sentryClients []sentry.SentryClient // sentry clients that will be used for accessing the network
-	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
-	pool          Pool                  // Transaction pool implementation
-	wg            *sync.WaitGroup       // used for synchronisation in the tests (nil when not in tests)
-	logger        log.Logger
+	ctx                context.Context       // Context used for cancellation and closing of the fetcher
+	sentryClients      []sentry.SentryClient // sentry clients that will be used for accessing the network
+	statusData         *sentry.StatusData    // Status data used for "handshaking" with sentries
+	pool               Pool                  // Transaction pool implementation
+	wg                 *sync.WaitGroup       // used for synchronisation in the tests (nil when not in tests)
+	stateChangesClient remote.KVClient
+	logger             log.Logger
 }
 
 type Timings struct {
@@ -67,6 +69,7 @@ func NewFetch(ctx context.Context,
 	networkId uint64,
 	forks []uint64,
 	pool Pool,
+	stateChangesClient remote.KVClient,
 	logger log.Logger,
 ) *Fetch {
 	statusData := &sentry.StatusData{
@@ -80,11 +83,12 @@ func NewFetch(ctx context.Context,
 		},
 	}
 	return &Fetch{
-		ctx:           ctx,
-		sentryClients: sentryClients,
-		statusData:    statusData,
-		pool:          pool,
-		logger:        logger,
+		ctx:                ctx,
+		sentryClients:      sentryClients,
+		statusData:         statusData,
+		pool:               pool,
+		logger:             logger,
+		stateChangesClient: stateChangesClient,
 	}
 }
 
@@ -92,8 +96,8 @@ func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
 	f.wg = wg
 }
 
-// Start initialises connection to the sentry
-func (f *Fetch) Start() {
+// ConnectSentries initialises connection to the sentry
+func (f *Fetch) ConnectSentries() {
 	for i := range f.sentryClients {
 		go func(i int) {
 			f.receiveMessageLoop(f.sentryClients[i])
@@ -102,6 +106,9 @@ func (f *Fetch) Start() {
 			f.receivePeerLoop(f.sentryClients[i])
 		}(i)
 	}
+}
+func (f *Fetch) ConnectCore() {
+	go func() { f.stateChangesLoop(f.ctx, f.stateChangesClient) }()
 }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
@@ -360,4 +367,77 @@ func (f *Fetch) handleNewPeer(req *sentry.PeersReply) error {
 	}
 
 	return nil
+}
+
+func (f *Fetch) stateChangesLoop(ctx context.Context, client remote.KVClient) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		f.stateChangesStream(ctx, client)
+	}
+}
+func (f *Fetch) stateChangesStream(ctx context.Context, client remote.KVClient) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := client.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		time.Sleep(time.Second)
+		log.Warn("state changes", "err", err)
+	}
+	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Warn("stream.Recv", "err", err)
+			return
+		}
+		if req == nil {
+			return
+		}
+
+		var unwindTxs, minedTxs TxSlots
+		if req.Direction == remote.Direction_FORWARD {
+			minedTxs.Growth(len(req.Txs))
+		}
+		if req.Direction == remote.Direction_UNWIND {
+			unwindTxs.Growth(len(req.Txs))
+		}
+		diff := map[string]senderInfo{}
+		for _, change := range req.Changes {
+			nonce, balance, err := DecodeSender(change.Data)
+			if err != nil {
+				log.Warn("stateChanges.decodeSender", "err", err)
+				continue
+			}
+			addr := gointerfaces.ConvertH160toAddress(change.Address)
+			diff[string(addr[:])] = senderInfo{nonce: nonce, balance: balance}
+		}
+
+		if err := f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockBaseFee, req.BlockHeight); err != nil {
+			log.Warn("onNewBlock", "err", err)
+		}
+	}
 }
