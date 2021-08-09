@@ -7,6 +7,7 @@ import (
 	context "context"
 	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	grpc "google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	sync "sync"
 )
@@ -201,5 +202,316 @@ func (mock *KVClientMock) VersionCalls() []struct {
 	mock.lockVersion.RLock()
 	calls = mock.calls.Version
 	mock.lockVersion.RUnlock()
+	return calls
+}
+
+// Ensure, that KV_StateChangesClientMock does implement KV_StateChangesClient.
+// If this is not the case, regenerate this file with moq.
+var _ KV_StateChangesClient = &KV_StateChangesClientMock{}
+
+// KV_StateChangesClientMock is a mock implementation of KV_StateChangesClient.
+//
+// 	func TestSomethingThatUsesKV_StateChangesClient(t *testing.T) {
+//
+// 		// make and configure a mocked KV_StateChangesClient
+// 		mockedKV_StateChangesClient := &KV_StateChangesClientMock{
+// 			CloseSendFunc: func() error {
+// 				panic("mock out the CloseSend method")
+// 			},
+// 			ContextFunc: func() context.Context {
+// 				panic("mock out the Context method")
+// 			},
+// 			HeaderFunc: func() (metadata.MD, error) {
+// 				panic("mock out the Header method")
+// 			},
+// 			RecvFunc: func() (*StateChange, error) {
+// 				panic("mock out the Recv method")
+// 			},
+// 			RecvMsgFunc: func(m interface{}) error {
+// 				panic("mock out the RecvMsg method")
+// 			},
+// 			SendMsgFunc: func(m interface{}) error {
+// 				panic("mock out the SendMsg method")
+// 			},
+// 			TrailerFunc: func() metadata.MD {
+// 				panic("mock out the Trailer method")
+// 			},
+// 		}
+//
+// 		// use mockedKV_StateChangesClient in code that requires KV_StateChangesClient
+// 		// and then make assertions.
+//
+// 	}
+type KV_StateChangesClientMock struct {
+	// CloseSendFunc mocks the CloseSend method.
+	CloseSendFunc func() error
+
+	// ContextFunc mocks the Context method.
+	ContextFunc func() context.Context
+
+	// HeaderFunc mocks the Header method.
+	HeaderFunc func() (metadata.MD, error)
+
+	// RecvFunc mocks the Recv method.
+	RecvFunc func() (*StateChange, error)
+
+	// RecvMsgFunc mocks the RecvMsg method.
+	RecvMsgFunc func(m interface{}) error
+
+	// SendMsgFunc mocks the SendMsg method.
+	SendMsgFunc func(m interface{}) error
+
+	// TrailerFunc mocks the Trailer method.
+	TrailerFunc func() metadata.MD
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// CloseSend holds details about calls to the CloseSend method.
+		CloseSend []struct {
+		}
+		// Context holds details about calls to the Context method.
+		Context []struct {
+		}
+		// Header holds details about calls to the Header method.
+		Header []struct {
+		}
+		// Recv holds details about calls to the Recv method.
+		Recv []struct {
+		}
+		// RecvMsg holds details about calls to the RecvMsg method.
+		RecvMsg []struct {
+			// M is the m argument value.
+			M interface{}
+		}
+		// SendMsg holds details about calls to the SendMsg method.
+		SendMsg []struct {
+			// M is the m argument value.
+			M interface{}
+		}
+		// Trailer holds details about calls to the Trailer method.
+		Trailer []struct {
+		}
+	}
+	lockCloseSend sync.RWMutex
+	lockContext   sync.RWMutex
+	lockHeader    sync.RWMutex
+	lockRecv      sync.RWMutex
+	lockRecvMsg   sync.RWMutex
+	lockSendMsg   sync.RWMutex
+	lockTrailer   sync.RWMutex
+}
+
+// CloseSend calls CloseSendFunc.
+func (mock *KV_StateChangesClientMock) CloseSend() error {
+	callInfo := struct {
+	}{}
+	mock.lockCloseSend.Lock()
+	mock.calls.CloseSend = append(mock.calls.CloseSend, callInfo)
+	mock.lockCloseSend.Unlock()
+	if mock.CloseSendFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.CloseSendFunc()
+}
+
+// CloseSendCalls gets all the calls that were made to CloseSend.
+// Check the length with:
+//     len(mockedKV_StateChangesClient.CloseSendCalls())
+func (mock *KV_StateChangesClientMock) CloseSendCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockCloseSend.RLock()
+	calls = mock.calls.CloseSend
+	mock.lockCloseSend.RUnlock()
+	return calls
+}
+
+// Context calls ContextFunc.
+func (mock *KV_StateChangesClientMock) Context() context.Context {
+	callInfo := struct {
+	}{}
+	mock.lockContext.Lock()
+	mock.calls.Context = append(mock.calls.Context, callInfo)
+	mock.lockContext.Unlock()
+	if mock.ContextFunc == nil {
+		var (
+			contextOut context.Context
+		)
+		return contextOut
+	}
+	return mock.ContextFunc()
+}
+
+// ContextCalls gets all the calls that were made to Context.
+// Check the length with:
+//     len(mockedKV_StateChangesClient.ContextCalls())
+func (mock *KV_StateChangesClientMock) ContextCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockContext.RLock()
+	calls = mock.calls.Context
+	mock.lockContext.RUnlock()
+	return calls
+}
+
+// Header calls HeaderFunc.
+func (mock *KV_StateChangesClientMock) Header() (metadata.MD, error) {
+	callInfo := struct {
+	}{}
+	mock.lockHeader.Lock()
+	mock.calls.Header = append(mock.calls.Header, callInfo)
+	mock.lockHeader.Unlock()
+	if mock.HeaderFunc == nil {
+		var (
+			mDOut  metadata.MD
+			errOut error
+		)
+		return mDOut, errOut
+	}
+	return mock.HeaderFunc()
+}
+
+// HeaderCalls gets all the calls that were made to Header.
+// Check the length with:
+//     len(mockedKV_StateChangesClient.HeaderCalls())
+func (mock *KV_StateChangesClientMock) HeaderCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockHeader.RLock()
+	calls = mock.calls.Header
+	mock.lockHeader.RUnlock()
+	return calls
+}
+
+// Recv calls RecvFunc.
+func (mock *KV_StateChangesClientMock) Recv() (*StateChange, error) {
+	callInfo := struct {
+	}{}
+	mock.lockRecv.Lock()
+	mock.calls.Recv = append(mock.calls.Recv, callInfo)
+	mock.lockRecv.Unlock()
+	if mock.RecvFunc == nil {
+		var (
+			stateChangeOut *StateChange
+			errOut         error
+		)
+		return stateChangeOut, errOut
+	}
+	return mock.RecvFunc()
+}
+
+// RecvCalls gets all the calls that were made to Recv.
+// Check the length with:
+//     len(mockedKV_StateChangesClient.RecvCalls())
+func (mock *KV_StateChangesClientMock) RecvCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockRecv.RLock()
+	calls = mock.calls.Recv
+	mock.lockRecv.RUnlock()
+	return calls
+}
+
+// RecvMsg calls RecvMsgFunc.
+func (mock *KV_StateChangesClientMock) RecvMsg(m interface{}) error {
+	callInfo := struct {
+		M interface{}
+	}{
+		M: m,
+	}
+	mock.lockRecvMsg.Lock()
+	mock.calls.RecvMsg = append(mock.calls.RecvMsg, callInfo)
+	mock.lockRecvMsg.Unlock()
+	if mock.RecvMsgFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.RecvMsgFunc(m)
+}
+
+// RecvMsgCalls gets all the calls that were made to RecvMsg.
+// Check the length with:
+//     len(mockedKV_StateChangesClient.RecvMsgCalls())
+func (mock *KV_StateChangesClientMock) RecvMsgCalls() []struct {
+	M interface{}
+} {
+	var calls []struct {
+		M interface{}
+	}
+	mock.lockRecvMsg.RLock()
+	calls = mock.calls.RecvMsg
+	mock.lockRecvMsg.RUnlock()
+	return calls
+}
+
+// SendMsg calls SendMsgFunc.
+func (mock *KV_StateChangesClientMock) SendMsg(m interface{}) error {
+	callInfo := struct {
+		M interface{}
+	}{
+		M: m,
+	}
+	mock.lockSendMsg.Lock()
+	mock.calls.SendMsg = append(mock.calls.SendMsg, callInfo)
+	mock.lockSendMsg.Unlock()
+	if mock.SendMsgFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.SendMsgFunc(m)
+}
+
+// SendMsgCalls gets all the calls that were made to SendMsg.
+// Check the length with:
+//     len(mockedKV_StateChangesClient.SendMsgCalls())
+func (mock *KV_StateChangesClientMock) SendMsgCalls() []struct {
+	M interface{}
+} {
+	var calls []struct {
+		M interface{}
+	}
+	mock.lockSendMsg.RLock()
+	calls = mock.calls.SendMsg
+	mock.lockSendMsg.RUnlock()
+	return calls
+}
+
+// Trailer calls TrailerFunc.
+func (mock *KV_StateChangesClientMock) Trailer() metadata.MD {
+	callInfo := struct {
+	}{}
+	mock.lockTrailer.Lock()
+	mock.calls.Trailer = append(mock.calls.Trailer, callInfo)
+	mock.lockTrailer.Unlock()
+	if mock.TrailerFunc == nil {
+		var (
+			mDOut metadata.MD
+		)
+		return mDOut
+	}
+	return mock.TrailerFunc()
+}
+
+// TrailerCalls gets all the calls that were made to Trailer.
+// Check the length with:
+//     len(mockedKV_StateChangesClient.TrailerCalls())
+func (mock *KV_StateChangesClientMock) TrailerCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockTrailer.RLock()
+	calls = mock.calls.Trailer
+	mock.lockTrailer.RUnlock()
 	return calls
 }

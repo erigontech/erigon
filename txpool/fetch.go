@@ -45,7 +45,6 @@ type Fetch struct {
 	pool               Pool                  // Transaction pool implementation
 	wg                 *sync.WaitGroup       // used for synchronisation in the tests (nil when not in tests)
 	stateChangesClient remote.KVClient
-	logger             log.Logger
 }
 
 type Timings struct {
@@ -63,15 +62,7 @@ var DefaultTimings = Timings{
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context,
-	sentryClients []sentry.SentryClient,
-	genesisHash [32]byte,
-	networkId uint64,
-	forks []uint64,
-	pool Pool,
-	stateChangesClient remote.KVClient,
-	logger log.Logger,
-) *Fetch {
+func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, genesisHash [32]byte, networkId uint64, forks []uint64, pool Pool, stateChangesClient remote.KVClient) *Fetch {
 	statusData := &sentry.StatusData{
 		NetworkId:       networkId,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(0)),
@@ -87,7 +78,6 @@ func NewFetch(ctx context.Context,
 		sentryClients:      sentryClients,
 		statusData:         statusData,
 		pool:               pool,
-		logger:             logger,
 		stateChangesClient: stateChangesClient,
 	}
 }
@@ -112,7 +102,6 @@ func (f *Fetch) ConnectCore() {
 }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
-	logger := f.logger
 	for {
 		select {
 		case <-f.ctx.Done():
@@ -125,7 +114,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				return
 			}
 			// Report error and wait more
-			logger.Warn("sentry not ready yet", "err", err)
+			log.Warn("sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -154,7 +143,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			logger.Warn("messages", "err", err)
+			log.Warn("messages", "err", err)
 			return
 		}
 
@@ -172,14 +161,14 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 				if errors.Is(err, io.EOF) {
 					return
 				}
-				logger.Warn("stream.Recv", "err", err)
+				log.Warn("stream.Recv", "err", err)
 				return
 			}
 			if req == nil {
 				return
 			}
 			if err = f.handleInboundMessage(req, sentryClient); err != nil {
-				logger.Warn("Handling incoming message: %s", "err", err)
+				log.Warn("Handling incoming message: %s", "err", err)
 			}
 			if f.wg != nil {
 				f.wg.Done()
@@ -290,7 +279,6 @@ func (f *Fetch) handleInboundMessage(req *sentry.InboundMessage, sentryClient se
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
-	logger := f.logger
 	for {
 		select {
 		case <-f.ctx.Done():
@@ -303,7 +291,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 				return
 			}
 			// Report error and wait more
-			logger.Warn("sentry not ready yet", "err", err)
+			log.Warn("sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -323,7 +311,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 			if errors.Is(err, io.EOF) {
 				return
 			}
-			logger.Warn("peers", "err", err)
+			log.Warn("peers", "err", err)
 			return
 		}
 
@@ -341,14 +329,14 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 				if errors.Is(err, io.EOF) {
 					return
 				}
-				logger.Warn("stream.Recv", "err", err)
+				log.Warn("stream.Recv", "err", err)
 				return
 			}
 			if req == nil {
 				return
 			}
 			if err = f.handleNewPeer(req); err != nil {
-				logger.Warn("Handling new peer", "err", err)
+				log.Warn("Handling new peer", "err", err)
 			}
 			if f.wg != nil {
 				f.wg.Done()
@@ -418,12 +406,27 @@ func (f *Fetch) stateChangesStream(ctx context.Context, client remote.KVClient) 
 			return
 		}
 
+		parseCtx := NewTxParseContext()
 		var unwindTxs, minedTxs TxSlots
 		if req.Direction == remote.Direction_FORWARD {
 			minedTxs.Growth(len(req.Txs))
+			for i := range req.Txs {
+				minedTxs.txs[i] = &TxSlot{}
+				if _, err := parseCtx.ParseTransaction(req.Txs[i], 0, minedTxs.txs[i], minedTxs.senders.At(i)); err != nil {
+					log.Warn("stream.Recv", "err", err)
+					continue
+				}
+			}
 		}
 		if req.Direction == remote.Direction_UNWIND {
 			unwindTxs.Growth(len(req.Txs))
+			for i := range req.Txs {
+				unwindTxs.txs[i] = &TxSlot{}
+				if _, err := parseCtx.ParseTransaction(req.Txs[i], 0, unwindTxs.txs[i], unwindTxs.senders.At(i)); err != nil {
+					log.Warn("stream.Recv", "err", err)
+					continue
+				}
+			}
 		}
 		diff := map[string]senderInfo{}
 		for _, change := range req.Changes {
@@ -438,6 +441,9 @@ func (f *Fetch) stateChangesStream(ctx context.Context, client remote.KVClient) 
 
 		if err := f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockBaseFee, req.BlockHeight); err != nil {
 			log.Warn("onNewBlock", "err", err)
+		}
+		if f.wg != nil {
+			f.wg.Done()
 		}
 	}
 }
