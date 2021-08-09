@@ -62,11 +62,11 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 // run runs the given contract and takes care of running precompiles with a fallback to the byte code interpreter.
 func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, error) {
 	callback, err := selectInterpreter(evm, contract)
-	defer callback()
-
 	if err != nil {
 		return nil, err
 	}
+
+	defer callback()
 
 	return evm.interpreter.Run(contract, input, readOnly)
 }
