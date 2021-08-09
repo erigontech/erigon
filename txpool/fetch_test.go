@@ -158,7 +158,7 @@ func TestOnNewBlock(t *testing.T) {
 	}
 	pool := &PoolMock{}
 	fetch := NewFetch(ctx, nil, genesisHash, networkId, nil, pool, stateChanges)
-	fetch.stateChangesStream(ctx, stateChanges)
+	fetch.handleStateChanges(ctx, stateChanges)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
 	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.txs))
 }
