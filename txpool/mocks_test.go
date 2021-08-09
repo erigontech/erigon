@@ -29,6 +29,9 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(hash []byte) bool {
 // 				panic("mock out the IdHashKnown method")
 // 			},
+// 			OnNewBlockFunc: func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockBaseFee uint64, blockHeight uint64) error {
+// 				panic("mock out the OnNewBlock method")
+// 			},
 // 		}
 //
 // 		// use mockedPool in code that requires Pool
@@ -47,6 +50,9 @@ type PoolMock struct {
 
 	// IdHashKnownFunc mocks the IdHashKnown method.
 	IdHashKnownFunc func(hash []byte) bool
+
+	// OnNewBlockFunc mocks the OnNewBlock method.
+	OnNewBlockFunc func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockBaseFee uint64, blockHeight uint64) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -70,11 +76,27 @@ type PoolMock struct {
 			// Hash is the hash argument value.
 			Hash []byte
 		}
+		// OnNewBlock holds details about calls to the OnNewBlock method.
+		OnNewBlock []struct {
+			// StateChanges is the stateChanges argument value.
+			StateChanges map[string]senderInfo
+			// UnwindTxs is the unwindTxs argument value.
+			UnwindTxs TxSlots
+			// MinedTxs is the minedTxs argument value.
+			MinedTxs TxSlots
+			// ProtocolBaseFee is the protocolBaseFee argument value.
+			ProtocolBaseFee uint64
+			// BlockBaseFee is the blockBaseFee argument value.
+			BlockBaseFee uint64
+			// BlockHeight is the blockHeight argument value.
+			BlockHeight uint64
+		}
 	}
 	lockAdd            sync.RWMutex
 	lockAddNewGoodPeer sync.RWMutex
 	lockGetRlp         sync.RWMutex
 	lockIdHashKnown    sync.RWMutex
+	lockOnNewBlock     sync.RWMutex
 }
 
 // Add calls AddFunc.
@@ -207,5 +229,59 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 	mock.lockIdHashKnown.RLock()
 	calls = mock.calls.IdHashKnown
 	mock.lockIdHashKnown.RUnlock()
+	return calls
+}
+
+// OnNewBlock calls OnNewBlockFunc.
+func (mock *PoolMock) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockBaseFee uint64, blockHeight uint64) error {
+	callInfo := struct {
+		StateChanges    map[string]senderInfo
+		UnwindTxs       TxSlots
+		MinedTxs        TxSlots
+		ProtocolBaseFee uint64
+		BlockBaseFee    uint64
+		BlockHeight     uint64
+	}{
+		StateChanges:    stateChanges,
+		UnwindTxs:       unwindTxs,
+		MinedTxs:        minedTxs,
+		ProtocolBaseFee: protocolBaseFee,
+		BlockBaseFee:    blockBaseFee,
+		BlockHeight:     blockHeight,
+	}
+	mock.lockOnNewBlock.Lock()
+	mock.calls.OnNewBlock = append(mock.calls.OnNewBlock, callInfo)
+	mock.lockOnNewBlock.Unlock()
+	if mock.OnNewBlockFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.OnNewBlockFunc(stateChanges, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, blockHeight)
+}
+
+// OnNewBlockCalls gets all the calls that were made to OnNewBlock.
+// Check the length with:
+//     len(mockedPool.OnNewBlockCalls())
+func (mock *PoolMock) OnNewBlockCalls() []struct {
+	StateChanges    map[string]senderInfo
+	UnwindTxs       TxSlots
+	MinedTxs        TxSlots
+	ProtocolBaseFee uint64
+	BlockBaseFee    uint64
+	BlockHeight     uint64
+} {
+	var calls []struct {
+		StateChanges    map[string]senderInfo
+		UnwindTxs       TxSlots
+		MinedTxs        TxSlots
+		ProtocolBaseFee uint64
+		BlockBaseFee    uint64
+		BlockHeight     uint64
+	}
+	mock.lockOnNewBlock.RLock()
+	calls = mock.calls.OnNewBlock
+	mock.lockOnNewBlock.RUnlock()
 	return calls
 }

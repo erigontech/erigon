@@ -458,7 +458,6 @@ func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 		}
 
 		(&balance).SetBytes(enc[pos+1 : pos+decodeLength+1])
-		pos += decodeLength + 1
 	}
 	return
 }
