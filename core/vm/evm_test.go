@@ -12,8 +12,6 @@ import (
 )
 
 func TestInterpreterReadonly(t *testing.T) {
-	t.Parallel()
-
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(BlockContext{
 			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
