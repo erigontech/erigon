@@ -478,7 +478,8 @@ func (db *DB) expireNodes() {
 		p := []byte(dbNodePrefix)
 		var prevId ID
 		var empty = true
-		for k, v, err := c.Seek(p); bytes.HasPrefix(k, p); k, v, err = c.Next() {
+		ci := cachedIter{c: c, db: db}
+		for k, v, err := ci.Seek(p); bytes.HasPrefix(k, p); k, v, err = ci.Next() {
 			if err != nil {
 				return err
 			}
@@ -622,6 +623,7 @@ func (ci *cachedIter) Next() (k, v []byte, err error) {
 			v = ci.cacheVal
 			ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
 			if v != nil {
+				// if v == nil, it is deleted entry and we try the next record
 				return
 			}
 			continue
@@ -644,6 +646,7 @@ func (ci *cachedIter) Next() (k, v []byte, err error) {
 			ci.cacheKey, ci.cacheVal, ci.cacheNextKey = ci.db.searchCache(ci.cacheNextKey)
 			ci.cKey, ci.cVal, err = ci.c.Next()
 			if v != nil {
+				// if v == nil, it is deleted entry and we try the next record
 				return
 			}
 		case 1:
@@ -686,7 +689,6 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("seek %d, k %x, v %x\n", seeks, k, v)
 				id, rest := splitNodeKey(k)
 				if string(rest) == dbDiscoverRoot {
 					n = mustDecodeNode(id[:], v)
@@ -699,9 +701,12 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			db.ensureExpirer()
 			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
 			var lastPongReceived int64
-			blob, errGet := tx.GetOne(kv.Inodes, pongKey)
-			if errGet != nil {
-				return errGet
+			blob := db.getFromCache(pongKey)
+			if blob == nil {
+				var errGet error
+				if blob, errGet = tx.GetOne(kv.Inodes, pongKey); errGet != nil {
+					return errGet
+				}
 			}
 			if blob != nil {
 				if v, read := binary.Varint(blob); read > 0 {
