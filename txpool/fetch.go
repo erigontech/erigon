@@ -103,7 +103,7 @@ func (f *Fetch) Start() {
 			f.receivePeerLoop(f.sentryClients[i])
 		}(i)
 	}
-	go func() { f.stateChangesLoop(f.ctx, nil) }()
+	//go func() { f.stateChangesLoop(f.ctx, nil) }()
 }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
