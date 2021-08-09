@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -360,4 +361,77 @@ func (f *Fetch) handleNewPeer(req *sentry.PeersReply) error {
 	}
 
 	return nil
+}
+
+func (f *Fetch) stateChangesLoop(ctx context.Context, client remote.KVClient) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		f.stateChangesStream(ctx, client)
+	}
+}
+func (f *Fetch) stateChangesStream(ctx context.Context, client remote.KVClient) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := client.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+			return
+		}
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		time.Sleep(time.Second)
+		log.Warn("state changes", "err", err)
+	}
+	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				return
+			}
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			log.Warn("stream.Recv", "err", err)
+			return
+		}
+		if req == nil {
+			return
+		}
+
+		var unwindTxs, minedTxs TxSlots
+		if req.Direction == remote.Direction_FORWARD {
+			minedTxs.Growth(len(req.Txs))
+		}
+		if req.Direction == remote.Direction_UNWIND {
+			unwindTxs.Growth(len(req.Txs))
+		}
+		diff := map[string]senderInfo{}
+		for _, change := range req.Changes {
+			nonce, balance, err := DecodeSender(change.Data)
+			if err != nil {
+				log.Warn("stateChanges.decodeSender", "err", err)
+				continue
+			}
+			addr := gointerfaces.ConvertH160toAddress(change.Address)
+			diff[string(addr[:])] = senderInfo{nonce: nonce, balance: balance}
+		}
+
+		if err := f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockBaseFee, req.BlockHeight); err != nil {
+			log.Warn("onNewBlock", "err", err)
+		}
+	}
 }

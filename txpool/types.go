@@ -426,3 +426,49 @@ func (s *TxSlots) Growth(targetSize int) {
 }
 
 var addressesGrowth = make([]byte, 20)
+
+func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
+	if len(enc) == 0 {
+		return
+	}
+
+	var fieldSet = enc[0]
+	var pos = 1
+
+	if fieldSet&1 > 0 {
+		decodeLength := int(enc[pos])
+
+		if len(enc) < pos+decodeLength+1 {
+			return nonce, balance, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		nonce = bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&2 > 0 {
+		decodeLength := int(enc[pos])
+
+		if len(enc) < pos+decodeLength+1 {
+			return nonce, balance, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		(&balance).SetBytes(enc[pos+1 : pos+decodeLength+1])
+		pos += decodeLength + 1
+	}
+	return
+}
+
+func bytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
+}
