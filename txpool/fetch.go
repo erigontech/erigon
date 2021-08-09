@@ -39,12 +39,13 @@ import (
 // genesis hash and list of forks, but with zero max block and total difficulty
 // Sentry should have a logic not to overwrite statusData with messages from tx pool
 type Fetch struct {
-	ctx           context.Context       // Context used for cancellation and closing of the fetcher
-	sentryClients []sentry.SentryClient // sentry clients that will be used for accessing the network
-	statusData    *sentry.StatusData    // Status data used for "handshaking" with sentries
-	pool          Pool                  // Transaction pool implementation
-	wg            *sync.WaitGroup       // used for synchronisation in the tests (nil when not in tests)
-	logger        log.Logger
+	ctx                context.Context       // Context used for cancellation and closing of the fetcher
+	sentryClients      []sentry.SentryClient // sentry clients that will be used for accessing the network
+	statusData         *sentry.StatusData    // Status data used for "handshaking" with sentries
+	pool               Pool                  // Transaction pool implementation
+	wg                 *sync.WaitGroup       // used for synchronisation in the tests (nil when not in tests)
+	stateChangesClient remote.KVClient
+	logger             log.Logger
 }
 
 type Timings struct {
@@ -68,6 +69,7 @@ func NewFetch(ctx context.Context,
 	networkId uint64,
 	forks []uint64,
 	pool Pool,
+	stateChangesClient remote.KVClient,
 	logger log.Logger,
 ) *Fetch {
 	statusData := &sentry.StatusData{
@@ -81,11 +83,12 @@ func NewFetch(ctx context.Context,
 		},
 	}
 	return &Fetch{
-		ctx:           ctx,
-		sentryClients: sentryClients,
-		statusData:    statusData,
-		pool:          pool,
-		logger:        logger,
+		ctx:                ctx,
+		sentryClients:      sentryClients,
+		statusData:         statusData,
+		pool:               pool,
+		logger:             logger,
+		stateChangesClient: stateChangesClient,
 	}
 }
 
@@ -93,8 +96,8 @@ func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
 	f.wg = wg
 }
 
-// Start initialises connection to the sentry
-func (f *Fetch) Start() {
+// ConnectSentries initialises connection to the sentry
+func (f *Fetch) ConnectSentries() {
 	for i := range f.sentryClients {
 		go func(i int) {
 			f.receiveMessageLoop(f.sentryClients[i])
@@ -103,7 +106,9 @@ func (f *Fetch) Start() {
 			f.receivePeerLoop(f.sentryClients[i])
 		}(i)
 	}
-	//go func() { f.stateChangesLoop(f.ctx, nil) }()
+}
+func (f *Fetch) ConnectCore() {
+	go func() { f.stateChangesLoop(f.ctx, f.stateChangesClient) }()
 }
 
 func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
