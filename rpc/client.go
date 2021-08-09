@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -179,8 +179,6 @@ func DialContext(ctx context.Context, rawurl string) (*Client, error) {
 		return DialWebsocket(ctx, rawurl, "")
 	case "stdio":
 		return DialStdIO(ctx)
-	case "":
-		return DialIPC(ctx, rawurl)
 	default:
 		return nil, fmt.Errorf("no known transport for URL scheme %q", u.Scheme)
 	}

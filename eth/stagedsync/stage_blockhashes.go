@@ -5,12 +5,12 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -22,18 +22,18 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 }
 
 type BlockHashesCfg struct {
-	db     ethdb.RwKV
+	db     kv.RwDB
 	tmpDir string
 }
 
-func StageBlockHashesCfg(db ethdb.RwKV, tmpDir string) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string) BlockHashesCfg {
 	return BlockHashesCfg{
 		db:     db,
 		tmpDir: tmpDir,
 	}
 }
 
-func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -61,8 +61,8 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	if err := etl.Transform(
 		logPrefix,
 		tx,
-		dbutils.HeadersBucket,
-		dbutils.HeaderNumberBucket,
+		kv.Headers,
+		kv.HeaderNumber,
 		cfg.tmpDir,
 		extractHeaders,
 		etl.IdentityLoadFunc,
@@ -85,7 +85,7 @@ func SpawnBlockHashStage(s *StageState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 	return nil
 }
 
-func UnwindBlockHashStage(u *UnwindState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -95,20 +95,18 @@ func UnwindBlockHashStage(u *UnwindState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx
 		defer tx.Rollback()
 	}
 
-	logPrefix := u.LogPrefix()
-
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+		return fmt.Errorf(" reset: %v", err)
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return fmt.Errorf("failed to write db commit: %w", err)
 		}
 	}
 	return nil
 }
 
-func PruneBlockHashStage(p *PruneState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+func PruneBlockHashStage(p *PruneState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -118,10 +116,9 @@ func PruneBlockHashStage(p *PruneState, tx ethdb.RwTx, cfg BlockHashesCfg, ctx c
 		defer tx.Rollback()
 	}
 
-	logPrefix := p.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

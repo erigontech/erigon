@@ -4,23 +4,22 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func HeadersSnapshot(snapshotPath string) error {
-	snKV := kv.NewMDBX().Path(snapshotPath).Readonly().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketConfigItem{},
+func HeadersSnapshot(logger log.Logger, snapshotPath string) error {
+	snKV := mdbx.NewMDBX(logger).Path(snapshotPath).Readonly().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	var prevHeader *types.Header
-	err := snKV.View(context.Background(), func(tx ethdb.Tx) error {
-		c, err := tx.Cursor(dbutils.HeadersBucket)
+	err := snKV.View(context.Background(), func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
 		}

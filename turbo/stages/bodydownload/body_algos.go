@@ -7,16 +7,16 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const BlockBufferSize = 128
@@ -29,7 +29,7 @@ const BlockBufferSize = 128
 type VerifyUnclesFunc func(peerID string, header *types.Header, uncles []*types.Header) error
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
+func (bd *BodyDownload) UpdateFromDb(db kv.RwTx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
@@ -76,7 +76,7 @@ func (bd *BodyDownload) UpdateFromDb(db ethdb.RwTx) (headHeight uint64, headHash
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(db ethdb.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	if blockNum < bd.requestedLow {
 		blockNum = bd.requestedLow
 	}

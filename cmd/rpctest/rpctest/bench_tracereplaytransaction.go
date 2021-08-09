@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonUrl, gethUrl)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -24,6 +24,17 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 		defer f.Close()
 		rec = bufio.NewWriter(f)
 		defer rec.Flush()
+	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
 	}
 
 	var res CallResult
@@ -46,42 +57,11 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 		}
 		for _, tx := range b.Result.Transactions {
 			reqGen.reqID++
-
 			request := reqGen.traceReplayTransaction(tx.Hash)
-			recording := rec != nil // This flag will be set to false if recording is not to be performed
-			res = reqGen.Erigon2("trace_replayTransaction", request)
-
-			if res.Err != nil {
-				fmt.Printf("Could not trace replay transaction (Erigon) %s: %v\n", tx.Hash, res.Err)
+			errCtx := fmt.Sprintf("block %d, tx %s", bn, tx.Hash)
+			if err := requestAndCompare(request, "trace_replayTransaction", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				fmt.Println(err)
 				return
-			}
-			if errVal := res.Result.Get("error"); errVal != nil {
-				fmt.Printf("Error tracing replay transaction (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-				return
-			}
-
-			if needCompare {
-				resg := reqGen.Geth2("trace_replayTransaction", request)
-				if resg.Err != nil {
-					fmt.Printf("Could not trace replay transaction (OE) %s: %v\n", tx.Hash, res.Err)
-					return
-				}
-				if errVal := resg.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing replay transaction (OE): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-					return
-				}
-				if resg.Err == nil && resg.Result.Get("error") == nil {
-					recording = false
-					if err := compareResults(res.Result, resg.Result); err != nil {
-						fmt.Printf("Different trace_replayTransaction block %d, tx %s: %v\n", bn, tx.Hash, err)
-						fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-						fmt.Printf("\n\nOE response=================================\n%s\n", resg.Response)
-						return
-					}
-				}
-			}
-			if recording {
-				fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 			}
 		}
 	}

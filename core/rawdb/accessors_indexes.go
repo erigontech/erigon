@@ -19,11 +19,10 @@ package rawdb
 import (
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // TxLookupEntry is a positional metadata to help looking up the data content of
@@ -36,8 +35,8 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db ethdb.Tx, txnHash common.Hash) (*uint64, error) {
-	data, err := db.GetOne(dbutils.TxLookupPrefix, txnHash.Bytes())
+func ReadTxLookupEntry(db kv.Tx, txnHash common.Hash) (*uint64, error) {
+	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -50,23 +49,23 @@ func ReadTxLookupEntry(db ethdb.Tx, txnHash common.Hash) (*uint64, error) {
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
-func WriteTxLookupEntries(db ethdb.Putter, block *types.Block) {
+func WriteTxLookupEntries(db kv.Putter, block *types.Block) {
 	for _, tx := range block.Transactions() {
 		data := block.Number().Bytes()
-		if err := db.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), data); err != nil {
+		if err := db.Put(kv.TxLookup, tx.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
 	}
 }
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
-func DeleteTxLookupEntry(db ethdb.Deleter, hash common.Hash) error {
-	return db.Delete(dbutils.TxLookupPrefix, hash.Bytes(), nil)
+func DeleteTxLookupEntry(db kv.Deleter, hash common.Hash) error {
+	return db.Delete(kv.TxLookup, hash.Bytes(), nil)
 }
 
 // ReadTransaction retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func ReadTransaction(db ethdb.Tx, hash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadTransaction(db kv.Tx, hash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
 	blockNumber, err := ReadTxLookupEntry(db, hash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
@@ -100,7 +99,7 @@ func ReadTransaction(db ethdb.Tx, hash common.Hash) (types.Transaction, common.H
 	return nil, common.Hash{}, 0, 0, nil
 }
 
-func ReadReceipt(db ethdb.Tx, txHash common.Hash) (*types.Receipt, common.Hash, uint64, uint64, error) {
+func ReadReceipt(db kv.Tx, txHash common.Hash) (*types.Receipt, common.Hash, uint64, uint64, error) {
 	// Retrieve the context of the receipt based on the transaction hash
 	blockNumber, err := ReadTxLookupEntry(db, txHash)
 	if err != nil {
@@ -129,18 +128,4 @@ func ReadReceipt(db ethdb.Tx, txHash common.Hash) (*types.Receipt, common.Hash, 
 	}
 	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", txHash)
 	return nil, common.Hash{}, 0, 0, nil
-}
-
-// ReadBloomBits retrieves the compressed bloom bit vector belonging to the given
-// section and bit index from the.
-func ReadBloomBits(db ethdb.DatabaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
-	return db.Get(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head))
-}
-
-// WriteBloomBits stores the compressed bloom bits vector belonging to the given
-// section and bit index.
-func WriteBloomBits(db ethdb.Putter, bit uint, section uint64, head common.Hash, bits []byte) {
-	if err := db.Put(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head), bits); err != nil {
-		log.Crit("Failed to store bloom bits", "err", err)
-	}
 }

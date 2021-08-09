@@ -205,6 +205,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if st.gasFeeCap != nil {
 		balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
 		balanceCheck = balanceCheck.Mul(balanceCheck, st.gasFeeCap)
+		balanceCheck.Add(balanceCheck, st.value)
 	}
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		if !gasBailout {
@@ -237,6 +238,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 				st.msg.From().Hex(), msgNonce, stNonce)
 		}
 	}
+
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules.IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
@@ -286,7 +288,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	// 5. there is no overflow when calculating intrinsic gas
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
-	// Check clauses 1-3, buy gas if everything is correct
+	// Check clauses 1-3 and 6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
 	}
@@ -307,18 +309,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	st.gas -= gas
 
-	// Check clause 6
 	var bailout bool
-	if !msg.Value().IsZero() && !st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value()) {
-		if gasBailout {
+	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
+	if gasBailout {
+		if !msg.Value().IsZero() && !st.evm.Context.CanTransfer(st.state, msg.From(), msg.Value()) {
 			bailout = true
-		} else {
-			return nil, fmt.Errorf("%w: address %v", ErrInsufficientFundsForTransfer, msg.From().Hex())
 		}
 	}
+
 	// Set up the initial access list.
 	if st.evm.ChainRules.IsBerlin {
-		st.state.PrepareAccessList(msg.From(), msg.To(), st.evm.ActivePrecompiles(), msg.AccessList())
+		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(st.evm.ChainRules), msg.AccessList())
 	}
 
 	var (

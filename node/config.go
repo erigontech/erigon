@@ -25,15 +25,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -142,7 +142,7 @@ type Config struct {
 	// Logger is a custom logger to use with the p2p.Server.
 	Logger log.Logger `toml:",omitempty"`
 
-	DatabaseVerbosity ethdb.DBVerbosityLvl
+	DatabaseVerbosity kv.DBVerbosityLvl
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener

@@ -9,39 +9,38 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
 
-var stageHeadersGauge = metrics.NewRegisteredGauge("stage/headers", nil)
-
 type HeadersCfg struct {
-	db                ethdb.RwKV
+	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
+	noP2PDiscovery    bool
 }
 
 func StageHeadersCfg(
-	db ethdb.RwKV,
+	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
+	noP2PDiscovery bool,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -51,6 +50,7 @@ func StageHeadersCfg(
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
 		batchSize:         batchSize,
+		noP2PDiscovery:    noP2PDiscovery,
 	}
 }
 
@@ -59,7 +59,7 @@ func HeadersForward(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
@@ -98,6 +98,11 @@ func HeadersForward(
 				return err
 			}
 		}
+		return nil
+	}
+
+	// Allow other stages to run 1 cycle if no network available
+	if initialCycle && cfg.noP2PDiscovery {
 		return nil
 	}
 
@@ -187,7 +192,7 @@ func HeadersForward(
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
 	} else if headerInserter.GetHighest() != 0 {
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
-			return fmt.Errorf("%s: failed to fix canonical chain: %w", logPrefix, err)
+			return fmt.Errorf("fix canonical chain: %w", err)
 		}
 	}
 	if !useExternalTx {
@@ -200,11 +205,10 @@ func HeadersForward(
 	}
 	// We do not print the followin line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
-	stageHeadersGauge.Update(int64(cfg.hd.Progress()))
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx ethdb.StatelessRwTx) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx) error {
 	if height == 0 {
 		return nil
 	}
@@ -215,7 +219,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	var err error
 	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
-			return fmt.Errorf("[%s] marking canonical header %d %x: %w", logPrefix, ancestorHeight, ancestorHash, err)
+			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
 		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
 		if ancestor == nil {
@@ -224,19 +228,19 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 		select {
 		case <-logEvery.C:
-			log.Info("fix canonical", "ancestor", ancestorHeight, "hash", ancestorHash)
+			log.Info("write canonical markers", "ancestor", ancestorHeight, "hash", ancestorHash)
 		default:
 		}
 		ancestorHash = ancestor.ParentHash
 		ancestorHeight--
 	}
 	if err != nil {
-		return fmt.Errorf("[%s] reading canonical hash for %d: %w", logPrefix, ancestorHeight, err)
+		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg) (err error) {
+func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -252,22 +256,36 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 		return err
 	}
 	badBlock := u.BadBlock != (common.Hash{})
-	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
-		if badBlock {
-			var hash common.Hash
-			if hash, err = rawdb.ReadCanonicalHash(tx, blockHeight); err != nil {
+	if badBlock {
+		cfg.hd.ReportBadHeader(u.BadBlock)
+		// Mark all descendants of bad block as bad too
+		headerCursor, cErr := tx.Cursor(kv.Headers)
+		if cErr != nil {
+			return cErr
+		}
+		defer headerCursor.Close()
+		var k, v []byte
+		for k, v, err = headerCursor.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
+			var h types.Header
+			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
 			}
-			cfg.hd.ReportBadHeader(hash)
+			if cfg.hd.IsBadHeader(h.ParentHash) {
+				cfg.hd.ReportBadHeader(h.Hash())
+			}
 		}
+		if err != nil {
+			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
+		}
+	}
+	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
 		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
 			return err
 		}
 	}
-	if u.BadBlock != (common.Hash{}) {
-		cfg.hd.ReportBadHeader(u.BadBlock)
+	if badBlock {
 		// Find header with biggest TD
-		tdCursor, cErr := tx.Cursor(dbutils.HeaderTDBucket)
+		tdCursor, cErr := tx.Cursor(kv.HeaderTD)
 		if cErr != nil {
 			return cErr
 		}
@@ -303,12 +321,15 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HeadersCfg)
 			return err
 		}
 		if maxNum == 0 {
-			// Read genesis hash
-			if maxHash, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
+			maxNum = u.UnwindPoint
+			if maxHash, err = rawdb.ReadCanonicalHash(tx, maxNum); err != nil {
 				return err
 			}
 		}
 		if err = rawdb.WriteHeadHeaderHash(tx, maxHash); err != nil {
+			return err
+		}
+		if err = u.Done(tx); err != nil {
 			return err
 		}
 		if err = s.Update(tx, maxNum); err != nil {
@@ -338,7 +359,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 
 type chainReader struct {
 	config *params.ChainConfig
-	tx     ethdb.RwTx
+	tx     kv.RwTx
 }
 
 func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
@@ -355,7 +376,7 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 }
 
 type epochReader struct {
-	tx ethdb.RwTx
+	tx kv.RwTx
 }
 
 func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
@@ -364,8 +385,17 @@ func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) 
 func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
 }
+func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
+}
+func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
+}
+func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
+}
 
-func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
+func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -375,10 +405,9 @@ func HeadersPrune(p *PruneState, tx ethdb.RwTx, cfg HeadersCfg, ctx context.Cont
 		defer tx.Rollback()
 	}
 
-	logPrefix := p.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

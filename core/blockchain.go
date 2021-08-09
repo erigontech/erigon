@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -32,14 +33,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
-	blockExecutionTimer     = metrics.NewRegisteredTimer("chain/execution", nil)
-	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
+	blockExecutionTimer     = metrics2.GetOrCreateSummary("chain_execution_seconds")
+	blockReorgInvalidatedTx = metrics2.GetOrCreateCounter("chain_reorg_invalidTx")
 )
 
 const (
@@ -96,9 +96,10 @@ func ExecuteBlockEphemerally(
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
+	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
 ) (types.Receipts, error) {
-	defer blockExecutionTimer.UpdateSince(time.Now())
+	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -108,7 +109,7 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit())
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -167,7 +168,7 @@ func ExecuteBlockEphemerally(
 		}
 	}
 	if !vmConfig.ReadOnly {
-		if err := FinalizeBlockExecution(engine, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader); err != nil {
+		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader); err != nil {
 			return nil, err
 		}
 	}
@@ -175,50 +176,37 @@ func ExecuteBlockEphemerally(
 	return receipts, nil
 }
 
-// SystemAddress - sender address for internal state updates.
-var SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
-
 func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
-	gp := new(GasPool)
-	gp.AddGas(50_000_000)
-	var gasUsed uint64
+	gp := new(GasPool).AddGas(50_000_000)
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 
-	noop := state.NewNoopWriter()
-	tx, err := SysCallContractTx(contract, data, ibs)
+	msg := types.NewMessage(
+		state.SystemAddress,
+		&contract,
+		0, u256.Num0,
+		50_000_000, u256.Num0,
+		nil, nil,
+		data, nil, false,
+	)
+	vmConfig := vm.Config{NoReceipts: true}
+	// Create a new context to be used in the EVM environment
+	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
+	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
+	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		return nil, fmt.Errorf("SysCallContract: %w ", err)
+		return nil, err
 	}
-	// Set infinite balance to the fake caller account.
-	//fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
-
-	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
-	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
-	if err != nil {
-		return result, fmt.Errorf("SysCallContract: %w ", err)
-	}
-	ibs.SetNonce(SystemAddress, 0) //hack - because syscall must use ApplyMessage instead of ApplyTx (and don't create tx at all). But CallContract must create tx.
-
-	//w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
-	//if err1 != nil {
-	//	panic(err1)
-	//}
-	//encoder := json.NewEncoder(w)
-	//logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-	//if err2 := encoder.Encode(logs); err2 != nil {
-	//	panic(err2)
-	//}
-	return result, nil
+	return res.ReturnData, nil
 }
 
 // from the null sender, with 50M gas.
-func SysCallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
+func SysCallContractTx(contract common.Address, data []byte) (tx types.Transaction, err error) {
 	//nonce := ibs.GetNonce(SystemAddress)
 	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data)
-	return tx.FakeSign(SystemAddress)
+	return tx.FakeSign(state.SystemAddress)
 }
 
 func CallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
@@ -234,23 +222,11 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 	if err != nil {
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
-	// Set infinite balance to the fake caller account.
-	//fmt.Printf("call contract: %d,%x,%x\n", header.Number.Uint64(), contract, data)
-
-	vmConfig := vm.Config{NoReceipts: true, Debug: true, Tracer: vm.NewStructLogger(&vm.LogConfig{})}
-	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
+	vmConfig := vm.Config{NoReceipts: true}
+	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}
-	//w, err1 := os.Create(fmt.Sprintf("txtrace_before.json"))
-	//if err1 != nil {
-	//	panic(err1)
-	//}
-	//encoder := json.NewEncoder(w)
-	//logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-	//if err2 := encoder.Encode(logs); err2 != nil {
-	//	panic(err2)
-	//}
 	return result, nil
 }
 
@@ -262,29 +238,43 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, header *types.Header,
-	txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig,
-	ibs *state.IntraBlockState, receipts types.Receipts, e consensus.EpochReader,
-) error {
+func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader) error {
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====tx processing end====\n")
 
-	engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, func(contract common.Address, data []byte) ([]byte, error) {
-		return CallContract(contract, data, *cc, ibs, header, engine)
-	})
-	//fmt.Printf("====finalize start====\n")
+	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
+		return SysCallContract(contract, data, *cc, ibs, header, engine)
+	}); err != nil {
+		return err
+	}
+
+	//fmt.Printf("====finalize start %d====\n", header.Number.Uint64())
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====finalize end====\n")
+
+	var originalSystemAcc *accounts.Account
+
+	if cc.ChainID.Uint64() == 77 { // hack for Sokol - don't understand why eip158 is enabled, but OE still save SystemAddress with nonce=0
+		n := ibs.GetNonce(state.SystemAddress) //hack - because syscall must use ApplyMessage instead of ApplyTx (and don't create tx at all). But CallContract must create tx.
+		if n > 0 {
+			var err error
+			originalSystemAcc, err = stateReader.ReadAccountData(state.SystemAddress)
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {
 		return fmt.Errorf("committing block %d failed: %v", header.Number.Uint64(), err)
 	}
-	if cc.ChainID.Uint64() == 77 { // hack for Sokol - don't understand why eip158 is enabled, but OE still save SystemAddress with nonce=0
-		acc0 := accounts.NewAccount()
-		acc0.Nonce = 1
+
+	if originalSystemAcc != nil { // hack for Sokol - don't understand why eip158 is enabled, but OE still save SystemAddress with nonce=0
 		acc := accounts.NewAccount()
 		acc.Nonce = 0
-		stateWriter.UpdateAccountData(SystemAddress, &acc0, &acc)
+		if err := stateWriter.UpdateAccountData(state.SystemAddress, originalSystemAcc, &acc); err != nil {
+			return err
+		}
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {
@@ -293,9 +283,9 @@ func FinalizeBlockExecution(engine consensus.Engine, header *types.Header,
 	return nil
 }
 
-func InitializeBlockExecution(engine consensus.Engine, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
+func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	engine.Initialize(cc, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	})
 	//fmt.Printf("====InitializeBlockExecution start %d====\n", header.Number.Uint64())

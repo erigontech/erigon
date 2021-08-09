@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, indexBucket string) error {
-	db := kv.MustOpen(chaindata)
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {

@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
 )
 
@@ -56,7 +56,7 @@ func NextKey(key []byte) ([]byte, error) {
 // loaded from files into a DB
 // * `key`: last commited key to the database (use etl.NextKey helper to use in LoadStartKey)
 // * `isDone`: true, if everything is processed
-type LoadCommitHandler func(db ethdb.Putter, key []byte, isDone bool) error
+type LoadCommitHandler func(db kv.Putter, key []byte, isDone bool) error
 type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
 
 type TransformArgs struct {
@@ -70,12 +70,12 @@ type TransformArgs struct {
 	LogDetailsExtract AdditionalLogArguments
 	LogDetailsLoad    AdditionalLogArguments
 
-	Comparator dbutils.CmpFunc
+	Comparator kv.CmpFunc
 }
 
 func Transform(
 	logPrefix string,
-	db ethdb.RwTx,
+	db kv.RwTx,
 	fromBucket string,
 	toBucket string,
 	tmpdir string,
@@ -105,7 +105,7 @@ func Transform(
 
 func extractBucketIntoFiles(
 	logPrefix string,
-	db ethdb.Tx,
+	db kv.Tx,
 	bucket string,
 	startkey []byte,
 	endkey []byte,
@@ -157,7 +157,7 @@ func extractBucketIntoFiles(
 }
 
 type currentTableReader struct {
-	getter ethdb.Tx
+	getter kv.Tx
 	bucket string
 }
 

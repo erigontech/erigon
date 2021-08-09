@@ -36,9 +36,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -328,7 +328,7 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 	return nil
 }
 
-func (ethash *Ethash) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header) []rlp.RawValue {
+func (ethash *Ethash) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []rlp.RawValue {
 	return nil
 }
 
@@ -596,22 +596,24 @@ func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.H
 	return nil
 }
 
-func (ethash *Ethash) Initialize(config *params.ChainConfig, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, _ consensus.SystemCall) {
+func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
-func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, _ consensus.SystemCall) {
+func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
+	return nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
-func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, syscall consensus.SystemCall) (*types.Block, error) {
+func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 
 	// Finalize block
-	ethash.Finalize(chainConfig, header, state, txs, uncles, r, e, syscall)
+	ethash.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
 	// Header seems complete, assemble into a block and return
 	return types.NewBlock(header, txs, uncles, r), nil
 }
@@ -683,8 +685,4 @@ func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState,
 		}
 	}
 	state.AddBalance(header.Coinbase, &minerReward)
-}
-
-func (ethash *Ethash) VerifyFamily(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return nil
 }

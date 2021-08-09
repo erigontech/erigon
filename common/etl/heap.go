@@ -3,7 +3,7 @@ package etl
 import (
 	"bytes"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 type HeapElem struct {
@@ -13,7 +13,7 @@ type HeapElem struct {
 }
 
 type Heap struct {
-	comparator dbutils.CmpFunc
+	comparator kv.CmpFunc
 	elems      []HeapElem
 }
 

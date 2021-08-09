@@ -12,32 +12,84 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type HistoryCfg struct {
-	db         ethdb.RwKV
+	db         kv.RwDB
 	bufLimit   datasize.ByteSize
+	prune      prune.Mode
 	flushEvery time.Duration
 	tmpdir     string
 }
 
-func StageHistoryCfg(db ethdb.RwKV, tmpDir string) HistoryCfg {
+func StageHistoryCfg(db kv.RwDB, prune prune.Mode, tmpDir string) HistoryCfg {
 	return HistoryCfg{
 		db:         db,
+		prune:      prune,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,
 	}
 }
 
-func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
+func SpawnAccountHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	quitCh := ctx.Done()
+
+	endBlock, err := s.ExecutionAt(tx)
+	logPrefix := s.LogPrefix()
+	if err != nil {
+		return fmt.Errorf(" getting last executed block: %w", err)
+	}
+	if endBlock <= s.BlockNumber {
+		return nil
+	}
+
+	var startBlock uint64
+	if s.BlockNumber > 0 {
+		startBlock = s.BlockNumber + 1
+	}
+	stopChangeSetsLookupAt := endBlock + 1
+
+	pruneTo := cfg.prune.History.PruneTo(endBlock)
+	if startBlock < pruneTo {
+		startBlock = pruneTo
+	}
+
+	if err := promoteHistory(logPrefix, tx, kv.AccountChangeSet, startBlock, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+		return err
+	}
+
+	if err := s.Update(tx, endBlock); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -52,7 +104,7 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	executionAt, err := s.ExecutionAt(tx)
 	logPrefix := s.LogPrefix()
 	if err != nil {
-		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	if executionAt <= s.BlockNumber {
 		return nil
@@ -64,14 +116,13 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+	if err := promoteHistory(logPrefix, tx, kv.StorageChangeSet, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+		return err
 	}
 
 	if err := s.Update(tx, executionAt); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
-
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
@@ -80,50 +131,7 @@ func SpawnAccountHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	return nil
 }
 
-func SpawnStorageHistoryIndex(s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-	quitCh := ctx.Done()
-
-	executionAt, err := s.ExecutionAt(tx)
-	logPrefix := s.LogPrefix()
-	if err != nil {
-		return fmt.Errorf("%s: logs index: getting last executed block: %w", logPrefix, err)
-	}
-	if executionAt <= s.BlockNumber {
-		return nil
-	}
-
-	var startChangeSetsLookupAt uint64
-	if s.BlockNumber > 0 {
-		startChangeSetsLookupAt = s.BlockNumber + 1
-	}
-	stopChangeSetsLookupAt := executionAt + 1
-
-	if err := promoteHistory(logPrefix, tx, dbutils.StorageChangeSetBucket, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
-	}
-
-	if err := s.Update(tx, executionAt); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, start, stop uint64, cfg HistoryCfg, quit <-chan struct{}) error {
+func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start, stop uint64, cfg HistoryCfg, quit <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -220,7 +228,7 @@ func promoteHistory(logPrefix string, tx ethdb.RwTx, changesetBucket string, sta
 	return nil
 }
 
-func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -232,12 +240,12 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 
 	quitCh := ctx.Done()
 	logPrefix := s.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, dbutils.AccountChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+	if err := unwindHistory(logPrefix, tx, kv.AccountChangeSet, u.UnwindPoint, cfg, quitCh); err != nil {
+		return err
 	}
 
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	if !useExternalTx {
@@ -248,7 +256,7 @@ func UnwindAccountHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 	return nil
 }
 
-func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -261,12 +269,12 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 	quitCh := ctx.Done()
 
 	logPrefix := s.LogPrefix()
-	if err := unwindHistory(logPrefix, tx, dbutils.StorageChangeSetBucket, u.UnwindPoint, cfg, quitCh); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+	if err := unwindHistory(logPrefix, tx, kv.StorageChangeSet, u.UnwindPoint, cfg, quitCh); err != nil {
+		return err
 	}
 
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
 
 	if !useExternalTx {
@@ -277,21 +285,20 @@ func UnwindStorageHistoryIndex(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg
 	return nil
 }
 
-func unwindHistory(logPrefix string, db ethdb.RwTx, csBucket string, to uint64, cfg HistoryCfg, quitCh <-chan struct{}) error {
+func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg HistoryCfg, quitCh <-chan struct{}) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	updates := map[string]struct{}{}
 	if err := changeset.Walk(db, csBucket, dbutils.EncodeBlockNumber(to), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if err := common.Stopped(quitCh); err != nil {
-			return false, err
-		}
 		select {
-		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		case <-quitCh:
+			return false, common.ErrStopped
+		default:
 		}
 		k = dbutils.CompositeKeyWithoutIncarnation(k)
 		updates[string(k)] = struct{}{}
@@ -332,7 +339,7 @@ func flushBitmaps64(c *etl.Collector, inMem map[string]*roaring64.Bitmap) error 
 	return nil
 }
 
-func truncateBitmaps64(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, to uint64) error {
+func truncateBitmaps64(tx kv.RwTx, bucket string, inMem map[string]struct{}, to uint64) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
@@ -347,7 +354,12 @@ func truncateBitmaps64(tx ethdb.RwTx, bucket string, inMem map[string]struct{}, 
 	return nil
 }
 
-func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+func PruneAccountHistoryIndex(s *PruneState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -355,6 +367,14 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneHistoryIndex(tx, kv.AccountChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
+	if err = s.Done(tx); err != nil {
+		return err
 	}
 
 	if !useExternalTx {
@@ -365,7 +385,12 @@ func PruneAccountHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 	return nil
 }
 
-func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+func PruneStorageHistoryIndex(s *PruneState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) (err error) {
+	if !cfg.prune.History.Enabled() {
+		return nil
+	}
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -374,11 +399,74 @@ func PruneStorageHistoryIndex(s *PruneState, tx ethdb.RwTx, cfg HistoryCfg, ctx 
 		}
 		defer tx.Rollback()
 	}
+	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
+	if err = pruneHistoryIndex(tx, kv.StorageChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+		return err
+	}
+	if err = s.Done(tx); err != nil {
+		return err
+	}
 
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo uint64, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	collector := etl.NewCollector(tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer collector.Close(logPrefix)
+
+	if err := changeset.Walk(tx, csTable, nil, 0, func(blockNum uint64, k, _ []byte) (bool, error) {
+		if blockNum >= pruneTo {
+			return false, nil
+		}
+		if err := collector.Collect(k, nil); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
+
+	c, err := tx.RwCursor(changeset.Mapper[csTable].IndexBucket)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+	prefixLen := common.AddressLength
+	if csTable == kv.StorageChangeSet {
+		prefixLen = common.HashLength
+	}
+	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		for k, _, err := c.Seek(addr); k != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k[prefixLen:])
+			if !bytes.HasPrefix(k, addr) || blockNum >= pruneTo {
+				break
+			}
+			if err = c.DeleteCurrent(); err != nil {
+				return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+			}
+		}
+		return nil
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+
 	return nil
 }

@@ -90,6 +90,7 @@ func (c *LibratoClient) PostMetrics(batch Batch) (err error) {
 	if resp, err = http.DefaultClient.Do(req); err != nil {
 		return
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		var body []byte

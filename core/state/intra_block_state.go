@@ -27,9 +27,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type revision struct {
@@ -41,6 +41,9 @@ type StateTracer interface {
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
 }
+
+// SystemAddress - sender address for internal state updates.
+var SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.

@@ -3,9 +3,12 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // Compares response of Erigon with OpenEthereum
@@ -13,7 +16,7 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 // 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
-func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string) {
+func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -28,6 +31,17 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		defer f.Close()
 		rec = bufio.NewWriter(f)
 		defer rec.Flush()
+	}
+	var errs *bufio.Writer
+	if errorFile != "" {
+		ferr, err := os.Create(errorFile)
+		if err != nil {
+			fmt.Printf("Cannot create file %s for error output: %v\n", errorFile, err)
+			return
+		}
+		defer ferr.Close()
+		errs = bufio.NewWriter(ferr)
+		defer errs.Flush()
 	}
 
 	var res CallResult
@@ -47,6 +61,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		return
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
 	prevBn := blockFrom
 	for bn := blockFrom + 100; bn < blockTo; bn += 100 {
 		// Checking modified accounts
@@ -63,73 +78,34 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
+			accounts := make([]common.Address, 0, len(accountSet))
 			for account := range accountSet {
-				recording := rec != nil // This flag will be set to false if recording is not to be performed
+				accounts = append(accounts, account)
+			}
+			// Randomly select 100 accounts
+			selects := 100
+			if len(accounts) < 100 {
+				selects = len(accounts)
+			}
+			for i := 0; i < selects; i++ {
+				idx := i
+				if len(accounts) > 100 {
+					idx = int(rnd.Int31n(int32(len(accounts))))
+				}
+				account := accounts[idx]
 				reqGen.reqID++
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
-				res = reqGen.Erigon2("trace_filter", request)
-				if res.Err != nil {
-					fmt.Printf("Could not trace filter from (Erigon) %d: %v\n", bn, res.Err)
+				errCtx := fmt.Sprintf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
 					return
-				}
-				if errVal := res.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing filter from (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-					return
-				}
-				if needCompare {
-					resg := reqGen.Geth2("trace_filter", request)
-					if resg.Err != nil {
-						fmt.Printf("Could not trace filter from (OE) %d: %v\n", bn, resg.Err)
-						return
-					}
-					if errVal := resg.Result.Get("error"); errVal != nil {
-						fmt.Printf("Error tracing filter from (OE): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-						return
-					}
-					if resg.Err == nil && resg.Result.Get("error") == nil {
-						if err := compareResults(res.Result, resg.Result); err != nil {
-							fmt.Printf("Different traces fromBlock %d, toBlock %d, fromAddress %x: %v\n", prevBn, bn, account, err)
-							fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-							fmt.Printf("\n\nOE response=================================\n%s\n", resg.Response)
-							return
-						}
-					}
-				}
-				if recording {
-					fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterTo(prevBn, bn, account)
-				res = reqGen.Erigon2("trace_filter", request)
-				if res.Err != nil {
-					fmt.Printf("Could not trace filter to (Erigon) %d: %v\n", bn, res.Err)
+				errCtx = fmt.Sprintf("traceFilterTo fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
 					return
-				}
-				if errVal := res.Result.Get("error"); errVal != nil {
-					fmt.Printf("Error tracing filter to (Erigon): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-					return
-				}
-				if needCompare {
-					resg := reqGen.Geth2("trace_filter", request)
-					if resg.Err != nil {
-						fmt.Printf("Could not trace filter from (OE) %d: %v\n", bn, resg.Err)
-						return
-					}
-					if errVal := resg.Result.Get("error"); errVal != nil {
-						fmt.Printf("Error tracing filter from (OE): %d %s\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
-						return
-					}
-					if resg.Err == nil && resg.Result.Get("error") == nil {
-						if err := compareResults(res.Result, resg.Result); err != nil {
-							fmt.Printf("Different traces fromBlock %d, toBlock %d, toAddress %x: %v\n", prevBn, bn, account, err)
-							fmt.Printf("\n\nTG response=================================\n%s\n", res.Response)
-							fmt.Printf("\n\nOE response=================================\n%s\n", resg.Response)
-							return
-						}
-					}
-				}
-				if recording {
-					fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 				}
 			}
 		}

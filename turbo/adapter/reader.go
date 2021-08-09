@@ -3,20 +3,20 @@ package adapter
 import (
 	"bytes"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 type StateReader struct {
 	blockNr uint64
-	tx      ethdb.Tx
+	tx      kv.Tx
 }
 
-func NewStateReader(tx ethdb.Tx, blockNr uint64) *StateReader {
+func NewStateReader(tx kv.Tx, blockNr uint64) *StateReader {
 	return &StateReader{
 		tx:      tx,
 		blockNr: blockNr,
@@ -45,7 +45,7 @@ func (r *StateReader) ReadAccountCode(address common.Address, incarnation uint64
 		return nil, nil
 	}
 	var val []byte
-	v, err := r.tx.GetOne(dbutils.CodeBucket, codeHash[:])
+	v, err := r.tx.GetOne(kv.Code, codeHash[:])
 	if err != nil {
 		return nil, err
 	}

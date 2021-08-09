@@ -12,17 +12,16 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
 )
 
 const TmpDirName = "etl-temp"
 
 type LoadNextFunc func(originalK, k, v []byte) error
-type LoadFunc func(k []byte, value []byte, table CurrentTableReader, next LoadNextFunc) error
+type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 
 // Collector performs the job of ETL Transform, but can also be used without "E" (Extract) part
 // as a Collect Transform Load
@@ -108,7 +107,7 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(logPrefix string, db ethdb.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
+func (c *Collector) Load(logPrefix string, db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		if c.autoClean {
 			c.Close(logPrefix)
@@ -131,11 +130,11 @@ func (c *Collector) Close(logPrefix string) {
 		totalSize += p.Dispose()
 	}
 	if totalSize > 0 {
-		log.Info(fmt.Sprintf("[%s] etl: temp files removed successfully", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
+		log.Info(fmt.Sprintf("[%s] etl: temp files removed", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
 	}
 }
 
-func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType int, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
+func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType int, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 	decoder := codec.NewDecoder(nil, &cbor)
 	var m runtime.MemStats
 
@@ -151,7 +150,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType
 			panic(eee)
 		}
 	}
-	var c ethdb.RwCursor
+	var c kv.RwCursor
 
 	currentTable := &currentTableReader{db, bucket}
 	haveSortingGuaranties := isIdentityLoadFunc(loadFunc) // user-defined loadFunc may change ordering
@@ -169,7 +168,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType
 		}
 	}
 	var canUseAppend bool
-	isDupSort := dbutils.BucketsConfigs[bucket].Flags&dbutils.DupSort != 0 && !dbutils.BucketsConfigs[bucket].AutoDupSortKeysConversion
+	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -217,7 +216,7 @@ func loadFilesIntoBucket(logPrefix string, db ethdb.RwTx, bucket string, bufType
 		}
 		if canUseAppend {
 			if isDupSort {
-				if err := c.(ethdb.RwCursorDupSort).AppendDup(k, v); err != nil {
+				if err := c.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, %w", logPrefix, bucket, k, err)
 				}
 			} else {

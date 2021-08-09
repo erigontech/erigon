@@ -20,16 +20,15 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db ethdb.KVGetter, hash common.Hash) (*params.ChainConfig, error) {
-	data, err := db.GetOne(dbutils.ConfigPrefix, hash[:])
+func ReadChainConfig(db kv.Getter, hash common.Hash) (*params.ChainConfig, error) {
+	data, err := db.GetOne(kv.ConfigTable, hash[:])
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +43,7 @@ func ReadChainConfig(db ethdb.KVGetter, hash common.Hash) (*params.ChainConfig, 
 }
 
 // WriteChainConfig writes the chain config settings to the database.
-func WriteChainConfig(db ethdb.Putter, hash common.Hash, cfg *params.ChainConfig) error {
+func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *params.ChainConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -52,13 +51,13 @@ func WriteChainConfig(db ethdb.Putter, hash common.Hash, cfg *params.ChainConfig
 	if err != nil {
 		return fmt.Errorf("failed to JSON encode chain config: %w", err)
 	}
-	if err := db.Put(dbutils.ConfigPrefix, hash[:], data); err != nil {
+	if err := db.Put(kv.ConfigTable, hash[:], data); err != nil {
 		return fmt.Errorf("failed to store chain config: %w", err)
 	}
 	return nil
 }
 
 // DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
-func DeleteChainConfig(db ethdb.Deleter, hash common.Hash) error {
-	return db.Delete(dbutils.ConfigPrefix, hash[:], nil)
+func DeleteChainConfig(db kv.Deleter, hash common.Hash) error {
+	return db.Delete(kv.ConfigTable, hash[:], nil)
 }

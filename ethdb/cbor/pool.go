@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
 )
 

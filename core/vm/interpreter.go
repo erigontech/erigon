@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Config are the configuration options for the Interpreter
@@ -73,6 +73,8 @@ type EVMInterpreter struct {
 	jt *JumpTable // EVM instruction table
 }
 
+//structcheck doesn't see embedding
+//nolint:structcheck
 type VM struct {
 	evm *EVM
 	cfg Config

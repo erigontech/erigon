@@ -29,6 +29,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -37,27 +38,30 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
-	Blocks:      20,
-	Default:     big.NewInt(0),
-	Percentile:  60,
-	MaxPrice:    gasprice.DefaultMaxPrice,
-	IgnorePrice: gasprice.DefaultIgnorePrice,
+	Blocks:           20,
+	Default:          big.NewInt(0),
+	Percentile:       60,
+	MaxHeaderHistory: 0,
+	MaxBlockHistory:  0,
+	MaxPrice:         gasprice.DefaultMaxPrice,
+	IgnorePrice:      gasprice.DefaultIgnorePrice,
 }
 
 // LightClientGPO contains default gasprice oracle settings for light client.
 var LightClientGPO = gasprice.Config{
-	Blocks:      2,
-	Percentile:  60,
-	MaxPrice:    gasprice.DefaultMaxPrice,
-	IgnorePrice: gasprice.DefaultIgnorePrice,
+	Blocks:           2,
+	Percentile:       60,
+	MaxHeaderHistory: 300,
+	MaxBlockHistory:  5,
+	MaxPrice:         gasprice.DefaultMaxPrice,
+	IgnorePrice:      gasprice.DefaultIgnorePrice,
 }
 
 // Defaults contains default settings for use on the Ethereum main net.
@@ -69,8 +73,8 @@ var Defaults = Config{
 		DatasetsOnDisk:   2,
 		DatasetsLockMmap: false,
 	},
-	NetworkID:   1,
-	StorageMode: ethdb.DefaultStorageMode,
+	NetworkID: 1,
+	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -133,8 +137,9 @@ type Config struct {
 
 	P2PEnabled bool
 
-	StorageMode ethdb.StorageMode
-	BatchSize   datasize.ByteSize // Batch size for execution stage
+	Prune     prune.Mode
+	BatchSize datasize.ByteSize // Batch size for execution stage
+	BadBlock  uint64            // Block marked as bad (for forced reorg)
 
 	Snapshot Snapshot
 
@@ -162,24 +167,12 @@ type Config struct {
 	// Gas Price Oracle options
 	GPO gasprice.Config
 
-	// Enables the dbg protocol
-	EnableDebugProtocol bool
-
-	// Miscellaneous options
-	DocRoot string `toml:"-"`
-
 	// RPCGasCap is the global gas cap for eth-call variants.
 	RPCGasCap uint64 `toml:",omitempty"`
 
 	// RPCTxFeeCap is the global transaction fee(price * gaslimit) cap for
 	// send-transction variants. The unit is ether.
 	RPCTxFeeCap float64 `toml:",omitempty"`
-
-	// Checkpoint is a hardcoded checkpoint which can be nil.
-	Checkpoint *params.TrustedCheckpoint `toml:",omitempty"`
-
-	// CheckpointOracle is the configuration for checkpoint oracle.
-	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
 	StateStream                bool
 	BodyDownloadTimeoutSeconds int // TODO change to duration
@@ -188,7 +181,7 @@ type Config struct {
 	SyncLoopThrottle time.Duration
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, notify []string, noverify bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -216,12 +209,12 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, config interface{}, 
 		}
 	case *params.SnapshotConfig:
 		if chainConfig.Clique != nil {
-			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory))
+			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
 			var err error
-			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, consensusCfg.InMemory), chainConfig.Aura.Etherbase, consensusconfig.Sokol)
+			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), chainConfig.Aura.Etherbase, consensusconfig.Sokol)
 			if err != nil {
 				panic(err)
 			}

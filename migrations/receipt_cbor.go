@@ -2,24 +2,21 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
-	"fmt"
-	"time"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/log"
-
 	"errors"
 	pkg2_big "math/big"
 	"runtime"
 	"strconv"
+	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/log/v3"
 
 	pkg1_common "github.com/ledgerwatch/erigon/common"
 	codec1978 "github.com/ugorji/go/codec"
@@ -38,20 +35,23 @@ type OldReceipts []*OldReceipt
 
 var ReceiptCbor = Migration{
 	Name: "receipt_cbor",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		var tx ethdb.RwTx
-		if hasTx, ok := db.(ethdb.HasTx); ok {
-			tx = hasTx.Tx().(ethdb.RwTx)
-		} else {
-			return fmt.Errorf("no transaction")
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
 		}
+		defer tx.Rollback()
+
 		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 		if err != nil {
 			return err
 		}
 		if genesisBlock == nil {
 			// Empty database check
-			return CommitProgress(db, nil, true)
+			if err := BeforeCommit(tx, nil, true); err != nil {
+				return err
+			}
+			return tx.Commit()
 		}
 		chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 		if cerr != nil {
@@ -69,7 +69,7 @@ var ReceiptCbor = Migration{
 		}
 		for blockNum := uint64(1); blockNum <= to; blockNum++ {
 			binary.BigEndian.PutUint64(key[:], blockNum)
-			if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+			if v, err = tx.GetOne(kv.Receipts, key[:]); err != nil {
 				return err
 			}
 			if v == nil {
@@ -108,11 +108,14 @@ var ReceiptCbor = Migration{
 			if err = cbor.Marshal(&buf, receipts); err != nil {
 				return err
 			}
-			if err = tx.Put(dbutils.BlockReceiptsPrefix, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
+			if err = tx.Put(kv.Receipts, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
 		}
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }
 

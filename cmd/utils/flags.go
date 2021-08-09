@@ -30,6 +30,7 @@ import (
 	"text/tabwriter"
 	"text/template"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -42,9 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/flags"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -52,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -122,38 +122,9 @@ var (
 		Name:  "identity",
 		Usage: "Custom node name",
 	}
-	DocRootFlag = DirectoryFlag{
-		Name:  "docroot",
-		Usage: "Document Root for HTTPClient file scheme",
-		Value: DirectoryString(HomeDir()),
-	}
-	ExitWhenSyncedFlag = cli.BoolFlag{
-		Name:  "exitwhensynced",
-		Usage: "Exits after block synchronisation completes",
-	}
-	IterativeOutputFlag = cli.BoolFlag{
-		Name:  "iterative",
-		Usage: "Print streaming JSON iteratively, delimited by newlines",
-	}
-	ExcludeStorageFlag = cli.BoolFlag{
-		Name:  "nostorage",
-		Usage: "Exclude storage entries (save db lookups)",
-	}
-	ExcludeCodeFlag = cli.BoolFlag{
-		Name:  "nocode",
-		Usage: "Exclude contract code (save db lookups)",
-	}
 	WhitelistFlag = cli.StringFlag{
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
-	}
-	OverrideLondonFlag = cli.Uint64Flag{
-		Name:  "override.london",
-		Usage: "Manually specify London fork-block, overriding the bundled setting",
-	}
-	DebugProtocolFlag = cli.BoolFlag{
-		Name:  "debug-protocol",
-		Usage: "Enable the DBG (debug) protocol",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
@@ -1196,12 +1167,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}
 
-	cfg.EnableDebugProtocol = ctx.GlobalBool(DebugProtocolFlag.Name)
-
-	if ctx.GlobalIsSet(DocRootFlag.Name) {
-		cfg.DocRoot = ctx.GlobalString(DocRootFlag.Name)
-	}
-
 	if ctx.GlobalIsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.GlobalUint64(RPCGlobalGasCapFlag.Name)
 	}
@@ -1286,7 +1251,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
 	default:
-		Fatalf("Chain name is not recognized: %s", chain)
+		Fatalf("ChainDB name is not recognized: %s", chain)
 	}
 }
 
@@ -1320,8 +1285,8 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 }
 
 // MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(cfg *node.Config) ethdb.RwKV {
-	chainDb, err := node.OpenDatabase(cfg, ethdb.Chain)
+func MakeChainDatabase(logger log.Logger, cfg *node.Config) kv.RwDB {
+	chainDb, err := node.OpenDatabase(cfg, logger, kv.ChainDB)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}

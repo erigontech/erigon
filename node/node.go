@@ -27,36 +27,36 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/gofrs/flock"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/prometheus/tsdb/fileutil"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Node is a container on which services can be registered.
 type Node struct {
 	config        *Config
 	log           log.Logger
-	dirLock       fileutil.Releaser // prevents concurrent use of instance directory
-	stop          chan struct{}     // Channel to wait for termination notifications
-	server        *p2p.Server       // Currently running P2P networking layer
-	startStopLock sync.Mutex        // Start/Stop are protected by an additional lock
-	state         int               // Tracks state of node lifecycle
+	dirLock       *flock.Flock  // prevents concurrent use of instance directory
+	stop          chan struct{} // Channel to wait for termination notifications
+	server        *p2p.Server   // Currently running P2P networking layer
+	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
+	state         int           // Tracks state of node lifecycle
 
 	lock          sync.Mutex
 	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
 	rpcAPIs       []rpc.API   // List of APIs currently provided by the node
 	http          *httpServer //
 	ws            *httpServer //
-	ipc           *ipcServer  // Stores information about the ipc http server
 	inprocHandler *rpc.Server // In-process RPC request handler to process the API requests
 
 	rpcAllowList rpc.AllowList // list of RPC methods explicitly allowed for this RPC node
 
-	databases []ethdb.Closer
+	databases []kv.Closer
 }
 
 const (
@@ -96,7 +96,7 @@ func New(conf *Config) (*Node, error) {
 		inprocHandler: rpc.NewServer(50),
 		log:           conf.Logger,
 		stop:          make(chan struct{}),
-		databases:     make([]ethdb.Closer, 0),
+		databases:     make([]kv.Closer, 0),
 	}
 	// Register built-in APIs.
 	node.rpcAPIs = append(node.rpcAPIs, node.apis()...)
@@ -120,7 +120,6 @@ func New(conf *Config) (*Node, error) {
 	// Configure RPC servers.
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
 	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
-	node.ipc = newIPCServer(node.log, conf.IPCEndpoint())
 	// Check for uncaught crashes from the previous boot and notify the user if
 	// there are any
 	//debug.CheckForCrashes(conf.DataDir)
@@ -280,18 +279,22 @@ func (n *Node) openDataDir() error {
 	}
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
-	release, _, err := fileutil.Flock(filepath.Join(instdir, "LOCK"))
+	l := flock.New(filepath.Join(instdir, "LOCK"))
+	locked, err := l.TryLock()
 	if err != nil {
 		return convertFileLockError(err)
 	}
-	n.dirLock = release
+	if !locked {
+		return fmt.Errorf("%w: %s\n", ErrDatadirUsed, instdir)
+	}
+	n.dirLock = l
 	return nil
 }
 
 func (n *Node) closeDataDir() {
 	// Release instance directory lock.
 	if n.dirLock != nil {
-		if err := n.dirLock.Release(); err != nil {
+		if err := n.dirLock.Unlock(); err != nil {
 			n.log.Error("Can't release datadir lock", "err", err)
 		}
 		n.dirLock = nil
@@ -309,13 +312,6 @@ func (n *Node) SetAllowListForRPC(allowList rpc.AllowList) {
 func (n *Node) startRPC() error {
 	if err := n.startInProc(); err != nil {
 		return err
-	}
-
-	// Configure IPC.
-	if n.ipc.endpoint != "" {
-		if err := n.ipc.start(n.rpcAPIs); err != nil {
-			return err
-		}
 	}
 
 	// Configure HTTP.
@@ -366,7 +362,6 @@ func (n *Node) wsServerForPort(port int) *httpServer {
 func (n *Node) stopRPC() {
 	n.http.stop()
 	n.ws.stop()
-	n.ipc.stop() //nolint:errcheck
 	n.stopInProc()
 }
 
@@ -483,11 +478,6 @@ func (n *Node) InstanceDir() string {
 	return n.config.instanceDir()
 }
 
-// IPCEndpoint retrieves the current IPC endpoint used by the protocol stack.
-func (n *Node) IPCEndpoint() string {
-	return n.ipc.endpoint
-}
-
 // HTTPEndpoint returns the URL of the HTTP server. Note that this URL does not
 // contain the JSON-RPC path prefix set by HTTPPathPrefix.
 func (n *Node) HTTPEndpoint() string {
@@ -502,107 +492,31 @@ func (n *Node) WSEndpoint() string {
 	return "ws://" + n.ws.listenAddr() + n.ws.wsConfig.prefix
 }
 
-// OpenDatabase opens an existing database with the given name (or creates one if no
-// previous can be found) from within the node's instance directory. If the node is
-// ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(label ethdb.Label, datadir string) (ethdb.RwKV, error) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state == closedState {
-		return nil, ErrNodeStopped
-	}
-
+func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
 	var name string
 	switch label {
-	case ethdb.Chain:
+	case kv.ChainDB:
 		name = "chaindata"
-	case ethdb.TxPool:
+	case kv.TxPoolDB:
 		name = "txpool"
 	default:
 		name = "test"
 	}
-	var db ethdb.RwKV
-	if n.config.DataDir == "" {
-		db = kv2.NewMemKV()
-		n.databases = append(n.databases, db)
-		return db, nil
-	}
-	dbPath := n.config.ResolvePath(name)
-
-	var openFunc func(exclusive bool) (ethdb.RwKV, error)
-	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (ethdb.RwKV, error) {
-		opts := kv2.NewMDBX().Path(dbPath).Label(label).DBVerbosity(n.config.DatabaseVerbosity)
-		if exclusive {
-			opts = opts.Exclusive()
-		}
-		kv, err1 := opts.Open()
-		if err1 != nil {
-			return nil, err1
-		}
-		return kv, nil
-	}
-	var err error
-	db, err = openFunc(false)
-	if err != nil {
-		return nil, err
-	}
-	migrator := migrations.NewMigrator(label)
-	has, err := migrator.HasPendingMigrations(db)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		log.Info("Re-Opening DB in exclusive mode to apply migrations")
-		db.Close()
-		db, err = openFunc(true)
-		if err != nil {
-			return nil, err
-		}
-		if err = migrator.Apply(db, datadir); err != nil {
-			return nil, err
-		}
-		db.Close()
-		db, err = openFunc(false)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	n.databases = append(n.databases, db)
-	return db, nil
-}
-
-func OpenDatabase(config *Config, label ethdb.Label) (ethdb.RwKV, error) {
-	var name string
-	switch label {
-	case ethdb.Chain:
-		name = "chaindata"
-	case ethdb.TxPool:
-		name = "txpool"
-	default:
-		name = "test"
-	}
-	var db ethdb.RwKV
+	var db kv.RwDB
 	if config.DataDir == "" {
-		db = kv2.NewMemKV()
+		db = memdb.New()
 		return db, nil
 	}
 	dbPath := config.ResolvePath(name)
 
-	var openFunc func(exclusive bool) (ethdb.RwKV, error)
-	log.Info("Opening Database", "label", name)
-	openFunc = func(exclusive bool) (ethdb.RwKV, error) {
-		opts := kv2.NewMDBX().Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
+	var openFunc func(exclusive bool) (kv.RwDB, error)
+	log.Info("Opening Database", "label", name, "path", dbPath)
+	openFunc = func(exclusive bool) (kv.RwDB, error) {
+		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
-		kv, err1 := opts.Open()
-		if err1 != nil {
-			return nil, err1
-		}
-		return kv, nil
+		return opts.Open()
 	}
 	var err error
 	db, err = openFunc(false)

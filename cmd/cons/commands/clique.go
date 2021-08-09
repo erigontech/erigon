@@ -15,19 +15,18 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_cons "github.com/ledgerwatch/erigon-lib/gointerfaces/consensus"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -50,11 +49,12 @@ var cliqueCmd = &cobra.Command{
 	Short: "Run clique consensus engine",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		return cliqueEngine(ctx)
+		logger := log.New()
+		return cliqueEngine(ctx, logger)
 	},
 }
 
-func cliqueEngine(ctx context.Context) error {
+func cliqueEngine(ctx context.Context, logger log.Logger) error {
 	var server *CliqueServerImpl
 	var err error
 	if config == "test" {
@@ -85,7 +85,7 @@ func cliqueEngine(ctx context.Context) error {
 			return err
 		}
 	}
-	server.db = openDatabase(filepath.Join(datadir, "clique", "db"))
+	server.db = openDB(filepath.Join(datadir, "clique", "db"), logger)
 	server.c = clique.New(server.chainConfig, &params.SnapshotConfig{}, server.db)
 	<-ctx.Done()
 	return nil
@@ -108,10 +108,10 @@ func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, 
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
+	//if metrics.Enabled {
+	//streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	//unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	//}
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
@@ -134,9 +134,9 @@ func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, 
 	if testServer {
 		proto_cons.RegisterTestServer(grpcServer, cliqueServer)
 	}
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
+	//if metrics.Enabled {
+	//	grpc_prometheus.Register(grpcServer)
+	//}
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Clique server fail", "err", err1)
@@ -151,7 +151,7 @@ type CliqueServerImpl struct {
 	genesis     *core.Genesis
 	chainConfig *params.ChainConfig
 	c           *clique.Clique
-	db          ethdb.RwKV
+	db          kv.RwDB
 }
 
 func NewCliqueServer(_ context.Context) *CliqueServerImpl {

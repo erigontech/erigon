@@ -49,7 +49,7 @@ func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint25
 	if gasFeeCap.Lt(baseFee) {
 		return uint256.NewInt(0)
 	}
-	effectiveFee := gasFeeCap.Sub(gasFeeCap, baseFee)
+	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
 	if tx.GetTip().Lt(effectiveFee) {
 		return tx.GetTip()
 	} else {
@@ -484,7 +484,7 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, 
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx DynamicFeeTransaction) Hash() common.Hash {
+func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}

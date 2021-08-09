@@ -2,13 +2,14 @@ package migrations
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -18,30 +19,45 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
+
+func availableReceiptFrom(tx kv.Tx) (uint64, error) {
+	c, err := tx.Cursor(kv.Receipts)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return 0, err
+	}
+	if len(k) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(k), nil
+}
 
 var ReceiptRepair = Migration{
 	Name: "receipt_repair",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
-		var tx ethdb.RwTx
-		if hasTx, ok := db.(ethdb.HasTx); ok {
-			tx = hasTx.Tx().(ethdb.RwTx)
-		} else {
-			return fmt.Errorf("no transaction")
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
 		}
-		if sm, smErr := ethdb.GetStorageModeFromDB(tx); smErr != nil {
-			return smErr
-		} else {
-			if !sm.History {
-				log.Warn("Could not perform this migration because history is not in storage mode")
-				return CommitProgress(db, nil, true)
-			}
-			if !sm.Receipts {
-				log.Info("Migration is only relevant for storage mode with receipts, skipping")
-				return CommitProgress(db, nil, true)
-			}
+		defer tx.Rollback()
+
+		blockNum, err := changeset.AvailableFrom(tx)
+		if err != nil {
+			return err
+		}
+		receiptsFrom, err := availableReceiptFrom(tx)
+		if err != nil {
+			return err
+		}
+		if receiptsFrom > blockNum {
+			blockNum = receiptsFrom
 		}
 
 		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
@@ -60,7 +76,7 @@ var ReceiptRepair = Migration{
 		logEvery := time.NewTicker(logInterval)
 		var key [8]byte
 		var v []byte
-		for blockNum := uint64(1); true; blockNum++ {
+		for ; true; blockNum++ {
 			select {
 			default:
 			case <-logEvery.C:
@@ -74,7 +90,7 @@ var ReceiptRepair = Migration{
 				break
 			}
 			binary.BigEndian.PutUint64(key[:], blockNum)
-			if v, err = tx.GetOne(dbutils.BlockReceiptsPrefix, key[:]); err != nil {
+			if v, err = tx.GetOne(kv.Receipts, key[:]); err != nil {
 				return err
 			}
 			var receipts types.Receipts
@@ -95,7 +111,7 @@ var ReceiptRepair = Migration{
 				return err
 			}
 
-			dbstate := state.NewPlainKvState(tx, block.NumberU64()-1)
+			dbstate := state.NewPlainState(tx, block.NumberU64()-1)
 			intraBlockState := state.New(dbstate)
 
 			getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
@@ -119,13 +135,16 @@ var ReceiptRepair = Migration{
 				if err != nil {
 					return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
 				}
-				if err = tx.Put(dbutils.BlockReceiptsPrefix, key[:], buf.Bytes()); err != nil {
+				if err = tx.Put(kv.Receipts, key[:], buf.Bytes()); err != nil {
 					return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
 				}
 				fixedCount++
 			}
 		}
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }
 
@@ -151,7 +170,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil); err != nil {
+		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 

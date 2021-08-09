@@ -7,23 +7,19 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
 
-var stageBodiesGauge = metrics.NewRegisteredGauge("stage/bodies", nil)
-
 type BodiesCfg struct {
-	db              ethdb.RwKV
+	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
@@ -34,7 +30,7 @@ type BodiesCfg struct {
 }
 
 func StageBodiesCfg(
-	db ethdb.RwKV,
+	db kv.RwDB,
 	bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
 	penalise func(context.Context, []headerdownload.PenaltyItem),
@@ -51,7 +47,7 @@ func BodiesForward(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
-	tx ethdb.RwTx,
+	tx kv.RwTx,
 	cfg BodiesCfg,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
@@ -106,7 +102,7 @@ Loop:
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
-				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
+				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 		}
@@ -127,7 +123,7 @@ Loop:
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
-				return fmt.Errorf("[%s] request more bodies: %w", logPrefix, err)
+				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 			peer = nil
@@ -149,7 +145,7 @@ Loop:
 		}
 		d4 += time.Since(start)
 		start = time.Now()
-		cr := ChainReader{Cfg: cfg.chanConfig, Db: kv.WrapIntoTxDB(tx)}
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
 		for i, header := range headers {
 			rawBody := rawBodies[i]
 			blockHeight := header.Number.Uint64()
@@ -160,12 +156,12 @@ Loop:
 				break Loop
 			}
 			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
-				return fmt.Errorf("[%s] writing block body: %w", logPrefix, err)
+				return fmt.Errorf("writing block body: %w", err)
 			}
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
 				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
-					return fmt.Errorf("[%s] saving Bodies progress: %w", logPrefix, err)
+					return fmt.Errorf("saving Bodies progress: %w", err)
 				}
 			}
 		}
@@ -195,7 +191,6 @@ Loop:
 			log.Debug("bodyLoop woken up by the incoming request")
 		}
 		d6 += time.Since(start)
-		stageBodiesGauge.Update(int64(bodyProgress))
 	}
 	if err := s.Update(tx, bodyProgress); err != nil {
 		return err
@@ -208,7 +203,9 @@ Loop:
 	if stopped {
 		return common.ErrStopped
 	}
-	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
+	if bodyProgress > s.BlockNumber+16 {
+		log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
+	}
 	return nil
 }
 
@@ -218,14 +215,14 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
-		"number committed", committed,
-		"delivery /second", common.StorageSize(speed),
-		"wasted /second", common.StorageSize(wastedSpeed),
+		"block number", committed,
+		"delivery/sec", common.StorageSize(speed),
+		"wasted/sec", common.StorageSize(wastedSpeed),
 		"alloc", common.StorageSize(m.Alloc),
 		"sys", common.StorageSize(m.Sys))
 }
 
-func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -235,19 +232,18 @@ func UnwindBodiesStage(u *UnwindState, tx ethdb.RwTx, cfg BodiesCfg, ctx context
 		defer tx.Rollback()
 	}
 
-	logPrefix := u.LogPrefix()
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf("[%s]: reset: %v", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil
 }
 
-func PruneBodiesStage(s *PruneState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func PruneBodiesStage(s *PruneState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -257,10 +253,9 @@ func PruneBodiesStage(s *PruneState, tx ethdb.RwTx, cfg BodiesCfg, ctx context.C
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("[%s]: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

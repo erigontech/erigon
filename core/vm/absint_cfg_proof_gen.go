@@ -5,15 +5,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/emicklei/dot"
-	"github.com/holiman/uint256"
-	"github.com/logrusorgru/aurora"
 	"log"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/emicklei/dot"
+	"github.com/holiman/uint256"
+	"github.com/logrusorgru/aurora/v3"
 )
 
 //////////////////////////////////////////////////

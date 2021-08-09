@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // bigIntegerJS is the minified version of https://github.com/peterolson/BigInteger.js.
@@ -317,6 +317,8 @@ type Tracer struct {
 
 	interrupt uint32 // Atomic flag to signal execution interruption
 	reason    error  // Textual reason for the interruption
+
+	activePrecompiles []common.Address // Updated on CaptureStart based on given rules
 }
 
 // New instantiates a new tracer instance. code specifies a Javascript snippet,
@@ -407,6 +409,15 @@ func New(code string, txCtx vm.TxContext) (*Tracer, error) {
 		return 1
 	})
 	tracer.vm.PushGlobalGoFunction("isPrecompiled", func(ctx *duktape.Context) int {
+		addr := common.BytesToAddress(popSlice(ctx))
+		for _, p := range tracer.activePrecompiles {
+			if p == addr {
+				ctx.PushBoolean(true)
+				return 1
+			}
+		}
+		ctx.PushBoolean(false)
+
 		_, ok := vm.PrecompiledContractsIstanbul[common.BytesToAddress(popSlice(ctx))]
 		ctx.PushBoolean(ok)
 		return 1
@@ -534,7 +545,7 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	if depth != 0 {
 		return nil
 	}
@@ -556,6 +567,10 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 	if jst.err == nil {
 		// Initialize the context if it wasn't done yet
 		if !jst.inited {
+			// Update list of precompiles based on current block
+			rules := env.ChainConfig().Rules(env.Context.BlockNumber)
+			jst.activePrecompiles = vm.ActivePrecompiles(rules)
+
 			jst.ctx["block"] = env.Context.BlockNumber
 			// Compute intrinsic gas
 			isHomestead := env.ChainRules.IsHomestead
@@ -618,13 +633,13 @@ func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (jst *Tracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	if depth != 0 {
 		return nil
 	}
 	jst.ctx["output"] = output
 	jst.ctx["time"] = t.String()
-	jst.ctx["gasUsed"] = gasUsed
+	jst.ctx["gasUsed"] = startGas - endGas
 
 	if err != nil {
 		jst.ctx["error"] = err.Error()
@@ -666,6 +681,13 @@ func (jst *Tracer) GetResult() (json.RawMessage, error) {
 
 		case *big.Int:
 			pushBigInt(val, jst.vm)
+
+		case int:
+			jst.vm.PushInt(val)
+
+		case common.Hash:
+			ptr := jst.vm.PushFixedBuffer(32)
+			copy(makeSlice(ptr, 32), val[:])
 
 		default:
 			panic(fmt.Sprintf("unsupported type: %T", val))

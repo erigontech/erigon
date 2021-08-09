@@ -15,11 +15,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -62,7 +62,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if num, ok := stateBlockNumberOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		stateReader = state.NewPlainStateReader(tx)
 	} else {
-		stateReader = state.NewPlainKvState(tx, stateBlockNumber)
+		stateReader = state.NewPlainState(tx, stateBlockNumber)
 	}
 	st := state.New(stateReader)
 

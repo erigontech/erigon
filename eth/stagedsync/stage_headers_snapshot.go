@@ -6,30 +6,32 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type SnapshotHeadersCfg struct {
-	db               ethdb.RwKV
+	db               kv.RwDB
 	snapshotDir      string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
+	log              log.Logger
 }
 
-func StageSnapshotHeadersCfg(db ethdb.RwKV, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator) SnapshotHeadersCfg {
+func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, logger log.Logger) SnapshotHeadersCfg {
 	return SnapshotHeadersCfg{
 		db:               db,
 		snapshotDir:      snapshot.Dir,
 		client:           client,
 		snapshotMigrator: snapshotMigrator,
+		log:              logger,
 	}
 }
 
-func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
+func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
 	if !initial {
 		return nil
@@ -64,7 +66,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 		return nil
 	}
 
-	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.db, readTX, cfg.client, false)
+	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.log, cfg.db, readTX, cfg.client, false)
 	if err != nil {
 		return err
 	}
@@ -119,7 +121,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx ethdb.RwTx, cfg Snaps
 	return nil
 }
 
-func UnwindHeadersSnapshotGenerationStage(u *UnwindState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, ctx context.Context) (err error) {
+func UnwindHeadersSnapshotGenerationStage(u *UnwindState, tx kv.RwTx, cfg SnapshotHeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -140,7 +142,7 @@ func UnwindHeadersSnapshotGenerationStage(u *UnwindState, tx ethdb.RwTx, cfg Sna
 	return nil
 }
 
-func PruneHeadersSnapshotGenerationStage(u *PruneState, tx ethdb.RwTx, cfg SnapshotHeadersCfg, ctx context.Context) (err error) {
+func PruneHeadersSnapshotGenerationStage(u *PruneState, tx kv.RwTx, cfg SnapshotHeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

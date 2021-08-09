@@ -1,24 +1,24 @@
 package stagedsync
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(firstCycle bool, s *StageState, unwinder Unwinder, tx ethdb.RwTx) error
+type ExecFunc func(firstCycle bool, s *StageState, unwinder Unwinder, tx kv.RwTx) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, tx ethdb.RwTx) error
+type UnwindFunc func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(firstCycle bool, p *PruneState, tx ethdb.RwTx) error
+type PruneFunc func(firstCycle bool, p *PruneState, tx kv.RwTx) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {
@@ -47,12 +47,15 @@ type StageState struct {
 func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
-func (s *StageState) Update(db ethdb.Putter, newBlockNum uint64) error {
+func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
+	if m, ok := syncMetrics[s.ID]; ok {
+		m.Set(newBlockNum)
+	}
 	return stages.SaveStageProgress(db, s.ID, newBlockNum)
 }
 
 // ExecutionAt gets the current state of the "Execution" stage, which block is currently executed.
-func (s *StageState) ExecutionAt(db ethdb.KVGetter) (uint64, error) {
+func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	execution, err := stages.GetStageProgress(db, stages.Execution)
 	return execution, err
 }
@@ -77,15 +80,18 @@ type UnwindState struct {
 func (u *UnwindState) LogPrefix() string { return u.state.LogPrefix() }
 
 // Done updates the DB state of the stage.
-func (u *UnwindState) Done(db ethdb.Putter) error {
+func (u *UnwindState) Done(db kv.Putter) error {
 	return stages.SaveStageProgress(db, u.ID, u.UnwindPoint)
 }
 
 type PruneState struct {
-	ID                 stages.SyncStage
-	PrunePoint         uint64 // PrunePoint is the block to prune to.
-	CurrentBlockNumber uint64
-	state              *Sync
+	ID              stages.SyncStage
+	ForwardProgress uint64 // progress of stage forward move
+	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
+	state           *Sync
 }
 
-func (u *PruneState) LogPrefix() string { return u.state.LogPrefix() }
+func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() }
+func (s *PruneState) Done(db kv.Putter) error {
+	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
+}

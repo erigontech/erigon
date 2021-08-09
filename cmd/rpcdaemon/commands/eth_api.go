@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
@@ -17,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -106,18 +107,18 @@ func NewBaseApi(f *filters.Filters) *BaseAPI {
 	return &BaseAPI{filters: f}
 }
 
-func (api *BaseAPI) chainConfig(tx ethdb.Tx) (*params.ChainConfig, error) {
+func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
 	cfg, _, err := api.chainConfigWithGenesis(tx)
 	return cfg, err
 }
 
 // nolint:unused
-func (api *BaseAPI) genesis(tx ethdb.Tx) (*types.Block, error) {
+func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(tx ethdb.Tx) (*params.ChainConfig, *types.Block, error) {
+func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {
 	if api._chainConfig != nil {
 		return api._chainConfig, api._genesis, nil
 	}
@@ -143,7 +144,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx ethdb.Tx) (*types.Block, error) {
+func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil
 	}
@@ -163,12 +164,12 @@ type APIImpl struct {
 	ethBackend services.ApiBackend
 	txPool     txpool.TxpoolClient
 	mining     txpool.MiningClient
-	db         ethdb.RoKV
+	db         kv.RoDB
 	GasCap     uint64
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db ethdb.RoKV, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
@@ -267,8 +268,12 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 }
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
-func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
-	return newRPCTransaction(tx, common.Hash{}, 0, 0, nil)
+func newRPCPendingTransaction(tx types.Transaction, current *types.Header, config *params.ChainConfig) *RPCTransaction {
+	var baseFee *big.Int
+	if current != nil {
+		baseFee = misc.CalcBaseFee(config, current)
+	}
+	return newRPCTransaction(tx, common.Hash{}, 0, 0, baseFee)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.

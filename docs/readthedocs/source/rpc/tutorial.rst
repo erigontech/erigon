@@ -56,7 +56,7 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
         "github.com/ledgerwatch/erigon/cmd/utils"
         "github.com/ledgerwatch/erigon/common"
         "github.com/ledgerwatch/erigon/ethdb"
-        "github.com/ledgerwatch/erigon/log"
+        "github.com/ledgerwatch/log/v3"
         "github.com/ledgerwatch/erigon/rpc"
         "github.com/spf13/cobra"
     )

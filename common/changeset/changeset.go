@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
@@ -103,11 +105,6 @@ func (s *ChangeSet) String() string {
 }
 
 // Encoded Method
-
-func Len(b []byte) int {
-	return int(binary.BigEndian.Uint32(b[0:4]))
-}
-
 func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	if len(dbKey) == 8 {
 		return DecodeAccounts(dbKey, dbValue)
@@ -116,7 +113,38 @@ func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	}
 }
 
-func Walk(db ethdb.Tx, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {
+func AvailableFrom(tx kv.Tx) (uint64, error) {
+	c, err := tx.Cursor(kv.AccountChangeSet)
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	if len(k) == 0 {
+		return math.MaxUint64, nil
+	}
+	return binary.BigEndian.Uint64(k), nil
+}
+func AvailableStorageFrom(tx kv.Tx) (uint64, error) {
+	c, err := tx.Cursor(kv.StorageChangeSet)
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return math.MaxUint64, err
+	}
+	if len(k) == 0 {
+		return math.MaxUint64, nil
+	}
+	return binary.BigEndian.Uint64(k), nil
+}
+
+func Walk(db kv.Tx, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {
 	var blockN uint64
 	c, err := db.Cursor(bucket)
 	if err != nil {
@@ -129,11 +157,11 @@ func Walk(db ethdb.Tx, bucket string, startkey []byte, fixedbits int, walker fun
 	})
 }
 
-func Truncate(tx ethdb.RwTx, from uint64) error {
+func Truncate(tx kv.RwTx, from uint64) error {
 	keyStart := dbutils.EncodeBlockNumber(from)
 
 	{
-		c, err := tx.RwCursorDupSort(dbutils.AccountChangeSetBucket)
+		c, err := tx.RwCursorDupSort(kv.AccountChangeSet)
 		if err != nil {
 			return err
 		}
@@ -149,7 +177,7 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 		}
 	}
 	{
-		c, err := tx.RwCursorDupSort(dbutils.StorageChangeSetBucket)
+		c, err := tx.RwCursorDupSort(kv.StorageChangeSet)
 		if err != nil {
 			return err
 		}
@@ -170,21 +198,21 @@ func Truncate(tx ethdb.RwTx, from uint64) error {
 var Mapper = map[string]struct {
 	IndexBucket   string
 	IndexChunkKey func([]byte, uint64) []byte
-	Find          func(cursor ethdb.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error)
+	Find          func(cursor kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error)
 	New           func() *ChangeSet
 	Encode        Encoder
 	Decode        Decoder
 }{
-	dbutils.AccountChangeSetBucket: {
-		IndexBucket:   dbutils.AccountsHistoryBucket,
+	kv.AccountChangeSet: {
+		IndexBucket:   kv.AccountsHistory,
 		IndexChunkKey: dbutils.AccountIndexChunkKey,
 		New:           NewAccountChangeSet,
 		Find:          FindAccount,
 		Encode:        EncodeAccounts,
 		Decode:        DecodeAccounts,
 	},
-	dbutils.StorageChangeSetBucket: {
-		IndexBucket:   dbutils.StorageHistoryBucket,
+	kv.StorageChangeSet: {
+		IndexBucket:   kv.StorageHistory,
 		IndexChunkKey: dbutils.StorageIndexChunkKey,
 		Find:          FindStorage,
 		New:           NewStorageChangeSet,

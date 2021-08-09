@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -28,10 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/remote"
@@ -40,15 +40,17 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type MockSentry struct {
 	proto_sentry.UnimplementedSentryServer
 	Ctx             context.Context
+	Log             log.Logger
 	t               *testing.T
 	cancel          context.CancelFunc
-	DB              ethdb.RwKV
+	DB              kv.RwDB
 	tmpdir          string
 	Engine          consensus.Engine
 	ChainConfig     *params.ChainConfig
@@ -129,19 +131,19 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 }
 
 func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
-	return MockWithGenesisStorageMode(t, gspec, key, ethdb.DefaultStorageMode)
+	return MockWithGenesisStorageMode(t, gspec, key, prune.DefaultMode)
 }
 
 func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(t, gspec, key, ethdb.DefaultStorageMode, engine)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine)
 }
 
-func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode) *MockSentry {
-	return MockWithEverything(t, gspec, key, sm, ethash.NewFaker())
+func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode) *MockSentry {
+	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker())
 }
 
-func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, sm ethdb.StorageMode, engine consensus.Engine) *MockSentry {
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine) *MockSentry {
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -150,12 +152,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	mock := &MockSentry{
 		t:           t,
+		Log:         log.New(),
 		tmpdir:      tmpdir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
 		Notifications: &stagedsync.Notifications{
-			Events:      remotedbserver.NewEvents(),
+			Events:      privateapi.NewEvents(),
 			Accumulator: &shards.Accumulator{},
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
@@ -163,9 +166,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
 	}
 	if t != nil {
-		mock.DB = kv.NewTestKV(t)
+		mock.DB = memdb.NewTestDB(t)
 	} else {
-		mock.DB = kv.NewMemKV()
+		mock.DB = memdb.New()
 	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -206,7 +209,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.TxPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, sm.History)
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec)
 	if _, ok := err.(*params.ConfigCompatError); err != nil && !ok {
 		if t != nil {
 			t.Fatal(err)
@@ -229,7 +232,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(
-			mock.Ctx, sm,
+			mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(
 				mock.DB,
 				mock.downloader.Hd,
@@ -238,9 +241,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				propagateNewBlockHashes,
 				penalize,
 				cfg.BatchSize,
+				false,
 			),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil),
+			stagedsync.StageSnapshotHeadersCfg(mock.DB, ethconfig.Snapshot{Enabled: false}, nil, nil, mock.Log),
 			stagedsync.StageBodiesCfg(
 				mock.DB,
 				mock.downloader.Bd,
@@ -260,15 +264,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
-				sm.Receipts,
-				sm.CallTraces,
-				sm.TEVM,
-				0,
+				prune,
 				cfg.BatchSize,
 				nil,
 				mock.ChainConfig,
 				mock.Engine,
-				&vm.Config{NoReceipts: !sm.Receipts},
+				&vm.Config{},
 				nil,
 				cfg.StateStream,
 				mock.tmpdir,
@@ -286,10 +287,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
 			stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir),
-			stagedsync.StageHistoryCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageLogIndexCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageCallTracesCfg(mock.DB, 0, mock.tmpdir),
-			stagedsync.StageTxLookupCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 				mock.StreamWg.Add(1)
 				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
@@ -297,7 +298,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.StreamWg.Wait()
 				mock.TxPoolP2PServer.TxFetcher.Start()
 			}),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, nil, nil, mock.Log),
 			true, /* test */
 		),
 		stagedsync.DefaultUnwindOrder,
@@ -358,7 +359,7 @@ func Mock(t *testing.T) *MockSentry {
 }
 
 func (ms *MockSentry) EnableLogs() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	ms.t.Cleanup(func() {
 		log.Root().SetHandler(log.Root().GetHandler())
 	})
@@ -413,12 +414,12 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
-	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	highestSeenHeader := chain.TopBlock.NumberU64()
+	if err := StageLoopStep(ms.Ctx, ms.Log, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	// Check if the latest header was imported or rolled back
-	if err = ms.DB.View(ms.Ctx, func(tx ethdb.Tx) error {
+	if err = ms.DB.View(ms.Ctx, func(tx kv.Tx) error {
 		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 		}

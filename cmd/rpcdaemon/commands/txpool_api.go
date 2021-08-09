@@ -6,9 +6,11 @@ import (
 	"fmt"
 
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -21,11 +23,11 @@ type TxPoolAPI interface {
 type TxPoolAPIImpl struct {
 	*BaseAPI
 	pool proto_txpool.TxpoolClient
-	db   ethdb.RoKV
+	db   kv.RoDB
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db ethdb.RoKV, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
 		BaseAPI: base,
 		pool:    pool,
@@ -72,13 +74,17 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		return nil, err
 	}
 	defer tx.Rollback()
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
-	//curHeader := rawdb.ReadCurrentHeader(tx)
+	curHeader := rawdb.ReadCurrentHeader(tx)
 	// Flatten the pending transactions
 	for account, txs := range pending {
 		dump := make(map[string]*RPCTransaction)
 		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn)
+			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
 		content["pending"][account.Hex()] = dump
 	}
@@ -86,23 +92,26 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	for account, txs := range queued {
 		dump := make(map[string]*RPCTransaction)
 		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn)
+			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
 		content["queued"][account.Hex()] = dump
 	}
 	return content, nil
 }
 
-/*
-
 // Status returns the number of pending and queued transaction in the pool.
-func (s *PublicTxPoolAPI) Status() map[string]hexutil.Uint {
-	pending, queue := s.b.Stats()
-	return map[string]hexutil.Uint{
-		"pending": hexutil.Uint(pending),
-		"queued":  hexutil.Uint(queue),
+func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, error) {
+	reply, err := api.pool.Status(ctx, &proto_txpool.StatusRequest{})
+	if err != nil {
+		return nil, err
 	}
+	return map[string]hexutil.Uint{
+		"pending": hexutil.Uint(reply.PendingCount),
+		"queued":  hexutil.Uint(reply.QueuedCount),
+	}, nil
 }
+
+/*
 
 // Inspect retrieves the content of the transaction pool and flattens it into an
 // easily inspectable list.

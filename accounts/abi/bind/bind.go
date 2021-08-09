@@ -31,7 +31,7 @@ import (
 	"unicode"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Lang is a target programming language selector to generate bindings for.

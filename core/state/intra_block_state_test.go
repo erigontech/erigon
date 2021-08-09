@@ -30,7 +30,7 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"gopkg.in/check.v1"
 
@@ -217,7 +217,7 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
-	db := kv.NewMemKV()
+	db := memdb.New()
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -226,7 +226,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 	var (
-		ds           = NewPlainKvState(tx, 0)
+		ds           = NewPlainState(tx, 0)
 		state        = New(ds)
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
@@ -241,7 +241,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkds := NewPlainKvState(tx, 0)
+		checkds := NewPlainState(tx, 0)
 		checkstate := New(checkds)
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
@@ -348,8 +348,8 @@ func TestAccessList(t *testing.T) {
 	addr := common.HexToAddress
 	slot := common.HexToHash
 
-	_, tx := kv.NewTestTx(t)
-	state := New(NewPlainKvState(tx, 0))
+	_, tx := memdb.NewTestTx(t)
+	state := New(NewPlainState(tx, 0))
 	state.accessList = newAccessList()
 
 	verifyAddrs := func(astrings ...string) {

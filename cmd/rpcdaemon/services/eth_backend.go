@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -37,7 +37,7 @@ type RemoteBackend struct {
 func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
-		version:          gointerfaces.VersionFromProto(remotedbserver.EthBackendAPIVersion),
+		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
 		log:              log.New("remote_service", "eth_backend"),
 	}
 }

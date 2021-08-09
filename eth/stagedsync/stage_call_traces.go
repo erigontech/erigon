@@ -5,44 +5,47 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type CallTracesCfg struct {
-	db      ethdb.RwKV
+	db      kv.RwDB
+	prune   prune.Mode
 	ToBlock uint64 // not setting this params means no limit
 	tmpdir  string
 }
 
 func StageCallTracesCfg(
-	db ethdb.RwKV,
+	db kv.RwDB,
+	prune prune.Mode,
 	toBlock uint64,
 	tmpdir string,
 ) CallTracesCfg {
 	return CallTracesCfg{
 		db:      db,
+		prune:   prune,
 		ToBlock: toBlock,
 		tmpdir:  tmpdir,
 	}
 }
 
-func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) error {
+func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -60,13 +63,13 @@ func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 	}
 	logPrefix := s.LogPrefix()
 	if err != nil {
-		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	if endBlock == s.BlockNumber {
 		return nil
 	}
 
-	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg); err != nil {
+	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg.tmpdir); err != nil {
 		return err
 	}
 
@@ -82,34 +85,37 @@ func SpawnCallTraces(s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 	return nil
 }
 
-func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, cfg CallTracesCfg) error {
+func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, tmpdir string) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	froms := map[string]*roaring64.Bitmap{}
 	tos := map[string]*roaring64.Bitmap{}
-	collectorFrom := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorFrom := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorFrom.Close(logPrefix)
-	collectorTo := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	collectorTo := etl.NewCollector(tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorTo.Close(logPrefix)
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
-	traceCursor, err := tx.RwCursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
-		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
+		return fmt.Errorf("failed to create cursor: %w", err)
 	}
 	defer traceCursor.Close()
 
 	var k, v []byte
 	prev := startBlock
-	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(startBlock)); k != nil && err == nil; k, v, err = traceCursor.Next() {
+	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(startBlock)); k != nil; k, v, err = traceCursor.Next() {
+		if err != nil {
+			return err
+		}
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum > endBlock {
 			break
 		}
 		if len(v) != common.AddressLength+1 {
-			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
+			return fmt.Errorf(" wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 		}
 		mapKey := string(v[:common.AddressLength])
 		if v[common.AddressLength]&1 > 0 {
@@ -143,7 +149,7 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 		case <-checkFlushEvery.C:
 			if needFlush64(froms, bufLimit) {
 				if err := flushBitmaps64(collectorFrom, froms); err != nil {
-					return fmt.Errorf("[%s] %w", logPrefix, err)
+					return err
 				}
 
 				froms = map[string]*roaring64.Bitmap{}
@@ -151,15 +157,12 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 
 			if needFlush64(tos, bufLimit) {
 				if err := flushBitmaps64(collectorTo, tos); err != nil {
-					return fmt.Errorf("[%s] %w", logPrefix, err)
+					return err
 				}
 
 				tos = map[string]*roaring64.Bitmap{}
 			}
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("%s: failed to move cursor: %w", logPrefix, err)
 	}
 	if err = flushBitmaps64(collectorFrom, froms); err != nil {
 		return err
@@ -167,46 +170,15 @@ func promoteCallTraces(logPrefix string, tx ethdb.RwTx, startBlock, endBlock uin
 	if err = flushBitmaps64(collectorTo, tos); err != nil {
 		return err
 	}
-	// Clean up before loading call traces to reclaim space
-	var prunedMin uint64 = math.MaxUint64
-	var prunedMax uint64 = 0
-	for k, _, err = traceCursor.First(); k != nil && err == nil; k, _, err = traceCursor.NextNoDup() {
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum+params.FullImmutabilityThreshold <= endBlock {
-			break
-		}
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Pruning call trace intermediate table", logPrefix), "number", blockNum,
-				"alloc", common.StorageSize(m.Alloc),
-				"sys", common.StorageSize(m.Sys))
-		}
-		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("%s: failed to remove trace call set for block %d: %v", logPrefix, blockNum, err)
-		}
-		if blockNum < prunedMin {
-			prunedMin = blockNum
-		}
-		if blockNum > prunedMax {
-			prunedMax = blockNum
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("%s: failed to move cleanup cursor: %w", logPrefix, err)
-	}
-	if prunedMax != 0 && prunedMax > prunedMin+16 {
-		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
-	}
+
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+		return err
 	}
+
 	return nil
 }
 
-func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix string, tx ethdb.RwTx, quit <-chan struct{}) error {
+func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix string, tx kv.RwTx, quit <-chan struct{}) error {
 	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
 	lastChunkKey := make([]byte, 128)
@@ -246,16 +218,16 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 		currentBitmap.Clear()
 		return nil
 	}
-	if err := collectorFrom.Load(logPrefix, tx, dbutils.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorFrom.Load(logPrefix, tx, kv.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
-	if err := collectorTo.Load(logPrefix, tx, dbutils.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorTo.Load(logPrefix, tx, kv.CallToIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
+func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
@@ -267,57 +239,66 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx ethdb.RwTx, cfg CallTrac
 		}
 		defer tx.Rollback()
 	}
-	quitCh := ctx.Done()
 
 	logPrefix := u.LogPrefix()
-	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, quitCh, cfg); err != nil {
-		return fmt.Errorf("[%s] %w", logPrefix, err)
+	if s.BlockNumber-u.UnwindPoint > 16 {
+		log.Info(fmt.Sprintf("[%s] Unwind", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
+	}
+	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, ctx, cfg.tmpdir); err != nil {
+		return err
 	}
 
 	if err := u.Done(tx); err != nil {
-		return fmt.Errorf("%s: %w", logPrefix, err)
+		return err
 	}
 
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("[%s] %w", logPrefix, err)
+			return err
 		}
 	}
 
 	return nil
 }
 
-func DoUnwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh <-chan struct{}, cfg CallTracesCfg) error {
-	froms := map[string]struct{}{}
-	tos := map[string]struct{}{}
+func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx context.Context, tmpdir string) error {
+	froms := etl.NewCollector(tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	tos := etl.NewCollector(tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	traceCursor, err := db.RwCursorDupSort(dbutils.CallTraceSet)
+	traceCursor, err := db.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
-		return fmt.Errorf("%s: failed to create cursor for call traces: %w", logPrefix, err)
+		return fmt.Errorf("create cursor for call traces: %w", err)
 	}
+	defer traceCursor.Close()
 
 	var k, v []byte
 	prev := to + 1
-	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil && err == nil; k, v, err = traceCursor.Next() {
+	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil; k, v, err = traceCursor.Next() {
+		if err != nil {
+			return err
+		}
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= from {
 			break
 		}
 		if len(v) != common.AddressLength+1 {
-			return fmt.Errorf("%s: wrong size of value in CallTraceSet: %x (size %d)", logPrefix, v, len(v))
+			return fmt.Errorf("wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 		}
-		mapKey := string(v[:common.AddressLength])
+		mapKey := v[:common.AddressLength]
 		if v[common.AddressLength]&1 > 0 {
-			froms[mapKey] = struct{}{}
+			if err = froms.Collect(mapKey, nil); err != nil {
+				return nil
+			}
 		}
 		if v[common.AddressLength]&2 > 0 {
-			tos[mapKey] = struct{}{}
+			if err = tos.Collect(mapKey, nil); err != nil {
+				return nil
+			}
 		}
 		select {
-		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -328,17 +309,22 @@ func DoUnwindCallTraces(logPrefix string, db ethdb.RwTx, from, to uint64, quitCh
 				"blk/second", speed,
 				"alloc", common.StorageSize(m.Alloc),
 				"sys", common.StorageSize(m.Sys))
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("%s: failed to move cursor: %w", logPrefix, err)
+
+	if err = froms.Load(logPrefix, db, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return bitmapdb.TruncateRange64(db, kv.CallFromIndex, k, to+1)
+	}, etl.TransformArgs{}); err != nil {
+		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallFromIndex, err)
 	}
 
-	if err := truncateBitmaps64(db, dbutils.CallFromIndex, froms, to); err != nil {
-		return err
-	}
-	if err := truncateBitmaps64(db, dbutils.CallToIndex, tos, to); err != nil {
-		return err
+	if err = tos.Load(logPrefix, db, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return bitmapdb.TruncateRange64(db, kv.CallToIndex, k, to+1)
+	}, etl.TransformArgs{}); err != nil {
+		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallFromIndex, err)
 	}
 	return nil
 }
@@ -357,7 +343,7 @@ func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTr
 	}
 }
 
-func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	ct.froms[from] = struct{}{}
 
 	created, ok := ct.tos[to]
@@ -366,8 +352,8 @@ func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Add
 	}
 
 	if !created && create {
-		if !accounts.IsEmptyCodeHash(codeHash) && ct.hasTEVM != nil {
-			has, err := ct.hasTEVM(codeHash)
+		if len(code) > 0 && ct.hasTEVM != nil {
+			has, err := ct.hasTEVM(common.BytesToHash(crypto.Keccak256(code)))
 			if !has {
 				ct.tos[to] = true
 			}
@@ -385,7 +371,7 @@ func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
-func (ct *CallTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ct *CallTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	return nil
 }
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
@@ -399,7 +385,9 @@ func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func PruneCallTraces(s *PruneState, tx ethdb.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
+func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
+	logPrefix := s.LogPrefix()
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -409,9 +397,137 @@ func PruneCallTraces(s *PruneState, tx ethdb.RwTx, cfg CallTracesCfg, ctx contex
 		defer tx.Rollback()
 	}
 
+	if cfg.prune.CallTraces.Enabled() {
+		if err = pruneCallTraces(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), ctx); err != nil {
+			return err
+		}
+	}
+	if err := s.Done(tx); err != nil {
+		return err
+	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.Context) error {
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	froms := map[string]struct{}{}
+	tos := map[string]struct{}{}
+
+	{
+		traceCursor, err := tx.CursorDupSort(kv.CallTraceSet)
+		if err != nil {
+			return fmt.Errorf("create cursor for call traces: %w", err)
+		}
+		defer traceCursor.Close()
+
+		var k, v []byte
+		for k, v, err = traceCursor.First(); k != nil; k, v, err = traceCursor.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k)
+			if blockNum >= pruneTo {
+				break
+			}
+			if len(v) != common.AddressLength+1 {
+				return fmt.Errorf("wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
+			}
+			mapKey := string(v[:common.AddressLength])
+			if v[common.AddressLength]&1 > 0 {
+				froms[mapKey] = struct{}{}
+			}
+			if v[common.AddressLength]&2 > 0 {
+				tos[mapKey] = struct{}{}
+			}
+			select {
+			case <-logEvery.C:
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			case <-ctx.Done():
+				return common.ErrStopped
+			default:
+			}
+		}
+
+	}
+
+	{
+		sorted := make([]string, 0, len(froms))
+		for k := range froms {
+			sorted = append(sorted, k)
+		}
+		sort.Strings(sorted)
+		c, err := tx.RwCursor(kv.CallFromIndex)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for _, fromS := range sorted {
+			from := []byte(fromS)
+			for k, _, err := c.Seek(from); k != nil; k, _, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				blockNum := binary.BigEndian.Uint64(k[common.AddressLength:])
+				if !bytes.HasPrefix(k, from) || blockNum >= pruneTo {
+					break
+				}
+				select {
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallFromIndex, "block", blockNum)
+				case <-ctx.Done():
+					return common.ErrStopped
+				default:
+				}
+				if err = c.DeleteCurrent(); err != nil {
+					return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
+				}
+			}
+		}
+	}
+	{
+		sorted := make([]string, 0, len(tos))
+		for k := range tos {
+			sorted = append(sorted, k)
+		}
+		sort.Strings(sorted)
+		c, err := tx.RwCursor(kv.CallToIndex)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		for _, toS := range sorted {
+			to := []byte(toS)
+			for k, _, err := c.Seek(to); k != nil; k, _, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				blockNum := binary.BigEndian.Uint64(k[common.AddressLength:])
+				if !bytes.HasPrefix(k, to) || blockNum >= pruneTo {
+					break
+				}
+				select {
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallToIndex, "block", blockNum)
+				case <-ctx.Done():
+					return common.ErrStopped
+				default:
+				}
+				if err = c.DeleteCurrent(); err != nil {
+					return fmt.Errorf("failed delete, block=%d: %w", blockNum, err)
+				}
+			}
 		}
 	}
 	return nil

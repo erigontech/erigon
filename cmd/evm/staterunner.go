@@ -24,14 +24,14 @@ import (
 	"io/ioutil"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
 
@@ -57,9 +57,9 @@ func stateTestCmd(ctx *cli.Context) error {
 		return errors.New("path-to-test argument required")
 	}
 	// Configure the go-ethereum logger
-	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
-	log.Root().SetHandler(glogger)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
+	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
 
 	// Configure the EVM logger
 	config := &vm.LogConfig{
@@ -98,7 +98,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
 	}
 	results := make([]StatetestResult, 0, len(tests))
-	db := kv.NewMemKV()
+	db := memdb.New()
 	defer db.Close()
 
 	tx, txErr := db.BeginRw(context.Background())

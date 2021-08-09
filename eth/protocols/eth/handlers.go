@@ -20,12 +20,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // handleGetBlockHeaders handles Block header query, collect the requested headers and reply
@@ -68,7 +68,7 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	return peer.ReplyBlockHeaders(query.RequestId, response)
 }
 
-func AnswerGetBlockHeadersQuery(db ethdb.KVGetter, query *GetBlockHeadersPacket) ([]*types.Header, error) {
+func AnswerGetBlockHeadersQuery(db kv.Getter, query *GetBlockHeadersPacket) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
@@ -191,7 +191,7 @@ func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
 	return peer.ReplyBlockBodiesRLP(query.RequestId, response)
 }
 
-func AnswerGetBlockBodiesQuery(db ethdb.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket) []rlp.RawValue { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var (
 		bytes  int
@@ -278,7 +278,7 @@ func handleGetReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	return peer.ReplyReceiptsRLP(query.RequestId, response)
 }
 
-func AnswerGetReceiptsQuery(db ethdb.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
+func AnswerGetReceiptsQuery(db kv.Tx, query GetReceiptsPacket) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
 		bytes    int

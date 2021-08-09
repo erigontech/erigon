@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -16,14 +17,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
 
 type SendersCfg struct {
-	db              ethdb.RwKV
+	db              kv.RwDB
 	batchSize       int
 	blockSize       int
 	bufferSize      int
@@ -34,7 +34,7 @@ type SendersCfg struct {
 	chainConfig *params.ChainConfig
 }
 
-func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig, tmpdir string) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -50,7 +50,7 @@ func StageSendersCfg(db ethdb.RwKV, chainCfg *params.ChainConfig, tmpdir string)
 	}
 }
 
-func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethdb.RwTx, toBlock uint64, ctx context.Context) error {
+func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context) error {
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -85,7 +85,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
-	canonicalC, err := tx.Cursor(dbutils.HeaderCanonicalBucket)
+	canonicalC, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx ethd
 		return nil
 	}
 
-	bodiesC, err := tx.Cursor(dbutils.BlockBodyPrefix)
+	bodiesC, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ Loop:
 		}
 	} else {
 		if err := collectorSenders.Load(logPrefix, tx,
-			dbutils.Senders,
+			kv.Senders,
 			etl.IdentityLoadFunc,
 			etl.TransformArgs{
 				Quit: quitCh,
@@ -323,7 +323,7 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 	}
 }
 
-func UnwindSendersStage(s *UnwindState, tx ethdb.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -333,19 +333,18 @@ func UnwindSendersStage(s *UnwindState, tx ethdb.RwTx, cfg SendersCfg, ctx conte
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
 	if err = s.Done(tx); err != nil {
-		return fmt.Errorf("%s: reset: %v", logPrefix, err)
+		return err
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil
 }
 
-func PruneSendersStage(s *PruneState, tx ethdb.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -355,10 +354,9 @@ func PruneSendersStage(s *PruneState, tx ethdb.RwTx, cfg SendersCfg, ctx context
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%s: failed to write db commit: %v", logPrefix, err)
+			return err
 		}
 	}
 	return nil

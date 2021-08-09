@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -15,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 )
 
-func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+func GetAsOf(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	v, err := FindByHistory(tx, storage, key, timestamp)
 	if err == nil {
 		return v, nil
@@ -23,15 +24,15 @@ func GetAsOf(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, e
 	if !errors.Is(err, ethdb.ErrKeyNotFound) {
 		return nil, err
 	}
-	return tx.GetOne(dbutils.PlainStateBucket, key)
+	return tx.GetOne(kv.PlainState, key)
 }
 
-func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var csBucket string
 	if storage {
-		csBucket = dbutils.StorageChangeSetBucket
+		csBucket = kv.StorageChangeSet
 	} else {
-		csBucket = dbutils.AccountChangeSetBucket
+		csBucket = kv.AccountChangeSet
 	}
 
 	ch, err := tx.Cursor(changeset.Mapper[csBucket].IndexBucket)
@@ -95,7 +96,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 			var codeHash []byte
 			var err error
-			codeHash, err = tx.GetOne(dbutils.PlainContractCodeBucket, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
+			codeHash, err = tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(key, acc.Incarnation))
 			if err != nil {
 				return nil, err
 			}
@@ -112,7 +113,7 @@ func FindByHistory(tx ethdb.Tx, storage bool, key []byte, timestamp uint64) ([]b
 }
 
 // startKey is the concatenation of address and incarnation (BigEndian 8 byte)
-func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, startLocation common.Hash, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, startLocation common.Hash, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	var startkey = make([]byte, common.AddressLength+common.IncarnationLength+common.HashLength)
 	copy(startkey, address.Bytes())
 	binary.BigEndian.PutUint64(startkey[common.AddressLength:], incarnation)
@@ -123,7 +124,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 	copy(startkeyNoInc[common.AddressLength:], startLocation.Bytes())
 
 	//for storage
-	mCursor, err := tx.Cursor(dbutils.PlainStateBucket)
+	mCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}
@@ -138,7 +139,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 	)
 
 	//for historic data
-	shCursor, err := tx.Cursor(dbutils.StorageHistoryBucket)
+	shCursor, err := tx.Cursor(kv.StorageHistory)
 	if err != nil {
 		return err
 	}
@@ -151,7 +152,7 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 		common.AddressLength,                   /* part2start */
 		common.AddressLength+common.HashLength, /* part3start */
 	)
-	csCursor, err := tx.CursorDupSort(dbutils.StorageChangeSetBucket)
+	csCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
 	if err != nil {
 		return err
 	}
@@ -239,13 +240,13 @@ func WalkAsOfStorage(tx ethdb.Tx, address common.Address, incarnation uint64, st
 	return nil
 }
 
-func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	mainCursor, err := tx.Cursor(dbutils.PlainStateBucket)
+func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+	mainCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}
 	defer mainCursor.Close()
-	ahCursor, err := tx.Cursor(dbutils.AccountsHistoryBucket)
+	ahCursor, err := tx.Cursor(kv.AccountsHistory)
 	if err != nil {
 		return err
 	}
@@ -258,7 +259,7 @@ func WalkAsOfAccounts(tx ethdb.Tx, startAddress common.Address, timestamp uint64
 		common.AddressLength,   /* part2start */
 		common.AddressLength+8, /* part3start */
 	)
-	csCursor, err := tx.CursorDupSort(dbutils.AccountChangeSetBucket)
+	csCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
 		return err
 	}

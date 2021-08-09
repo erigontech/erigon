@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -62,14 +63,6 @@ func withConfig(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&config, "config", "", "`file:<path>` to specify config file in file system, `embed:<path>` to use embedded file, `test` to register test interface and receive config from test driver")
 }
 
-func openDatabase(path string) ethdb.RwKV {
-	return openKV(path, false)
-}
-
-func openKV(path string, exclusive bool) ethdb.RwKV {
-	opts := kv.NewMDBX().Path(path)
-	if exclusive {
-		opts = opts.Exclusive()
-	}
-	return opts.MustOpen()
+func openDB(path string, logger log.Logger) kv.RwDB {
+	return mdbx.NewMDBX(logger).Path(path).MustOpen()
 }

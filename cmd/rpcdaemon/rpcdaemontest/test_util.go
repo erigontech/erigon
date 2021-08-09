@@ -9,6 +9,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
@@ -17,15 +18,14 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func CreateTestKV(t *testing.T) ethdb.RwKV {
+func CreateTestKV(t *testing.T) kv.RwDB {
 	// Configure and generate a sample block chain
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -214,8 +214,8 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	txpool.RegisterTxpoolServer(server, remotedbserver.NewTxPoolServer(ctx, m.TxPoolP2PServer.TxPool))
-	txpool.RegisterMiningServer(server, remotedbserver.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
+	txpool.RegisterTxpoolServer(server, privateapi.NewTxPoolServer(ctx, m.TxPoolP2PServer.TxPool))
+	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {

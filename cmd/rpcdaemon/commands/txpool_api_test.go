@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -53,7 +54,7 @@ func TestTxPoolContent(t *testing.T) {
 
 		initialCycle := true
 		highestSeenHeader := chain.TopBlock.NumberU64()
-		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+		if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -79,4 +80,10 @@ func TestTxPoolContent(t *testing.T) {
 	sender := m.Address.String()
 	require.Equal(1, len(content["pending"][sender]))
 	require.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
+
+	status, err := api.Status(ctx)
+	require.NoError(err)
+	require.Len(status, 2)
+	require.Equal(status["pending"], hexutil.Uint(1))
+	require.Equal(status["queued"], hexutil.Uint(0))
 }

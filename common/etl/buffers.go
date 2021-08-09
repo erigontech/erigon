@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 const (
@@ -32,7 +32,7 @@ type Buffer interface {
 	GetEntries() []sortableBufferEntry
 	Sort()
 	CheckFlushSize() bool
-	SetComparator(cmp dbutils.CmpFunc)
+	SetComparator(cmp kv.CmpFunc)
 }
 
 type sortableBufferEntry struct {
@@ -58,7 +58,7 @@ type sortableBuffer struct {
 	entries     []sortableBufferEntry
 	size        int
 	optimalSize int
-	comparator  dbutils.CmpFunc
+	comparator  kv.CmpFunc
 }
 
 func (b *sortableBuffer) Put(k, v []byte) {
@@ -75,7 +75,7 @@ func (b *sortableBuffer) Len() int {
 	return len(b.entries)
 }
 
-func (b *sortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+func (b *sortableBuffer) SetComparator(cmp kv.CmpFunc) {
 	b.comparator = cmp
 }
 
@@ -123,7 +123,7 @@ type appendSortableBuffer struct {
 	size        int
 	optimalSize int
 	sortedBuf   []sortableBufferEntry
-	comparator  dbutils.CmpFunc
+	comparator  kv.CmpFunc
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
@@ -137,7 +137,7 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	b.entries[ks] = stored
 }
 
-func (b *appendSortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+func (b *appendSortableBuffer) SetComparator(cmp kv.CmpFunc) {
 	b.comparator = cmp
 }
 
@@ -196,10 +196,10 @@ type oldestEntrySortableBuffer struct {
 	size        int
 	optimalSize int
 	sortedBuf   []sortableBufferEntry
-	comparator  dbutils.CmpFunc
+	comparator  kv.CmpFunc
 }
 
-func (b *oldestEntrySortableBuffer) SetComparator(cmp dbutils.CmpFunc) {
+func (b *oldestEntrySortableBuffer) SetComparator(cmp kv.CmpFunc) {
 	b.comparator = cmp
 }
 

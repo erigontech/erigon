@@ -8,6 +8,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -15,10 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type MiningBlock struct {
@@ -48,7 +47,7 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 }
 
 type MiningCreateBlockCfg struct {
-	db          ethdb.RwKV
+	db          kv.RwDB
 	miner       MiningState
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
@@ -57,7 +56,7 @@ type MiningCreateBlockCfg struct {
 }
 
 func StageMiningCreateBlockCfg(
-	db ethdb.RwKV,
+	db kv.RwDB,
 	miner MiningState,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
@@ -77,7 +76,7 @@ func StageMiningCreateBlockCfg(
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) error {
+func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) error {
 	txPoolLocals := cfg.txPool.Locals()
 	pendingTxs, err := cfg.txPool.Pending()
 	if err != nil {
@@ -99,7 +98,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 	logPrefix := s.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
-		return fmt.Errorf("%s: getting last executed block: %w", logPrefix, err)
+		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
@@ -113,7 +112,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: kv.WrapIntoTxDB(tx)}
+	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
@@ -172,7 +171,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 			"parentNumber", parent.Number.Uint64(),
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
-		return fmt.Errorf("[%s] mining failed", logPrefix)
+		return err
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
@@ -290,7 +289,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx ethdb.RwTx, cfg MiningCreateB
 	return nil
 }
 
-func readNonCanonicalHeaders(tx ethdb.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {

@@ -34,9 +34,9 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -53,9 +53,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
+	remotedbserver2 "github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
@@ -66,6 +66,7 @@ import (
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -77,12 +78,13 @@ type Config = ethconfig.Config
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	config *ethconfig.Config
+	logger log.Logger
 
 	// Handlers
 	txPool *core.TxPool
 
 	// DB interfaces
-	chainKV    ethdb.RwKV
+	chainKV    kv.RwDB
 	privateAPI *grpc.Server
 
 	engine consensus.Engine
@@ -119,7 +121,7 @@ type Ethereum struct {
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
+func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -131,7 +133,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	// Assemble the Ethereum object
-	chainKv, err := node.OpenDatabase(stack.Config(), ethdb.Chain)
+	chainKv, err := node.OpenDatabase(stack.Config(), logger, kv.ChainDB)
 	if err != nil {
 		return nil, err
 	}
@@ -140,8 +142,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	config.Snapshot.Dir = stack.Config().ResolvePath("snapshots")
 	if config.Snapshot.Enabled {
 		var peerID string
-		if err = chainKv.View(context.Background(), func(tx ethdb.Tx) error {
-			v, err := tx.GetOne(dbutils.BittorrentInfoBucket, []byte(dbutils.BittorrentPeerID))
+		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
+			v, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 			if err != nil {
 				return err
 			}
@@ -156,7 +158,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 		if len(peerID) == 0 {
 			log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
-			if err = chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
+			if err = chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 				return torrentClient.SavePeerID(tx)
 			}); err != nil {
 				log.Error("Bittorrent peerID haven't saved", "err", err)
@@ -173,7 +175,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis, config.StorageMode.History)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -181,6 +183,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	backend := &Ethereum{
 		config:               config,
+		logger:               logger,
 		chainKV:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
@@ -191,7 +194,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		waitForMiningStop:    make(chan struct{}),
 		sentries:             []remote.SentryClient{},
 		notifications: &stagedsync.Notifications{
-			Events:      remotedbserver.NewEvents(),
+			Events:      privateapi.NewEvents(),
 			Accumulator: &shards.Accumulator{},
 		},
 	}
@@ -208,12 +211,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		consensusConfig = &config.Ethash
 	}
 
-	backend.engine = ethconfig.CreateConsensusEngine(chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
+	backend.engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
-	if err := chainKv.Update(context.Background(), func(tx ethdb.RwTx) error {
-		if err := ethdb.SetStorageModeIfNotExist(tx, config.StorageMode); err != nil {
+	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
+		if err := prune.SetIfNotExist(tx, config.Prune); err != nil {
 			return err
 		}
 
@@ -221,19 +224,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return err
 		}
 
-		sm, err := ethdb.GetStorageModeFromDB(tx)
+		pm, err := prune.Get(tx)
 		if err != nil {
 			return err
 		}
-		if config.StorageMode.Initialised {
+		if config.Prune.Initialised {
 			// If storage mode is not explicitly specified, we take whatever is in the database
-			if !reflect.DeepEqual(sm, config.StorageMode) {
-				return errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+			if !reflect.DeepEqual(pm, config.Prune) {
+				return errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
 			}
 		} else {
-			config.StorageMode = sm
+			config.Prune = pm
 		}
-		log.Info("Effective", "storage mode", config.StorageMode)
+		log.Info("Effective", "prune", config.Prune.String())
 
 		return nil
 	}); err != nil {
@@ -283,10 +286,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver.NewKvServer(backend.chainKV)
-	ethBackendRPC := remotedbserver.NewEthBackendServer(backend, backend.notifications.Events)
-	txPoolRPC := remotedbserver.NewTxPoolServer(context.Background(), backend.txPool)
-	miningRPC := remotedbserver.NewMiningServer(context.Background(), backend, ethashApi)
+	kvRPC := remotedbserver2.NewKvServer(backend.chainKV)
+	ethBackendRPC := privateapi.NewEthBackendServer(backend, backend.notifications.Events)
+	txPoolRPC := privateapi.NewTxPoolServer(context.Background(), backend.txPool)
+	miningRPC := privateapi.NewMiningServer(context.Background(), backend, ethashApi)
 
 	if stack.Config().PrivateApiAddr != "" {
 
@@ -322,7 +325,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if err != nil {
 				return nil, err
 			}
-			backend.privateAPI, err = remotedbserver.StartGrpc(
+			backend.privateAPI, err = privateapi.StartGrpc(
 				kvRPC,
 				ethBackendRPC,
 				txPoolRPC,
@@ -334,7 +337,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return nil, err
 			}
 		} else {
-			backend.privateAPI, err = remotedbserver.StartGrpc(
+			backend.privateAPI, err = privateapi.StartGrpc(
 				kvRPC,
 				ethBackendRPC,
 				txPoolRPC,
@@ -360,7 +363,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	} else {
 		var readNodeInfo = func() *eth.NodeInfo {
 			var res *eth.NodeInfo
-			_ = backend.chainKV.View(context.Background(), func(tx ethdb.Tx) error {
+			_ = backend.chainKV.View(context.Background(), func(tx kv.Tx) error {
 				res = eth.ReadNodeInfo(tx, backend.chainConfig, backend.genesisHash, backend.networkID)
 				return nil
 			})
@@ -425,9 +428,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	backend.txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(backend.txPool.Has, backend.txPool.AddRemotes, fetchTx)
 	config.BodyDownloadTimeoutSeconds = 30
 
-	backend.stagedSync, err = stages2.NewStagedSync2(
+	backend.stagedSync, err = stages2.NewStagedSync(
 		backend.downloadCtx,
+		backend.logger,
 		backend.chainKV,
+		stack.Config().P2P,
 		*config,
 		backend.downloadServer,
 		tmpdir,
@@ -438,6 +443,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if config.BadBlock != 0 {
+		var badHash common.Hash
+		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
+			var hErr error
+			badHash, hErr = rawdb.ReadCanonicalHash(tx, config.BadBlock)
+			return hErr
+		}); err != nil {
+			return nil, err
+		}
+		backend.stagedSync.UnwindTo(config.BadBlock-1, badHash)
 	}
 
 	go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
@@ -537,7 +553,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -621,7 +637,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv ethdb.RwKV, mining *stage
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
 func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
-func (s *Ethereum) ChainKV() ethdb.RwKV         { return s.chainKV }
+func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainKV }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
@@ -662,7 +678,13 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go Loop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer, s.notifications, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
+	go stages2.StageLoop(
+		s.downloadCtx, s.logger, s.chainKV,
+		s.stagedSync, s.downloadServer.Hd,
+		s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop,
+		s.config.SyncLoopThrottle,
+	)
+
 	return nil
 }
 
@@ -700,26 +722,4 @@ func (s *Ethereum) Stop() error {
 		<-s.waitForMiningStop
 	}
 	return nil
-}
-
-//Deprecated - use stages.StageLoop
-func Loop(
-	ctx context.Context,
-	db ethdb.RwKV, sync *stagedsync.Sync,
-	controlServer *download.ControlServerImpl,
-	notifications *stagedsync.Notifications,
-	waitForDone chan struct{},
-	loopMinTime time.Duration,
-) {
-	defer debug.LogPanic()
-	stages2.StageLoop(
-		ctx,
-		db,
-		sync,
-		controlServer.Hd,
-		notifications,
-		controlServer.UpdateHead,
-		waitForDone,
-		loopMinTime,
-	)
 }

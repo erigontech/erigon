@@ -6,13 +6,13 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -21,10 +21,11 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := utils.RootContext()
-		db := openDB(chaindata, true)
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
-		err := resetState(db, ctx)
+		err := resetState(db, logger, ctx)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -41,119 +42,124 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func resetState(kv ethdb.RwKV, ctx context.Context) error {
-	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
+func resetState(db kv.RwDB, logger log.Logger, ctx context.Context) error {
+	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
 	// don't reset senders here
-	if err := kv.Update(ctx, stagedsync.ResetHashState); err != nil {
+	if err := db.Update(ctx, stagedsync.ResetHashState); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, stagedsync.ResetIH); err != nil {
+	if err := db.Update(ctx, stagedsync.ResetIH); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, resetHistory); err != nil {
+	if err := db.Update(ctx, resetHistory); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, resetLogIndex); err != nil {
+	if err := db.Update(ctx, resetLogIndex); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, resetCallTraces); err != nil {
+	if err := db.Update(ctx, resetCallTraces); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, resetTxLookup); err != nil {
+	if err := db.Update(ctx, resetTxLookup); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, resetTxPool); err != nil {
+	if err := db.Update(ctx, resetTxPool); err != nil {
 		return err
 	}
-	if err := kv.Update(ctx, resetFinish); err != nil {
+	if err := db.Update(ctx, resetFinish); err != nil {
 		return err
 	}
 
 	genesis, _ := byChain()
-	if err := kv.Update(ctx, func(tx ethdb.RwTx) error { return resetExec(tx, genesis) }); err != nil {
+	if err := db.Update(ctx, func(tx kv.RwTx) error { return resetExec(tx, genesis) }); err != nil {
 		return err
 	}
 
 	// set genesis after reset all buckets
 	fmt.Printf("After reset: \n")
-	if err := kv.View(ctx, func(tx ethdb.Tx) error { return printStages(tx) }); err != nil {
+	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
 		return err
 	}
 	return nil
 }
 
-func resetSenders(tx ethdb.RwTx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Senders); err != nil {
+func resetSenders(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.Senders); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Senders, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePruneProgress(tx, stages.Senders, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
-func resetExec(tx ethdb.RwTx, g *core.Genesis) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedAccountsBucket); err != nil {
+func resetExec(tx kv.RwTx, g *core.Genesis) error {
+	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.HashedStorageBucket); err != nil {
+	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.ContractCodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.ContractCode); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainStateBucket); err != nil {
+	if err := tx.ClearBucket(kv.PlainState); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.AccountChangeSetBucket); err != nil {
+	if err := tx.ClearBucket(kv.AccountChangeSet); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.StorageChangeSetBucket); err != nil {
+	if err := tx.ClearBucket(kv.StorageChangeSet); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.PlainContractCodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.PlainContractCode); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.BlockReceiptsPrefix); err != nil {
+	if err := tx.ClearBucket(kv.Receipts); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Log); err != nil {
+	if err := tx.ClearBucket(kv.Log); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.IncarnationMapBucket); err != nil {
+	if err := tx.ClearBucket(kv.IncarnationMap); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CodeBucket); err != nil {
+	if err := tx.ClearBucket(kv.Code); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallTraceSet); err != nil {
+	if err := tx.ClearBucket(kv.CallTraceSet); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.Epoch); err != nil {
+	if err := tx.ClearBucket(kv.Epoch); err != nil {
+		return err
+	}
+	if err := tx.ClearBucket(kv.PendingEpoch); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
-
-	sm, err := ethdb.GetStorageModeFromDB(tx)
-	if err != nil {
+	if err := stages.SaveStagePruneProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
-	_, _, err = core.OverrideGenesisBlock(tx, g, sm.History)
+
+	_, _, err := core.OverrideGenesisBlock(tx, g)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func resetHistory(tx ethdb.RwTx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.AccountsHistoryBucket); err != nil {
+func resetHistory(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.AccountsHistory); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.StorageHistoryBucket); err != nil {
+	if err := tx.ClearBucket(kv.StorageHistory); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.AccountHistoryIndex, 0); err != nil {
@@ -162,71 +168,104 @@ func resetHistory(tx ethdb.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.StorageHistoryIndex, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePruneProgress(tx, stages.AccountHistoryIndex, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePruneProgress(tx, stages.StorageHistoryIndex, 0); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func resetLogIndex(tx ethdb.RwTx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.LogAddressIndex); err != nil {
+func resetLogIndex(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.LogAddressIndex); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.LogTopicIndex); err != nil {
+	if err := tx.ClearBucket(kv.LogTopicIndex); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.LogIndex, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePruneProgress(tx, stages.LogIndex, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
-func resetCallTraces(tx ethdb.RwTx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallFromIndex); err != nil {
+func resetCallTraces(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.CallFromIndex); err != nil {
 		return err
 	}
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.CallToIndex); err != nil {
+	if err := tx.ClearBucket(kv.CallToIndex); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.CallTraces, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePruneProgress(tx, stages.CallTraces, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
-func resetTxLookup(tx ethdb.RwTx) error {
-	if err := tx.(ethdb.BucketMigrator).ClearBucket(dbutils.TxLookupPrefix); err != nil {
+func resetTxLookup(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {
 		return err
 	}
+	if err := stages.SaveStagePruneProgress(tx, stages.TxLookup, 0); err != nil {
+		return err
+	}
 	return nil
 }
 
-func resetTxPool(tx ethdb.RwTx) error {
+func resetTxPool(tx kv.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.TxPool, 0); err != nil {
 		return err
 	}
-	return nil
-}
-
-func resetFinish(tx ethdb.RwTx) error {
-	if err := stages.SaveStageProgress(tx, stages.Finish, 0); err != nil {
+	if err := stages.SaveStagePruneProgress(tx, stages.TxPool, 0); err != nil {
 		return err
 	}
 	return nil
 }
 
-func printStages(db ethdb.KVGetter) error {
+func resetFinish(tx kv.RwTx) error {
+	if err := stages.SaveStageProgress(tx, stages.Finish, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePruneProgress(tx, stages.Finish, 0); err != nil {
+		return err
+	}
+	return nil
+}
+
+func printStages(db kv.Getter) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
 	defer w.Flush()
 	w.Init(os.Stdout, 8, 8, 0, '\t', 0)
+	fmt.Fprintf(w, "Note: prune_at doesn't mean 'all data before were deleted' - it just mean stage.Prune function were run to this block. Because 1 stage may prune multiple data types to different prune distance.\n")
+	fmt.Fprint(w, "\n \t stage_at \t prune_at\n")
 	for _, stage := range stages.AllStages {
 		if progress, err = stages.GetStageProgress(db, stage); err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s \t %d\n", string(stage), progress)
+		prunedTo, err := stages.GetStagePruneProgress(db, stage)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s \t %d \t %d\n", string(stage), progress, prunedTo)
 	}
+	pm, err := prune.Get(db)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "--\n")
+	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
 	return nil
 }

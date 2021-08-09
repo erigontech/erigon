@@ -22,7 +22,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/clique"
@@ -30,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -44,7 +44,7 @@ import (
 func TestReimportMirroredState(t *testing.T) {
 	// Initialize a Clique chain with a single signer
 	var (
-		cliqueDB = kv.NewTestKV(t)
+		cliqueDB = memdb.NewTestDB(t)
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr     = crypto.PubkeyToAddress(key.PublicKey)
 		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
@@ -62,7 +62,7 @@ func TestReimportMirroredState(t *testing.T) {
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {
-		if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			h = rawdb.ReadHeader(tx, hash, number)
 			return nil
 		}); err != nil {
@@ -107,7 +107,7 @@ func TestReimportMirroredState(t *testing.T) {
 	if err := m.InsertChain(chain.Slice(0, 2)); err != nil {
 		t.Fatalf("failed to insert initial blocks: %v", err)
 	}
-	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 2 {
@@ -124,7 +124,7 @@ func TestReimportMirroredState(t *testing.T) {
 	if err := m.InsertChain(chain.Slice(2, chain.Length)); err != nil {
 		t.Fatalf("failed to insert final block: %v", err)
 	}
-	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
 			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 3 {

@@ -18,19 +18,22 @@ package stages_test
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -40,10 +43,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // So we can deterministically seed different blockchains
@@ -86,7 +88,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	var err error
 	// Assert the chains have the same header/block at #i
 	var hash1, hash2 common.Hash
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		if hash1, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
@@ -97,7 +99,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	})
 	require.NoError(t, err)
 
-	canonicalMock.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
 		if hash2, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash 2: %v", err)
 		}
@@ -116,7 +118,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	var tdPre, tdPost *big.Int
 	var currentBlockB *types.Block
 
-	err = canonicalMock.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
 		currentBlockB, err = rawdb.ReadBlockByHash(tx, rawdb.ReadHeadBlockHash(tx))
 		if err != nil {
 			t.Fatalf("Failed to read current bock: %v", err)
@@ -127,7 +129,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 
 	blockChainB = makeBlockChain(currentBlockB, n, canonicalMock, forkSeed)
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		currentBlockHash := rawdb.ReadHeadBlockHash(tx)
 		currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
 		if err1 != nil {
@@ -145,7 +147,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 		t.Fatalf("failed to insert forking chain: %v", err)
 	}
 	currentBlockHash := blockChainB.TopBlock.Hash()
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		currentBlock, err1 := rawdb.ReadBlockByHash(tx, currentBlockHash)
 		if err1 != nil {
 			t.Fatalf("Failed to read last header: %v", err1)
@@ -562,7 +564,7 @@ func TestEIP155Transition(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
+	db := olddb.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	chain, chainErr := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
@@ -613,7 +615,7 @@ func TestEIP155Transition(t *testing.T) {
 	if chainErr = m.InsertChain(chain); chainErr != nil {
 		t.Fatal(chainErr)
 	}
-	if err := m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		block, _ := rawdb.ReadBlockByNumber(tx, 1)
 		if block.Transactions()[0].Protected() {
 			t.Error("Expected block[0].txs[0] to not be replay protected")
@@ -663,8 +665,9 @@ func TestModes(t *testing.T) {
 	)
 }
 
-func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
-	fmt.Printf("h=%v, r=%v, t=%v\n", history, receipts, txlookup)
+func doModesTest(t *testing.T, pm prune.Mode) error {
+	fmt.Printf("h=%v, r=%v, t=%v\n", pm.History.Enabled(), pm.Receipts.Enabled(), pm.TxIndex.Enabled())
+	require := require.New(t)
 	// Configure and generate a sample block chain
 	var (
 		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -676,9 +679,10 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := stages.MockWithGenesisStorageMode(t, gspec, key, ethdb.StorageMode{Initialised: true, History: history, Receipts: receipts, TxIndex: txlookup})
+	m := stages.MockWithGenesisStorageMode(t, gspec, key, pm)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
+	head := uint64(4)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *core.BlockGen) {
 		var (
 			tx      types.Transaction
 			err     error
@@ -728,69 +732,129 @@ func doModesTest(t *testing.T, history, receipts, txlookup bool) error {
 	}
 
 	tx, err := m.DB.BeginRo(context.Background())
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 
-	for bucketName, shouldBeEmpty := range map[string]bool{
-		dbutils.AccountsHistoryBucket: !history,
-		dbutils.BlockReceiptsPrefix:   !receipts,
-		dbutils.TxLookupPrefix:        !txlookup,
-	} {
-		numberOfEntries := 0
-
-		err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
-			// we ignore empty account history
-			//nolint:scopelint
-			if bucketName == dbutils.AccountsHistoryBucket && len(v) == 0 {
-				return nil
-			}
-
-			numberOfEntries++
+	if pm.Receipts.Enabled() {
+		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
+		require.NoError(err)
+		found := uint64(0)
+		err = tx.ForEach(kv.Receipts, nil, func(k, v []byte) error {
+			found++
 			return nil
 		})
-		if err != nil {
-			return err
-		}
-
-		if bucketName == dbutils.BlockReceiptsPrefix {
-			// we will always have a receipt for genesis
-			numberOfEntries--
-		}
-
-		if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
-			return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
-		}
+		require.NoError(err)
+		require.GreaterOrEqual(receiptsAvailable, pm.Receipts.PruneTo(head))
+		require.Greater(found, uint64(0))
+	} else {
+		receiptsAvailable, err := rawdb.ReceiptsAvailableFrom(tx)
+		require.NoError(err)
+		require.Equal(uint64(0), receiptsAvailable)
 	}
 
+	if pm.History.Enabled() {
+		afterPrune := uint64(0)
+		err := tx.ForEach(kv.AccountsHistory, nil, func(k, _ []byte) error {
+			n := binary.BigEndian.Uint64(k[common.AddressLength:])
+			require.Greater(n, pm.History.PruneTo(head))
+			afterPrune++
+			return nil
+		})
+		require.Greater(afterPrune, uint64(0))
+		assert.NoError(t, err)
+	} else {
+		found, err := bitmapdb.Get64(tx, kv.AccountsHistory, address[:], 0, 1024)
+		require.NoError(err)
+		require.Equal(uint64(0), found.Minimum())
+	}
+
+	if pm.TxIndex.Enabled() {
+		b, err := rawdb.ReadBlockByNumber(tx, 1)
+		require.NoError(err)
+		for _, txn := range b.Transactions() {
+			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+			require.NoError(err)
+			require.Nil(found)
+		}
+	} else {
+		b, err := rawdb.ReadBlockByNumber(tx, 1)
+		require.NoError(err)
+		for _, txn := range b.Transactions() {
+			found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+			require.NoError(err)
+			if found == nil {
+				require.NotNil(found)
+			}
+			require.Equal(uint64(1), *found)
+		}
+	}
+	/*
+		for bucketName, shouldBeEmpty := range map[string]bool{
+			//dbutils.AccountsHistory: pm.History.Enabled(),
+			dbutils.Receipts: pm.Receipts.Enabled(),
+			//dbutils.TxLookup: pm.TxIndex.Enabled(),
+		} {
+			numberOfEntries := 0
+
+			err := tx.ForEach(bucketName, nil, func(k, v []byte) error {
+				// we ignore empty account history
+				//nolint:scopelint
+				if bucketName == dbutils.AccountsHistory && len(v) == 0 {
+					return nil
+				}
+
+				numberOfEntries++
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+
+			if bucketName == dbutils.Receipts {
+				// we will always have a receipt for genesis
+				numberOfEntries--
+			}
+
+			if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
+				return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
+			}
+			}
+	*/
 	return nil
 }
 
-func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, bool, bool, bool) error) {
-	err := runPermutation(t, testFunc, 0, true, true, true)
+func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, prune.Mode) error) {
+	err := runPermutation(t, testFunc, 0, prune.DefaultMode)
 	if err != nil {
 		t.Errorf("error while testing stuff: %v", err)
 	}
 }
 
-func runPermutation(t *testing.T, testFunc func(*testing.T, bool, bool, bool) error, current int, history, receipts, txlookup bool) error {
+func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, current int, pm prune.Mode) error {
 	if current == 3 {
-		return testFunc(t, history, receipts, txlookup)
+		return testFunc(t, pm)
 	}
-	if err := runPermutation(t, testFunc, current+1, history, receipts, txlookup); err != nil {
+	if err := runPermutation(t, testFunc, current+1, pm); err != nil {
 		return err
+	}
+	invert := func(a prune.Distance) prune.Distance {
+		if a.Enabled() {
+			return math.MaxUint64
+		}
+		return 2
 	}
 	switch current {
 	case 0:
-		history = !history
+		pm.History = invert(pm.History)
 	case 1:
-		receipts = !receipts
+		pm.Receipts = invert(pm.Receipts)
 	case 2:
-		txlookup = !txlookup
+		pm.TxIndex = invert(pm.TxIndex)
 	default:
 		panic("unexpected current item")
 	}
 
-	return runPermutation(t, testFunc, current+1, history, receipts, txlookup)
+	return runPermutation(t, testFunc, current+1, pm)
 }
 
 func TestEIP161AccountRemoval(t *testing.T) {
@@ -812,8 +876,6 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		var (
@@ -841,25 +903,38 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); !st.Exist(theAddr) {
-		t.Error("expected account to exist")
-	}
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); !st.Exist(theAddr) {
+			t.Error("expected account to exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// account needs to be deleted post eip 161
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
 
 	// account mustn't be created post eip 161
 	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
 		t.Fatal(err)
 	}
-	if st := state.New(state.NewPlainStateReader(db)); st.Exist(theAddr) {
-		t.Error("account should not exist")
-	}
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		if st := state.New(state.NewPlainStateReader(tx)); st.Exist(theAddr) {
+			t.Error("account should not exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
@@ -877,7 +952,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, bankKey)
-	db := kv.NewObjectDatabase(m.DB)
+	db := olddb.NewObjectDatabase(m.DB)
 	defer db.Close()
 
 	var theAddr common.Address
@@ -912,24 +987,28 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	err = m.InsertChain(chain)
 	assert.NoError(t, err)
 
-	st := state.New(state.NewDbStateReader(db))
+	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		st := state.New(state.NewDbStateReader(tx))
+		assert.NoError(t, err)
+		assert.False(t, st.Exist(theAddr), "Contract should've been removed")
+		return nil
+	})
 	assert.NoError(t, err)
-	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
 
 	tx, err := db.RwKV().BeginRo(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer tx.Rollback()
-	st = state.New(state.NewPlainKvState(tx, 0))
+	st := state.New(state.NewPlainState(tx, 0))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(state.NewPlainKvState(tx, 1))
+	st = state.New(state.NewPlainState(tx, 1))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(state.NewPlainKvState(tx, 2))
+	st = state.New(state.NewPlainState(tx, 2))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -972,7 +1051,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 
-		if err := m2.DB.View(context.Background(), func(tx ethdb.Tx) error {
+		if err := m2.DB.View(context.Background(), func(tx kv.Tx) error {
 			b, h := rawdb.ReadCurrentBlock(tx), rawdb.ReadCurrentHeader(tx)
 			if b.Hash() != h.Hash() {
 				t.Errorf("block %d: current block/header mismatch: block #%d [%x…], header #%d [%x…]", i, b.Number(), b.Hash().Bytes()[:4], h.Number, h.Hash().Bytes()[:4])
@@ -995,7 +1074,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	// Generate the original common chain segment and the two competing forks
 
 	m, m2 := stages.Mock(t), stages.Mock(t)
@@ -1056,7 +1135,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //  - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	// Generate a canonical chain to act as the main dataset
 	m := stages.Mock(t)
 
@@ -1094,7 +1173,7 @@ func TestLowDiffLongChain(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 
-	if err := m2.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := m2.DB.View(context.Background(), func(tx kv.Tx) error {
 		head := rawdb.ReadCurrentBlock(tx)
 		if got := fork.TopBlock.Hash(); got != head.Hash() {
 			t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
@@ -1287,8 +1366,8 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 1))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		statedb := state.New(state.NewPlainState(tx, 1))
 
 		// If all is correct, then slot 1 and 2 are zero
 		key1 := common.HexToHash("01")
@@ -1372,8 +1451,8 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	if err := m.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 1))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		statedb := state.New(state.NewPlainState(tx, 1))
 
 		// If all is correct, then both slots are zero
 		key1 := common.HexToHash("01")
@@ -1479,7 +1558,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key)
-	db := kv.NewObjectDatabase(m.DB)
+	db := olddb.NewObjectDatabase(m.DB)
 	defer db.Close()
 	var nonce uint64
 
@@ -1554,37 +1633,42 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		if err := m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
-		statedb := state.New(state.NewDbStateReader(db))
-		// If all is correct, then slot 1 and 2 are zero
-		key1 := common.HexToHash("01")
-		var got uint256.Int
-		statedb.GetState(aa, &key1, &got)
-		if !got.IsZero() {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
-		}
-		key2 := common.HexToHash("02")
-		statedb.GetState(aa, &key2, &got)
-		if !got.IsZero() {
-			t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
-		}
-		exp := expectations[i]
-		if exp.exist {
-			if !statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
+		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+
+			statedb := state.New(state.NewDbStateReader(tx))
+			// If all is correct, then slot 1 and 2 are zero
+			key1 := common.HexToHash("01")
+			var got uint256.Int
+			statedb.GetState(aa, &key1, &got)
+			if !got.IsZero() {
+				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
-			for slot, val := range exp.values {
-				key := asHash(slot)
-				var gotValue uint256.Int
-				statedb.GetState(aa, &key, &gotValue)
-				if gotValue.Uint64() != uint64(val) {
-					t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
+			key2 := common.HexToHash("02")
+			statedb.GetState(aa, &key2, &got)
+			if !got.IsZero() {
+				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
+			}
+			exp := expectations[i]
+			if exp.exist {
+				if !statedb.Exist(aa) {
+					t.Fatalf("block %d, expected %x to exist, it did not", blockNum, aa)
+				}
+				for slot, val := range exp.values {
+					key := asHash(slot)
+					var gotValue uint256.Int
+					statedb.GetState(aa, &key, &gotValue)
+					if gotValue.Uint64() != uint64(val) {
+						t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
+					}
+				}
+			} else {
+				if statedb.Exist(aa) {
+					t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
 				}
 			}
-		} else {
-			if statedb.Exist(aa) {
-				t.Fatalf("block %d, expected %x to not exist, it did", blockNum, aa)
-			}
-		}
+			return nil
+		})
+		require.NoError(t, err)
 	}
 }
 
@@ -1680,10 +1764,10 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 
 		// Import the canonical chain
-		statedb := state.New(state.NewPlainKvState(tx, 1))
+		statedb := state.New(state.NewPlainState(tx, 1))
 		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 			t.Fatalf("Genesis err, got %v exp %v", got, exp)
 		}
@@ -1693,7 +1777,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			if err := m.InsertChain(chain.Slice(0, 1)); err != nil {
 				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 			}
-			statedb = state.New(state.NewPlainKvState(tx, 0))
+			statedb = state.New(state.NewPlainState(tx, 0))
 			if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 				t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 			}
@@ -1888,8 +1972,8 @@ func TestEIP1559Transition(t *testing.T) {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expectedGas, block.GasUsed())
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 0))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		statedb := state.New(state.NewPlainState(tx, 0))
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual := statedb.GetBalance(block.Coinbase())
@@ -1929,8 +2013,8 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	block = chain.Blocks[0]
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
-		statedb := state.New(state.NewPlainKvState(tx, 0))
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		statedb := state.New(state.NewPlainState(tx, 0))
 		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
@@ -1954,7 +2038,7 @@ func TestEIP1559Transition(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func current(kv ethdb.RwKV) *types.Block {
+func current(kv kv.RwDB) *types.Block {
 	tx, err := kv.BeginRo(context.Background())
 	if err != nil {
 		panic(err)

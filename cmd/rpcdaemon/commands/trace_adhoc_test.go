@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/require"
 )
@@ -61,7 +61,7 @@ func TestReplayTransaction(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	api := NewTraceAPI(NewBaseApi(nil), db, &cli.Flags{})
 	var txnHash common.Hash
-	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		b, err := rawdb.ReadBlockByNumber(tx, 6)
 		if err != nil {
 			return err
@@ -75,7 +75,7 @@ func TestReplayTransaction(t *testing.T) {
 	// Call GetTransactionReceipt for transaction which is not in the database
 	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"})
 	if err != nil {
-		t.Errorf("calling CallMany: %v", err)
+		t.Errorf("calling ReplayTransaction: %v", err)
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results.StateDiff)
@@ -92,11 +92,11 @@ func TestReplayBlockTransactions(t *testing.T) {
 	n := rpc.BlockNumber(6)
 	results, err := api.ReplayBlockTransactions(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"})
 	if err != nil {
-		t.Errorf("calling CallMany: %v", err)
+		t.Errorf("calling ReplayBlockTransactions: %v", err)
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)
-	addrDiff := results[0].StateDiff[common.HexToAddress("0x0000000000000020000000000000000000000000")]
+	addrDiff := results[0].StateDiff[common.HexToAddress("0x0000000000000001000000000000000000000000")]
 	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }

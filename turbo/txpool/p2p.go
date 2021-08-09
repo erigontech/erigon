@@ -19,10 +19,10 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -283,7 +283,7 @@ func RecvTxMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
+	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -372,7 +372,7 @@ func RecvPeers(ctx context.Context,
 	recentPeers *txpropagate.RecentlyConnectedPeers,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
+	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

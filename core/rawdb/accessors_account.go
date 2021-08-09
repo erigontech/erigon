@@ -17,28 +17,14 @@
 package rawdb
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-// ReadAccountDeprecated reading account object from multiple buckets of db
-func ReadAccountDeprecated(db ethdb.DatabaseReader, addrHash common.Hash, acc *accounts.Account) (bool, error) {
+func ReadAccount(db kv.Tx, addrHash common.Address, acc *accounts.Account) (bool, error) {
 	addrHashBytes := addrHash[:]
-	enc, err := db.Get(dbutils.HashedAccountsBucket, addrHashBytes)
-	if err != nil {
-		return false, err
-	}
-	if err = acc.DecodeForStorage(enc); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func ReadAccount(db ethdb.Tx, addrHash common.Address, acc *accounts.Account) (bool, error) {
-	addrHashBytes := addrHash[:]
-	enc, err := db.GetOne(dbutils.PlainStateBucket, addrHashBytes)
+	enc, err := db.GetOne(kv.PlainState, addrHashBytes)
 	if err != nil {
 		return false, err
 	}

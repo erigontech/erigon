@@ -1,32 +1,41 @@
 package migrations
 
 import (
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/ethdb"
+	"context"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 var oldSequences = map[string]string{
-	dbutils.EthTx: "eth_tx",
+	kv.EthTx: "eth_tx",
 }
 
 var fixSequences = Migration{
 	Name: "fix_sequences",
-	Up: func(db ethdb.Database, tmpdir string, progress []byte, CommitProgress etl.LoadCommitHandler) (err error) {
+	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
 		for bkt, oldbkt := range oldSequences {
-			seq, getErr := db.GetOne(dbutils.Sequence, []byte(oldbkt))
+			seq, getErr := tx.GetOne(kv.Sequence, []byte(oldbkt))
 			if getErr != nil {
 				return getErr
 			}
 
 			if seq != nil {
-				putErr := db.Put(dbutils.Sequence, []byte(bkt), seq)
+				putErr := tx.Put(kv.Sequence, []byte(bkt), seq)
 				if putErr != nil {
 					return putErr
 				}
 			}
 		}
 
-		return CommitProgress(db, nil, true)
+		if err := BeforeCommit(tx, nil, true); err != nil {
+			return err
+		}
+		return tx.Commit()
 	},
 }

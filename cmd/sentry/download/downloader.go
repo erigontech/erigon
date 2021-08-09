@@ -14,18 +14,18 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	debug2 "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
@@ -87,7 +87,7 @@ func RecvUploadMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug2.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
+	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -173,7 +173,7 @@ func RecvMessage(
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug2.ReportPanicAndRecover() }() // avoid crash because Erigon's core does many things
+	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
@@ -253,11 +253,11 @@ type ControlServerImpl struct {
 	forks       []uint64
 	genesisHash common.Hash
 	networkId   uint64
-	db          ethdb.RwKV
+	db          kv.RwDB
 	Engine      consensus.Engine
 }
 
-func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -284,7 +284,7 @@ func NewControlServer(db ethdb.RwKV, nodeName string, chainConfig *params.ChainC
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error
-	err = db.Update(context.Background(), func(tx ethdb.RwTx) error {
+	err = db.Update(context.Background(), func(tx kv.RwTx) error {
 		cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(tx)
 		return err
 	})
@@ -419,8 +419,11 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
 				canRequestMore = canRequestMore || requestMore
+				if len(penalties) > 0 {
+					cs.Penalize(ctx, penalties)
+				}
 			}
 
 			if canRequestMore {
@@ -491,8 +494,11 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
 				canRequestMore = canRequestMore || requestMore
+				if len(penalties) > 0 {
+					cs.Penalize(ctx, penalties)
+				}
 			}
 
 			if canRequestMore {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 
@@ -18,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests/contracts"
 )
@@ -370,7 +370,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -393,7 +393,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal("should fail")
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -411,7 +411,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -457,7 +457,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -475,7 +475,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
 		t.Fatal(err)
 	}
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -541,7 +541,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -560,7 +560,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -630,7 +630,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")
@@ -648,7 +648,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = m.DB.View(context.Background(), func(tx ethdb.Tx) error {
+	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		st := state.New(state.NewPlainStateReader(tx))
 		if !st.Exist(from) {
 			t.Error("expected account to exist")

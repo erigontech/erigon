@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -24,9 +26,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -154,7 +155,7 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
@@ -184,7 +185,7 @@ func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.A
 	return nil
 }
 
-func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	// When a CaptureEnd is called, a Tx has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
@@ -393,7 +394,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 	ot := NewOpcodeTracer(blockNum, saveOpcodes, saveBblocks)
 
-	chainDb := kv.MustOpen(chaindata)
+	chainDb := mdbx.MustOpen(chaindata)
 	defer chainDb.Close()
 	historyDb := chainDb
 	historyTx, err1 := historyDb.BeginRo(context.Background())
@@ -526,7 +527,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	blockNumLastReport := blockNum
 	for !interrupt {
 		var block *types.Block
-		if err := chainDb.View(context.Background(), func(tx ethdb.Tx) (err error) {
+		if err := chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
 			block, err = rawdb.ReadBlockByNumber(tx, blockNum)
 			return err
 		}); err != nil {
@@ -544,7 +545,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate := state.NewPlainKvState(historyTx, block.NumberU64()-1)
+		dbstate := state.NewPlainState(historyTx, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
 
@@ -687,7 +688,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil); err != nil {
+		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 		}
 

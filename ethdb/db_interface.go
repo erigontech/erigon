@@ -19,6 +19,8 @@ package ethdb
 import (
 	"context"
 	"errors"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 // DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
@@ -33,53 +35,27 @@ const (
 	RO TxFlags = 0x02
 )
 
-type DatabaseReader interface {
-	KVGetter
+// DBGetter wraps the database read operations.
+type DBGetter interface {
+	kv.Getter
 
 	// Get returns the value for a given key if it's present.
 	Get(bucket string, key []byte) ([]byte, error)
 }
 
-// Getter wraps the database read operations.
-type Getter interface {
-	DatabaseReader
-}
-
-type GetterTx interface {
-	Getter
-
-	Rollback()
-}
-
-type GetterBeginner interface {
-	Getter
-
-	BeginGetter(ctx context.Context) (GetterTx, error)
-}
-
-type GetterPutter interface {
-	Getter
-	Putter
-}
-
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
-	GetterBeginner
-	Putter
-	Deleter
-	Closer
-
-	// MultiPut inserts or updates multiple entries.
-	// Entries are passed as an array:
-	// bucket0, key0, val0, bucket1, key1, val1, ...
-	MultiPut(tuples ...[]byte) (uint64, error)
+	DBGetter
+	kv.Putter
+	kv.Deleter
+	kv.Closer
 
 	Begin(ctx context.Context, flags TxFlags) (DbWithPendingMutations, error) // starts db transaction
 	Last(bucket string) ([]byte, []byte, error)
 
 	IncrementSequence(bucket string, amount uint64) (uint64, error)
 	ReadSequence(bucket string) (uint64, error)
-	RwKV() RwKV
+	RwKV() kv.RwDB
 }
 
 // MinDatabase is a minimalistic version of the Database interface.
@@ -106,37 +82,17 @@ type DbWithPendingMutations interface {
 	//
 	Commit() error
 
-	// CommitAndBegin - commits and starts new transaction inside same db object.
-	// useful for periodical commits implementation.
-	//
-	// Common pattern:
-	//
-	// tx := db.Begin()
-	// defer tx.Rollback()
-	// for {
-	// 		... some calculations on `tx`
-	//       tx.CommitAndBegin()
-	//       // defer here - is not useful, because 'tx' object is reused and first `defer` will work perfectly
-	// }
-	// tx.Commit()
-	//
-	CommitAndBegin(ctx context.Context) error
-	RollbackAndBegin(ctx context.Context) error
 	Rollback()
 	BatchSize() int
 }
 
 type HasRwKV interface {
-	RwKV() RwKV
-	SetRwKV(kv RwKV)
+	RwKV() kv.RwDB
+	SetRwKV(kv kv.RwDB)
 }
 
 type HasTx interface {
-	Tx() Tx
-}
-
-type HasNetInterface interface {
-	DB() Database
+	Tx() kv.Tx
 }
 
 type BucketsMigrator interface {
@@ -154,5 +110,3 @@ func GetOneWrapper(dat []byte, err error) ([]byte, error) {
 	}
 	return dat, nil
 }
-
-var ErrNotSupported = errors.New("not supported")

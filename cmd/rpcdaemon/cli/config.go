@@ -2,26 +2,34 @@ package cli
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"path"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/ethdb"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
+	"github.com/ledgerwatch/erigon/ethdb/remotedb"
+	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 )
 
 type Flags struct {
@@ -124,16 +132,16 @@ func RootCommand() (*cobra.Command, *Flags) {
 	return rootCmd, cfg
 }
 
-func checkDbCompatibility(db ethdb.RoKV) error {
+func checkDbCompatibility(db kv.RoDB) error {
 	// DB schema version compatibility check
 	var version []byte
 	var compatErr error
-	var compatTx ethdb.Tx
+	var compatTx kv.Tx
 	if compatTx, compatErr = db.BeginRo(context.Background()); compatErr != nil {
 		return fmt.Errorf("open Ro Tx for DB schema compability check: %w", compatErr)
 	}
 	defer compatTx.Rollback()
-	if version, compatErr = compatTx.GetOne(dbutils.DatabaseInfoBucket, dbutils.DBSchemaVersionKey); compatErr != nil {
+	if version, compatErr = compatTx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey); compatErr != nil {
 		return fmt.Errorf("read version for DB schema compability check: %w", compatErr)
 	}
 	if len(version) != 12 {
@@ -143,7 +151,7 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	minor := binary.BigEndian.Uint32(version[4:])
 	patch := binary.BigEndian.Uint32(version[8:])
 	var compatible bool
-	dbSchemaVersion := &dbutils.DBSchemaVersion
+	dbSchemaVersion := &kv.DBSchemaVersion
 	if major != dbSchemaVersion.Major {
 		compatible = false
 	} else if minor != dbSchemaVersion.Minor {
@@ -161,46 +169,41 @@ func checkDbCompatibility(db ethdb.RoKV) error {
 	return nil
 }
 
-func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
+func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
-		var rwKv ethdb.RwKV
-		rwKv, err = kv2.NewMDBX().Path(cfg.Chaindata).Readonly().Open()
+		var rwKv kv.RwDB
+		rwKv, err = kv2.NewMDBX(logger).Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
 		if compatErr := checkDbCompatibility(rwKv); compatErr != nil {
 			return nil, nil, nil, nil, compatErr
 		}
-		kv = rwKv
-		if cfg.SnapshotMode != "" {
-			mode, innerErr := snapshotsync.SnapshotModeFromString(cfg.SnapshotMode)
-			if innerErr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("can't process snapshot-mode err:%w", innerErr)
-			}
-			snapKv, innerErr := snapshotsync.WrapBySnapshotsFromDir(rwKv, cfg.SnapshotDir, mode)
-			if innerErr != nil {
-				return nil, nil, nil, nil, fmt.Errorf("can't wrap by snapshots err:%w", innerErr)
-			}
-			kv = snapKv
-		}
+		db = rwKv
 	} else {
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 	if cfg.PrivateApiAddr != "" {
-		remoteKv, err := kv2.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)).Path(cfg.PrivateApiAddr).Open(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert)
+		conn, err := connectErigon(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, cfg.PrivateApiAddr)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
-		remoteEth := services.NewRemoteBackend(remoteKv.GrpcConn())
-		mining = services.NewMiningService(remoteKv.GrpcConn())
-		txPool = services.NewTxPoolService(remoteKv.GrpcConn())
-		if kv == nil {
-			kv = remoteKv
+
+		kvClient := remote.NewKVClient(conn)
+		remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+		}
+		remoteEth := services.NewRemoteBackend(conn)
+		mining = services.NewMiningService(conn)
+		txPool = services.NewTxPoolService(conn)
+		if db == nil {
+			db = remoteKv
 		}
 		eth = remoteEth
 		go func() {
@@ -218,7 +221,67 @@ func RemoteServices(cfg Flags, rootCancel context.CancelFunc) (kv ethdb.RoKV, et
 			}
 		}()
 	}
-	return kv, eth, txPool, mining, err
+	return db, eth, txPool, mining, err
+}
+
+func connectErigon(certFile, keyFile, caCert string, dialAddress string) (*grpc.ClientConn, error) {
+	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(15 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+	}
+	if certFile == "" {
+		dialOpts = append(dialOpts, grpc.WithInsecure())
+	} else {
+		var creds credentials.TransportCredentials
+		var err error
+		if caCert == "" {
+			creds, err = credentials.NewClientTLSFromFile(certFile, "")
+
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// load peer cert/key, ca cert
+			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				log.Error("load peer cert/key error:%v", err)
+				return nil, err
+			}
+			caCert, err := ioutil.ReadFile(caCert)
+			if err != nil {
+				log.Error("read ca cert file error:%v", err)
+				return nil, err
+			}
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(caCert)
+			creds = credentials.NewTLS(&tls.Config{
+				Certificates: []tls.Certificate{peerCert},
+				ClientCAs:    caCertPool,
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+				//nolint:gosec
+				InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
+			})
+		}
+
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+	}
+
+	//if opts.inMemConn != nil {
+	//	dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
+	//		return opts.inMemConn.Dial()
+	//	}))
+	//}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return grpc.DialContext(ctx, dialAddress, dialOpts...)
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {

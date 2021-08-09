@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
@@ -28,7 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, tx ethdb.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
+func getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
 	}
@@ -110,7 +111,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	var addrBitmap *roaring.Bitmap
 	for _, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, dbutils.LogAddressIndex, addr[:], uint32(begin), uint32(end))
+		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(begin), uint32(end))
 		if err != nil {
 			return nil, err
 		}
@@ -135,12 +136,14 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
+		if err = common.Stopped(ctx.Done()); err != nil {
+			return nil, err
+		}
+
 		blockNToMatch := uint64(iter.Next())
-		prefix := make([]byte, 8)
-		binary.BigEndian.PutUint64(prefix, blockNToMatch)
 		var logIndex uint
 		var blockLogs types.Logs
-		if err := tx.ForPrefix(dbutils.Log, prefix, func(k, v []byte) error {
+		if err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNToMatch), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
@@ -161,6 +164,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}); err != nil {
 			return returnLogs(logs), err
 		}
+
 		if len(blockLogs) > 0 {
 			b, err := rawdb.ReadBlockByNumber(tx, blockNToMatch)
 			if err != nil {
@@ -192,12 +196,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c ethdb.Tx, topics [][]common.Hash, from, to uint32) (*roaring.Bitmap, error) {
+func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring.Bitmap, error) {
 	var result *roaring.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
-			m, err := bitmapdb.Get(c, dbutils.LogTopicIndex, topic[:], from, to)
+			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], from, to)
 			if err != nil {
 				return nil, err
 			}

@@ -6,8 +6,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon/ethdb/remote/remotedbserver"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -21,7 +21,7 @@ type TxPoolService struct {
 func NewTxPoolService(cc grpc.ClientConnInterface) *TxPoolService {
 	return &TxPoolService{
 		TxpoolClient: txpool.NewTxpoolClient(cc),
-		version:      gointerfaces.VersionFromProto(remotedbserver.TxPoolAPIVersion),
+		version:      gointerfaces.VersionFromProto(privateapi.TxPoolAPIVersion),
 		log:          log.New("remote_service", "tx_pool"),
 	}
 }

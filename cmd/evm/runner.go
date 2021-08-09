@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
@@ -40,8 +40,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var runCommand = cli.Command{
@@ -107,9 +107,10 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 }
 
 func runCmd(ctx *cli.Context) error {
-	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
-	log.Root().SetHandler(glogger)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
+	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
+	//log.Root().SetHandler(glogger)
 	logconfig := &vm.LogConfig{
 		DisableMemory:     ctx.GlobalBool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.GlobalBool(DisableStackFlag.Name),
@@ -135,7 +136,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = vm.NewStructLogger(logconfig)
 	}
-	db := kv.NewMemKV()
+	db := memdb.New()
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		gen.MustCommit(db)

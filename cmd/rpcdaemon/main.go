@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,8 @@ func main() {
 	cmd, cfg := cli.RootCommand()
 	rootCtx, rootCancel := utils.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		db, backend, txPool, mining, err := cli.RemoteServices(*cfg, rootCancel)
+		logger := log.New()
+		db, backend, txPool, mining, err := cli.RemoteServices(*cfg, logger, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "error", err)
 			return nil

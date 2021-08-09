@@ -19,7 +19,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -28,13 +28,12 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
@@ -434,10 +433,10 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	)
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
+	//if metrics.Enabled {
+	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	//}
 
 	var grpcServer *grpc.Server
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
@@ -458,9 +457,9 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	grpcServer = grpc.NewServer(opts...)
 
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
+	//if metrics.Enabled {
+	//	grpc_prometheus.Register(grpcServer)
+	//}
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry P2P server fail", "err", err1)
@@ -949,7 +948,7 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 
 // MessageStreams - it's safe to use this class as non-pointer
 type MessageStreams struct {
-	sync.RWMutex
+	mu      sync.RWMutex
 	id      uint
 	streams map[uint]proto_sentry.Sentry_MessagesServer
 }
@@ -959,8 +958,8 @@ func NewStreamsList() *MessageStreams {
 }
 
 func (s *MessageStreams) Add(stream proto_sentry.Sentry_MessagesServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.streams == nil {
 		s.streams = make(map[uint]proto_sentry.Sentry_MessagesServer)
 	}
@@ -971,8 +970,8 @@ func (s *MessageStreams) Add(stream proto_sentry.Sentry_MessagesServer) (remove 
 }
 
 func (s *MessageStreams) doBroadcast(reply *proto_sentry.InboundMessage) (ids []uint, errs []error) {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for id, stream := range s.streams {
 		err := stream.Send(reply)
 		if err != nil {
@@ -991,8 +990,8 @@ func (s *MessageStreams) Broadcast(reply *proto_sentry.InboundMessage) (errs []e
 	var ids []uint
 	ids, errs = s.doBroadcast(reply)
 	if len(ids) > 0 {
-		s.Lock()
-		defer s.Unlock()
+		s.mu.Lock()
+		defer s.mu.Unlock()
 	}
 	for _, id := range ids {
 		delete(s.streams, id)
@@ -1001,14 +1000,14 @@ func (s *MessageStreams) Broadcast(reply *proto_sentry.InboundMessage) (errs []e
 }
 
 func (s *MessageStreams) Len() int {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return len(s.streams)
 }
 
 func (s *MessageStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.streams[id]
 	if !ok { // double-unsubscribe support
 		return
@@ -1035,7 +1034,7 @@ func (ss *SentryServerImpl) Peers(req *proto_sentry.PeersRequest, server proto_s
 
 // PeersStreams - it's safe to use this class as non-pointer
 type PeersStreams struct {
-	sync.RWMutex
+	mu      sync.RWMutex
 	id      uint
 	streams map[uint]proto_sentry.Sentry_PeersServer
 }
@@ -1045,8 +1044,8 @@ func NewPeersStreams() *PeersStreams {
 }
 
 func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func()) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.streams == nil {
 		s.streams = make(map[uint]proto_sentry.Sentry_PeersServer)
 	}
@@ -1057,8 +1056,8 @@ func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func(
 }
 
 func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeersReply) (ids []uint, errs []error) {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for id, stream := range s.streams {
 		err := stream.Send(reply)
 		if err != nil {
@@ -1077,8 +1076,8 @@ func (s *PeersStreams) Broadcast(reply *proto_sentry.PeersReply) (errs []error) 
 	var ids []uint
 	ids, errs = s.doBroadcast(reply)
 	if len(ids) > 0 {
-		s.Lock()
-		defer s.Unlock()
+		s.mu.Lock()
+		defer s.mu.Unlock()
 	}
 	for _, id := range ids {
 		delete(s.streams, id)
@@ -1087,14 +1086,14 @@ func (s *PeersStreams) Broadcast(reply *proto_sentry.PeersReply) (errs []error) 
 }
 
 func (s *PeersStreams) Len() int {
-	s.RLock()
-	defer s.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return len(s.streams)
 }
 
 func (s *PeersStreams) remove(id uint) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.streams[id]
 	if !ok { // double-unsubscribe support
 		return

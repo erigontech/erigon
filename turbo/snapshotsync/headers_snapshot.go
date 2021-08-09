@@ -7,24 +7,26 @@ import (
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64, snapshotPath string) error {
+func CreateHeadersSnapshot(ctx context.Context, readTX kv.Tx, toBlock uint64, snapshotPath string) error {
 	// remove created snapshot if it's not saved in main db(to avoid append error)
 	err := os.RemoveAll(snapshotPath)
 	if err != nil {
 		return err
 	}
 
-	snKV, err := kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+	snKV, err := mdbx.NewMDBX(log.New()).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.ChaindataTablesCfg[kv.Headers],
 		}
 	}).Path(snapshotPath).Open()
 	if err != nil {
@@ -49,8 +51,8 @@ func CreateHeadersSnapshot(ctx context.Context, readTX ethdb.Tx, toBlock uint64,
 	return nil
 }
 
-func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, toBlock uint64) error {
-	headerCursor, err := sntx.RwCursor(dbutils.HeadersBucket)
+func GenerateHeadersSnapshot(ctx context.Context, db kv.Tx, sntx kv.RwTx, toBlock uint64) error {
+	headerCursor, err := sntx.RwCursor(kv.Headers)
 	if err != nil {
 		return err
 	}
@@ -85,31 +87,31 @@ func GenerateHeadersSnapshot(ctx context.Context, db ethdb.Tx, sntx ethdb.RwTx, 
 	return nil
 }
 
-func OpenHeadersSnapshot(dbPath string) (ethdb.RoKV, error) {
-	return kv.NewMDBX().WithBucketsConfig(func(defaultBuckets dbutils.BucketsCfg) dbutils.BucketsCfg {
-		return dbutils.BucketsCfg{
-			dbutils.HeadersBucket: dbutils.BucketsConfigs[dbutils.HeadersBucket],
+func OpenHeadersSnapshot(dbPath string) (kv.RoDB, error) {
+	return mdbx.NewMDBX(log.New()).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{
+			kv.Headers: kv.ChaindataTablesCfg[kv.Headers],
 		}
 	}).Readonly().Path(dbPath).Open()
 }
 
-func RemoveHeadersData(db ethdb.RoKV, tx ethdb.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
+func RemoveHeadersData(db kv.RoDB, tx kv.RwTx, currentSnapshot, newSnapshot uint64) (err error) {
 	log.Info("Remove data", "from", currentSnapshot, "to", newSnapshot)
-	if _, ok := db.(kv.SnapshotUpdater); !ok {
+	if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 		return errors.New("db don't implement snapshotUpdater interface")
 	}
-	headerSnapshot := db.(kv.SnapshotUpdater).HeadersSnapshot()
+	headerSnapshot := db.(snapshotdb.SnapshotUpdater).HeadersSnapshot()
 	if headerSnapshot == nil {
 		return errors.New("empty headers snapshot")
 	}
-	writeTX := tx.(kv.DBTX).DBTX()
-	c, err := writeTX.RwCursor(dbutils.HeadersBucket)
+	writeTX := tx.(snapshotdb.DBTX).DBTX()
+	c, err := writeTX.RwCursor(kv.Headers)
 	if err != nil {
 		return fmt.Errorf("get headers cursor %w", err)
 	}
 
-	return headerSnapshot.View(context.Background(), func(tx ethdb.Tx) error {
-		c2, err := tx.Cursor(dbutils.HeadersBucket)
+	return headerSnapshot.View(context.Background(), func(tx kv.Tx) error {
+		c2, err := tx.Cursor(kv.Headers)
 		if err != nil {
 			return err
 		}

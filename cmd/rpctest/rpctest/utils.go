@@ -1,18 +1,20 @@
 package rpctest
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/valyala/fastjson"
 )
 
@@ -181,6 +183,55 @@ func compareResults(trace, traceg *fastjson.Value) error {
 	r := trace.Get("result")
 	rg := traceg.Get("result")
 	return compareJsonValues("result", r, rg)
+}
+
+func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer) error {
+	recording := rec != nil
+	res := reqGen.Erigon2(methodName, request)
+	if res.Err != nil {
+		return fmt.Errorf("could not invoke %s (Erigon): %w\n", methodName, res.Err)
+	}
+	if errVal := res.Result.Get("error"); errVal != nil {
+		return fmt.Errorf("error invoking %s (Erigon): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+	}
+	if needCompare {
+		resg := reqGen.Geth2(methodName, request)
+		if resg.Err != nil {
+			return fmt.Errorf("could not invoke %s (Geth/OE): %w\n", methodName, res.Err)
+		}
+		if errVal := resg.Result.Get("error"); errVal != nil {
+			return fmt.Errorf("error invoking %s (Geth/OE): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+		}
+		if resg.Err == nil && resg.Result.Get("error") == nil {
+			if err := compareResults(res.Result, resg.Result); err != nil {
+				recording = false
+				if errs != nil {
+					fmt.Printf("different results for method %s, errCtx: %s: %v\n", methodName, errCtx, err)
+					fmt.Fprintf(errs, "\nDifferent results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
+					fmt.Fprintf(errs, "Request=====================================\n%s\n", request)
+					fmt.Fprintf(errs, "TG response=================================\n%s\n", res.Response)
+					fmt.Fprintf(errs, "G/OE response=================================\n%s\n", resg.Response)
+					errs.Flush() // nolint:errcheck
+					// Keep going
+				} else {
+					reqFile, _ := os.Create("request.json")                //nolint:errcheck
+					reqFile.Write([]byte(request))                         //nolint:errcheck
+					reqFile.Close()                                        //nolint:errcheck
+					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
+					erigonRespFile.Write(res.Response)                     //nolint:errcheck
+					erigonRespFile.Close()                                 //nolint:errcheck
+					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
+					oeRespFile.Write(resg.Response)                        //nolint:errcheck
+					oeRespFile.Close()                                     //nolint:errcheck
+					return fmt.Errorf("different results for method %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
+				}
+			}
+		}
+	}
+	if recording {
+		fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
+	}
+	return nil
 }
 
 func compareBalances(balance, balanceg *EthBalance) bool {
@@ -518,6 +569,7 @@ func print(client *http.Client, url, request string) {
 		fmt.Printf("Could not print: %v\n", err)
 		return
 	}
+	defer r.Body.Close()
 	if r.StatusCode != 200 {
 		fmt.Printf("Status %s", r.Status)
 		return

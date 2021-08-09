@@ -98,6 +98,15 @@ func (p *TestTxPool) Content() (map[common.Address]types.Transactions, map[commo
 	return batches, nil
 }
 
+// CountContent returns the number of pending and queued transactions
+// in the transaction pool.
+func (p *TestTxPool) CountContent() (pending uint, queued uint) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	pending = uint(len(p.pool))
+	return
+}
+
 // SubscribeNewTxsEvent should return an event subscription of NewTxsEvent and
 // send events to the given channel.
 func (p *TestTxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {

@@ -5,34 +5,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
+func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
 	err := os.RemoveAll(tmpDataDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 
 	if !notRegenerateGethData {
 		err = os.RemoveAll(gethDataDir)
 		if err != nil {
-			log.Fatal(err)
+			log.Error(err.Error())
+			return
 		}
 	}
-	resultsKV := kv.NewMDBX().Path(tmpDataDir).MustOpen()
-	gethKV := kv.NewMDBX().Path(gethDataDir).MustOpen()
+	resultsKV := mdbx.NewMDBX(logger).Path(tmpDataDir).MustOpen()
+	gethKV := mdbx.NewMDBX(logger).Path(gethDataDir).MustOpen()
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,
@@ -56,7 +57,7 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 		Result state.IteratorDump `json:"result"`
 	}
 
-	f := func(url string, db ethdb.RwTx) error {
+	f := func(url string, db kv.RwTx) error {
 		i := uint64(0)
 		reqGen := &RequestGenerator{
 			client: client,
@@ -83,7 +84,7 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 				if innerErr != nil {
 					return innerErr
 				}
-				err = db.Put(dbutils.AccountsHistoryBucket, addr.Bytes(), b)
+				err = db.Put(kv.AccountsHistory, addr.Bytes(), b)
 				if err != nil {
 					return err
 				}
@@ -95,49 +96,58 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 			next = ar.Result.Next
 		}
 	}
-	err = resultsKV.Update(context.Background(), func(tx ethdb.RwTx) error {
+	err = resultsKV.Update(context.Background(), func(tx kv.RwTx) error {
 		return f(erigonURL, tx)
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
+
 	}
 
 	if !notRegenerateGethData {
-		err = gethKV.Update(context.Background(), func(tx ethdb.RwTx) error {
+		err = gethKV.Update(context.Background(), func(tx kv.RwTx) error {
 			return f(erigonURL, tx)
 		})
 		if err != nil {
-			log.Fatal(err)
+			log.Error(err.Error())
+			return
 		}
 	}
 
 	tgTx, err := resultsKV.BeginRo(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 	gethTx, err := gethKV.BeginRo(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
-	tgCursor, err := tgTx.Cursor(dbutils.AccountsHistoryBucket)
+	tgCursor, err := tgTx.Cursor(kv.AccountsHistory)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 	defer tgCursor.Close()
-	gethCursor, err := gethTx.Cursor(dbutils.AccountsHistoryBucket)
+	gethCursor, err := gethTx.Cursor(kv.AccountsHistory)
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 	defer gethCursor.Close()
 
 	tgKey, tgVal, err1 := tgCursor.Next()
 	if err1 != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 
 	gethKey, gethVal, err2 := gethCursor.Next()
 	if err2 != nil {
-		log.Fatal(err)
+		log.Error(err.Error())
+		return
 	}
 
 	i := 0
@@ -159,23 +169,31 @@ func CompareAccountRange(erigonURL, gethURL, tmpDataDir, gethDataDir string, blo
 
 			tgKey, tgVal, err1 = tgCursor.Next()
 			if err1 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 			gethKey, gethVal, err2 = gethCursor.Next()
 			if err2 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 		} else if cmp < 0 {
 			gethMissed++
 			tgKey, tgVal, err1 = tgCursor.Next()
 			if err1 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 		} else if cmp > 0 {
 			tgMissed++
 			gethKey, gethVal, err2 = gethCursor.Next()
 			if err2 != nil {
-				log.Fatal(err)
+				log.Error(err.Error())
+				return
+
 			}
 		}
 		i++

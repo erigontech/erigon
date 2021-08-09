@@ -8,7 +8,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 
 	"google.golang.org/grpc"
 )
@@ -22,7 +22,7 @@ type SentryClient interface {
 
 type SentryClientRemote struct {
 	proto_sentry.SentryClient
-	sync.RWMutex
+	mu       sync.RWMutex
 	protocol uint
 	ready    bool
 }
@@ -35,20 +35,20 @@ func NewSentryClientRemote(client proto_sentry.SentryClient) *SentryClientRemote
 }
 
 func (c *SentryClientRemote) Protocol() uint {
-	c.RLock()
-	defer c.RUnlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.protocol
 }
 
 func (c *SentryClientRemote) Ready() bool {
-	c.RLock()
-	defer c.RUnlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.ready
 }
 
 func (c *SentryClientRemote) MarkDisconnected() {
-	c.Lock()
-	defer c.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.ready = false
 }
 
@@ -58,8 +58,8 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.Sta
 		return nil, err
 	}
 
-	c.Lock()
-	defer c.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	switch reply.Protocol {
 	case proto_sentry.Protocol_ETH65:
 		c.protocol = eth.ETH65

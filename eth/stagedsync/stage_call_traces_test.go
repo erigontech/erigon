@@ -1,0 +1,70 @@
+package stagedsync
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
+	v := [21]byte{}
+	for i := uint64(0); i < to; i++ {
+		v[19] = byte(i % 5)
+		if i%2 == 0 {
+			v[20] = 1
+		}
+		if i%2 == 1 {
+			v[20] = 2
+		}
+		err := tx.Put(kv.CallTraceSet, dbutils.EncodeBlockNumber(i), v[:])
+		require.NoError(t, err)
+	}
+}
+
+func TestCallTrace(t *testing.T) {
+	ctx, assert := context.Background(), assert.New(t)
+	_, tx := memdb.NewTestTx(t)
+	genTestCallTraceSet(t, tx, 30)
+	addr := [20]byte{}
+	addr[19] = byte(1)
+	froms := func() *roaring64.Bitmap {
+		b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr[:], 0, 30)
+		assert.NoError(err)
+		return b
+	}
+	tos := func() *roaring64.Bitmap {
+		b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr[:], 0, 30)
+		assert.NoError(err)
+		return b
+	}
+
+	err := stages.SaveStageProgress(tx, stages.Execution, 30)
+	assert.NoError(err)
+
+	// forward 0->20
+	err = promoteCallTraces("test", tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "")
+	assert.NoError(err)
+	assert.Equal([]uint64{6, 16}, froms().ToArray())
+	assert.Equal([]uint64{1, 11}, tos().ToArray())
+
+	// unwind 20->10
+	err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "")
+	assert.NoError(err)
+	assert.Equal([]uint64{6}, froms().ToArray())
+	assert.Equal([]uint64{1}, tos().ToArray())
+
+	// forward 10->30
+	err = promoteCallTraces("test", tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "")
+	assert.NoError(err)
+	assert.Equal([]uint64{6, 16, 26}, froms().ToArray())
+	assert.Equal([]uint64{1, 11, 21}, tos().ToArray())
+}
