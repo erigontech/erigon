@@ -69,7 +69,7 @@ func TestInterpreterReadonly(t *testing.T) {
 		var gotReadonly bool
 		var firstReadOnly int
 
-		//properties-invariants
+		// properties-invariants
 
 		if len(readOnlies) != len(readOnlySliceTest) {
 			t.Fatalf("expected static calls the same stack length as generated. got %d, expected %d", len(readOnlies), len(readOnlySliceTest))
