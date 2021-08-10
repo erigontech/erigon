@@ -97,7 +97,7 @@ func executeBlock(
 	writeChangesets bool,
 	writeReceipts bool,
 	writeCallTraces bool,
-	checkTEVM func(contractHash common.Hash) (bool, error),
+	contractHasTEVM func(contractHash common.Hash) (bool, error),
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
@@ -106,10 +106,10 @@ func executeBlock(
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
-	callTracer := NewCallTracer(checkTEVM)
+	callTracer := NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, checkTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, contractHasTEVM)
 	if err != nil {
 		return err
 	}
@@ -274,17 +274,17 @@ Loop:
 
 		lastLogTx += uint64(block.Transactions().Len())
 
-		var checkTEVMCode func(contractHash common.Hash) (bool, error)
+		var contractHasTEVM func(contractHash common.Hash) (bool, error)
 
 		if cfg.vmConfig.EnableTEMV {
-			checkTEVMCode = ethdb.GetCheckTEVM(tx)
+			contractHasTEVM = ethdb.GetHasTEVM(tx)
 		}
 
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop

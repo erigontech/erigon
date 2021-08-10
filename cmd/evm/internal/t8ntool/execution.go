@@ -127,15 +127,15 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	)
 	gaspool.AddGas(pre.Env.GasLimit)
 	vmContext := vm.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		Coinbase:    pre.Env.Coinbase,
-		BlockNumber: pre.Env.Number,
-		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
-		Time:        pre.Env.Timestamp,
-		Difficulty:  pre.Env.Difficulty,
-		GasLimit:    pre.Env.GasLimit,
-		GetHash:     getHash,
+		CanTransfer:     core.CanTransfer,
+		Transfer:        core.Transfer,
+		Coinbase:        pre.Env.Coinbase,
+		BlockNumber:     pre.Env.Number,
+		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
+		Time:            pre.Env.Timestamp,
+		Difficulty:      pre.Env.Difficulty,
+		GasLimit:        pre.Env.GasLimit,
+		GetHash:         getHash,
 	}
 	// If currentBaseFee is defined, add it to the vmContext.
 	if pre.Env.BaseFee != nil {
