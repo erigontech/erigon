@@ -27,6 +27,7 @@ import (
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"go.uber.org/atomic"
 )
 
@@ -37,8 +38,8 @@ type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(hash []byte) bool
 	GetRlp(hash []byte) []byte
-	Add(newTxs TxSlots) error
-	OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error
+	Add(db kv.Tx, newTxs TxSlots) error
+	OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error
 
 	AddNewGoodPeer(peerID PeerID)
 }
@@ -87,6 +88,8 @@ const PendingSubPoolLimit = 1024
 const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
+const MaxSendersInfoCache = 1024
+
 type nonce2Tx struct{ *btree.BTree }
 
 type senderInfo struct {
@@ -115,6 +118,7 @@ type TxPool struct {
 	protocolBaseFee atomic.Uint64
 	blockBaseFee    atomic.Uint64
 
+	senderID                 uint64
 	senderIDs                map[string]uint64
 	senderInfo               map[uint64]*senderInfo
 	byHash                   map[string]*metaTx // tx_hash => tx
@@ -202,7 +206,7 @@ func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 }
 func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 
-func (p *TxPool) Add(newTxs TxSlots) error {
+func (p *TxPool) Add(tx kv.Tx, newTxs TxSlots) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := newTxs.Valid(); err != nil {
@@ -214,7 +218,9 @@ func (p *TxPool) Add(newTxs TxSlots) error {
 		return fmt.Errorf("non-zero base fee")
 	}
 
-	setTxSenderID(p.senderIDs, p.senderInfo, newTxs)
+	if err := setTxSenderID(tx, &p.senderID, p.senderIDs, p.senderInfo, newTxs); err != nil {
+		return err
+	}
 	if err := onNewTxs(p.senderInfo, newTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
@@ -286,7 +292,7 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 
 	return nil
 }
-func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error {
+func (p *TxPool) OnNewBlock(tx kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := unwindTxs.Valid(); err != nil {
@@ -300,13 +306,18 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
-	setTxSenderID(p.senderIDs, p.senderInfo, unwindTxs)
-	setTxSenderID(p.senderIDs, p.senderInfo, minedTxs)
+	if err := setTxSenderID(tx, &p.senderID, p.senderIDs, p.senderInfo, unwindTxs); err != nil {
+		return err
+	}
+	if err := setTxSenderID(tx, &p.senderID, p.senderIDs, p.senderInfo, minedTxs); err != nil {
+		return err
+	}
 	for addr, id := range p.senderIDs { // merge state changes
 		if v, ok := stateChanges[addr]; ok {
 			p.senderInfo[id] = &v
 		}
 	}
+
 	if err := onNewBlock(p.senderInfo, unwindTxs, minedTxs.txs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
@@ -326,24 +337,53 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 		}
 	}
 
+	/*
+		// evict sendersInfo without txs
+		if len(p.senderIDs) > MaxSendersInfoCache {
+			for i := range p.senderInfo {
+				if p.senderInfo[i].txNonce2Tx.Len() > 0 {
+					continue
+				}
+				for addr, id := range p.senderIDs {
+					if id == i {
+						delete(p.senderIDs, addr)
+					}
+				}
+				delete(p.senderInfo, i)
+			}
+		}
+	*/
+
 	return nil
 }
-func setTxSenderID(senderIDs map[string]uint64, senderInfo map[uint64]*senderInfo, txs TxSlots) {
+
+func setTxSenderID(tx kv.Tx, senderIDSequence *uint64, senderIDs map[string]uint64, sendersInfo map[uint64]*senderInfo, txs TxSlots) error {
 	for i := range txs.txs {
 		addr := string(txs.senders.At(i))
 
+		// assign ID to each new sender
 		id, ok := senderIDs[addr]
 		if !ok {
-			for i := range senderInfo { //TODO: create field for it?
-				if id < i {
-					id = i
-				}
-			}
-			id++
-			senderIDs[addr] = id
+			*senderIDSequence++
+			senderIDs[addr] = *senderIDSequence
 		}
 		txs.txs[i].senderID = id
+
+		// load data from db if need
+		_, ok = sendersInfo[txs.txs[i].senderID]
+		if !ok {
+			encoded, err := tx.GetOne(kv.PlainState, txs.senders.At(i))
+			if err != nil {
+				return err
+			}
+			nonce, balance, err := DecodeSender(encoded)
+			if err != nil {
+				return err
+			}
+			sendersInfo[txs.txs[i].senderID] = &senderInfo{nonce: nonce, balance: balance}
+		}
 	}
+	return nil
 }
 
 func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *lru.Cache) error {

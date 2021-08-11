@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,7 +46,7 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, &remote.KVClientMock{})
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, &remote.KVClientMock{}, nil)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
@@ -138,6 +139,7 @@ func TestSendTxPropagate(t *testing.T) {
 func TestOnNewBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	db := memdb.NewTestDB(t)
 	var genesisHash [32]byte
 	var networkId uint64 = 1
 
@@ -157,7 +159,7 @@ func TestOnNewBlock(t *testing.T) {
 		},
 	}
 	pool := &PoolMock{}
-	fetch := NewFetch(ctx, nil, genesisHash, networkId, nil, pool, stateChanges)
+	fetch := NewFetch(ctx, nil, genesisHash, networkId, nil, pool, stateChanges, db)
 	fetch.handleStateChanges(ctx, stateChanges)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
 	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.txs))
