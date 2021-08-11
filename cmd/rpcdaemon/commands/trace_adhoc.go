@@ -105,12 +105,12 @@ type VmTrace struct {
 
 // VmTraceOp is one element of the vmTrace ops trace
 type VmTraceOp struct {
-	Cost int       `json:"cost"`
-	Ex   VmTraceEx `json:"ex"`
-	Pc   int       `json:"pc"`
-	Sub  *VmTrace  `json:"sub"`
-	Op   string    `json:"op,omitempty"`
-	Idx  string    `json:"idx,omitempty"`
+	Cost int        `json:"cost"`
+	Ex   *VmTraceEx `json:"ex"`
+	Pc   int        `json:"pc"`
+	Sub  *VmTrace   `json:"sub"`
+	Op   string     `json:"op,omitempty"`
+	Idx  string     `json:"idx,omitempty"`
 }
 
 type VmTraceEx struct {
@@ -256,7 +256,14 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 		} else {
 			vmTrace = ot.r.VmTrace
 		}
-		vmTrace.Code = code
+		if create {
+			vmTrace.Code = common.CopyBytes(input)
+			if ot.lastVmOp != nil {
+				ot.lastVmOp.Cost += int(gas)
+			}
+		} else {
+			vmTrace.Code = code
+		}
 	}
 	if precompile {
 		ot.precompile = true
@@ -337,7 +344,7 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		if !ot.compat && depth > 0 {
 			ot.idx = ot.idx[:len(ot.idx)-1]
 		}
-		if depth > 0 && topTrace.Type == CALL {
+		if depth > 0 {
 			ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
 			ot.memOffStack = ot.memOffStack[:len(ot.memOffStack)-1]
 			ot.lastMemLen = ot.memLenStack[len(ot.memLenStack)-1]
@@ -425,7 +432,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				vm.ADD, vm.EXP, vm.CALLER, vm.SHA3, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL,
 				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
 				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY, vm.SGT, vm.GASPRICE,
-				vm.MSIZE:
+				vm.MSIZE, vm.EXTCODEHASH:
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
@@ -445,7 +452,23 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
 			}
 		}
-		ot.lastVmOp = &VmTraceOp{}
+		if ot.lastOffStack != nil {
+			ot.lastOffStack.Ex.Used = int(gas)
+			ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+			if ot.lastMemLen > 0 && memory != nil {
+				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				if len(cpy) == 0 {
+					cpy = make([]byte, ot.lastMemLen)
+				}
+				ot.lastOffStack.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
+			}
+			ot.lastOffStack = nil
+		}
+		if ot.lastOp == vm.STOP && op == vm.STOP && len(ot.vmOpStack) == 0 {
+			// Looks like OE is "optimising away" the second STOP
+			return nil
+		}
+		ot.lastVmOp = &VmTraceOp{Ex: &VmTraceEx{}}
 		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
 		if !ot.compat {
 			var sb strings.Builder
@@ -459,18 +482,6 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		ot.lastVmOp.Pc = int(pc)
 		ot.lastVmOp.Ex.Push = []string{}
 		ot.lastVmOp.Ex.Used = int(gas) - int(cost)
-		if ot.lastOffStack != nil {
-			ot.lastOffStack.Ex.Used = int(gas)
-			ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
-			if ot.lastMemLen > 0 && memory != nil {
-				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
-				if len(cpy) == 0 {
-					cpy = make([]byte, ot.lastMemLen)
-				}
-				ot.lastOffStack.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
-			}
-			ot.lastOffStack = nil
-		}
 		if !ot.compat {
 			ot.lastVmOp.Op = op.String()
 		}
@@ -490,8 +501,15 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		case vm.CALL, vm.CALLCODE:
 			ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
 			ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
+		case vm.CREATE, vm.CREATE2:
+			// Effectively disable memory output
+			ot.memOffStack = append(ot.memOffStack, 0)
+			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
 			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
+		}
+		if ot.lastVmOp.Ex.Used < 0 {
+			ot.lastVmOp.Ex = nil
 		}
 	}
 	return nil
