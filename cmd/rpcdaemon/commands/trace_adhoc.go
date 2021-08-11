@@ -15,6 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus/misc/eip1559"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -893,7 +895,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	var baseFee *uint256.Int
 	if header != nil && header.BaseFee != nil {
 		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		// We calculate the base fee of the new block, given the header as the parent block
+		// This allows ad-hoc traces to simulate transactions in the next included block, rather
+		// than as transactions in the previous block
+		var newBlockBaseFee = CalcBaseFee(chainConfig, header)
+
+		baseFee, overflow = uint256.FromBig(newBlockBaseFee)
 		if overflow {
 			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
 		}
@@ -906,6 +913,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, ethdb.GetHasTEVM(tx))
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
+
+	// Need to patch the base fee to be the next-block's basefee
+	blockCtx.baseFee = baseFee
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: traceTypeTrace, Tracer: &ot})
 
