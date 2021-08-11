@@ -337,20 +337,22 @@ func (p *TxPool) OnNewBlock(tx kv.Tx, stateChanges map[string]senderInfo, unwind
 		}
 	}
 
-	// evict sendersInfo without txs
-	if len(p.senderIDs) > MaxSendersInfoCache {
-		for i := range p.senderInfo {
-			if p.senderInfo[i].txNonce2Tx.Len() > 0 {
-				continue
-			}
-			for addr, id := range p.senderIDs {
-				if id == i {
-					delete(p.senderIDs, addr)
+	/*
+		// evict sendersInfo without txs
+		if len(p.senderIDs) > MaxSendersInfoCache {
+			for i := range p.senderInfo {
+				if p.senderInfo[i].txNonce2Tx.Len() > 0 {
+					continue
 				}
+				for addr, id := range p.senderIDs {
+					if id == i {
+						delete(p.senderIDs, addr)
+					}
+				}
+				delete(p.senderInfo, i)
 			}
-			delete(p.senderInfo, i)
 		}
-	}
+	*/
 
 	return nil
 }
