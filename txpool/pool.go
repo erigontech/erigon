@@ -206,7 +206,7 @@ func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 }
 func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 
-func (p *TxPool) Add(tx kv.Tx, newTxs TxSlots) error {
+func (p *TxPool) Add(coreDB kv.Tx, newTxs TxSlots) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := newTxs.Valid(); err != nil {
@@ -218,7 +218,7 @@ func (p *TxPool) Add(tx kv.Tx, newTxs TxSlots) error {
 		return fmt.Errorf("non-zero base fee")
 	}
 
-	if err := setTxSenderID(tx, &p.senderID, p.senderIDs, p.senderInfo, newTxs); err != nil {
+	if err := setTxSenderID(coreDB, &p.senderID, p.senderIDs, p.senderInfo, newTxs); err != nil {
 		return err
 	}
 	if err := onNewTxs(p.senderInfo, newTxs, protocolBaseFee, blockBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
@@ -292,7 +292,7 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 
 	return nil
 }
-func (p *TxPool) OnNewBlock(tx kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error {
+func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockBaseFee, blockHeight uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := unwindTxs.Valid(); err != nil {
@@ -306,10 +306,10 @@ func (p *TxPool) OnNewBlock(tx kv.Tx, stateChanges map[string]senderInfo, unwind
 	p.protocolBaseFee.Store(protocolBaseFee)
 	p.blockBaseFee.Store(blockBaseFee)
 
-	if err := setTxSenderID(tx, &p.senderID, p.senderIDs, p.senderInfo, unwindTxs); err != nil {
+	if err := setTxSenderID(coreDB, &p.senderID, p.senderIDs, p.senderInfo, unwindTxs); err != nil {
 		return err
 	}
-	if err := setTxSenderID(tx, &p.senderID, p.senderIDs, p.senderInfo, minedTxs); err != nil {
+	if err := setTxSenderID(coreDB, &p.senderID, p.senderIDs, p.senderInfo, minedTxs); err != nil {
 		return err
 	}
 	for addr, id := range p.senderIDs { // merge state changes
@@ -357,7 +357,7 @@ func (p *TxPool) OnNewBlock(tx kv.Tx, stateChanges map[string]senderInfo, unwind
 	return nil
 }
 
-func setTxSenderID(tx kv.Tx, senderIDSequence *uint64, senderIDs map[string]uint64, sendersInfo map[uint64]*senderInfo, txs TxSlots) error {
+func setTxSenderID(coreDB kv.Tx, senderIDSequence *uint64, senderIDs map[string]uint64, sendersInfo map[uint64]*senderInfo, txs TxSlots) error {
 	for i := range txs.txs {
 		addr := string(txs.senders.At(i))
 
@@ -372,7 +372,7 @@ func setTxSenderID(tx kv.Tx, senderIDSequence *uint64, senderIDs map[string]uint
 		// load data from db if need
 		_, ok = sendersInfo[txs.txs[i].senderID]
 		if !ok {
-			encoded, err := tx.GetOne(kv.PlainState, txs.senders.At(i))
+			encoded, err := coreDB.GetOne(kv.PlainState, txs.senders.At(i))
 			if err != nil {
 				return err
 			}

@@ -44,7 +44,7 @@ type Fetch struct {
 	sentryClients      []sentry.SentryClient // sentry clients that will be used for accessing the network
 	statusData         *sentry.StatusData    // Status data used for "handshaking" with sentries
 	pool               Pool                  // Transaction pool implementation
-	db                 kv.RoDB
+	coreDB             kv.RoDB
 	wg                 *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesClient remote.KVClient
 }
@@ -80,7 +80,7 @@ func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, genesisH
 		sentryClients:      sentryClients,
 		statusData:         statusData,
 		pool:               pool,
-		db:                 db,
+		coreDB:             db,
 		stateChangesClient: stateChangesClient,
 	}
 }
@@ -282,7 +282,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 				return err
 			}
 		}
-		if err := f.db.View(ctx, func(tx kv.Tx) error {
+		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
 			return f.pool.Add(tx, txs)
 		}); err != nil {
 			return err
@@ -443,7 +443,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 			diff[string(addr[:])] = senderInfo{nonce: nonce, balance: balance}
 		}
 
-		if err := f.db.View(ctx, func(tx kv.Tx) error {
+		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
 			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockBaseFee, req.BlockHeight)
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
