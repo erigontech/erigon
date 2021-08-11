@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
 
@@ -26,15 +27,16 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
 
 func TestFetch(t *testing.T) {
-	logger := log.New()
-	ctx, cancelFn := context.WithCancel(context.Background())
-	defer cancelFn()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	var genesisHash [32]byte
 	var networkId uint64 = 1
@@ -44,7 +46,7 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, &remote.KVClientMock{}, logger)
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, &remote.KVClientMock{}, nil)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
@@ -132,4 +134,33 @@ func TestSendTxPropagate(t *testing.T) {
 			assert.True(t, len(req.Data.Data) > 0)
 		}
 	})
+}
+
+func TestOnNewBlock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	db := memdb.NewTestDB(t)
+	var genesisHash [32]byte
+	var networkId uint64 = 1
+
+	i := 0
+	stream := &remote.KV_StateChangesClientMock{
+		RecvFunc: func() (*remote.StateChange, error) {
+			if i > 0 {
+				return nil, io.EOF
+			}
+			i++
+			return &remote.StateChange{Txs: [][]byte{decodeHex(txParseTests[0].payloadStr), decodeHex(txParseTests[1].payloadStr), decodeHex(txParseTests[2].payloadStr)}}, nil
+		},
+	}
+	stateChanges := &remote.KVClientMock{
+		StateChangesFunc: func(ctx context.Context, in *remote.StateChangeRequest, opts ...grpc.CallOption) (remote.KV_StateChangesClient, error) {
+			return stream, nil
+		},
+	}
+	pool := &PoolMock{}
+	fetch := NewFetch(ctx, nil, genesisHash, networkId, nil, pool, stateChanges, db)
+	fetch.handleStateChanges(ctx, stateChanges)
+	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
+	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.txs))
 }

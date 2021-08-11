@@ -426,19 +426,19 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
-		err = pool.OnNewBlock(map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee, 1)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee, 1)
 		assert.NoError(err)
 		check(unwindTxs, minedTxs1, "fork1")
 		checkNotify(unwindTxs, minedTxs1, "fork1")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, blockBaseFee, 2)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, blockBaseFee, 2)
 		assert.NoError(err)
 		check(minedTxs1, minedTxs2, "fork2")
 		checkNotify(minedTxs1, minedTxs2, "fork2")
 
 		// add some remote txs from p2p
-		err = pool.Add(p2pReceived)
+		err = pool.Add(nil, p2pReceived)
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
