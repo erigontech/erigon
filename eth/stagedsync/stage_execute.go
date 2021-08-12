@@ -8,12 +8,8 @@ import (
 	"sort"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -27,12 +23,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
-
-var stageExecutionGauge = metrics2.GetOrCreateCounter("stage_execution")
 
 const (
 	logInterval = 30 * time.Second
@@ -101,7 +97,7 @@ func executeBlock(
 	writeChangesets bool,
 	writeReceipts bool,
 	writeCallTraces bool,
-	checkTEVM func(contractHash common.Hash) (bool, error),
+	contractHasTEVM func(contractHash common.Hash) (bool, error),
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
@@ -110,10 +106,10 @@ func executeBlock(
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
-	callTracer := NewCallTracer(checkTEVM)
+	callTracer := NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, checkTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, contractHasTEVM)
 	if err != nil {
 		return err
 	}
@@ -278,17 +274,17 @@ Loop:
 
 		lastLogTx += uint64(block.Transactions().Len())
 
-		var checkTEVMCode func(contractHash common.Hash) (bool, error)
+		var contractHasTEVM func(contractHash common.Hash) (bool, error)
 
 		if cfg.vmConfig.EnableTEMV {
-			checkTEVMCode = ethdb.GetCheckTEVM(tx)
+			contractHasTEVM = ethdb.GetHasTEVM(tx)
 		}
 
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
@@ -327,7 +323,7 @@ Loop:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
 			gas = 0
 			tx.CollectMetrics()
-			stageExecutionGauge.Set(blockNum)
+			syncMetrics[stages.Execution].Set(blockNum)
 		}
 	}
 

@@ -5,11 +5,12 @@ import (
 	"compress/zlib"
 	"encoding/json"
 	"fmt"
-	"github.com/holiman/uint256"
 	"io/ioutil"
 	"log"
 	"strconv"
 	"strings"
+
+	"github.com/holiman/uint256"
 )
 
 ////////////////////////

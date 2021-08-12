@@ -721,5 +721,8 @@ func (s *Ethereum) Stop() error {
 	if s.config.Miner.Enabled {
 		<-s.waitForMiningStop
 	}
+	for _, sentryServer := range s.sentryServers {
+		sentryServer.Close()
+	}
 	return nil
 }

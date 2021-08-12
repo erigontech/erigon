@@ -120,10 +120,10 @@ const (
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
 type Tracer interface {
-	CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error
+	CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *big.Int, code []byte) error
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rData []byte, contract *Contract, depth int, err error) error
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, contract *Contract, depth int, err error) error
-	CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error
+	CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error
 	CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int)
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
@@ -155,7 +155,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (l *StructLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	return nil
 }
 
@@ -227,7 +227,7 @@ func (l *StructLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost ui
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *StructLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (l *StructLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	if depth != 0 {
 		return nil
 	}
@@ -324,7 +324,7 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	return l
 }
 
-func (t *mdLogger) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error { //nolint:interfacer
+func (t *mdLogger) CaptureStart(_ int, from common.Address, to common.Address, preimage bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) error { //nolint:interfacer
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
@@ -369,9 +369,9 @@ func (t *mdLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64
 	return nil
 }
 
-func (t *mdLogger) CaptureEnd(_ int, output []byte, gasUsed uint64, tm time.Duration, err error) error {
+func (t *mdLogger) CaptureEnd(_ int, output []byte, startGas, endGas uint64, tm time.Duration, err error) error {
 	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
-		output, gasUsed, err)
+		output, startGas-endGas, err)
 	return nil
 }
 

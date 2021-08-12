@@ -3,25 +3,16 @@ package remotedb
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"net"
-	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -32,11 +23,11 @@ type remoteOpts struct {
 	inMemConn   *bufconn.Listener // for tests
 	DialAddress string
 	version     gointerfaces.Version
+	remoteKV    remote.KVClient
 	log         log.Logger
 }
 
 type RemoteKV struct {
-	conn     *grpc.ClientConn
 	remoteKV remote.KVClient
 	log      log.Logger
 	buckets  kv.TableCfg
@@ -70,11 +61,6 @@ func (opts remoteOpts) ReadOnly() remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Path(path string) remoteOpts {
-	opts.DialAddress = path
-	return opts
-}
-
 func (opts remoteOpts) WithBucketsConfig(f mdbx.TableCfgFunc) remoteOpts {
 	opts.bucketsCfg = f
 	return opts
@@ -85,73 +71,10 @@ func (opts remoteOpts) InMem(listener *bufconn.Listener) remoteOpts {
 	return opts
 }
 
-func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error) {
-	var dialOpts []grpc.DialOption
-
-	backoffCfg := backoff.DefaultConfig
-	backoffCfg.BaseDelay = 500 * time.Millisecond
-	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(15 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
-	if certFile == "" {
-		dialOpts = append(dialOpts, grpc.WithInsecure())
-	} else {
-		var creds credentials.TransportCredentials
-		var err error
-		if caCert == "" {
-			creds, err = credentials.NewClientTLSFromFile(certFile, "")
-
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			// load peer cert/key, ca cert
-			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
-			if err != nil {
-				log.Error("load peer cert/key error:%v", err)
-				return nil, err
-			}
-			caCert, err := ioutil.ReadFile(caCert)
-			if err != nil {
-				log.Error("read ca cert file error:%v", err)
-				return nil, err
-			}
-			caCertPool := x509.NewCertPool()
-			caCertPool.AppendCertsFromPEM(caCert)
-			creds = credentials.NewTLS(&tls.Config{
-				Certificates: []tls.Certificate{peerCert},
-				ClientCAs:    caCertPool,
-				ClientAuth:   tls.RequireAndVerifyClientCert,
-				//nolint:gosec
-				InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
-			})
-		}
-
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
-	}
-
-	if opts.inMemConn != nil {
-		dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
-			return opts.inMemConn.Dial()
-		}))
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(ctx, opts.DialAddress, dialOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	kvClient := remote.NewKVClient(conn)
+func (opts remoteOpts) Open() (*RemoteKV, error) {
 	db := &RemoteKV{
 		opts:     opts,
-		conn:     conn,
-		remoteKV: kvClient,
+		remoteKV: opts.remoteKV,
 		log:      log.New("remote_db", opts.DialAddress),
 		buckets:  kv.TableCfg{},
 	}
@@ -164,7 +87,7 @@ func (opts remoteOpts) Open(certFile, keyFile, caCert string) (*RemoteKV, error)
 }
 
 func (opts remoteOpts) MustOpen() kv.RwDB {
-	db, err := opts.Open("", "", "")
+	db, err := opts.Open()
 	if err != nil {
 		panic(err)
 	}
@@ -174,16 +97,12 @@ func (opts remoteOpts) MustOpen() kv.RwDB {
 // NewRemote defines new remove KV connection (without actually opening it)
 // version parameters represent the version the KV client is expecting,
 // compatibility check will be performed when the KV connection opens
-func NewRemote(v gointerfaces.Version, logger log.Logger) remoteOpts {
-	return remoteOpts{bucketsCfg: mdbx.WithChaindataTables, version: v, log: logger}
+func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remote.KVClient) remoteOpts {
+	return remoteOpts{bucketsCfg: mdbx.WithChaindataTables, version: v, log: logger, remoteKV: remoteKV}
 }
 
 func (db *RemoteKV) AllBuckets() kv.TableCfg {
 	return db.buckets
-}
-
-func (db *RemoteKV) GrpcConn() *grpc.ClientConn {
-	return db.conn
 }
 
 func (db *RemoteKV) EnsureVersionCompatibility() bool {
@@ -203,14 +122,6 @@ func (db *RemoteKV) EnsureVersionCompatibility() bool {
 }
 
 func (db *RemoteKV) Close() {
-	if db.conn != nil {
-		if err := db.conn.Close(); err != nil {
-			db.log.Warn("failed to close remote DB", "err", err)
-		} else {
-			db.log.Info("remote database closed")
-		}
-		db.conn = nil
-	}
 }
 
 func (db *RemoteKV) BeginRo(ctx context.Context) (kv.Tx, error) {

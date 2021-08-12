@@ -8,6 +8,7 @@ import (
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -98,16 +99,19 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	return content, nil
 }
 
-/*
-
 // Status returns the number of pending and queued transaction in the pool.
-func (s *PublicTxPoolAPI) Status() map[string]hexutil.Uint {
-	pending, queue := s.b.Stats()
-	return map[string]hexutil.Uint{
-		"pending": hexutil.Uint(pending),
-		"queued":  hexutil.Uint(queue),
+func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, error) {
+	reply, err := api.pool.Status(ctx, &proto_txpool.StatusRequest{})
+	if err != nil {
+		return nil, err
 	}
+	return map[string]hexutil.Uint{
+		"pending": hexutil.Uint(reply.PendingCount),
+		"queued":  hexutil.Uint(reply.QueuedCount),
+	}, nil
 }
+
+/*
 
 // Inspect retrieves the content of the transaction pool and flattens it into an
 // easily inspectable list.

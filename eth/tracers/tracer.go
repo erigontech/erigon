@@ -545,7 +545,7 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	if depth != 0 {
 		return nil
 	}
@@ -633,13 +633,13 @@ func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (jst *Tracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	if depth != 0 {
 		return nil
 	}
 	jst.ctx["output"] = output
 	jst.ctx["time"] = t.String()
-	jst.ctx["gasUsed"] = gasUsed
+	jst.ctx["gasUsed"] = startGas - endGas
 
 	if err != nil {
 		jst.ctx["error"] = err.Error()
