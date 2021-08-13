@@ -731,8 +731,6 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 }
 
 func (db *DB) commitCache(logit bool) {
-	db.kvCacheLock.Lock()
-	defer db.kvCacheLock.Unlock()
 	entriesUpdated := 0
 	entriesDeleted := 0
 	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
@@ -773,6 +771,8 @@ func (db *DB) Close() {
 	}
 	close(db.quit)
 	db.quit = nil
+	db.kvCacheLock.Lock()
+	defer db.kvCacheLock.Unlock()
 	db.commitCache(true /* logit */)
 	db.kv.Close()
 }
