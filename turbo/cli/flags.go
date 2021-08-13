@@ -49,7 +49,7 @@ var (
 	PrivateApiRateLimit = cli.IntFlag{
 		Name:  "private.api.ratelimit",
 		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
-		Value: 500,
+		Value: kv.ReadersLimit - 128,
 	}
 
 	MaxPeersFlag = cli.IntFlag{
