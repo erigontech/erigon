@@ -339,7 +339,6 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 }
 
 func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
@@ -363,6 +362,7 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		ot.r.Output = common.CopyBytes(output)
 	}
 	ignoreError := false
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.compat {
 		ignoreError = depth == 0 && topTrace.Type == CREATE
 	}
