@@ -107,7 +107,7 @@ Some methods, if not found historical data in DB, can fallback to old blocks re-
 
 ### RPC Implementation Status
 
-Label "remote" means: `--private.api.addr` flag is required.  
+Label "remote" means: `--private.api.addr` flag is required.
 
 The following table shows the current implementation status of Erigon's RPC daemon.
 
