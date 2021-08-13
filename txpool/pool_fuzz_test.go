@@ -258,7 +258,8 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		var prevTotal int
 
 		ch := make(chan Hashes, 100)
-		pool := New(ch)
+		pool, err := New(ch, nil)
+		assert.NoError(err)
 		pool.senderInfo = senders
 		pool.senderIDs = senderIDs
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
