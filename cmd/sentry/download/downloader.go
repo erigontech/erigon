@@ -593,7 +593,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
+		return fmt.Errorf("decode BlockBodiesPacket66: %v: %x", err, inreq.Data)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
 	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
