@@ -356,7 +356,7 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 				}
 				for addr, id := range p.senderIDs {
 					if id == i {
-					h	delete(p.senderIDs, addr)
+						delete(p.senderIDs, addr)
 					}
 				}
 				delete(p.senderInfo, i)
