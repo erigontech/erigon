@@ -703,11 +703,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil
@@ -740,11 +736,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil
@@ -772,11 +764,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil
@@ -804,11 +792,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	if err == nil || err == ErrExecutionReverted {
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil
