@@ -341,7 +341,13 @@ var ChaindataTables = []string{
 	PendingEpoch,
 }
 
-var TxPoolTables = []string{}
+const (
+	RecentLocalTransactions = "RecentLocalTransactions" // sequence_u64 -> tx_hash
+)
+
+var TxPoolTables = []string{
+	RecentLocalTransactions,
+}
 var SentryTables = []string{}
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
