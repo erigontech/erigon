@@ -194,6 +194,9 @@ func handShake(
 		if uint(reply.ProtocolVersion) < minVersion {
 			return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", reply.ProtocolVersion, minVersion)
 		}
+		if uint(reply.ProtocolVersion) > version {
+			return fmt.Errorf("version is more than what this senty supports: theirs %d, max %d", reply.ProtocolVersion, version)
+		}
 		if reply.Genesis != genesisHash {
 			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 		}

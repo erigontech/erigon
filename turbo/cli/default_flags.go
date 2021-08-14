@@ -34,6 +34,7 @@ var DefaultFlags = []cli.Flag{
 	BlockDownloaderWindowFlag,
 	DatabaseVerbosityFlag,
 	PrivateApiAddr,
+	PrivateApiRateLimit,
 	EtlBufferSizeFlag,
 	TLSFlag,
 	TLSCertFlag,
