@@ -152,7 +152,7 @@ func TestOnNewBlock(t *testing.T) {
 	pool := &PoolMock{}
 	fetch := NewFetch(ctx, nil, pool, stateChanges, db)
 	err := fetch.handleStateChanges(ctx, stateChanges)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
 	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.txs))
 }
