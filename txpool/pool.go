@@ -45,6 +45,8 @@ type Pool interface {
 	AddNewGoodPeer(peerID PeerID)
 }
 
+var _ Pool = (*TxPool)(nil) // compile-time interface check
+
 // SubPoolMarker ordered bitset responsible to sort transactions by sub-pools. Bits meaning:
 // 1. Minimum fee requirement. Set to 1 if feeCap of the transaction is no less than in-protocol parameter of minimal base fee. Set to 0 if feeCap is less than minimum base fee, which means this transaction will never be included into this particular chain.
 // 2. Absence of nonce gaps. Set to 1 for transactions whose nonce is N, state nonce for the sender is M, and there are transactions for all nonces between M and N from the same sender. Set to 0 is the transaction's nonce is divided from the state nonce by one or more nonce gaps.
@@ -214,7 +216,7 @@ func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 	}
 	return txn.subPool&IsLocal != 0
 }
-func (p *TxPool) OnNewPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
+func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 
 func (p *TxPool) Add(coreDB kv.Tx, newTxs TxSlots) error {
 	p.lock.Lock()
