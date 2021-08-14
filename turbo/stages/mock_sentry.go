@@ -110,8 +110,11 @@ func (ms *MockSentry) SendMessageToAll(_ context.Context, r *proto_sentry.Outbou
 func (ms *MockSentry) SentMessage(i int) *proto_sentry.OutboundMessageData {
 	return ms.sentMessages[i]
 }
+func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
+	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+}
 func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
-	return &proto_sentry.SetStatusReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+	return &proto_sentry.SetStatusReply{}, nil
 }
 func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_sentry.Sentry_MessagesServer) error {
 	if ms.streams == nil {
@@ -230,6 +233,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
+	mock.downloader.Start(mock.Ctx)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(
 			mock.Ctx, prune,
@@ -293,7 +297,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 				mock.StreamWg.Add(1)
-				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
 				go txpropagate.BroadcastPendingTxsToNetwork(mock.Ctx, txPool, mock.TxPoolP2PServer.RecentPeers, mock.downloader)
 				mock.StreamWg.Wait()
 				mock.TxPoolP2PServer.TxFetcher.Start()

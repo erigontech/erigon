@@ -265,10 +265,10 @@ func NewStagedSync(
 			stagedsync.StageTxPoolCfg(db, txPool, func() {
 				for i := range txPoolServer.Sentries {
 					go func(i int) {
-						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
+						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
 					}(i)
 					go func(i int) {
-						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.RecentPeers, nil)
+						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
 					}(i)
 				}
 				txPoolServer.TxFetcher.Start()

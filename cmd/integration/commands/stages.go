@@ -925,6 +925,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if err != nil {
 		panic(err)
 	}
+	go downloadServer.Start(context.Background())
 
 	txPoolP2PServer, err := txpool.NewP2PServer(context.Background(), nil, txPool)
 	if err != nil {

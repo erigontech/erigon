@@ -19,6 +19,7 @@ import (
 	debug2 "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -31,6 +32,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Methods of Core called by sentry
@@ -68,7 +70,7 @@ func RecvUploadMessageLoop(ctx context.Context,
 		default:
 		}
 
-		if err := SentryHandshake(ctx, sentry, cs); err != nil {
+		if err := SentryHandshake(ctx, sentry); err != nil {
 			log.Error("[RecvUploadMessage] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
@@ -150,7 +152,7 @@ func RecvMessageLoop(ctx context.Context,
 		default:
 		}
 
-		if err := SentryHandshake(ctx, sentry, cs); err != nil {
+		if err := SentryHandshake(ctx, sentry); err != nil {
 			log.Error("[RecvMessage] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
@@ -229,8 +231,8 @@ func RecvMessage(
 	}
 }
 
-func SentryHandshake(ctx context.Context, sentry remote.SentryClient, controlServer *ControlServerImpl) error {
-	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
+func SentryHandshake(ctx context.Context, sentry remote.SentryClient) error {
+	_, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 			return nil
@@ -284,13 +286,37 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error
-	err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		cs.headHeight, cs.headHash, cs.headTd, err = bd.UpdateFromDb(tx)
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		cs.headHeight, cs.headHash, cs.headTd, err = cs.Bd.UpdateFromDb(tx)
 		return err
 	})
 	return cs, err
 }
 
+// Start - blocking network-bounded func - to initialize ControlServer class and
+func (cs *ControlServerImpl) Start(ctx context.Context) {
+	wg := sync.WaitGroup{}
+	for i := range cs.sentries {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for {
+				_, err := cs.sentries[i].SetStatus(ctx, makeStatusData(cs), grpc.WaitForReady(true))
+				if err != nil {
+					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+						time.Sleep(time.Second)
+						continue
+					}
+					log.Warn("sentry.SetStatus", "err", err)
+					time.Sleep(time.Second)
+					continue
+				}
+				break
+			}
+		}(i)
+	}
+	wg.Wait()
+}
 func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
 	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
 		return nil
@@ -623,14 +649,14 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 		return fmt.Errorf("decoding getBlockHeaders66: %v, data: %x", err, inreq.Data)
 	}
 
-	tx, err := cs.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	headers, err := eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket)
-	tx.Rollback()
-	if err != nil {
+	var headers []*types.Header
+	if err := cs.db.View(ctx, func(tx kv.Tx) (err error) {
+		headers, err = eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
 	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
@@ -664,14 +690,14 @@ func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto
 		return fmt.Errorf("decoding getBlockHeaders65: %v, data: %x", err, inreq.Data)
 	}
 
-	tx, err := cs.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	headers, err := eth.AnswerGetBlockHeadersQuery(tx, &query)
-	tx.Rollback()
-	if err != nil {
+	var headers []*types.Header
+	if err := cs.db.View(ctx, func(tx kv.Tx) (err error) {
+		headers, err = eth.AnswerGetBlockHeadersQuery(tx, &query)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("querying BlockHeaders: %w", err)
 	}
 	b, err := rlp.EncodeToBytes(eth.BlockHeadersPacket(headers))
