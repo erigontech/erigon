@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/remotedb"
 	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	remote2 "github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -71,24 +71,31 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		sentryClients := make([]proto_sentry.SentryClient, len(sentryAddr))
+		sentryClients := make([]txpool.SentryClient, len(sentryAddr))
+		sentryClientsCasted := make([]proto_sentry.SentryClient, len(sentryAddr))
 		for i := range sentryAddr {
 			sentryConn, err := cli.ConnectCore(TLSCertfile, TLSKeyFile, TLSCACert, sentryAddr[i])
 			if err != nil {
 				return fmt.Errorf("could not connect to sentry: %w", err)
 			}
 
-			sentryClients[i] = remote2.NewSentryClientRemote(proto_sentry.NewSentryClient(sentryConn))
+			sentryClients[i] = direct.NewSentryClientRemote(proto_sentry.NewSentryClient(sentryConn))
+			sentryClientsCasted[i] = proto_sentry.SentryClient(sentryClients[i])
 		}
 
-		txPool, err := txpool.New(nil, txPoolDB)
+		newTxs := make(chan txpool.Hashes, 1)
+		txPool, err := txpool.New(newTxs, txPoolDB)
 		if err != nil {
 			return err
 		}
 
-		fetcher := txpool.NewFetch(cmd.Context(), sentryClients, nil, 1, nil, txPool, kvClient, coreDB)
+		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, kvClient, coreDB)
 		fetcher.ConnectCore()
 		fetcher.ConnectSentries()
+
+		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
+
+		txpool.BroadcastLoop(cmd.Context(), txPool, newTxs, send, txpool.DefaultTimings)
 		return nil
 	},
 }
