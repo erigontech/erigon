@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
@@ -26,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // P2PServer - receiving and sending messages to Sentries
@@ -260,7 +260,7 @@ func RecvTxMessageLoop(ctx context.Context, sentry direct.SentryClient, handleIn
 		default:
 		}
 
-		if err := download.SentryHandshake(ctx, sentry); err != nil {
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			log.Error("[RecvTxMessage] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
@@ -344,7 +344,7 @@ func RecvPeersLoop(ctx context.Context, sentry direct.SentryClient, recentPeers 
 		default:
 		}
 
-		if err := download.SentryHandshake(ctx, sentry); err != nil {
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			log.Error("[RecvPeers] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue

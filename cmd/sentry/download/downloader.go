@@ -165,7 +165,7 @@ func RecvMessageLoop(ctx context.Context,
 		default:
 		}
 
-		if err := SentryHandshake(ctx, sentry); err != nil {
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			log.Error("[RecvMessage] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
@@ -260,17 +260,6 @@ func RecvMessage(
 func SentrySetStatus(ctx context.Context, sentry direct.SentryClient, controlServer *ControlServerImpl) error {
 	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
 	return err
-}
-
-func SentryHandshake(ctx context.Context, sentry direct.SentryClient) error {
-	_, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-	if err != nil {
-		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-			return nil
-		}
-		return err
-	}
-	return nil
 }
 
 type ControlServerImpl struct {
