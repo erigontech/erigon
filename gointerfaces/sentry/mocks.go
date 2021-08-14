@@ -20,6 +20,9 @@ var _ SentryServer = &SentryServerMock{}
 //
 // 		// make and configure a mocked SentryServer
 // 		mockedSentryServer := &SentryServerMock{
+// 			HandShakeFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error) {
+// 				panic("mock out the HandShake method")
+// 			},
 // 			MessagesFunc: func(messagesRequest *MessagesRequest, sentry_MessagesServer Sentry_MessagesServer) error {
 // 				panic("mock out the Messages method")
 // 			},
@@ -60,6 +63,9 @@ var _ SentryServer = &SentryServerMock{}
 //
 // 	}
 type SentryServerMock struct {
+	// HandShakeFunc mocks the HandShake method.
+	HandShakeFunc func(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error)
+
 	// MessagesFunc mocks the Messages method.
 	MessagesFunc func(messagesRequest *MessagesRequest, sentry_MessagesServer Sentry_MessagesServer) error
 
@@ -95,6 +101,13 @@ type SentryServerMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// HandShake holds details about calls to the HandShake method.
+		HandShake []struct {
+			// ContextMoqParam is the contextMoqParam argument value.
+			ContextMoqParam context.Context
+			// Empty is the empty argument value.
+			Empty *emptypb.Empty
+		}
 		// Messages holds details about calls to the Messages method.
 		Messages []struct {
 			// MessagesRequest is the messagesRequest argument value.
@@ -169,6 +182,7 @@ type SentryServerMock struct {
 		mustEmbedUnimplementedSentryServer []struct {
 		}
 	}
+	lockHandShake                          sync.RWMutex
 	lockMessages                           sync.RWMutex
 	lockPeerCount                          sync.RWMutex
 	lockPeerMinBlock                       sync.RWMutex
@@ -180,6 +194,45 @@ type SentryServerMock struct {
 	lockSendMessageToRandomPeers           sync.RWMutex
 	lockSetStatus                          sync.RWMutex
 	lockmustEmbedUnimplementedSentryServer sync.RWMutex
+}
+
+// HandShake calls HandShakeFunc.
+func (mock *SentryServerMock) HandShake(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error) {
+	callInfo := struct {
+		ContextMoqParam context.Context
+		Empty           *emptypb.Empty
+	}{
+		ContextMoqParam: contextMoqParam,
+		Empty:           empty,
+	}
+	mock.lockHandShake.Lock()
+	mock.calls.HandShake = append(mock.calls.HandShake, callInfo)
+	mock.lockHandShake.Unlock()
+	if mock.HandShakeFunc == nil {
+		var (
+			handShakeReplyOut *HandShakeReply
+			errOut            error
+		)
+		return handShakeReplyOut, errOut
+	}
+	return mock.HandShakeFunc(contextMoqParam, empty)
+}
+
+// HandShakeCalls gets all the calls that were made to HandShake.
+// Check the length with:
+//     len(mockedSentryServer.HandShakeCalls())
+func (mock *SentryServerMock) HandShakeCalls() []struct {
+	ContextMoqParam context.Context
+	Empty           *emptypb.Empty
+} {
+	var calls []struct {
+		ContextMoqParam context.Context
+		Empty           *emptypb.Empty
+	}
+	mock.lockHandShake.RLock()
+	calls = mock.calls.HandShake
+	mock.lockHandShake.RUnlock()
+	return calls
 }
 
 // Messages calls MessagesFunc.
@@ -606,6 +659,9 @@ var _ SentryClient = &SentryClientMock{}
 //
 // 		// make and configure a mocked SentryClient
 // 		mockedSentryClient := &SentryClientMock{
+// 			HandShakeFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error) {
+// 				panic("mock out the HandShake method")
+// 			},
 // 			MessagesFunc: func(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error) {
 // 				panic("mock out the Messages method")
 // 			},
@@ -643,6 +699,9 @@ var _ SentryClient = &SentryClientMock{}
 //
 // 	}
 type SentryClientMock struct {
+	// HandShakeFunc mocks the HandShake method.
+	HandShakeFunc func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error)
+
 	// MessagesFunc mocks the Messages method.
 	MessagesFunc func(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error)
 
@@ -675,6 +734,15 @@ type SentryClientMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// HandShake holds details about calls to the HandShake method.
+		HandShake []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *emptypb.Empty
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
 		// Messages holds details about calls to the Messages method.
 		Messages []struct {
 			// Ctx is the ctx argument value.
@@ -766,6 +834,7 @@ type SentryClientMock struct {
 			Opts []grpc.CallOption
 		}
 	}
+	lockHandShake                sync.RWMutex
 	lockMessages                 sync.RWMutex
 	lockPeerCount                sync.RWMutex
 	lockPeerMinBlock             sync.RWMutex
@@ -776,6 +845,49 @@ type SentryClientMock struct {
 	lockSendMessageToAll         sync.RWMutex
 	lockSendMessageToRandomPeers sync.RWMutex
 	lockSetStatus                sync.RWMutex
+}
+
+// HandShake calls HandShakeFunc.
+func (mock *SentryClientMock) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *emptypb.Empty
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockHandShake.Lock()
+	mock.calls.HandShake = append(mock.calls.HandShake, callInfo)
+	mock.lockHandShake.Unlock()
+	if mock.HandShakeFunc == nil {
+		var (
+			handShakeReplyOut *HandShakeReply
+			errOut            error
+		)
+		return handShakeReplyOut, errOut
+	}
+	return mock.HandShakeFunc(ctx, in, opts...)
+}
+
+// HandShakeCalls gets all the calls that were made to HandShake.
+// Check the length with:
+//     len(mockedSentryClient.HandShakeCalls())
+func (mock *SentryClientMock) HandShakeCalls() []struct {
+	Ctx  context.Context
+	In   *emptypb.Empty
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *emptypb.Empty
+		Opts []grpc.CallOption
+	}
+	mock.lockHandShake.RLock()
+	calls = mock.calls.HandShake
+	mock.lockHandShake.RUnlock()
+	return calls
 }
 
 // Messages calls MessagesFunc.

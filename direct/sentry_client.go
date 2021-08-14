@@ -24,6 +24,7 @@ import (
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"google.golang.org/grpc"
 )
@@ -82,6 +83,9 @@ type SentryClientRemote struct {
 	ready    bool
 }
 
+var _ SentryClient = (*SentryClientRemote)(nil) // compile-time interface check
+var _ SentryClient = (*SentryClientDirect)(nil) // compile-time interface check
+
 // NewSentryClientRemote - app code must use this class
 // to avoid concurrency - it accepts protocol (which received async by SetStatus) in constructor,
 // means app can't use client which protocol unknown yet
@@ -107,12 +111,11 @@ func (c *SentryClientRemote) MarkDisconnected() {
 	c.ready = false
 }
 
-func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
-	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
+func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.HandShakeReply, error) {
+	reply, err := c.SentryClient.HandShake(ctx, in, opts...)
 	if err != nil {
 		return nil, err
 	}
-
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
@@ -124,6 +127,14 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusDat
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
 	c.ready = true
+	return reply, nil
+}
+func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
+	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
+	if err != nil {
+		return nil, err
+	}
+
 	return reply, nil
 }
 
@@ -183,6 +194,10 @@ func (c *SentryClientDirect) SendMessageToRandomPeers(ctx context.Context, in *s
 
 func (c *SentryClientDirect) SendMessageToAll(ctx context.Context, in *sentry.OutboundMessageData, opts ...grpc.CallOption) (*sentry.SentPeers, error) {
 	return c.server.SendMessageToAll(ctx, in)
+}
+
+func (c *SentryClientDirect) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.HandShakeReply, error) {
+	return c.server.HandShake(ctx, in)
 }
 
 func (c *SentryClientDirect) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {

@@ -8,7 +8,7 @@ fn config() -> prost_build::Config {
 fn make_protos(protos: &[&str]) {
     tonic_build::configure()
         .format(false)
-        .compile_with_config(config(), &protos, &["."])
+        .compile_with_config(config(), protos, &["."])
         .unwrap();
 }
 
@@ -33,12 +33,9 @@ fn main() {
     }
 
     if cfg!(feature = "txpool") {
+        protos.push("txpool/mining.proto");
         protos.push("txpool/txpool.proto");
         protos.push("txpool/txpool_control.proto");
-    }
-
-    if cfg!(feature = "consensus") {
-        protos.push("consensus_engine/consensus.proto");
     }
 
     make_protos(&protos);
