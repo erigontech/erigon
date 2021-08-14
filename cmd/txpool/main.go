@@ -34,7 +34,7 @@ var (
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
-	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9091", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
+	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)

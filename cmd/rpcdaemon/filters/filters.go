@@ -70,7 +70,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 					continue
 				}
-				if errors.Is(err, io.EOF) {
+				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 					continue
 				}
 
@@ -97,7 +97,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 						continue
 					}
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 						continue
 					}
 					log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
@@ -121,7 +121,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 						continue
 					}
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 						continue
 					}
 					log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
@@ -145,7 +145,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 						continue
 					}
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 						continue
 					}
 					log.Warn("rpc filters: error subscribing to pending logs", "err", err)
