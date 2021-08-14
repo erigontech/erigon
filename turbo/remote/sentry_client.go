@@ -9,6 +9,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"google.golang.org/grpc"
 )
@@ -52,12 +53,11 @@ func (c *SentryClientRemote) MarkDisconnected() {
 	c.ready = false
 }
 
-func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
-	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
+func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+	reply, err := c.SentryClient.HandShake(ctx, in, opts...)
 	if err != nil {
 		return nil, err
 	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch reply.Protocol {
@@ -69,6 +69,14 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.Sta
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
 	c.ready = true
+	return reply, nil
+}
+
+func (c *SentryClientRemote) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
+	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
+	if err != nil {
+		return nil, err
+	}
 	return reply, nil
 }
 
@@ -125,7 +133,9 @@ func (c *SentryClientDirect) SendMessageToRandomPeers(ctx context.Context, in *p
 func (c *SentryClientDirect) SendMessageToAll(ctx context.Context, in *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
 	return c.server.SendMessageToAll(ctx, in)
 }
-
+func (c *SentryClientDirect) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
+	return c.server.HandShake(ctx, in)
+}
 func (c *SentryClientDirect) SetStatus(ctx context.Context, in *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
 	return c.server.SetStatus(ctx, in)
 }

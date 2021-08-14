@@ -669,6 +669,8 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
+	go s.downloadServer.Start(s.downloadCtx)
+
 	for i := range s.sentries {
 		go func(i int) {
 			download.RecvMessageLoop(s.downloadCtx, s.sentries[i], s.downloadServer, nil)

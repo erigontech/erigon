@@ -252,12 +252,7 @@ func (tp *P2PServer) HandleInboundMessage(ctx context.Context, inreq *proto_sent
 	}
 }
 
-func RecvTxMessageLoop(ctx context.Context,
-	sentry remote.SentryClient,
-	cs *download.ControlServerImpl,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
-	wg *sync.WaitGroup,
-) {
+func RecvTxMessageLoop(ctx context.Context, sentry remote.SentryClient, handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error, wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -265,7 +260,7 @@ func RecvTxMessageLoop(ctx context.Context,
 		default:
 		}
 
-		if err := download.SentryHandshake(ctx, sentry, cs); err != nil {
+		if err := download.SentryHandshake(ctx, sentry); err != nil {
 			log.Error("[RecvTxMessage] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
@@ -341,12 +336,7 @@ func RecvTxMessage(ctx context.Context,
 	}
 }
 
-func RecvPeersLoop(ctx context.Context,
-	sentry remote.SentryClient,
-	cs *download.ControlServerImpl,
-	recentPeers *txpropagate.RecentlyConnectedPeers,
-	wg *sync.WaitGroup,
-) {
+func RecvPeersLoop(ctx context.Context, sentry remote.SentryClient, recentPeers *txpropagate.RecentlyConnectedPeers, wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -354,7 +344,7 @@ func RecvPeersLoop(ctx context.Context,
 		default:
 		}
 
-		if err := download.SentryHandshake(ctx, sentry, cs); err != nil {
+		if err := download.SentryHandshake(ctx, sentry); err != nil {
 			log.Error("[RecvPeers] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
