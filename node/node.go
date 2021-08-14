@@ -273,7 +273,7 @@ func (n *Node) openDataDir() error {
 		return nil // ephemeral
 	}
 
-	instdir := n.config.instanceDir()
+	instdir := n.config.DataDir
 	if err := os.MkdirAll(instdir, 0700); err != nil {
 		return err
 	}
@@ -475,7 +475,7 @@ func (n *Node) DataDir() string {
 
 // InstanceDir retrieves the instance directory used by the protocol stack.
 func (n *Node) InstanceDir() string {
-	return n.config.instanceDir()
+	return n.config.DataDir
 }
 
 // HTTPEndpoint returns the URL of the HTTP server. Note that this URL does not
@@ -507,7 +507,8 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		db = memdb.New()
 		return db, nil
 	}
-	dbPath := config.ResolvePath(name)
+
+	dbPath := filepath.Join(config.DataDir, name)
 
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)
