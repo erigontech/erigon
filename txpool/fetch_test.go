@@ -38,15 +38,11 @@ func TestFetch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var genesisHash [32]byte
-	var networkId uint64 = 1
-	forks := []uint64{1, 5, 10}
-
 	m := NewMockSentry(ctx)
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, genesisHash, networkId, forks, pool, &remote.KVClientMock{}, nil)
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, pool, &remote.KVClientMock{}, nil)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
@@ -140,8 +136,6 @@ func TestOnNewBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	db := memdb.NewTestDB(t)
-	var genesisHash [32]byte
-	var networkId uint64 = 1
 
 	i := 0
 	stream := &remote.KV_StateChangesClientMock{
@@ -159,7 +153,7 @@ func TestOnNewBlock(t *testing.T) {
 		},
 	}
 	pool := &PoolMock{}
-	fetch := NewFetch(ctx, nil, genesisHash, networkId, nil, pool, stateChanges, db)
+	fetch := NewFetch(ctx, nil, pool, stateChanges, db)
 	fetch.handleStateChanges(ctx, stateChanges)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
 	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.txs))
