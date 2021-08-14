@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -23,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -37,7 +37,7 @@ import (
 
 // Methods of Core called by sentry
 
-func GrpcSentryClient(ctx context.Context, sentryAddr string) (*remote.SentryClientRemote, error) {
+func GrpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 
@@ -55,11 +55,11 @@ func GrpcSentryClient(ctx context.Context, sentryAddr string) (*remote.SentryCli
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
 	}
-	return remote.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
+	return direct.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
 }
 
 func RecvUploadMessageLoop(ctx context.Context,
-	sentry remote.SentryClient,
+	sentry direct.SentryClient,
 	cs *ControlServerImpl,
 	wg *sync.WaitGroup,
 ) {
@@ -85,8 +85,8 @@ func RecvUploadMessageLoop(ctx context.Context,
 }
 
 func RecvUploadMessage(ctx context.Context,
-	sentry remote.SentryClient,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
+	sentry direct.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
 	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
@@ -141,7 +141,7 @@ func RecvUploadMessage(ctx context.Context,
 }
 
 func RecvMessageLoop(ctx context.Context,
-	sentry remote.SentryClient,
+	sentry direct.SentryClient,
 	cs *ControlServerImpl,
 	wg *sync.WaitGroup,
 ) {
@@ -171,8 +171,8 @@ func RecvMessageLoop(ctx context.Context,
 // wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil
 func RecvMessage(
 	ctx context.Context,
-	sentry remote.SentryClient,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error,
+	sentry direct.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
 	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
@@ -231,7 +231,7 @@ func RecvMessage(
 	}
 }
 
-func SentryHandshake(ctx context.Context, sentry remote.SentryClient) error {
+func SentryHandshake(ctx context.Context, sentry direct.SentryClient) error {
 	_, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
@@ -247,7 +247,7 @@ type ControlServerImpl struct {
 	Hd          *headerdownload.HeaderDownload
 	Bd          *bodydownload.BodyDownload
 	nodeName    string
-	sentries    []remote.SentryClient
+	sentries    []direct.SentryClient
 	headHeight  uint64
 	headHash    common.Hash
 	headTd      *uint256.Int
@@ -259,7 +259,7 @@ type ControlServerImpl struct {
 	Engine      consensus.Engine
 }
 
-func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []remote.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient, window int) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -317,7 +317,7 @@ func (cs *ControlServerImpl) Start(ctx context.Context) {
 	}
 	wg.Wait()
 }
-func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
 		return nil
 	}
@@ -362,7 +362,7 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 	return nil
 }
 
-func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
 		return nil
 	}
@@ -404,7 +404,7 @@ func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_se
 	return nil
 }
 
-func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
@@ -485,7 +485,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 	return nil
 }
 
-func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the BlockHeadersPacket, which is list of headers
@@ -560,11 +560,11 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 	return nil
 }
 
-func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	return cs.newBlock65(ctx, inreq, sentry)
 }
 
-func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
@@ -616,7 +616,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	return nil
 }
 
-func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
@@ -626,7 +626,7 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 	return nil
 }
 
-func (cs *ControlServerImpl) blockBodies65(inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) blockBodies65(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode blockBodies65: %v", err)
@@ -636,14 +636,14 @@ func (cs *ControlServerImpl) blockBodies65(inreq *proto_sentry.InboundMessage, s
 	return nil
 }
 
-func (cs *ControlServerImpl) receipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) receipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	return nil
 }
-func (cs *ControlServerImpl) receipts65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) receipts65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockHeaders66: %v, data: %x", err, inreq.Data)
@@ -684,7 +684,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockHeadersPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockHeaders65: %v, data: %x", err, inreq.Data)
@@ -721,7 +721,7 @@ func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockBodies66: %v, data: %x", err, inreq.Data)
@@ -758,7 +758,7 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockBodiesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockBodies65: %v, data: %x", err, inreq.Data)
@@ -792,7 +792,7 @@ func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_
 	return nil
 }
 
-func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %v, data: %x", err, inreq.Data)
@@ -832,7 +832,7 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 	return nil
 }
 
-func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetReceiptsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts65: %v, data: %x", err, inreq.Data)
@@ -869,7 +869,7 @@ func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sen
 	return nil
 }
 
-func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry remote.SentryClient) error {
+func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	switch inreq.Id {
 	// ========= eth 65 ==========
 	case proto_sentry.MessageId_GET_BLOCK_HEADERS_65:
