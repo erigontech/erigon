@@ -70,13 +70,26 @@ func RecvUploadMessageLoop(ctx context.Context,
 		default:
 		}
 
-		if err := SentryHandshake(ctx, sentry); err != nil {
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
+			log.Error("[RecvUploadMessage] sentry not ready yet", "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
+		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
 			log.Error("[RecvUploadMessage] sentry not ready yet", "err", err)
 			time.Sleep(time.Second)
 			continue
 		}
 		if err := RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
 			if isPeerNotFoundErr(err) {
+				continue
+			}
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				time.Sleep(time.Second)
+				continue
+			}
+			if errors.Is(err, io.EOF) {
+				time.Sleep(time.Second)
 				continue
 			}
 			log.Error("[RecvUploadMessage]", "err", err)
@@ -157,8 +170,21 @@ func RecvMessageLoop(ctx context.Context,
 			time.Sleep(time.Second)
 			continue
 		}
+		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
+			log.Error("[RecvUploadMessage] sentry not ready yet", "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
 		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
 			if isPeerNotFoundErr(err) {
+				continue
+			}
+			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				time.Sleep(time.Second)
+				continue
+			}
+			if errors.Is(err, io.EOF) {
+				time.Sleep(time.Second)
 				continue
 			}
 			log.Error("[RecvMessage]", "err", err)
@@ -229,6 +255,11 @@ func RecvMessage(
 			wg.Done()
 		}
 	}
+}
+
+func SentrySetStatus(ctx context.Context, sentry direct.SentryClient, controlServer *ControlServerImpl) error {
+	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer), grpc.WaitForReady(true))
+	return err
 }
 
 func SentryHandshake(ctx context.Context, sentry direct.SentryClient) error {
