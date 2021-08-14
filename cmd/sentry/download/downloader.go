@@ -92,14 +92,6 @@ func RecvUploadMessageLoop(ctx context.Context,
 			if isPeerNotFoundErr(err) {
 				continue
 			}
-			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-				time.Sleep(time.Second)
-				continue
-			}
-			if errors.Is(err, io.EOF) {
-				time.Sleep(time.Second)
-				continue
-			}
 			s, ok := status.FromError(err)
 			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				time.Sleep(time.Second)
@@ -168,10 +160,6 @@ func RecvMessageLoop(ctx context.Context,
 		}
 
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-				time.Sleep(time.Second)
-				continue
-			}
 			s, ok := status.FromError(err)
 			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
 				time.Sleep(time.Second)
@@ -187,27 +175,10 @@ func RecvMessageLoop(ctx context.Context,
 				continue
 			}
 			log.Warn("[RecvMessage] sentry not ready yet", "err", err)
-			continue
-		}
-		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
-			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-				time.Sleep(time.Second)
-				continue
-			}
-			log.Error("[RecvUploadMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
 			continue
 		}
 		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
 			if isPeerNotFoundErr(err) {
-				continue
-			}
-			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-				time.Sleep(time.Second)
-				continue
-			}
-			if errors.Is(err, io.EOF) {
-				time.Sleep(time.Second)
 				continue
 			}
 			s, ok := status.FromError(err)
