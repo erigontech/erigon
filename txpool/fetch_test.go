@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -65,13 +64,11 @@ func TestFetch(t *testing.T) {
 }
 
 func TestSendTxPropagate(t *testing.T) {
-	logger := log.New()
-
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 	t.Run("few remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		send.BroadcastRemotePooledTxs(toHashes([32]byte{1}, [32]byte{42}))
 
 		calls := m.SendMessageToRandomPeersCalls()
@@ -82,7 +79,7 @@ func TestSendTxPropagate(t *testing.T) {
 	})
 	t.Run("much remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
-		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
@@ -102,7 +99,7 @@ func TestSendTxPropagate(t *testing.T) {
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
-		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		send.BroadcastLocalPooledTxs(toHashes([32]byte{1}, [32]byte{42}))
 
 		calls := m.SendMessageToAllCalls()
@@ -117,7 +114,7 @@ func TestSendTxPropagate(t *testing.T) {
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
 			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
-		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil, logger)
+		send := NewSend(ctx, []SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		expectPeers := toPeerIDs(1, 2, 42)
 		send.PropagatePooledTxsToPeersList(expectPeers, toHashes([32]byte{1}, [32]byte{42}))
 
