@@ -38,16 +38,14 @@ type Send struct {
 	sentryClients []SentryClient // sentry clients that will be used for accessing the network
 	pool          Pool
 
-	logger log.Logger
-	wg     *sync.WaitGroup
+	wg *sync.WaitGroup
 }
 
-func NewSend(ctx context.Context, sentryClients []SentryClient, pool Pool, logger log.Logger) *Send {
+func NewSend(ctx context.Context, sentryClients []SentryClient, pool Pool) *Send {
 	return &Send{
 		ctx:           ctx,
 		pool:          pool,
 		sentryClients: sentryClients,
-		logger:        logger.New("at", "TxPool.Send"),
 	}
 }
 
@@ -102,7 +100,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req65, &grpc.EmptyCallOption{})
 				if err != nil {
-					f.logger.Warn("sentry response", "err", err)
+					log.Warn("[txpool.send] BroadcastLocalPooledTxs", "err", err)
 				}
 				avgPeersPerSent65 += len(peers.Peers)
 
@@ -115,7 +113,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 				}
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
-					f.logger.Warn("sentry response", "err", err)
+					log.Warn("[txpool.send] BroadcastLocalPooledTxs", "err", err)
 				}
 				avgPeersPerSent66 += len(peers.Peers)
 			}
@@ -161,7 +159,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 				}
 
 				if _, err := sentryClient.SendMessageToRandomPeers(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-					f.logger.Warn("sentry response", "err", err)
+					log.Warn("[txpool.send] BroadcastRemotePooledTxs", "err", err)
 				}
 
 			case direct.ETH66:
@@ -175,7 +173,7 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 					}
 				}
 				if _, err := sentryClient.SendMessageToRandomPeers(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-					f.logger.Warn("sentry response", "err", err)
+					log.Warn("[txpool.send] BroadcastRemotePooledTxs", "err", err)
 				}
 			}
 		}
@@ -217,7 +215,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 					}
 
 					if _, err := sentryClient.SendMessageById(f.ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-						f.logger.Warn("sentry response", "err", err)
+						log.Warn("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
 					}
 
 				case direct.ETH66:
@@ -229,7 +227,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 						},
 					}
 					if _, err := sentryClient.SendMessageById(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-						f.logger.Warn("sentry response", "err", err)
+						log.Warn("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
 					}
 				}
 			}

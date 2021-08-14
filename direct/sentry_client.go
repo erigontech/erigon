@@ -130,12 +130,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	return reply, nil
 }
 func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
-	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	return reply, nil
+	return c.SentryClient.SetStatus(ctx, in, opts...)
 }
 
 func (c *SentryClientRemote) Messages(ctx context.Context, in *sentry.MessagesRequest, opts ...grpc.CallOption) (sentry.Sentry_MessagesClient, error) {

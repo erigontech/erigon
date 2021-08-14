@@ -29,6 +29,7 @@ import (
 	"github.com/hashicorp/golang-lru/simplelru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 )
 
@@ -160,6 +161,11 @@ func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
 	}, nil
 }
 
+func (p *TxPool) logStats() {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	log.Info(fmt.Sprintf("[txpool] queues size: pending=%d/%d, baseFee=%d/%d, queued=%d/%d", p.pending.Len(), PendingSubPoolLimit, p.baseFee.Len(), BaseFeeSubPoolLimit, p.pending.Len(), PendingSubPoolLimit))
+}
 func (p *TxPool) GetRlp(hash []byte) []byte {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -837,14 +843,11 @@ func (p *WorstQueue) Pop() interface{} {
 // promote/demote transactions
 // reorgs
 func BroadcastLoop(ctx context.Context, p *TxPool, newTxs chan Hashes, send *Send, timings Timings) {
-	propagateAllNewTxsEvery := time.NewTicker(timings.propagateAllNewTxsEvery)
-	defer propagateAllNewTxsEvery.Stop()
+	logEvery := time.NewTicker(timings.logEvery)
+	defer logEvery.Stop()
 
 	syncToNewPeersEvery := time.NewTicker(timings.syncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
-
-	broadcastLocalTransactionsEvery := time.NewTicker(timings.broadcastLocalTransactionsEvery)
-	defer broadcastLocalTransactionsEvery.Stop()
 
 	localTxHashes := make([]byte, 0, 128)
 	remoteTxHashes := make([]byte, 0, 128)
@@ -853,6 +856,8 @@ func BroadcastLoop(ctx context.Context, p *TxPool, newTxs chan Hashes, send *Sen
 		select {
 		case <-ctx.Done():
 			return
+		case <-logEvery.C:
+			p.logStats()
 		case h := <-newTxs:
 			// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
 			localTxHashes = localTxHashes[:0]
@@ -879,6 +884,7 @@ func BroadcastLoop(ctx context.Context, p *TxPool, newTxs chan Hashes, send *Sen
 	}
 }
 
+// commitIsLocalHistory - use u64 sequence as keys to preserve order
 func commitIsLocalHistory(db kv.RwDB, commited time.Time, localsHistory *simplelru.LRU) error {
 	if db == nil || time.Since(commited) < 30*time.Second {
 		return nil

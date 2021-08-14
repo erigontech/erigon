@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -33,6 +32,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Fetch connects to sentry and implements eth/65 or eth/66 protocol regarding the transaction
@@ -42,7 +42,6 @@ import (
 type Fetch struct {
 	ctx                context.Context       // Context used for cancellation and closing of the fetcher
 	sentryClients      []sentry.SentryClient // sentry clients that will be used for accessing the network
-	statusData         *sentry.StatusData    // Status data used for "handshaking" with sentries
 	pool               Pool                  // Transaction pool implementation
 	coreDB             kv.RoDB
 	wg                 *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
@@ -50,35 +49,22 @@ type Fetch struct {
 }
 
 type Timings struct {
-	propagateAllNewTxsEvery         time.Duration
-	syncToNewPeersEvery             time.Duration
-	broadcastLocalTransactionsEvery time.Duration
+	syncToNewPeersEvery time.Duration
+	logEvery            time.Duration
 }
 
 var DefaultTimings = Timings{
-	propagateAllNewTxsEvery:         5 * time.Second,
-	broadcastLocalTransactionsEvery: 2 * time.Minute,
-	syncToNewPeersEvery:             2 * time.Minute,
+	syncToNewPeersEvery: 2 * time.Minute,
+	logEvery:            30 * time.Second,
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, genesisHash [32]byte, networkId uint64, forks []uint64, pool Pool, stateChangesClient remote.KVClient, db kv.RoDB) *Fetch {
-	statusData := &sentry.StatusData{
-		NetworkId:       networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(0)),
-		BestHash:        gointerfaces.ConvertHashToH256(genesisHash),
-		MaxBlock:        0,
-		ForkData: &sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(genesisHash),
-			Forks:   forks,
-		},
-	}
+func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, stateChangesClient remote.KVClient, db kv.RoDB) *Fetch {
 	return &Fetch{
 		ctx:                ctx,
 		sentryClients:      sentryClients,
-		statusData:         statusData,
 		pool:               pool,
 		coreDB:             db,
 		stateChangesClient: stateChangesClient,
@@ -108,7 +94,15 @@ func (f *Fetch) ConnectCore() {
 				return
 			default:
 			}
-			f.handleStateChanges(f.ctx, f.stateChangesClient)
+			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
+				s, ok := status.FromError(err)
+				retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
+				if retryLater {
+					time.Sleep(time.Second)
+					continue
+				}
+				log.Warn("[txpool.handleStateChanges]", "err", err)
+			}
 		}
 	}()
 }
@@ -120,8 +114,7 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 			return
 		default:
 		}
-		_, err := sentryClient.SetStatus(f.ctx, f.statusData, grpc.WaitForReady(true))
-		if err != nil {
+		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			s, ok := status.FromError(err)
 			retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
 			if retryLater {
@@ -301,8 +294,7 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 			return
 		default:
 		}
-		_, err := sentryClient.SetStatus(f.ctx, f.statusData, grpc.WaitForReady(true))
-		if err != nil {
+		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			s, ok := status.FromError(err)
 			retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
 			if retryLater {
@@ -371,41 +363,19 @@ func (f *Fetch) handleNewPeer(req *sentry.PeersReply) error {
 	return nil
 }
 
-func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) {
+func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := client.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		s, ok := status.FromError(err)
-		terminated := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF)
-		if terminated {
-			return
-		}
-		time.Sleep(time.Second)
-		log.Warn("state changes", "err", err)
+		return err
 	}
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			s, ok := status.FromError(err)
-			terminated := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF)
-			if terminated {
-				return
-			}
-			log.Warn("stream.Recv", "err", err)
-			return
+			return err
 		}
 		if req == nil {
-			return
+			return nil
 		}
 
 		parseCtx := NewTxParseContext()
