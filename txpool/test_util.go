@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 //go:generate moq -stub -out mocks_test.go . Pool
@@ -54,7 +55,10 @@ func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
 }
 
 func (ms *MockSentry) SetStatus(context.Context, *sentry.StatusData) (*sentry.SetStatusReply, error) {
-	return &sentry.SetStatusReply{Protocol: sentry.Protocol_ETH66}, nil
+	return &sentry.SetStatusReply{}, nil
+}
+func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentry.HandShakeReply, error) {
+	return &sentry.HandShakeReply{Protocol: sentry.Protocol_ETH66}, nil
 }
 func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry_MessagesServer) error {
 	ms.lock.Lock()

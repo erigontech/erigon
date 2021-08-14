@@ -4,9 +4,8 @@
 package txpool
 
 import (
-	"sync"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"sync"
 )
 
 // Ensure, that PoolMock does implement Pool.

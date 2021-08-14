@@ -19,13 +19,17 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentryClient interface {
+	// SetStatus - force new ETH client state of sentry - network_id, max_block, etc...
+	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error)
 	PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// HandShake - pre-requirement for all Send* methods - returns ETH protocol version,
+	// without knowledge of protocol - impossible encode correct P2P message
+	HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error)
 	SendMessageByMinBlock(ctx context.Context, in *SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageById(ctx context.Context, in *SendMessageByIdRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageToRandomPeers(ctx context.Context, in *SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*SentPeers, error)
 	SendMessageToAll(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error)
-	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error)
 	// Subscribe to receive messages.
 	// Calling multiple times with a different set of ids starts separate streams.
 	// It is possible to subscribe to the same set if ids more than once.
@@ -43,6 +47,15 @@ func NewSentryClient(cc grpc.ClientConnInterface) SentryClient {
 	return &sentryClient{cc}
 }
 
+func (c *sentryClient) SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error) {
+	out := new(SetStatusReply)
+	err := c.cc.Invoke(ctx, "/sentry.Sentry/SetStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sentryClient) PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/PenalizePeer", in, out, opts...)
@@ -55,6 +68,15 @@ func (c *sentryClient) PenalizePeer(ctx context.Context, in *PenalizePeerRequest
 func (c *sentryClient) PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/PeerMinBlock", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentryClient) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error) {
+	out := new(HandShakeReply)
+	err := c.cc.Invoke(ctx, "/sentry.Sentry/HandShake", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -91,15 +113,6 @@ func (c *sentryClient) SendMessageToRandomPeers(ctx context.Context, in *SendMes
 func (c *sentryClient) SendMessageToAll(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error) {
 	out := new(SentPeers)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/SendMessageToAll", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *sentryClient) SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error) {
-	out := new(SetStatusReply)
-	err := c.cc.Invoke(ctx, "/sentry.Sentry/SetStatus", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -183,13 +196,17 @@ func (x *sentryPeersClient) Recv() (*PeersReply, error) {
 // All implementations must embed UnimplementedSentryServer
 // for forward compatibility
 type SentryServer interface {
+	// SetStatus - force new ETH client state of sentry - network_id, max_block, etc...
+	SetStatus(context.Context, *StatusData) (*SetStatusReply, error)
 	PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error)
 	PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error)
+	// HandShake - pre-requirement for all Send* methods - returns ETH protocol version,
+	// without knowledge of protocol - impossible encode correct P2P message
+	HandShake(context.Context, *emptypb.Empty) (*HandShakeReply, error)
 	SendMessageByMinBlock(context.Context, *SendMessageByMinBlockRequest) (*SentPeers, error)
 	SendMessageById(context.Context, *SendMessageByIdRequest) (*SentPeers, error)
 	SendMessageToRandomPeers(context.Context, *SendMessageToRandomPeersRequest) (*SentPeers, error)
 	SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error)
-	SetStatus(context.Context, *StatusData) (*SetStatusReply, error)
 	// Subscribe to receive messages.
 	// Calling multiple times with a different set of ids starts separate streams.
 	// It is possible to subscribe to the same set if ids more than once.
@@ -204,11 +221,17 @@ type SentryServer interface {
 type UnimplementedSentryServer struct {
 }
 
+func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*SetStatusReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetStatus not implemented")
+}
 func (UnimplementedSentryServer) PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PenalizePeer not implemented")
 }
 func (UnimplementedSentryServer) PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PeerMinBlock not implemented")
+}
+func (UnimplementedSentryServer) HandShake(context.Context, *emptypb.Empty) (*HandShakeReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HandShake not implemented")
 }
 func (UnimplementedSentryServer) SendMessageByMinBlock(context.Context, *SendMessageByMinBlockRequest) (*SentPeers, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessageByMinBlock not implemented")
@@ -221,9 +244,6 @@ func (UnimplementedSentryServer) SendMessageToRandomPeers(context.Context, *Send
 }
 func (UnimplementedSentryServer) SendMessageToAll(context.Context, *OutboundMessageData) (*SentPeers, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SendMessageToAll not implemented")
-}
-func (UnimplementedSentryServer) SetStatus(context.Context, *StatusData) (*SetStatusReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SetStatus not implemented")
 }
 func (UnimplementedSentryServer) Messages(*MessagesRequest, Sentry_MessagesServer) error {
 	return status.Errorf(codes.Unimplemented, "method Messages not implemented")
@@ -245,6 +265,24 @@ type UnsafeSentryServer interface {
 
 func RegisterSentryServer(s grpc.ServiceRegistrar, srv SentryServer) {
 	s.RegisterService(&Sentry_ServiceDesc, srv)
+}
+
+func _Sentry_SetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StatusData)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).SetStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentry.Sentry/SetStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).SetStatus(ctx, req.(*StatusData))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Sentry_PenalizePeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -279,6 +317,24 @@ func _Sentry_PeerMinBlock_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SentryServer).PeerMinBlock(ctx, req.(*PeerMinBlockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Sentry_HandShake_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).HandShake(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentry.Sentry/HandShake",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).HandShake(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -355,24 +411,6 @@ func _Sentry_SendMessageToAll_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Sentry_SetStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StatusData)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SentryServer).SetStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/sentry.Sentry/SetStatus",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SentryServer).SetStatus(ctx, req.(*StatusData))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Sentry_Messages_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(MessagesRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -441,12 +479,20 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*SentryServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
+			MethodName: "SetStatus",
+			Handler:    _Sentry_SetStatus_Handler,
+		},
+		{
 			MethodName: "PenalizePeer",
 			Handler:    _Sentry_PenalizePeer_Handler,
 		},
 		{
 			MethodName: "PeerMinBlock",
 			Handler:    _Sentry_PeerMinBlock_Handler,
+		},
+		{
+			MethodName: "HandShake",
+			Handler:    _Sentry_HandShake_Handler,
 		},
 		{
 			MethodName: "SendMessageByMinBlock",
@@ -463,10 +509,6 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendMessageToAll",
 			Handler:    _Sentry_SendMessageToAll_Handler,
-		},
-		{
-			MethodName: "SetStatus",
-			Handler:    _Sentry_SetStatus_Handler,
 		},
 		{
 			MethodName: "PeerCount",
