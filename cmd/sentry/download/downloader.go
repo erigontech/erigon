@@ -93,7 +93,7 @@ func RecvUploadMessageLoop(ctx context.Context,
 				continue
 			}
 			s, ok := status.FromError(err)
-			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				time.Sleep(time.Second)
 				continue
 			}
@@ -301,30 +301,6 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 	return cs, err
 }
 
-// Start - blocking network-bounded func - to initialize ControlServer class and
-func (cs *ControlServerImpl) Start(ctx context.Context) {
-	wg := sync.WaitGroup{}
-	for i := range cs.sentries {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			for {
-				_, err := cs.sentries[i].SetStatus(ctx, makeStatusData(cs), grpc.WaitForReady(true))
-				if err != nil {
-					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-						time.Sleep(time.Second)
-						continue
-					}
-					log.Warn("sentry.SetStatus", "err", err)
-					time.Sleep(time.Second)
-					continue
-				}
-				break
-			}
-		}(i)
-	}
-	wg.Wait()
-}
 func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
 		return nil
