@@ -70,8 +70,21 @@ func RecvUploadMessageLoop(ctx context.Context,
 		default:
 		}
 
-		if err := SentryHandshake(ctx, sentry); err != nil {
-			log.Error("[RecvUploadMessage] sentry not ready yet", "err", err)
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
+			s, ok := status.FromError(err)
+			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			if doLog {
+				log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
+			s, ok := status.FromError(err)
+			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			if doLog {
+				log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
+			}
 			time.Sleep(time.Second)
 			continue
 		}
@@ -79,7 +92,13 @@ func RecvUploadMessageLoop(ctx context.Context,
 			if isPeerNotFoundErr(err) {
 				continue
 			}
-			log.Error("[RecvUploadMessage]", "err", err)
+			s, ok := status.FromError(err)
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+				time.Sleep(time.Second)
+				continue
+			}
+			log.Warn("[RecvUploadMessage]", "err", err)
+			continue
 		}
 	}
 }
@@ -103,12 +122,6 @@ func RecvUploadMessage(ctx context.Context,
 		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
 	}}, grpc.WaitForReady(true))
 	if err != nil {
-		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-			return
-		}
-		if errors.Is(err, io.EOF) {
-			return
-		}
 		return err
 	}
 	var req *proto_sentry.InboundMessage
@@ -118,12 +131,6 @@ func RecvUploadMessage(ctx context.Context,
 			case <-ctx.Done():
 				return
 			default:
-			}
-			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-				return
-			}
-			if errors.Is(err, io.EOF) {
-				return
 			}
 			return err
 		}
@@ -152,16 +159,35 @@ func RecvMessageLoop(ctx context.Context,
 		default:
 		}
 
-		if err := SentryHandshake(ctx, sentry); err != nil {
-			log.Error("[RecvMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
+			s, ok := status.FromError(err)
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+				time.Sleep(time.Second)
+				continue
+			}
+			log.Warn("[RecvMessage] sentry not ready yet", "err", err)
+			continue
+		}
+		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
+			s, ok := status.FromError(err)
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+				time.Sleep(time.Second)
+				continue
+			}
+			log.Warn("[RecvMessage] sentry not ready yet", "err", err)
 			continue
 		}
 		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
 			if isPeerNotFoundErr(err) {
 				continue
 			}
-			log.Error("[RecvMessage]", "err", err)
+			s, ok := status.FromError(err)
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+				time.Sleep(time.Second)
+				continue
+			}
+			log.Warn("[RecvMessage]", "err", err)
+			continue
 		}
 	}
 }
@@ -192,12 +218,6 @@ func RecvMessage(
 		eth.ToProto[eth.ETH66][eth.NewBlockMsg],
 	}}, grpc.WaitForReady(true))
 	if err != nil {
-		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-			return
-		}
-		if errors.Is(err, io.EOF) {
-			return
-		}
 		return err
 	}
 
@@ -208,12 +228,6 @@ func RecvMessage(
 			case <-ctx.Done():
 				return
 			default:
-			}
-			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-				return
-			}
-			if errors.Is(err, io.EOF) {
-				return
 			}
 			return err
 		}
@@ -231,15 +245,9 @@ func RecvMessage(
 	}
 }
 
-func SentryHandshake(ctx context.Context, sentry direct.SentryClient) error {
-	_, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-	if err != nil {
-		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-			return nil
-		}
-		return err
-	}
-	return nil
+func SentrySetStatus(ctx context.Context, sentry direct.SentryClient, controlServer *ControlServerImpl) error {
+	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer))
+	return err
 }
 
 type ControlServerImpl struct {
