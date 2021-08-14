@@ -108,7 +108,7 @@ func (c *SentryClientRemote) MarkDisconnected() {
 	c.ready = false
 }
 
-func (c *SentryClientRemote) HanHhake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.HandShakeReply, error) {
+func (c *SentryClientRemote) HanShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.HandShakeReply, error) {
 	reply, err := c.SentryClient.HandShake(ctx, in, opts...)
 	if err != nil {
 		return nil, err
