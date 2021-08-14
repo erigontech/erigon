@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -60,7 +61,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
@@ -110,7 +110,7 @@ type Ethereum struct {
 	downloadServer  *download.ControlServerImpl
 	sentryServers   []*download.SentryServerImpl
 	txPoolP2PServer *txpool.P2PServer
-	sentries        []remote.SentryClient
+	sentries        []direct.SentryClient
 	stagedSync      *stagedsync.Sync
 
 	notifications *stagedsync.Notifications
@@ -192,7 +192,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
-		sentries:             []remote.SentryClient{},
+		sentries:             []direct.SentryClient{},
 		notifications: &stagedsync.Notifications{
 			Events:      privateapi.NewEvents(),
 			Accumulator: &shards.Accumulator{},
@@ -380,7 +380,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg66.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth66")
 		server66 := download.NewSentryServer(backend.downloadCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
-		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
+		backend.sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
 		cfg65 := stack.Config().P2P
 		cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
 		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
@@ -390,7 +390,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg65.ListenAddr = cfg65.ListenAddr65
 		server65 := download.NewSentryServer(backend.downloadCtx, d65, readNodeInfo, &cfg65, eth.ETH65)
 		backend.sentryServers = append(backend.sentryServers, server65)
-		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
+		backend.sentries = append(backend.sentries, direct.NewSentryClientDirect(eth.ETH65, server65))
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()

@@ -19,6 +19,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
@@ -817,18 +818,22 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
-	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
-
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
-	reply := &proto_sentry.SetStatusReply{}
+func (ss *SentryServerImpl) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
+	reply := &proto_sentry.HandShakeReply{}
 	switch ss.Protocol.Version {
 	case eth.ETH66:
 		reply.Protocol = proto_sentry.Protocol_ETH66
 	case eth.ETH65:
 		reply.Protocol = proto_sentry.Protocol_ETH65
 	}
+	return reply, nil
+}
+func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
+	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
+
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	reply := &proto_sentry.SetStatusReply{}
 
 	if ss.P2pServer == nil {
 		var err error
