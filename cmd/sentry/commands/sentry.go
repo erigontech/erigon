@@ -41,7 +41,7 @@ func init() {
 	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
 `)
 	rootCmd.Flags().IntVar(&port, "port", 30303, "p2p port number")
-	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
+	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
 	rootCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth65|eth66")
 	rootCmd.Flags().StringSliceVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
 	rootCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)

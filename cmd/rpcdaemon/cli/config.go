@@ -189,7 +189,7 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 	if cfg.PrivateApiAddr != "" {
-		conn, err := connectErigon(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, cfg.PrivateApiAddr)
+		conn, err := ConnectCore(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, cfg.PrivateApiAddr)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
@@ -224,7 +224,7 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 	return db, eth, txPool, mining, err
 }
 
-func connectErigon(certFile, keyFile, caCert string, dialAddress string) (*grpc.ClientConn, error) {
+func ConnectCore(certFile, keyFile, caCert string, dialAddress string) (*grpc.ClientConn, error) {
 	var dialOpts []grpc.DialOption
 
 	backoffCfg := backoff.DefaultConfig

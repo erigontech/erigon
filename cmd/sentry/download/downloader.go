@@ -72,7 +72,7 @@ func RecvUploadMessageLoop(ctx context.Context,
 
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			s, ok := status.FromError(err)
-			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
 			if doLog {
 				log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
 			}
@@ -81,7 +81,7 @@ func RecvUploadMessageLoop(ctx context.Context,
 		}
 		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
 			s, ok := status.FromError(err)
-			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
 			if doLog {
 				log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
 			}
@@ -161,7 +161,7 @@ func RecvMessageLoop(ctx context.Context,
 
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			s, ok := status.FromError(err)
-			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				time.Sleep(time.Second)
 				continue
 			}
@@ -170,7 +170,7 @@ func RecvMessageLoop(ctx context.Context,
 		}
 		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
 			s, ok := status.FromError(err)
-			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				time.Sleep(time.Second)
 				continue
 			}
@@ -182,7 +182,7 @@ func RecvMessageLoop(ctx context.Context,
 				continue
 			}
 			s, ok := status.FromError(err)
-			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) {
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				time.Sleep(time.Second)
 				continue
 			}

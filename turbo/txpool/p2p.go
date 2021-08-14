@@ -262,7 +262,7 @@ func RecvTxMessageLoop(ctx context.Context, sentry direct.SentryClient, handleIn
 
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			s, ok := status.FromError(err)
-			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
 			if doLog {
 				log.Error("[RecvTxMessage] sentry not ready yet", "err", err)
 			}
@@ -271,7 +271,7 @@ func RecvTxMessageLoop(ctx context.Context, sentry direct.SentryClient, handleIn
 		}
 		if err := RecvTxMessage(ctx, sentry, handleInboundMessage, wg); err != nil {
 			s, ok := status.FromError(err)
-			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
 			if doLog {
 				log.Error("[RecvTxMessage]", "err", err)
 			}
@@ -343,7 +343,7 @@ func RecvPeersLoop(ctx context.Context, sentry direct.SentryClient, recentPeers 
 
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
 			s, ok := status.FromError(err)
-			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
 			if doLog {
 				log.Warn("[RecvPeers] sentry not ready yet", "err", err)
 			}
@@ -352,7 +352,7 @@ func RecvPeersLoop(ctx context.Context, sentry direct.SentryClient, recentPeers 
 		}
 		if err := RecvPeers(ctx, sentry, recentPeers, wg); err != nil {
 			s, ok := status.FromError(err)
-			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
 			if doLog {
 				log.Warn("[RecvPeers]", "err", err)
 			}
@@ -382,7 +382,7 @@ func RecvPeers(ctx context.Context,
 		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 			return
 		}
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 			return
 		}
 		return err
@@ -399,7 +399,7 @@ func RecvPeers(ctx context.Context,
 			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
 				return
 			}
-			if errors.Is(err, io.EOF) {
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				return
 			}
 			return err
