@@ -233,7 +233,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
-	mock.downloader.Start(mock.Ctx)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(
 			mock.Ctx, prune,

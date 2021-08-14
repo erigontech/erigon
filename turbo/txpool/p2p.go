@@ -261,12 +261,21 @@ func RecvTxMessageLoop(ctx context.Context, sentry direct.SentryClient, handleIn
 		}
 
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			log.Error("[RecvTxMessage] sentry not ready yet", "err", err)
+			s, ok := status.FromError(err)
+			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			if doLog {
+				log.Error("[RecvTxMessage] sentry not ready yet", "err", err)
+			}
 			time.Sleep(time.Second)
 			continue
 		}
 		if err := RecvTxMessage(ctx, sentry, handleInboundMessage, wg); err != nil {
-			log.Error("[RecvTxMessage]", "err", err)
+			s, ok := status.FromError(err)
+			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			if doLog {
+				log.Error("[RecvTxMessage]", "err", err)
+			}
+			continue
 		}
 	}
 }
@@ -299,12 +308,6 @@ func RecvTxMessage(ctx context.Context,
 			return
 		default:
 		}
-		if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-			return
-		}
-		if errors.Is(err, io.EOF) {
-			return
-		}
 		return err
 	}
 
@@ -315,12 +318,6 @@ func RecvTxMessage(ctx context.Context,
 			case <-ctx.Done():
 				return
 			default:
-			}
-			if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-				return
-			}
-			if errors.Is(err, io.EOF) {
-				return
 			}
 			return err
 		}
@@ -345,12 +342,21 @@ func RecvPeersLoop(ctx context.Context, sentry direct.SentryClient, recentPeers 
 		}
 
 		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			log.Error("[RecvPeers] sentry not ready yet", "err", err)
+			s, ok := status.FromError(err)
+			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			if doLog {
+				log.Warn("[RecvPeers] sentry not ready yet", "err", err)
+			}
 			time.Sleep(time.Second)
 			continue
 		}
 		if err := RecvPeers(ctx, sentry, recentPeers, wg); err != nil {
-			log.Error("[RecvPeers]", "err", err)
+			s, ok := status.FromError(err)
+			doLog := !(ok && s.Code() == codes.Canceled) && !errors.Is(err, io.EOF)
+			if doLog {
+				log.Warn("[RecvPeers]", "err", err)
+			}
+			continue
 		}
 	}
 }
