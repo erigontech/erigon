@@ -11,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -61,7 +61,7 @@ type MockSentry struct {
 	downloader      *download.ControlServerImpl
 	Key             *ecdsa.PrivateKey
 	Genesis         *types.Block
-	SentryClient    remote.SentryClient
+	SentryClient    direct.SentryClient
 	PeerId          *ptypes.H512
 	TxPoolP2PServer *txpool.P2PServer
 	UpdateHead      func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
@@ -196,8 +196,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {
 	}
 	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
-	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
-	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
+	txSentryClient := direct.NewSentryClientDirect(eth.ETH66, mock)
+	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, []direct.SentryClient{txSentryClient}, txPool)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -223,8 +223,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.SentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
-	sentries := []remote.SentryClient{mock.SentryClient}
+	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
+	sentries := []direct.SentryClient{mock.SentryClient}
 	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
 		if t != nil {
