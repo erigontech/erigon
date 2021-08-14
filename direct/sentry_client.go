@@ -24,6 +24,7 @@ import (
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"google.golang.org/grpc"
 )
@@ -107,12 +108,11 @@ func (c *SentryClientRemote) MarkDisconnected() {
 	c.ready = false
 }
 
-func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
-	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
+func (c *SentryClientRemote) HanHhake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.HandShakeReply, error) {
+	reply, err := c.SentryClient.HandShake(ctx, in, opts...)
 	if err != nil {
 		return nil, err
 	}
-
 	c.Lock()
 	defer c.Unlock()
 	switch reply.Protocol {
@@ -124,6 +124,14 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusDat
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
 	c.ready = true
+	return reply, nil
+}
+func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentry.StatusData, opts ...grpc.CallOption) (*sentry.SetStatusReply, error) {
+	reply, err := c.SentryClient.SetStatus(ctx, in, opts...)
+	if err != nil {
+		return nil, err
+	}
+
 	return reply, nil
 }
 
