@@ -49,15 +49,11 @@ type Fetch struct {
 }
 
 type Timings struct {
-	propagateAllNewTxsEvery         time.Duration
-	syncToNewPeersEvery             time.Duration
-	broadcastLocalTransactionsEvery time.Duration
+	syncToNewPeersEvery time.Duration
 }
 
 var DefaultTimings = Timings{
-	propagateAllNewTxsEvery:         5 * time.Second,
-	broadcastLocalTransactionsEvery: 2 * time.Minute,
-	syncToNewPeersEvery:             2 * time.Minute,
+	syncToNewPeersEvery: 2 * time.Minute,
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the

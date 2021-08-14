@@ -837,14 +837,8 @@ func (p *WorstQueue) Pop() interface{} {
 // promote/demote transactions
 // reorgs
 func BroadcastLoop(ctx context.Context, p *TxPool, newTxs chan Hashes, send *Send, timings Timings) {
-	propagateAllNewTxsEvery := time.NewTicker(timings.propagateAllNewTxsEvery)
-	defer propagateAllNewTxsEvery.Stop()
-
 	syncToNewPeersEvery := time.NewTicker(timings.syncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
-
-	broadcastLocalTransactionsEvery := time.NewTicker(timings.broadcastLocalTransactionsEvery)
-	defer broadcastLocalTransactionsEvery.Stop()
 
 	localTxHashes := make([]byte, 0, 128)
 	remoteTxHashes := make([]byte, 0, 128)
@@ -879,6 +873,7 @@ func BroadcastLoop(ctx context.Context, p *TxPool, newTxs chan Hashes, send *Sen
 	}
 }
 
+// commitIsLocalHistory - use u64 sequence as keys to preserve order
 func commitIsLocalHistory(db kv.RwDB, commited time.Time, localsHistory *simplelru.LRU) error {
 	if db == nil || time.Since(commited) < 30*time.Second {
 		return nil
