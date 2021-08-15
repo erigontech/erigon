@@ -264,7 +264,7 @@ func snapshotCheck(ctx context.Context, db kv.RwDB, isNew bool, tmpDir string) (
 		stage6 := stage(sync, tx, nil, stages.IntermediateHashes)
 		stage6.BlockNumber = blockNumber - 1
 		log.Info("Stage6", "progress", stage6.BlockNumber)
-		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, nil /* Unwinder */, tx, stagedsync.StageTrieCfg(db, true, true, tmpDir), ctx); err != nil {
+		if _, err = stagedsync.SpawnIntermediateHashesStage(stage5, sync /* Unwinder */, tx, stagedsync.StageTrieCfg(db, true, true, tmpDir), ctx); err != nil {
 			log.Error("Error on ih", "err", err, "block", blockNumber)
 			return fmt.Errorf("spawnIntermediateHashesStage %w", err)
 		}

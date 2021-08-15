@@ -529,7 +529,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(s, nil /* Unwinder */, tx, cfg, ctx); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(s, sync /* Unwinder */, tx, cfg, ctx); err != nil {
 			return err
 		}
 	}
