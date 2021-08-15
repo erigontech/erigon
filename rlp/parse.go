@@ -127,6 +127,28 @@ func U64(payload []byte, pos int) (int, uint64, error) {
 	return dataPos + dataLen, r, nil
 }
 
+// U32 parses uint64 number from given payload at given position
+func U32(payload []byte, pos int) (int, uint32, error) {
+	dataPos, dataLen, isList, err := Prefix(payload, pos)
+	if err != nil {
+		return 0, 0, err
+	}
+	if isList {
+		return 0, 0, fmt.Errorf("uint32 must be a string, not isList")
+	}
+	if dataLen > 4 {
+		return 0, 0, fmt.Errorf("uint32 must not be more than 4 bytes long, got %d", dataLen)
+	}
+	if dataLen > 0 && payload[dataPos] == 0 {
+		return 0, 0, fmt.Errorf("integer encoding for RLP must not have leading zeros: %x", payload[dataPos:dataPos+dataLen])
+	}
+	var r uint32
+	for _, b := range payload[dataPos : dataPos+dataLen] {
+		r = (r << 8) | uint32(b)
+	}
+	return dataPos + dataLen, r, nil
+}
+
 // U256 parses uint256 number from given payload at given position
 func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
 	dataPos, dataLen, err := String(payload, pos)
