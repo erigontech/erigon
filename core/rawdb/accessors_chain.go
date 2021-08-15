@@ -388,7 +388,7 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		}
 
 		binary.BigEndian.PutUint64(blockKey, i)
-		copy(blockKey[dbutils.NumberLength:], hash[:])
+		copy(blockKey[dbutils.NumberLength:], hash)
 		bodyRlp, err := db.GetOne(kv.BlockBody, blockKey)
 		if err != nil {
 			return nil, err
