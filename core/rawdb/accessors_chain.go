@@ -401,12 +401,9 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 			return nil, err
 		}
 
-		res = make([][]byte, txAmount)
 		binary.BigEndian.PutUint64(encNum, baseTxId)
-		j := 0
 		if err = db.ForAmount(kv.EthTx, encNum, txAmount, func(k, v []byte) error {
-			res[j] = v
-			j++
+			res = append(res, v)
 			return nil
 		}); err != nil {
 			return nil, err
