@@ -113,9 +113,7 @@ Let's now try it:
     $ go build
     $ ./hello-erigon-daemon --http.api=myNamespace # the flag enables our namespace.
 
-**Note: Remember to run it with --private.api.addr=localhost:9090** and/or --datadir <path-to-erigon-data>
-
-For example: ./hello-erigon-daemon --http.api=myNamespace --private.api.addr 127.0.0.1:9090 --datadir /root/.erigon/ropsten --http.addr "127.0.0.1"
+**Note: Remember to run it with --private.api.addr=localhost:9090 and/or --datadir <path-to-erigon-data>**
 
 now it should be all set and we can test it with:
 
