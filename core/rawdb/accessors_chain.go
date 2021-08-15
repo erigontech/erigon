@@ -243,7 +243,7 @@ func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
-	body := ReadBody(db, hash, number)
+	body := ReadBodyWithTransactions(db, hash, number)
 	bodyRlp, err := rlp.EncodeToBytes(body)
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -356,12 +356,12 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	if hash == (common.Hash{}) {
 		return nil, 0, 0, nil
 	}
-	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	body, baseTxId, txAmount := ReadBody(db, hash, number)
 	return body, baseTxId, txAmount, nil
 }
 
-func ReadBody(db kv.Getter, hash common.Hash, number uint64) *types.Body {
-	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+	body, baseTxId, txAmount := ReadBody(db, hash, number)
 	if body == nil {
 		return nil
 	}
@@ -374,7 +374,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) *types.Body {
 	return body
 }
 
-func ReadBodyWithoutTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil, 0, 0
@@ -716,7 +716,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if header == nil {
 		return nil
 	}
-	body := ReadBody(tx, hash, number)
+	body := ReadBodyWithTransactions(tx, hash, number)
 	if body == nil {
 		return nil
 	}

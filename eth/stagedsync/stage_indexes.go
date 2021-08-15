@@ -167,11 +167,10 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 			}
 		}
 
-		kStr := string(k)
-		m, ok := updates[kStr]
+		m, ok := updates[string(k)]
 		if !ok {
 			m = roaring64.New()
-			updates[kStr] = m
+			updates[string(k)] = m
 		}
 		m.Add(blockN)
 

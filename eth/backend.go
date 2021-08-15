@@ -678,12 +678,7 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go stages2.StageLoop(
-		s.downloadCtx, s.logger, s.chainKV,
-		s.stagedSync, s.downloadServer.Hd,
-		s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop,
-		s.config.SyncLoopThrottle,
-	)
+	go stages2.StageLoop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer.Hd, s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 
 	return nil
 }
