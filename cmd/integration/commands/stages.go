@@ -537,7 +537,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 		}
 	}
 	integrity.Trie(tx, integritySlow, ctx)
-	return nil
+	return tx.Commit()
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
