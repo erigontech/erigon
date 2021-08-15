@@ -375,18 +375,24 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *ty
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
+	k := make([]byte, dbutils.NumberLength+common.HashLength)
 	encNum := make([]byte, 8)
 	for i := from; i < to; i++ {
 		h, err := ReadCanonicalHash(db, i)
 		if err != nil {
 			return nil, err
 		}
-		data := ReadStorageBodyRLP(db, h, i)
-		if len(data) == 0 {
+		binary.BigEndian.PutUint64(k, i)
+		copy(k[dbutils.NumberLength:], h[:])
+		bodyRlp, err := db.GetOne(kv.BlockBody, k)
+		if err != nil {
+			return nil, err
+		}
+		if len(bodyRlp) == 0 {
 			continue
 		}
 		bodyForStorage := new(types.BodyForStorage)
-		err = rlp.DecodeBytes(data, bodyForStorage) //TODO: manually get only 2 digits instead of full decode
+		err = rlp.DecodeBytes(bodyRlp, bodyForStorage) //TODO: manually get only 2 digits instead of full decode
 		if err != nil {
 			return nil, err
 		}
