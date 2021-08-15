@@ -243,7 +243,7 @@ func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
-	body := ReadBody(db, hash, number)
+	body := ReadBodyWithTransactions(db, hash, number)
 	bodyRlp, err := rlp.EncodeToBytes(body)
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -360,7 +360,44 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	return body, baseTxId, txAmount, nil
 }
 
-func ReadBody(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+func ReadBodyWithTransactionsByNumber(db kv.Getter, number uint64) (*types.Body, error) {
+	hash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+	}
+	if hash == (common.Hash{}) {
+		return nil, nil
+	}
+	return ReadBodyWithTransactions(db, hash, number), nil
+}
+func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
+	encNum := make([]byte, 8)
+	for i := from; i < to; i++ {
+		h, err := ReadCanonicalHash(db, i)
+		if err != nil {
+			return nil, err
+		}
+		data := ReadStorageBodyRLP(db, h, i)
+		if len(data) == 0 {
+			continue
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		err = rlp.DecodeBytes(data, bodyForStorage) //TODO: manually get only 2 digits instead of full decode
+		if err != nil {
+			return nil, err
+		}
+
+		binary.BigEndian.PutUint64(encNum, bodyForStorage.BaseTxId)
+		if err = db.ForAmount(kv.EthTx, encNum, bodyForStorage.TxAmount, func(k, v []byte) error {
+			res = append(res, v)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return
+}
+func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
 	if body == nil {
 		return nil
@@ -716,7 +753,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if header == nil {
 		return nil
 	}
-	body := ReadBody(tx, hash, number)
+	body := ReadBodyWithTransactions(tx, hash, number)
 	if body == nil {
 		return nil
 	}

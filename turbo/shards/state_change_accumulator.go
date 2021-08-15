@@ -1,6 +1,9 @@
 package shards
 
 import (
+	"context"
+	"math/big"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
@@ -14,15 +17,31 @@ type Accumulator struct {
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
+type StateChangeConsumer interface {
+	SendStateChanges(sc *remote.StateChange)
+}
+
 func (a *Accumulator) Reset() {
 	a.changes = nil
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
 }
+func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
+	if a == nil || c == nil {
+		return
+	}
+	for i := range a.changes {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return
+		}
+		c.SendStateChanges(&a.changes[i])
+	}
+	a.Reset()
+}
 
-// StartChanges begins accumulation of changes for a new block
-func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, unwind bool) {
+// StartChange begins accumulation of changes for a new block
+func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs [][]byte, blockBaseFee *big.Int, unwind bool) {
 	a.changes = append(a.changes, remote.StateChange{})
 	a.latestChange = &a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight
@@ -34,9 +53,18 @@ func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, unw
 	}
 	a.accountChangeIndex = make(map[common.Address]int)
 	a.storageChangeIndex = make(map[common.Address]map[common.Hash]int)
+	if txs != nil {
+		a.latestChange.Txs = make([][]byte, len(txs))
+		for i := range txs {
+			a.latestChange.Txs[i] = common.CopyBytes(txs[i])
+		}
+	}
+	if blockBaseFee != nil {
+		a.latestChange.BlockBaseFee = blockBaseFee.Uint64()
+	}
 }
 
-// ChangeAction adds modification of account balance or nonce (or both) to the latest change
+// ChangeAccount adds modification of account balance or nonce (or both) to the latest change
 func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
 	i, ok := a.accountChangeIndex[address]
 	if !ok {

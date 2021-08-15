@@ -206,7 +206,7 @@ Loop:
 			// non-canonical case
 			continue
 		}
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 
 		select {
 		case recoveryErr := <-errCh:

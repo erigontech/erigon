@@ -92,7 +92,7 @@ var ReceiptCbor = Migration{
 			}
 			var body *types.Body
 			if chainConfig.IsBerlin(blockNum) {
-				body = rawdb.ReadBody(tx, blockHash, blockNum)
+				body = rawdb.ReadBodyWithTransactions(tx, blockHash, blockNum)
 			}
 			receipts = make(types.Receipts, len(oldReceipts))
 			for i, oldReceipt := range oldReceipts {

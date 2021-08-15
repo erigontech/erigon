@@ -101,7 +101,10 @@ func executeBlock(
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter := newStateReaderWriter(batch, tx, blockNum, block.Hash(), writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	if err != nil {
+		return err
+	}
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
@@ -184,13 +187,12 @@ func executeBlock(
 func newStateReaderWriter(
 	batch ethdb.Database,
 	tx kv.RwTx,
-	blockNum uint64,
-	blockHash common.Hash,
+	block *types.Block,
 	writeChangesets bool,
 	accumulator *shards.Accumulator,
 	initialCycle bool,
 	stateStream bool,
-) (state.StateReader, state.WriterWithChangeSets) {
+) (state.StateReader, state.WriterWithChangeSets, error) {
 
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -198,17 +200,21 @@ func newStateReaderWriter(
 	stateReader = state.NewPlainStateReader(batch)
 
 	if !initialCycle && stateStream {
-		accumulator.StartChange(blockNum, blockHash, false)
+		txs, err := rawdb.RawTransactionsRange(tx, block.NumberU64(), block.NumberU64())
+		if err != nil {
+			return nil, nil, err
+		}
+		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, block.BaseFee(), false)
 	} else {
 		accumulator = nil
 	}
 	if writeChangesets {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum).SetAccumulator(accumulator)
+		stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
 	} else {
 		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
 	}
 
-	return stateReader, stateWriter
+	return stateReader, stateWriter, nil
 }
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
@@ -438,7 +444,12 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}
-		accumulator.StartChange(u.UnwindPoint, hash, true /* unwind */)
+		txs, err := rawdb.RawTransactionsRange(tx, u.UnwindPoint, s.BlockNumber)
+		if err != nil {
+			return err
+		}
+		targetHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
+		accumulator.StartChange(u.UnwindPoint, hash, txs, targetHeader.BaseFee, true /* unwind */)
 	}
 
 	changes := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))

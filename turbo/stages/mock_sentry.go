@@ -161,8 +161,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		ChainConfig: gspec.Config,
 		Key:         key,
 		Notifications: &stagedsync.Notifications{
-			Events:      privateapi.NewEvents(),
-			Accumulator: &shards.Accumulator{},
+			Events:               privateapi.NewEvents(),
+			Accumulator:          &shards.Accumulator{},
+			StateChangesConsumer: nil,
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
@@ -418,7 +419,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	if err := StageLoopStep(ms.Ctx, ms.Log, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	// Check if the latest header was imported or rolled back

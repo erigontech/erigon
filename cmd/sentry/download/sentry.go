@@ -1034,7 +1034,7 @@ func (s *MessageStreams) remove(id uint) {
 
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
-		log.Error("Sending new peer notice to core P2P failed", "error", err)
+		log.Warn("Sending new peer notice to core P2P failed", "error", err)
 	}
 }
 

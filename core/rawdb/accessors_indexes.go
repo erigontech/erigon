@@ -80,7 +80,7 @@ func ReadTransaction(db kv.Tx, hash common.Hash) (types.Transaction, common.Hash
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	body := ReadBody(db, blockHash, *blockNumber)
+	body := ReadBodyWithTransactions(db, blockHash, *blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0, nil

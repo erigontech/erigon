@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/common"
@@ -563,4 +564,58 @@ func TestWriteCodeExceedLimit(t *testing.T) {
 		code := []byte{byte(i), 2, 3}
 		sc.SetCodeWrite(addr.Bytes(), 1, code)
 	}
+}
+
+func ByteSlice2String(bs []byte) string { // from bytes.Builder.String
+	return *(*string)(unsafe.Pointer(&bs))
+}
+func BenchmarkName(b *testing.B) {
+	onBytes := map[common.Address]struct{}{}
+	onString := map[string]struct{}{}
+	k := common.Address{}
+	kb := k[:]
+	b.Run("string cast with new variable", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			x := string(kb)
+			//_ = onString[x]
+			onString[x] = struct{}{}
+		}
+	})
+	b.Run("bytes map", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			//_ = onBytes[k]
+			onBytes[k] = struct{}{}
+		}
+	})
+	b.Run("string cast in-place", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			//_ = onString[string(kb)]
+			onString[string(kb)] = struct{}{}
+		}
+	})
+	b.Run("unsafe string cast in-place", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			//_ = onString[string(kb)]
+			onString[ByteSlice2String(kb)] = struct{}{}
+		}
+	})
+	b.Run("string cast in-place from array", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			//_ = onString[string(k[:])]
+			onString[string(k[:])] = struct{}{}
+		}
+	})
+	b.Run("unsafe string cast in-place from array", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			//_ = onString[string(k[:])]
+			onString[ByteSlice2String(k[:])] = struct{}{}
+		}
+	})
+	ks := string(kb)
+	b.Run("string cast in-advance", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			//_ = onString[ks]
+			onString[ks] = struct{}{}
+		}
+	})
 }

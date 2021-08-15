@@ -181,6 +181,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
+	kvRPC := remotedbserver2.NewKvServer(chainKv)
+
 	backend := &Ethereum{
 		config:               config,
 		logger:               logger,
@@ -194,8 +196,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		waitForMiningStop:    make(chan struct{}),
 		sentries:             []direct.SentryClient{},
 		notifications: &stagedsync.Notifications{
-			Events:      privateapi.NewEvents(),
-			Accumulator: &shards.Accumulator{},
+			Events:               privateapi.NewEvents(),
+			Accumulator:          &shards.Accumulator{},
+			StateChangesConsumer: kvRPC,
 		},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
@@ -286,7 +289,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver2.NewKvServer(backend.chainKV)
 	ethBackendRPC := privateapi.NewEthBackendServer(backend, backend.notifications.Events)
 	txPoolRPC := privateapi.NewTxPoolServer(context.Background(), backend.txPool)
 	miningRPC := privateapi.NewMiningServer(context.Background(), backend, ethashApi)
@@ -678,12 +680,7 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 
-	go stages2.StageLoop(
-		s.downloadCtx, s.logger, s.chainKV,
-		s.stagedSync, s.downloadServer.Hd,
-		s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop,
-		s.config.SyncLoopThrottle,
-	)
+	go stages2.StageLoop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer.Hd, s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 
 	return nil
 }

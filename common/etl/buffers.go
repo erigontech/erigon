@@ -127,14 +127,13 @@ type appendSortableBuffer struct {
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
-	ks := string(k)
-	stored, ok := b.entries[ks]
+	stored, ok := b.entries[string(k)]
 	if !ok {
 		b.size += len(k)
 	}
 	b.size += len(v)
 	stored = append(stored, v...)
-	b.entries[ks] = stored
+	b.entries[string(k)] = stored
 }
 
 func (b *appendSortableBuffer) SetComparator(cmp kv.CmpFunc) {
@@ -204,15 +203,14 @@ func (b *oldestEntrySortableBuffer) SetComparator(cmp kv.CmpFunc) {
 }
 
 func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
-	ks := string(k)
-	_, ok := b.entries[ks]
+	_, ok := b.entries[string(k)]
 	if ok {
 		// if we already had this entry, we are going to keep it and ignore new value
 		return
 	}
 
 	b.size += len(k) + len(v)
-	b.entries[ks] = v
+	b.entries[string(k)] = v
 }
 
 func (b *oldestEntrySortableBuffer) Size() int {
