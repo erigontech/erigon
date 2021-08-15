@@ -1290,7 +1290,7 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uin
 	if err != nil {
 		return baseTxId, txAmount, err
 	}
-	pos, txAmount, err = rlp2.U32(payload, pos)
+	_, txAmount, err = rlp2.U32(payload, pos)
 	if err != nil {
 		return baseTxId, txAmount, err
 	}
