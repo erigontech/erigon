@@ -2,7 +2,6 @@ package shards
 
 import (
 	"context"
-	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -41,7 +40,7 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
 }
 
 // StartChange begins accumulation of changes for a new block
-func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs [][]byte, blockBaseFee *big.Int, unwind bool) {
+func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs [][]byte, blockBaseFee uint64, unwind bool) {
 	a.changes = append(a.changes, remote.StateChange{})
 	a.latestChange = &a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight
@@ -59,9 +58,7 @@ func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs
 			a.latestChange.Txs[i] = common.CopyBytes(txs[i])
 		}
 	}
-	if blockBaseFee != nil {
-		a.latestChange.BlockBaseFee = blockBaseFee.Uint64()
-	}
+	a.latestChange.BlockBaseFee = blockBaseFee
 }
 
 // ChangeAccount adds modification of account balance or nonce (or both) to the latest change
