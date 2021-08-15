@@ -356,20 +356,24 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	if hash == (common.Hash{}) {
 		return nil, 0, 0, nil
 	}
-	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
+	body, baseTxId, txAmount := ReadBody(db, hash, number)
 	return body, baseTxId, txAmount, nil
 }
 
-func ReadBodyWithTransactionsByNumber(db kv.Getter, number uint64) (*types.Body, error) {
-	hash, err := ReadCanonicalHash(db, number)
+func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	var err error
+	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount)
 	if err != nil {
-		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
+		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
+		return nil
 	}
-	if hash == (common.Hash{}) {
-		return nil, nil
-	}
-	return ReadBodyWithTransactions(db, hash, number), nil
+	return body
 }
+
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
 	encNum := make([]byte, 8)
 	for i := from; i < to; i++ {
@@ -397,21 +401,8 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 	}
 	return
 }
-func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
-	body, baseTxId, txAmount := ReadBodyWithoutTransactions(db, hash, number)
-	if body == nil {
-		return nil
-	}
-	var err error
-	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount)
-	if err != nil {
-		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
-		return nil
-	}
-	return body
-}
 
-func ReadBodyWithoutTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
+func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil, 0, 0

@@ -1580,7 +1580,7 @@ func extractBodies(chaindata string, block uint64) error {
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
-		_, baseTxId, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, blockNumber)
+		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
 		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
 	}
 	return nil
