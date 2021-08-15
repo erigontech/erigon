@@ -858,7 +858,7 @@ func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 	for !interrupt {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		tool.Check(err)
-		body := rawdb.ReadBody(tx, blockHash, blockNum)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNum)
 
 		if body == nil {
 			break
@@ -1456,7 +1456,7 @@ func mint(chaindata string, block uint64) error {
 			fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
 		}
 		prevBlock = blockNumber
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
 		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNumber)
 		if errSenders != nil {
@@ -1580,7 +1580,7 @@ func extractBodies(chaindata string, block uint64) error {
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
-		_, baseTxId, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, blockNumber)
+		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
 		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
 	}
 	return nil
@@ -2156,7 +2156,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			}
 			var body *types.Body
 			if chainConfig.IsBerlin(blockNum) {
-				body = rawdb.ReadBody(tx, hash, blockNum)
+				body = rawdb.ReadBodyWithTransactions(tx, hash, blockNum)
 			}
 			receipts = make(types.Receipts, len(oldReceipts))
 			for i, oldReceipt := range oldReceipts {
