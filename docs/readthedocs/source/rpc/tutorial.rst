@@ -69,7 +69,6 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
     func main() {
         cmd, cfg := cli.RootCommand()
         rootCtx, rootCancel := utils.RootContext()
-        _ = rootCtx
         cmd.RunE = func(cmd *cobra.Command, args []string) error {
             logger := log.New()
             db, _, _, _, err := cli.RemoteServices(*cfg, logger, rootCancel)
