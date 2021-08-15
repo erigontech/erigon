@@ -375,31 +375,38 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *ty
 }
 
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
-	k := make([]byte, dbutils.NumberLength+common.HashLength)
+	blockKey := make([]byte, dbutils.NumberLength+common.HashLength)
 	encNum := make([]byte, 8)
 	for i := from; i < to; i++ {
-		h, err := ReadCanonicalHash(db, i)
+		binary.BigEndian.PutUint64(encNum, i)
+		hash, err := db.GetOne(kv.HeaderCanonical, encNum)
 		if err != nil {
 			return nil, err
 		}
-		binary.BigEndian.PutUint64(k, i)
-		copy(k[dbutils.NumberLength:], h[:])
-		bodyRlp, err := db.GetOne(kv.BlockBody, k)
+		if len(hash) == 0 {
+			continue
+		}
+
+		binary.BigEndian.PutUint64(blockKey, i)
+		copy(blockKey[dbutils.NumberLength:], hash[:])
+		bodyRlp, err := db.GetOne(kv.BlockBody, blockKey)
 		if err != nil {
 			return nil, err
 		}
 		if len(bodyRlp) == 0 {
 			continue
 		}
-		bodyForStorage := new(types.BodyForStorage)
-		err = rlp.DecodeBytes(bodyRlp, bodyForStorage) //TODO: manually get only 2 digits instead of full decode
+		baseTxId, txAmount, err := types.DecodeOnlyTxMetadataFromBody(bodyRlp)
 		if err != nil {
 			return nil, err
 		}
 
-		binary.BigEndian.PutUint64(encNum, bodyForStorage.BaseTxId)
-		if err = db.ForAmount(kv.EthTx, encNum, bodyForStorage.TxAmount, func(k, v []byte) error {
-			res = append(res, v)
+		res = make([][]byte, txAmount)
+		binary.BigEndian.PutUint64(encNum, baseTxId)
+		j := 0
+		if err = db.ForAmount(kv.EthTx, encNum, txAmount, func(k, v []byte) error {
+			res[j] = v
+			j++
 			return nil
 		}); err != nil {
 			return nil, err
