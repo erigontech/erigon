@@ -19,6 +19,7 @@ package mdbx_test
 import (
 	"context"
 	"fmt"
+	"net"
 	"runtime"
 	"testing"
 
@@ -179,7 +180,10 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Major versions
 	v1 := v
 	v1.Major++
-	a, err := remotedb.NewRemote(v1, logger).InMem(conn).Open("", "", "")
+
+	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
+	assert.NoError(t, err)
+	a, err := remotedb.NewRemote(v1, logger, remote.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -187,7 +191,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Minor versions
 	v2 := v
 	v2.Minor++
-	_, err = remotedb.NewRemote(v2, logger).InMem(conn).Open("", "", "")
+	a, err = remotedb.NewRemote(v2, logger, remote.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -195,11 +199,11 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Patch versions
 	v3 := v
 	v3.Patch++
-	_, err = remotedb.NewRemote(v3, logger).InMem(conn).Open("", "", "")
+	a, err = remotedb.NewRemote(v3, logger, remote.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	require.False(t, a.EnsureVersionCompatibility())
+	require.True(t, a.EnsureVersionCompatibility())
 }
 
 func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
@@ -219,7 +223,9 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	}
 	go f2()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
-	rdb := remotedb.NewRemote(v, logger).InMem(conn).MustOpen()
+	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
+	assert.NoError(t, err)
+	rdb, err := remotedb.NewRemote(v, logger, remote.NewKVClient(cc)).Open()
 	readDBs = []kv.RwDB{
 		writeDBs[0],
 		writeDBs[1],
