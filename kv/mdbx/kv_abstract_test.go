@@ -226,6 +226,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
 	assert.NoError(t, err)
 	rdb, err := remotedb.NewRemote(v, logger, remote.NewKVClient(cc)).Open()
+	assert.NoError(t, err)
 	readDBs = []kv.RwDB{
 		writeDBs[0],
 		writeDBs[1],
