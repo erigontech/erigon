@@ -75,9 +75,9 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		select {
 		case <-s.ctx.Done():
-			return s.ctx.Err()
+			return nil
 		case <-subscribeServer.Context().Done():
-			return subscribeServer.Context().Err()
+			return nil
 		default:
 		}
 
