@@ -3,6 +3,7 @@ package download
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -910,6 +911,9 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 		Data:   b,
 	})
 	for _, err := range errs {
+		if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+			continue
+		}
 		log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(msgID)], "error", err)
 	}
 }
