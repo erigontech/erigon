@@ -291,9 +291,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	ethBackendRPC := privateapi.NewEthBackendServer(backend, backend.notifications.Events)
-	txPoolRPC := privateapi.NewTxPoolServer(context.Background(), backend.txPool)
-	miningRPC := privateapi.NewMiningServer(context.Background(), backend, ethashApi)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.notifications.Events)
+	txPoolRPC := privateapi.NewTxPoolServer(ctx, backend.txPool)
+	miningRPC := privateapi.NewMiningServer(ctx, backend, ethashApi)
 
 	if stack.Config().PrivateApiAddr != "" {
 
