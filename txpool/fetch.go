@@ -412,7 +412,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 		}
 
 		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight)
+			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, 0, req.BlockHeight)
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}

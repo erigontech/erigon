@@ -41,7 +41,7 @@ type Pool interface {
 	IdHashKnown(hash []byte) bool
 	GetRlp(hash []byte) []byte
 	Add(db kv.Tx, newTxs TxSlots) error
-	OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockHeight uint64) error
+	OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64) error
 
 	AddNewGoodPeer(peerID PeerID)
 }
@@ -318,7 +318,20 @@ func onNewTxs(senderInfo map[uint64]*senderInfo, newTxs TxSlots, protocolBaseFee
 
 	return nil
 }
-func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, blockHeight uint64) error {
+
+func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uint64) {
+	p.protocolBaseFee.Store(protocolBaseFee)
+	hasNewVal := pendingBaseFee > 0
+	if pendingBaseFee < protocolBaseFee {
+		pendingBaseFee = protocolBaseFee
+	}
+	if hasNewVal {
+		p.protocolBaseFee.Store(pendingBaseFee)
+	}
+	return protocolBaseFee, p.pendingBaseFee.Load()
+}
+
+func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := unwindTxs.Valid(); err != nil {
@@ -329,11 +342,7 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 	}
 
 	p.blockHeight.Store(blockHeight)
-	p.protocolBaseFee.Store(protocolBaseFee)
-	pendingBaseFee := p.pendingBaseFee.Load()
-	if pendingBaseFee < protocolBaseFee {
-		p.pendingBaseFee.Store(protocolBaseFee)
-	}
+	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 
 	if err := setTxSenderID(coreDB, &p.senderID, p.senderIDs, p.senderInfo, unwindTxs); err != nil {
 		return err
@@ -417,7 +426,7 @@ func setTxSenderID(coreDB kv.Tx, senderIDSequence *uint64, senderIDs map[string]
 	return nil
 }
 
-func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, blockBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU) error {
+func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU) error {
 	for i := range unwindTxs.txs {
 		if unwindTxs.txs[i].senderID == 0 {
 			return fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero")
@@ -473,7 +482,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 
 	for i := range senderInfo {
 		// TODO: aggregate changed senders before call this func
-		onSenderChange(senderInfo[i], protocolBaseFee, blockBaseFee)
+		onSenderChange(senderInfo[i], protocolBaseFee, pendingBaseFee)
 	}
 
 	pending.EnforceInvariants()
@@ -610,6 +619,7 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, pendingBaseFee uint64) 
 		// baseFee of the currently pending block. Set to 0 otherwise.
 		it.metaTx.subPool &^= EnoughFeeCapBlock
 		if it.metaTx.Tx.feeCap >= pendingBaseFee {
+			fmt.Printf("setttttt: %d,%d,%d\n", protocolBaseFee, pendingBaseFee, it.metaTx.Tx.feeCap)
 			it.metaTx.subPool |= EnoughFeeCapBlock
 		}
 

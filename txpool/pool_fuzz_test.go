@@ -238,13 +238,11 @@ func FuzzOnNewBlocks11(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, pendingBaseFee1 uint8) {
 		t.Parallel()
-		protocolBaseFee, pendingBaseFee := uint64(protocolBaseFee1%16+1), uint64(pendingBaseFee1%16+1)
+		protocolBaseFee, pendingBaseFee := uint64(protocolBaseFee1%16+1), uint64(pendingBaseFee1%8+1)
 		if protocolBaseFee == 0 || pendingBaseFee == 0 {
 			t.Skip()
 		}
-		if pendingBaseFee < protocolBaseFee {
-			pendingBaseFee = protocolBaseFee
-		}
+		pendingBaseFee += protocolBaseFee
 		if len(sender) < 1+1+1 {
 			t.Skip()
 		}
@@ -430,13 +428,13 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
-		err = pool.OnNewBlock(nil, map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, 1)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, pendingBaseFee, 1)
 		assert.NoError(err)
 		check(unwindTxs, minedTxs1, "fork1")
 		checkNotify(unwindTxs, minedTxs1, "fork1")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(nil, map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, 2)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, pendingBaseFee, 2)
 		assert.NoError(err)
 		check(minedTxs1, minedTxs2, "fork2")
 		checkNotify(minedTxs1, minedTxs2, "fork2")
