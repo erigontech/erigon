@@ -195,9 +195,6 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.MiningClient) error {
 	subscription, err := mining.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
 	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return errors.New(s.Message())
-		}
 		return err
 	}
 	for {
@@ -239,9 +236,6 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.MiningClient) error {
 	subscription, err := mining.OnPendingLogs(ctx, &txpool.OnPendingLogsRequest{}, grpc.WaitForReady(true))
 	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return errors.New(s.Message())
-		}
 		return err
 	}
 	for {
