@@ -229,19 +229,14 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 }
 
 func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
-	if err := common.Stopped(s.ctx.Done()); err != nil {
-		return s.ctx.Err()
-	}
 	clean := s.stateChangeStreams.Add(server)
 	defer clean()
-	//select {
-	//case <-s.ctx.Done():
-	//	return nil
-	//case <-server.Context().Done():
-	//	return nil
-	//}
-	<-server.Context().Done()
-	return nil
+	select {
+	case <-s.ctx.Done():
+		return nil
+	case <-server.Context().Done():
+		return nil
+	}
 }
 
 func (s *KvServer) SendStateChanges(sc *remote.StateChange) {
