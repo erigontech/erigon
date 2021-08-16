@@ -557,18 +557,7 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	sentryServer.discoveryDNS = discoveryDNS
 
 	<-ctx.Done()
-	{
-		shutdownDone := make(chan bool)
-		go func() {
-			defer close(shutdownDone)
-			grpcServer.GracefulStop()
-		}()
-		select {
-		case <-time.After(1 * time.Second): // shutdown deadline
-			grpcServer.Stop()
-		case <-shutdownDone:
-		}
-	}
+	grpcServer.GracefulStop()
 	sentryServer.Close()
 	return nil
 }
