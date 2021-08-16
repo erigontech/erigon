@@ -39,6 +39,7 @@ import (
 type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(hash []byte) bool
+	Started() bool
 	GetRlp(hash []byte) []byte
 	Add(db kv.Tx, newTxs TxSlots) error
 	OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64) error
@@ -332,6 +333,7 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 }
 
 func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64) error {
+	log.Debug("[txpool.onNewBlock]", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := unwindTxs.Valid(); err != nil {
@@ -355,6 +357,8 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 			p.senderInfo[id] = &v
 		}
 	}
+
+	log.Debug("[txpool.onNewBlock]", "senderInfo", len(p.senderInfo))
 
 	if err := onNewBlock(p.senderInfo, unwindTxs, minedTxs.txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err

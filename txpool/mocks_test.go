@@ -33,6 +33,9 @@ var _ Pool = &PoolMock{}
 // 			OnNewBlockFunc: func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
+// 			StartedFunc: func() bool {
+// 				panic("mock out the Started method")
+// 			},
 // 		}
 //
 // 		// use mockedPool in code that requires Pool
@@ -54,6 +57,9 @@ type PoolMock struct {
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
 	OnNewBlockFunc func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64) error
+
+	// StartedFunc mocks the Started method.
+	StartedFunc func() bool
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -96,12 +102,16 @@ type PoolMock struct {
 			// BlockHeight is the blockHeight argument value.
 			BlockHeight uint64
 		}
+		// Started holds details about calls to the Started method.
+		Started []struct {
+		}
 	}
 	lockAdd            sync.RWMutex
 	lockAddNewGoodPeer sync.RWMutex
 	lockGetRlp         sync.RWMutex
 	lockIdHashKnown    sync.RWMutex
 	lockOnNewBlock     sync.RWMutex
+	lockStarted        sync.RWMutex
 }
 
 // Add calls AddFunc.
@@ -296,5 +306,34 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 	mock.lockOnNewBlock.RLock()
 	calls = mock.calls.OnNewBlock
 	mock.lockOnNewBlock.RUnlock()
+	return calls
+}
+
+// Started calls StartedFunc.
+func (mock *PoolMock) Started() bool {
+	callInfo := struct {
+	}{}
+	mock.lockStarted.Lock()
+	mock.calls.Started = append(mock.calls.Started, callInfo)
+	mock.lockStarted.Unlock()
+	if mock.StartedFunc == nil {
+		var (
+			bOut bool
+		)
+		return bOut
+	}
+	return mock.StartedFunc()
+}
+
+// StartedCalls gets all the calls that were made to Started.
+// Check the length with:
+//     len(mockedPool.StartedCalls())
+func (mock *PoolMock) StartedCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockStarted.RLock()
+	calls = mock.calls.Started
+	mock.lockStarted.RUnlock()
 	return calls
 }

@@ -266,6 +266,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return err
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66:
+		if !f.pool.Started() {
+			return nil
+		}
+
 		parseCtx := NewTxParseContext()
 		txs := TxSlots{}
 		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
