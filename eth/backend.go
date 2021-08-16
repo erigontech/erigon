@@ -692,11 +692,6 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.downloadCancel()
 	s.txPoolP2PServer.TxFetcher.Stop()
-	s.txPool.Stop()
-	if s.quitMining != nil {
-		close(s.quitMining)
-	}
-
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
@@ -708,6 +703,10 @@ func (s *Ethereum) Stop() error {
 			s.privateAPI.Stop()
 		case <-shutdownDone:
 		}
+	}
+	s.txPool.Stop()
+	if s.quitMining != nil {
+		close(s.quitMining)
 	}
 
 	//s.miner.Stop()
