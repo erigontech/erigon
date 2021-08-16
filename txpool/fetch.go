@@ -281,6 +281,9 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 				return err
 			}
 		}
+		if len(txs.txs) == 0 {
+			return nil
+		}
 		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
 			return f.pool.Add(tx, txs)
 		}); err != nil {
