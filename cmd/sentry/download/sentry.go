@@ -945,6 +945,9 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, serv
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
+	if err := common.Stopped(ss.ctx.Done()); err != nil {
+		return nil
+	}
 	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
 	clean := ss.addMessagesStream(req.Ids, server)
 	defer clean()
