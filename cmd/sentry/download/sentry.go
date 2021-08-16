@@ -419,7 +419,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) error {
+func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
@@ -430,7 +430,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	}
 	lis, err := listenConfig.Listen(ctx, "tcp", sentryAddr)
 	if err != nil {
-		return fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
+		return nil, fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
 	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -470,7 +470,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 			log.Error("Sentry P2P server fail", "err", err1)
 		}
 	}()
-	return nil
+	return grpcServer, nil
 }
 
 func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint) *SentryServerImpl {
@@ -550,7 +550,7 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 
-	err := grpcSentryServer(ctx, sentryAddr, sentryServer)
+	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer)
 	if err != nil {
 		return err
 	}
@@ -558,6 +558,7 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 
 	<-ctx.Done()
 	sentryServer.Close()
+	grpcServer.GracefulStop()
 	return nil
 }
 
@@ -945,9 +946,9 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, serv
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	if err := common.Stopped(ss.ctx.Done()); err != nil {
-		return ss.ctx.Err()
-	}
+	//if err := common.Stopped(ss.ctx.Done()); err != nil {
+	//	return ss.ctx.Err()
+	//}
 	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
 	clean := ss.addMessagesStream(req.Ids, server)
 	defer clean()
