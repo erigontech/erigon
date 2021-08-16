@@ -236,11 +236,14 @@ func FuzzOnNewBlocks11(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 1, 2)
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 3, 4)
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
-	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, blockBaseFee1 uint8) {
+	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, pendingBaseFee1 uint8) {
 		t.Parallel()
-		protocolBaseFee, blockBaseFee := uint64(protocolBaseFee1%16+1), uint64(blockBaseFee1%16+1)
-		if protocolBaseFee == 0 || blockBaseFee == 0 {
+		protocolBaseFee, pendingBaseFee := uint64(protocolBaseFee1%16+1), uint64(pendingBaseFee1%16+1)
+		if protocolBaseFee == 0 || pendingBaseFee == 0 {
 			t.Skip()
+		}
+		if pendingBaseFee < protocolBaseFee {
+			pendingBaseFee = protocolBaseFee
 		}
 		if len(sender) < 1+1+1 {
 			t.Skip()
@@ -287,7 +290,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				// side data structures must have all txs
@@ -326,7 +329,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), msg)
@@ -353,7 +356,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(blockBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
@@ -427,13 +430,13 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
-		err = pool.OnNewBlock(nil, map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, blockBaseFee, 1)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, 1)
 		assert.NoError(err)
 		check(unwindTxs, minedTxs1, "fork1")
 		checkNotify(unwindTxs, minedTxs1, "fork1")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(nil, map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, blockBaseFee, 2)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, 2)
 		assert.NoError(err)
 		check(minedTxs1, minedTxs2, "fork2")
 		checkNotify(minedTxs1, minedTxs2, "fork2")

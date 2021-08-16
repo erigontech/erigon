@@ -176,7 +176,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			return nil
 		}
 		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			log.Warn("Handling incoming message: %s", "err", err)
+			log.Warn("Handling incoming message", "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -412,7 +412,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 		}
 
 		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockBaseFee, req.BlockHeight)
+			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight)
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}

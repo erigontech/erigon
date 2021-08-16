@@ -30,7 +30,7 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(hash []byte) bool {
 // 				panic("mock out the IdHashKnown method")
 // 			},
-// 			OnNewBlockFunc: func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockBaseFee uint64, blockHeight uint64) error {
+// 			OnNewBlockFunc: func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockHeight uint64) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
 // 		}
@@ -53,7 +53,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(hash []byte) bool
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockBaseFee uint64, blockHeight uint64) error
+	OnNewBlockFunc func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockHeight uint64) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -91,8 +91,6 @@ type PoolMock struct {
 			MinedTxs TxSlots
 			// ProtocolBaseFee is the protocolBaseFee argument value.
 			ProtocolBaseFee uint64
-			// BlockBaseFee is the blockBaseFee argument value.
-			BlockBaseFee uint64
 			// BlockHeight is the blockHeight argument value.
 			BlockHeight uint64
 		}
@@ -242,14 +240,13 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockBaseFee uint64, blockHeight uint64) error {
+func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, blockHeight uint64) error {
 	callInfo := struct {
 		Db              kv.Tx
 		StateChanges    map[string]senderInfo
 		UnwindTxs       TxSlots
 		MinedTxs        TxSlots
 		ProtocolBaseFee uint64
-		BlockBaseFee    uint64
 		BlockHeight     uint64
 	}{
 		Db:              db,
@@ -257,7 +254,6 @@ func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, u
 		UnwindTxs:       unwindTxs,
 		MinedTxs:        minedTxs,
 		ProtocolBaseFee: protocolBaseFee,
-		BlockBaseFee:    blockBaseFee,
 		BlockHeight:     blockHeight,
 	}
 	mock.lockOnNewBlock.Lock()
@@ -269,7 +265,7 @@ func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, u
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(db, stateChanges, unwindTxs, minedTxs, protocolBaseFee, blockBaseFee, blockHeight)
+	return mock.OnNewBlockFunc(db, stateChanges, unwindTxs, minedTxs, protocolBaseFee, blockHeight)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
@@ -281,7 +277,6 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 	UnwindTxs       TxSlots
 	MinedTxs        TxSlots
 	ProtocolBaseFee uint64
-	BlockBaseFee    uint64
 	BlockHeight     uint64
 } {
 	var calls []struct {
@@ -290,7 +285,6 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 		UnwindTxs       TxSlots
 		MinedTxs        TxSlots
 		ProtocolBaseFee uint64
-		BlockBaseFee    uint64
 		BlockHeight     uint64
 	}
 	mock.lockOnNewBlock.RLock()
