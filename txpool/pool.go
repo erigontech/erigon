@@ -234,6 +234,7 @@ func (p *TxPool) Started() bool {
 }
 
 func (p *TxPool) Add(coreDB kv.Tx, newTxs TxSlots) error {
+	log.Debug("[txpool.add]", "txs", len(newTxs.txs))
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if err := newTxs.Valid(); err != nil {
