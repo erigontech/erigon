@@ -453,11 +453,11 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 			return err
 		}
 		targetHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
-		var blockBaseFee uint64
+		var protocolBaseFee uint64
 		if targetHeader.BaseFee != nil {
-			blockBaseFee = targetHeader.BaseFee.Uint64()
+			protocolBaseFee = targetHeader.BaseFee.Uint64()
 		}
-		accumulator.StartChange(u.UnwindPoint, hash, txs, blockBaseFee, true /* unwind */)
+		accumulator.StartChange(u.UnwindPoint, hash, txs, protocolBaseFee, true /* unwind */)
 	}
 
 	changes := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
