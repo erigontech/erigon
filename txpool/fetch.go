@@ -176,7 +176,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			return nil
 		}
 		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			log.Warn("Handling incoming message: %s", "err", err)
+			log.Warn("Handling incoming message", "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -266,6 +266,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return err
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66:
+		if !f.pool.Started() {
+			return nil
+		}
+
 		parseCtx := NewTxParseContext()
 		txs := TxSlots{}
 		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
@@ -276,6 +280,9 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			if _, _, err := ParsePooledTransactions66(req.Data, 0, parseCtx, &txs); err != nil {
 				return err
 			}
+		}
+		if len(txs.txs) == 0 {
+			return nil
 		}
 		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
 			return f.pool.Add(tx, txs)
@@ -412,7 +419,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 		}
 
 		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockBaseFee, req.BlockHeight)
+			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, 0, req.BlockHeight)
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}

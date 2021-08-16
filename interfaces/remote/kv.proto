@@ -86,8 +86,7 @@ message StateChange {
   types.H256 blockHash = 3;
   repeated AccountChange changes = 4;
   repeated bytes txs = 5;     // enable by withTransactions=true
-  uint64 blockBaseFee = 6;    // enable by withTransactions=true
-  uint64 protocolBaseFee = 7; // enable by withTransactions=true
+  uint64 protocolBaseFee = 6; // enable by withTransactions=true
 }
 
 message StateChangeRequest {
