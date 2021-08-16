@@ -558,7 +558,9 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 
 	<-ctx.Done()
 	sentryServer.Close()
+	fmt.Println("!!!!! start gracefull stop\n")
 	grpcServer.GracefulStop()
+	fmt.Println("!!!!! end gracefull stop\n")
 	return nil
 }
 
