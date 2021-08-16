@@ -921,6 +921,7 @@ func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
 }
 
 func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, server proto_sentry.Sentry_MessagesServer) func() {
+	log.Debug("addMessagesStream", "ids", ids)
 	ss.messageStreamsLock.Lock()
 	defer ss.messageStreamsLock.Unlock()
 	if ss.messageStreams == nil {
