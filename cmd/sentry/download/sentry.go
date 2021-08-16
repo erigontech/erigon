@@ -1042,6 +1042,10 @@ func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
 }
 
 func (ss *SentryServerImpl) Peers(req *proto_sentry.PeersRequest, server proto_sentry.Sentry_PeersServer) error {
+	if err := common.Stopped(ss.ctx.Done()); err != nil {
+		return ss.ctx.Err()
+	}
+
 	clean := ss.peersStreams.Add(server)
 	defer clean()
 	select {

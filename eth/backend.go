@@ -181,9 +181,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
-	kvRPC := remotedbserver2.NewKvServer(chainKv)
-
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	kvRPC := remotedbserver2.NewKvServer(ctx, chainKv)
 	backend := &Ethereum{
+		downloadCtx:          ctx,
+		downloadCancel:       ctxCancel,
 		config:               config,
 		logger:               logger,
 		chainKV:              chainKv,
@@ -353,7 +355,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
-	backend.downloadCtx, backend.downloadCancel = context.WithCancel(context.Background())
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
 			sentry, err := download.GrpcSentryClient(backend.downloadCtx, addr)

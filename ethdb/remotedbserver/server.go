@@ -28,10 +28,11 @@ type KvServer struct {
 
 	kv                 kv.RwDB
 	stateChangeStreams *StateChangeStreams
+	ctx                context.Context
 }
 
-func NewKvServer(kv kv.RwDB) *KvServer {
-	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams()}
+func NewKvServer(ctx context.Context, kv kv.RwDB) *KvServer {
+	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx}
 }
 
 // Version returns the service-side interface version number
@@ -228,6 +229,9 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 }
 
 func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
+	if err := common.Stopped(s.ctx.Done()); err != nil {
+		return s.ctx.Err()
+	}
 	clean := s.stateChangeStreams.Add(server)
 	defer clean()
 	//select {
