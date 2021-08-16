@@ -230,7 +230,7 @@ func (p *TxPool) Started() bool {
 	defer p.lock.Unlock()
 
 	protocolBaseFee := p.protocolBaseFee.Load()
-	return protocolBaseFee == 0
+	return protocolBaseFee > 0
 }
 
 func (p *TxPool) Add(coreDB kv.Tx, newTxs TxSlots) error {
