@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
@@ -30,6 +31,7 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
 	if a == nil || c == nil {
 		return
 	}
+	log.Info("Accumulator.send", "len", len(a.changes))
 	for i := range a.changes {
 		if err := common.Stopped(ctx.Done()); err != nil {
 			return
