@@ -243,7 +243,7 @@ func (p *TxPool) Add(coreDB kv.Tx, newTxs TxSlots) error {
 
 	protocolBaseFee, pendingBaseFee := p.protocolBaseFee.Load(), p.pendingBaseFee.Load()
 	if protocolBaseFee == 0 || pendingBaseFee == 0 {
-		return fmt.Errorf("non-zero base fee")
+		return fmt.Errorf("non-zero base fee: %d,%d", protocolBaseFee, pendingBaseFee)
 	}
 
 	if err := setTxSenderID(coreDB, &p.senderID, p.senderIDs, p.senderInfo, newTxs); err != nil {
