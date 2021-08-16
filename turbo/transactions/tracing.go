@@ -2,8 +2,10 @@ package transactions
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
 	"time"
@@ -178,6 +180,7 @@ type JsonStreamLogger struct {
 	ctx          context.Context
 	cfg          vm.LogConfig
 	stream       *jsoniter.Stream
+	hexEncoder   io.Writer
 	firstCapture bool
 
 	locations common.Hashes // For sorting
@@ -187,11 +190,14 @@ type JsonStreamLogger struct {
 	err       error  //nolint
 }
 
+var quote = []byte{byte('"')}
+
 // NewStructLogger returns a new logger
 func NewJsonStreamLogger(cfg *vm.LogConfig, ctx context.Context, stream *jsoniter.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
+		hexEncoder:   hex.NewEncoder(stream),
 		storage:      make(map[common.Address]vm.Storage),
 		firstCapture: true,
 	}
@@ -295,7 +301,9 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(fmt.Sprintf("%x", memData[i:i+32]))
+			l.stream.Write(quote) //nolint:errcheck
+			l.hexEncoder.Write(memData[i : i+32])
+			l.stream.Write(quote) //nolint:errcheck
 		}
 		l.stream.WriteArrayEnd()
 	}
