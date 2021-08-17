@@ -414,6 +414,8 @@ var ChaindataTablesCfg = TableCfg{
 	},
 }
 
+var TxpoolTablesCfg = TableCfg{}
+
 func sortBuckets() {
 	sort.SliceStable(ChaindataTables, func(i, j int) bool {
 		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
@@ -443,4 +445,12 @@ func reinit() {
 		tmp.IsDeprecated = true
 		ChaindataTablesCfg[name] = tmp
 	}
+
+	for _, name := range TxPoolTables {
+		_, ok := TxpoolTablesCfg[name]
+		if !ok {
+			TxpoolTablesCfg[name] = TableCfgItem{}
+		}
+	}
+
 }
