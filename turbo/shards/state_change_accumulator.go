@@ -74,6 +74,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
 		a.accountChangeIndex[address] = i
+		a.latestChange.Changes[i].Address = gointerfaces.ConvertAddressToH160(address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
@@ -95,6 +96,7 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
 		a.accountChangeIndex[address] = i
+		a.latestChange.Changes[i].Address = gointerfaces.ConvertAddressToH160(address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	if accountChange.Action != remote.Action_STORAGE {
@@ -114,6 +116,7 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
 		a.accountChangeIndex[address] = i
+		a.latestChange.Changes[i].Address = gointerfaces.ConvertAddressToH160(address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	switch accountChange.Action {
@@ -135,6 +138,7 @@ func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, 
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
 		a.accountChangeIndex[address] = i
+		a.latestChange.Changes[i].Address = gointerfaces.ConvertAddressToH160(address)
 	}
 	accountChange := a.latestChange.Changes[i]
 	if accountChange.Action == remote.Action_DELETE {
