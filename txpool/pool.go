@@ -347,6 +347,7 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 	}
 
 	p.blockHeight.Store(blockHeight)
+	log.Debug("before set base fee", "protocol", protocolBaseFee, "pending", pendingBaseFee)
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 
 	if err := setTxSenderID(coreDB, &p.senderID, p.senderIDs, p.senderInfo, unwindTxs); err != nil {
