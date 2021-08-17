@@ -62,9 +62,9 @@ func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs
 }
 
 // ChangeAccount adds modification of account balance or nonce (or both) to the latest change
-func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
+func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok {
+	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
@@ -79,6 +79,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
 	case remote.Action_DELETE:
 		panic("")
 	}
+	accountChange.Incarnation = incarnation
 	accountChange.Data = data
 }
 
