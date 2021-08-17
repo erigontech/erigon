@@ -357,7 +357,7 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem map[string]struct{}, pru
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.AccountsHistory, "block", blockNum)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.AccountsHistory, "block", blockNum)
 			case <-ctx.Done():
 				return common.ErrStopped
 			default:
@@ -426,7 +426,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Log, "block", blockNum)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
 			case <-ctx.Done():
 				return common.ErrStopped
 			default:

@@ -445,7 +445,7 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
