@@ -91,7 +91,7 @@ type PruneState struct {
 	state           *Sync
 }
 
-func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " prune" }
+func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" }
 func (s *PruneState) Done(db kv.Putter) error {
 	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
 }
