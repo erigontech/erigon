@@ -183,26 +183,22 @@ func (p *TxPool) GetRlp(hash []byte) []byte {
 func (p *TxPool) AppendLocalHashes(buf []byte) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	i := 0
 	for hash, txn := range p.byHash {
 		if txn.subPool&IsLocal == 0 {
 			continue
 		}
-		buf = append(buf[i*32:], hash...)
-		i++
+		buf = append(buf, hash...)
 	}
 }
 func (p *TxPool) AppendRemoteHashes(buf []byte) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
-	i := 0
 	for hash, txn := range p.byHash {
 		if txn.subPool&IsLocal != 0 {
 			continue
 		}
-		buf = append(buf[i*32:], hash...)
-		i++
+		buf = append(buf, hash...)
 	}
 }
 func (p *TxPool) AppendAllHashes(buf []byte) {
