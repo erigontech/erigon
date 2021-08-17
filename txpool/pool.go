@@ -339,16 +339,16 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 	log.Debug("[txpool.onNewBlock]", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	log.Debug("before set base fee", "protocol", protocolBaseFee, "pending", pendingBaseFee)
+	p.blockHeight.Store(blockHeight)
+	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
+
 	if err := unwindTxs.Valid(); err != nil {
 		return err
 	}
 	if err := minedTxs.Valid(); err != nil {
 		return err
 	}
-
-	p.blockHeight.Store(blockHeight)
-	log.Debug("before set base fee", "protocol", protocolBaseFee, "pending", pendingBaseFee)
-	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 
 	if err := setTxSenderID(coreDB, &p.senderID, p.senderIDs, p.senderInfo, unwindTxs); err != nil {
 		return err
