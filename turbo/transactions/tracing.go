@@ -2,6 +2,7 @@ package transactions
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -178,6 +179,7 @@ type JsonStreamLogger struct {
 	ctx          context.Context
 	cfg          vm.LogConfig
 	stream       *jsoniter.Stream
+	hexEncodeBuf [128]byte
 	firstCapture bool
 
 	locations common.Hashes // For sorting
@@ -295,7 +297,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(fmt.Sprintf("%x", memData[i:i+32]))
+			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i:i+32])]))
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -320,8 +322,8 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			} else {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(fmt.Sprintf("%x", loc))
-			l.stream.WriteString(fmt.Sprintf("%x", value))
+			l.stream.WriteObjectField(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], loc[:])]))
+			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], value[:])]))
 		}
 		l.stream.WriteObjectEnd()
 	}
