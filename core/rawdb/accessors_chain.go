@@ -377,7 +377,7 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *ty
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
 	blockKey := make([]byte, dbutils.NumberLength+common.HashLength)
 	encNum := make([]byte, 8)
-	for i := from; i < to; i++ {
+	for i := from; i < to+1; i++ {
 		binary.BigEndian.PutUint64(encNum, i)
 		hash, err := db.GetOne(kv.HeaderCanonical, encNum)
 		if err != nil {
