@@ -181,7 +181,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	kvRPC := remotedbserver2.NewKvServer(ctx, chainKv)
 	backend := &Ethereum{
+		downloadCtx:          ctx,
+		downloadCancel:       ctxCancel,
 		config:               config,
 		logger:               logger,
 		chainKV:              chainKv,
@@ -194,8 +198,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		waitForMiningStop:    make(chan struct{}),
 		sentries:             []direct.SentryClient{},
 		notifications: &stagedsync.Notifications{
-			Events:      privateapi.NewEvents(),
-			Accumulator: &shards.Accumulator{},
+			Events:               privateapi.NewEvents(),
+			Accumulator:          &shards.Accumulator{},
+			StateChangesConsumer: kvRPC,
 		},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
@@ -286,10 +291,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver2.NewKvServer(backend.chainKV)
-	ethBackendRPC := privateapi.NewEthBackendServer(backend, backend.notifications.Events)
-	txPoolRPC := privateapi.NewTxPoolServer(context.Background(), backend.txPool)
-	miningRPC := privateapi.NewMiningServer(context.Background(), backend, ethashApi)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.notifications.Events)
+	txPoolRPC := privateapi.NewTxPoolServer(ctx, backend.txPool)
+	miningRPC := privateapi.NewMiningServer(ctx, backend, ethashApi)
 
 	if stack.Config().PrivateApiAddr != "" {
 
@@ -351,7 +355,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
-	backend.downloadCtx, backend.downloadCancel = context.WithCancel(context.Background())
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
 			sentry, err := download.GrpcSentryClient(backend.downloadCtx, addr)
@@ -689,11 +692,6 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.downloadCancel()
 	s.txPoolP2PServer.TxFetcher.Stop()
-	s.txPool.Stop()
-	if s.quitMining != nil {
-		close(s.quitMining)
-	}
-
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
@@ -705,6 +703,10 @@ func (s *Ethereum) Stop() error {
 			s.privateAPI.Stop()
 		case <-shutdownDone:
 		}
+	}
+	s.txPool.Stop()
+	if s.quitMining != nil {
+		close(s.quitMining)
 	}
 
 	//s.miner.Stop()

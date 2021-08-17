@@ -175,6 +175,7 @@ func StageLoopStep(
 		return err
 	}
 
+	notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer)
 	return nil
 }
 

@@ -374,6 +374,44 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *ty
 	return body
 }
 
+func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
+	blockKey := make([]byte, dbutils.NumberLength+common.HashLength)
+	encNum := make([]byte, 8)
+	for i := from; i < to+1; i++ {
+		binary.BigEndian.PutUint64(encNum, i)
+		hash, err := db.GetOne(kv.HeaderCanonical, encNum)
+		if err != nil {
+			return nil, err
+		}
+		if len(hash) == 0 {
+			continue
+		}
+
+		binary.BigEndian.PutUint64(blockKey, i)
+		copy(blockKey[dbutils.NumberLength:], hash)
+		bodyRlp, err := db.GetOne(kv.BlockBody, blockKey)
+		if err != nil {
+			return nil, err
+		}
+		if len(bodyRlp) == 0 {
+			continue
+		}
+		baseTxId, txAmount, err := types.DecodeOnlyTxMetadataFromBody(bodyRlp)
+		if err != nil {
+			return nil, err
+		}
+
+		binary.BigEndian.PutUint64(encNum, baseTxId)
+		if err = db.ForAmount(kv.EthTx, encNum, txAmount, func(k, v []byte) error {
+			res = append(res, v)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return
+}
+
 func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {

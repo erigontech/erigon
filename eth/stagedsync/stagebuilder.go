@@ -16,8 +16,9 @@ type ChainEventNotifier interface {
 }
 
 type Notifications struct {
-	Events      *privateapi.Events
-	Accumulator *shards.Accumulator
+	Events               *privateapi.Events
+	Accumulator          *shards.Accumulator
+	StateChangesConsumer shards.StateChangeConsumer
 }
 
 func MiningStages(
