@@ -2,7 +2,6 @@ package shards
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -29,9 +28,7 @@ func (a *Accumulator) Reset() {
 	a.storageChangeIndex = nil
 }
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
-	if a == nil || c == nil {
-		log.Info(fmt.Sprintf("accumulator.send something is nil: %#v,%#v", a, c))
-
+	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
 	log.Info("Accumulator.send", "len", len(a.changes))
