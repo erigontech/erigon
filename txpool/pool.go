@@ -331,6 +331,7 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 	if hasNewVal {
 		p.protocolBaseFee.Store(pendingBaseFee)
 	}
+	log.Debug("set base fee", "protocol", protocolBaseFee, "pending", pendingBaseFee)
 	return protocolBaseFee, p.pendingBaseFee.Load()
 }
 

@@ -55,7 +55,7 @@ type Timings struct {
 
 var DefaultTimings = Timings{
 	syncToNewPeersEvery: 2 * time.Minute,
-	logEvery:            30 * time.Second,
+	logEvery:            10 * time.Second,
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
