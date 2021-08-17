@@ -160,6 +160,7 @@ func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
 		queued:                 NewSubPool(),
 		newTxs:                 newTxs,
 		db:                     db,
+		senderID:               1,
 	}, nil
 }
 
@@ -187,7 +188,7 @@ func (p *TxPool) AppendLocalHashes(buf []byte) {
 		if txn.subPool&IsLocal == 0 {
 			continue
 		}
-		copy(buf[i*32:(i+1)*32], hash)
+		buf = append(buf[i*32:], hash...)
 		i++
 	}
 }
@@ -200,7 +201,7 @@ func (p *TxPool) AppendRemoteHashes(buf []byte) {
 		if txn.subPool&IsLocal != 0 {
 			continue
 		}
-		copy(buf[i*32:(i+1)*32], hash)
+		buf = append(buf[i*32:], hash...)
 		i++
 	}
 }
@@ -343,8 +344,6 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 	defer p.lock.Unlock()
 	p.blockHeight.Store(blockHeight)
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
-	log.Debug("before set base fee", "protocol", p.protocolBaseFee.Load(), "pending", p.pendingBaseFee.Load())
-
 	if err := unwindTxs.Valid(); err != nil {
 		return err
 	}
@@ -415,7 +414,8 @@ func setTxSenderID(coreDB kv.Tx, senderIDSequence *uint64, senderIDs map[string]
 		id, ok := senderIDs[addr]
 		if !ok {
 			*senderIDSequence++
-			senderIDs[addr] = *senderIDSequence
+			id = *senderIDSequence
+			senderIDs[addr] = id
 		}
 		txs.txs[i].senderID = id
 
@@ -629,7 +629,6 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, pendingBaseFee uint64) 
 		// baseFee of the currently pending block. Set to 0 otherwise.
 		it.metaTx.subPool &^= EnoughFeeCapBlock
 		if it.metaTx.Tx.feeCap >= pendingBaseFee {
-			fmt.Printf("setttttt: %d,%d,%d\n", protocolBaseFee, pendingBaseFee, it.metaTx.Tx.feeCap)
 			it.metaTx.subPool |= EnoughFeeCapBlock
 		}
 
