@@ -180,7 +180,7 @@ func (p *TxPool) GetRlp(hash []byte) []byte {
 	}
 	return txn.Tx.rlp
 }
-func (p *TxPool) AppendLocalHashes(buf []byte) {
+func (p *TxPool) AppendLocalHashes(buf []byte) []byte {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	for hash, txn := range p.byHash {
@@ -189,8 +189,9 @@ func (p *TxPool) AppendLocalHashes(buf []byte) {
 		}
 		buf = append(buf, hash...)
 	}
+	return buf
 }
-func (p *TxPool) AppendRemoteHashes(buf []byte) {
+func (p *TxPool) AppendRemoteHashes(buf []byte) []byte {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
@@ -200,10 +201,12 @@ func (p *TxPool) AppendRemoteHashes(buf []byte) {
 		}
 		buf = append(buf, hash...)
 	}
+	return buf
 }
-func (p *TxPool) AppendAllHashes(buf []byte) {
-	p.AppendLocalHashes(buf)
-	p.AppendRemoteHashes(buf[len(buf):])
+func (p *TxPool) AppendAllHashes(buf []byte) []byte {
+	buf = p.AppendLocalHashes(buf)
+	buf = p.AppendRemoteHashes(buf)
+	return buf
 }
 func (p *TxPool) IdHashKnown(hash []byte) bool {
 	p.lock.RLock()
@@ -444,7 +447,9 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 		}
 	}
 
+	j := 0
 	removeMined(senderInfo, minedTxs, pending, baseFee, queued, func(i *metaTx) {
+		j++
 		delete(byHash, string(i.Tx.idHash[:]))
 		senderInfo[i.Tx.senderID].txNonce2Tx.Delete(&nonce2TxItem{i})
 		if i.subPool&IsLocal != 0 {
@@ -452,6 +457,7 @@ func onNewBlock(senderInfo map[uint64]*senderInfo, unwindTxs TxSlots, minedTxs [
 			localsHistory.Add(i.Tx.idHash, struct{}{})
 		}
 	})
+	log.Info("remove mined", "removed", j, "minedTxsLen", len(minedTxs))
 
 	// This can be thought of a reverse operation from the one described before.
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
@@ -525,10 +531,10 @@ func removeMined(senderInfo map[uint64]*senderInfo, minedTxs []*TxSlot, pending,
 		// delete mined transactions from everywhere
 		sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 			it := i.(*nonce2TxItem)
+			fmt.Printf("nonce cmp: %d,%d, senderID=%d\n", it.metaTx.Tx.nonce, sender.nonce, tx.senderID)
 			if it.metaTx.Tx.nonce > sender.nonce {
 				return false
 			}
-			// TODO: save local transactions to cache with TTL, in case of re-org - to restore isLocal flag of re-injected transactions
 
 			// del from nonce2tx mapping
 			sender.txNonce2Tx.Delete(i)
@@ -904,7 +910,7 @@ func BroadcastLoop(ctx context.Context, p *TxPool, newTxs chan Hashes, send *Sen
 			if len(newPeers) == 0 {
 				continue
 			}
-			p.AppendAllHashes(remoteTxHashes[:0])
+			remoteTxHashes = p.AppendAllHashes(remoteTxHashes[:0])
 			send.PropagatePooledTxsToPeersList(newPeers, remoteTxHashes)
 		}
 	}
