@@ -104,10 +104,10 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 // ChangeCode adds code to the latest change
 func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, code []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok {
+	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_CODE})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
@@ -125,10 +125,10 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 
 func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, location common.Hash, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok {
+	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_STORAGE})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
