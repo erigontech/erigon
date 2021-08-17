@@ -17,6 +17,7 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -101,12 +103,6 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 
 // handleBatch executes all messages in a batch and returns the responses.
 func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
-	needWriteStream := false
-	if stream == nil {
-		stream = jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
-		needWriteStream = true
-	}
-
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
@@ -127,76 +123,72 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 	}
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
-		stream.WriteArrayStart()
-		firstResponse := true
-		// All goroutines will place results right to this array. Because requests order must match reply orders.
-		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
-		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
-		defer close(boundedConcurrency)
-		wg := sync.WaitGroup{}
-		wg.Add(len(msgs))
-		streamMutex := sync.Mutex{}
-
-		writeToStream := func(buffer []byte) {
-			if len(buffer) == 0 {
-				return
-			}
-
-			streamMutex.Lock()
-			defer streamMutex.Unlock()
-
-			if !firstResponse {
-				stream.WriteMore()
-			}
-			stream.Write(buffer)
-			firstResponse = false
-		}
-
+		allMethodsAreThreadSafe := true // only if all methods in batch are pass next criteria
 		for i := range calls {
 			if calls[i].isSubscribe() {
-				// Force subscribe call to work in non-streaming mode
-				response := h.handleCallMsg(cp, calls[i], nil)
-				if response != nil {
-					b, _ := json.Marshal(response)
-					writeToStream(b)
+				allMethodsAreThreadSafe = false
+				break
+			}
+			cb := h.reg.callback(calls[i].Method)
+			if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
+				allMethodsAreThreadSafe = false
+				break
+			}
+		}
+		if !allMethodsAreThreadSafe && stream == nil {
+			_ = h.conn.writeJSON(context.Background(), jsonrpcMessage{Version: vsn, ID: null, Error: &jsonError{
+				Code:    -32601,
+				Message: "streamable methods are not supported on websockets. help us to implement",
+			}})
+			return
+		}
+
+		answers := make([]interface{}, 0, len(msgs))
+		if allMethodsAreThreadSafe {
+			// All goroutines will place results right to this array. Because requests order must match reply orders.
+			answersWithNils := make([]*jsonrpcMessage, len(msgs))
+			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
+			boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
+			defer close(boundedConcurrency)
+			wg := sync.WaitGroup{}
+			wg.Add(len(msgs))
+			for i := range calls {
+				boundedConcurrency <- struct{}{}
+				go func(i int) {
+					defer func() {
+						wg.Done()
+						<-boundedConcurrency
+					}()
+
+					answersWithNils[i] = h.handleCallMsg(cp, calls[i], stream)
+				}(i)
+			}
+			wg.Wait()
+			for _, answer := range answersWithNils {
+				if answer != nil {
+					answers = append(answers, answer)
 				}
 			}
-			boundedConcurrency <- struct{}{}
-			go func(i int) {
-				defer func() {
-					wg.Done()
-					<-boundedConcurrency
-				}()
-				cb := h.reg.callback(calls[i].Method)
-				var response *jsonrpcMessage
-				if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
-					batchStream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
-					response = h.handleCallMsg(cp, calls[i], batchStream)
-					if response == nil {
-						writeToStream(batchStream.Buffer())
-					}
-				} else {
-					response = h.handleCallMsg(cp, calls[i], stream)
-				}
-				// Marshal inside goroutine (parallel)
-				if response != nil {
-					buffer, _ := json.Marshal(response)
-					writeToStream(buffer)
-				}
-			}(i)
-		}
-		wg.Wait()
-
-		stream.WriteArrayEnd()
-		stream.Flush()
-
-		if needWriteStream {
-			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
 		} else {
-			stream.Write([]byte("\n"))
+			answers = make([]interface{}, 0, len(msgs))
+			buf := bytes.NewBuffer(nil)
+			stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
+			for _, msg := range calls {
+				buf.Reset()
+				stream.Reset(buf)
+				if answer := h.handleCallMsg(cp, msg, stream); answer != nil {
+					answers = append(answers, answer)
+				} else {
+					if buf.Len() > 0 {
+						answers = append(answers, json.RawMessage(common.CopyBytes(buf.Bytes())))
+					}
+				}
+			}
 		}
-
 		h.addSubscriptions(cp.notifiers)
+		if len(answers) > 0 {
+			h.conn.writeJSON(cp.ctx, answers)
+		}
 		for _, n := range cp.notifiers {
 			n.activate()
 		}
