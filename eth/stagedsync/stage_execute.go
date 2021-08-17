@@ -371,7 +371,7 @@ func pruneChangeSets(tx kv.RwTx, logPrefix string, table string, pruneTo uint64,
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", table, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -652,7 +652,7 @@ func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Receipts, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Receipts, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -678,7 +678,7 @@ func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Log, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -707,7 +707,7 @@ func pruneCallTracesSet(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
