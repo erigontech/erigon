@@ -150,6 +150,7 @@ func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
 	}
 	return &TxPool{
 		lock:                   &sync.RWMutex{},
+		senderIDs:              map[string]uint64{},
 		senderInfo:             map[uint64]*senderInfo{},
 		byHash:                 map[string]*metaTx{},
 		localsHistory:          localsHistory,
@@ -327,9 +328,10 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 	hasNewVal := pendingBaseFee > 0
 	if pendingBaseFee < protocolBaseFee {
 		pendingBaseFee = protocolBaseFee
+		hasNewVal = true
 	}
 	if hasNewVal {
-		p.protocolBaseFee.Store(pendingBaseFee)
+		p.pendingBaseFee.Store(pendingBaseFee)
 	}
 	log.Debug("set base fee", "protocol", protocolBaseFee, "pending", pendingBaseFee)
 	return protocolBaseFee, p.pendingBaseFee.Load()
@@ -339,9 +341,9 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 	log.Debug("[txpool.onNewBlock]", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	log.Debug("before set base fee", "protocol", protocolBaseFee, "pending", pendingBaseFee)
 	p.blockHeight.Store(blockHeight)
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
+	log.Debug("before set base fee", "protocol", p.protocolBaseFee.Load(), "pending", p.pendingBaseFee.Load())
 
 	if err := unwindTxs.Valid(); err != nil {
 		return err
@@ -358,7 +360,7 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 	}
 	for addr, id := range p.senderIDs { // merge state changes
 		if v, ok := stateChanges[addr]; ok {
-			p.senderInfo[id] = &v
+			p.senderInfo[id] = newSenderInfo(v.nonce, v.balance)
 		}
 	}
 
@@ -428,7 +430,7 @@ func setTxSenderID(coreDB kv.Tx, senderIDSequence *uint64, senderIDs map[string]
 			if err != nil {
 				return err
 			}
-			sendersInfo[txs.txs[i].senderID] = &senderInfo{nonce: nonce, balance: balance}
+			sendersInfo[txs.txs[i].senderID] = newSenderInfo(nonce, balance)
 		}
 	}
 	return nil
