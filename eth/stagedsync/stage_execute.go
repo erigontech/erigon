@@ -444,6 +444,8 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 
 	var accumulator *shards.Accumulator
 	if !initialCycle && cfg.stateStream {
+		accumulator = cfg.accumulator
+
 		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
