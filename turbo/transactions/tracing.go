@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"sort"
 	"time"
@@ -180,7 +179,7 @@ type JsonStreamLogger struct {
 	ctx          context.Context
 	cfg          vm.LogConfig
 	stream       *jsoniter.Stream
-	hexEncoder   io.Writer
+	hexEncodeBuf [128]byte
 	firstCapture bool
 
 	locations common.Hashes // For sorting
@@ -190,14 +189,11 @@ type JsonStreamLogger struct {
 	err       error  //nolint
 }
 
-var quote = []byte{byte('"')}
-
 // NewStructLogger returns a new logger
 func NewJsonStreamLogger(cfg *vm.LogConfig, ctx context.Context, stream *jsoniter.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
-		hexEncoder:   hex.NewEncoder(stream),
 		storage:      make(map[common.Address]vm.Storage),
 		firstCapture: true,
 	}
@@ -301,9 +297,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.Write(quote) //nolint:errcheck
-			l.hexEncoder.Write(memData[i : i+32])
-			l.stream.Write(quote) //nolint:errcheck
+			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], memData[i:i+32])]))
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -328,8 +322,8 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 			} else {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(fmt.Sprintf("%x", loc))
-			l.stream.WriteString(fmt.Sprintf("%x", value))
+			l.stream.WriteObjectField(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], loc[:])]))
+			l.stream.WriteString(string(l.hexEncodeBuf[0:hex.Encode(l.hexEncodeBuf[:], value[:])]))
 		}
 		l.stream.WriteObjectEnd()
 	}
