@@ -329,7 +329,7 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	} else {
-		db.log.Info("database closed (MDBX)")
+		db.log.Info("database closed", "label", db.opts.label)
 	}
 }
 
