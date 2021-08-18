@@ -50,7 +50,7 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(address, value)
+		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 	return w.db.Put(kv.PlainState, address[:], value)
 }

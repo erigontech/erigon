@@ -185,6 +185,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {
 	}
 	cfg := ethconfig.Defaults
+	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Journal = ""
@@ -274,7 +275,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
-				nil,
+				&shards.Accumulator{},
 				cfg.StateStream,
 				mock.tmpdir,
 			),
