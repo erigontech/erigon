@@ -57,7 +57,7 @@ var rootCmd = &cobra.Command{
 			genesis = genesisFromFile(genesisPath)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "erigon", "chaindata")
+			chaindata = path.Join(datadir, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
