@@ -500,7 +500,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
 				if accumulator != nil {
-					accumulator.ChangeAccount(address, newV)
+					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
 				if err := next(k, k, newV); err != nil {
 					return err
