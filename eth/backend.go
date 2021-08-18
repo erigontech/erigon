@@ -721,5 +721,6 @@ func (s *Ethereum) Stop() error {
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()
 	}
+	s.chainKV.Close()
 	return nil
 }
