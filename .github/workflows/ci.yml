@@ -15,12 +15,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - run: df -h
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v2
         with:
           go-version: 1.16.x
-      - run: go env
       - name: Install dependencies
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
