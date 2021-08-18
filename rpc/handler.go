@@ -123,66 +123,37 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 	}
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
-		allMethodsAreThreadSafe := true // only if all methods in batch are pass next criteria
+		// All goroutines will place results right to this array. Because requests order must match reply orders.
+		answersWithNils := make([]interface{}, len(msgs))
+		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
+		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
+		defer close(boundedConcurrency)
+		wg := sync.WaitGroup{}
+		wg.Add(len(msgs))
 		for i := range calls {
-			if calls[i].isSubscribe() {
-				allMethodsAreThreadSafe = false
-				break
-			}
-			cb := h.reg.callback(calls[i].Method)
-			if cb != nil && cb.streamable { // cb == nil: means no such method and this case is thread-safe
-				allMethodsAreThreadSafe = false
-				break
-			}
-		}
-		if !allMethodsAreThreadSafe && stream == nil {
-			_ = h.conn.writeJSON(context.Background(), jsonrpcMessage{Version: vsn, ID: null, Error: &jsonError{
-				Code:    -32601,
-				Message: "streamable methods are not supported on websockets. help us to implement",
-			}})
-			return
-		}
+			boundedConcurrency <- struct{}{}
+			go func(i int) {
+				defer func() {
+					wg.Done()
+					<-boundedConcurrency
+				}()
 
+				buf := bytes.NewBuffer(nil)
+				stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
+				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
+					answersWithNils[i] = res
+				}
+				_ = stream.Flush()
+				if buf.Len() > 0 && answersWithNils[i] == nil {
+					answersWithNils[i] = json.RawMessage(common.CopyBytes(buf.Bytes()))
+				}
+			}(i)
+		}
+		wg.Wait()
 		answers := make([]interface{}, 0, len(msgs))
-		if allMethodsAreThreadSafe {
-			// All goroutines will place results right to this array. Because requests order must match reply orders.
-			answersWithNils := make([]*jsonrpcMessage, len(msgs))
-			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
-			boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
-			defer close(boundedConcurrency)
-			wg := sync.WaitGroup{}
-			wg.Add(len(msgs))
-			for i := range calls {
-				boundedConcurrency <- struct{}{}
-				go func(i int) {
-					defer func() {
-						wg.Done()
-						<-boundedConcurrency
-					}()
-
-					answersWithNils[i] = h.handleCallMsg(cp, calls[i], stream)
-				}(i)
-			}
-			wg.Wait()
-			for _, answer := range answersWithNils {
-				if answer != nil {
-					answers = append(answers, answer)
-				}
-			}
-		} else {
-			answers = make([]interface{}, 0, len(msgs))
-			buf := bytes.NewBuffer(nil)
-			stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
-			for _, msg := range calls {
-				buf.Reset()
-				stream.Reset(buf)
-				if answer := h.handleCallMsg(cp, msg, stream); answer != nil {
-					answers = append(answers, answer)
-				} else {
-					if buf.Len() > 0 {
-						answers = append(answers, json.RawMessage(common.CopyBytes(buf.Bytes())))
-					}
-				}
+		for _, answer := range answersWithNils {
+			if answer != nil {
+				answers = append(answers, answer)
 			}
 		}
 		h.addSubscriptions(cp.notifiers)
