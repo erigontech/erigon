@@ -157,9 +157,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 			}
 		}
 		h.addSubscriptions(cp.notifiers)
-		if len(answers) > 0 {
-			h.conn.writeJSON(cp.ctx, answers)
-		}
+		//if len(answers) > 0 {
+		h.conn.writeJSON(cp.ctx, answers)
+		//}
 		for _, n := range cp.notifiers {
 			n.activate()
 		}
