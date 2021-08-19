@@ -420,7 +420,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		} else {
 			vmTrace = ot.r.VmTrace
 		}
-		if ot.lastVmOp != nil {
+		if ot.lastVmOp != nil && ot.lastVmOp.Ex != nil {
 			// Set the "push" of the last operation
 			var showStack int
 			switch {
