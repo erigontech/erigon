@@ -29,7 +29,6 @@ import (
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
-	logger log.Logger,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
@@ -52,7 +51,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, logger, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
 			if errors.Is(err, common.ErrStopped) {
 				return
 			}
@@ -82,7 +81,6 @@ func StageLoop(
 
 func StageLoopStep(
 	ctx context.Context,
-	logger log.Logger,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
@@ -177,6 +175,7 @@ func StageLoopStep(
 		return err
 	}
 
+	notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer)
 	return nil
 }
 
@@ -265,10 +264,10 @@ func NewStagedSync(
 			stagedsync.StageTxPoolCfg(db, txPool, func() {
 				for i := range txPoolServer.Sentries {
 					go func(i int) {
-						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
+						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
 					}(i)
 					go func(i int) {
-						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.RecentPeers, nil)
+						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
 					}(i)
 				}
 				txPoolServer.TxFetcher.Start()

@@ -68,9 +68,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				default:
 				}
 				if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					time.Sleep(time.Second)
 					continue
 				}
-				if errors.Is(err, io.EOF) {
+				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+					time.Sleep(time.Second)
 					continue
 				}
 
@@ -95,9 +97,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					default:
 					}
 					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+						time.Sleep(time.Second)
 						continue
 					}
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+						time.Sleep(time.Second)
 						continue
 					}
 					log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
@@ -119,9 +123,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					default:
 					}
 					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+						time.Sleep(time.Second)
 						continue
 					}
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+						time.Sleep(time.Second)
 						continue
 					}
 					log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
@@ -143,9 +149,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					default:
 					}
 					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+						time.Sleep(time.Second)
 						continue
 					}
-					if errors.Is(err, io.EOF) {
+					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+						time.Sleep(time.Second)
 						continue
 					}
 					log.Warn("rpc filters: error subscribing to pending logs", "err", err)
@@ -167,9 +175,6 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
 	subscription, err := txPool.OnAdd(ctx, &txpool.OnAddRequest{}, grpc.WaitForReady(true))
 	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return errors.New(s.Message())
-		}
 		return err
 	}
 	for {
@@ -190,9 +195,6 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.MiningClient) error {
 	subscription, err := mining.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
 	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return errors.New(s.Message())
-		}
 		return err
 	}
 	for {
@@ -234,9 +236,6 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.MiningClient) error {
 	subscription, err := mining.OnPendingLogs(ctx, &txpool.OnPendingLogsRequest{}, grpc.WaitForReady(true))
 	if err != nil {
-		if s, ok := status.FromError(err); ok {
-			return errors.New(s.Message())
-		}
 		return err
 	}
 	for {

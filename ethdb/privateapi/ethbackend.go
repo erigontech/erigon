@@ -23,6 +23,7 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
+	ctx    context.Context
 	eth    EthBackend
 	events *Events
 }
@@ -33,8 +34,8 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 }
 
-func NewEthBackendServer(eth EthBackend, events *Events) *EthBackendServer {
-	return &EthBackendServer{eth: eth, events: events}
+func NewEthBackendServer(ctx context.Context, eth EthBackend, events *Events) *EthBackendServer {
+	return &EthBackendServer{ctx: ctx, eth: eth, events: events}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -73,8 +74,10 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	log.Debug("establishing event subscription channel with the RPC daemon")
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		select {
+		case <-s.ctx.Done():
+			return nil
 		case <-subscribeServer.Context().Done():
-			return subscribeServer.Context().Err()
+			return nil
 		default:
 		}
 
@@ -102,7 +105,10 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	})
 
 	log.Info("event subscription channel established with the RPC daemon")
-	<-subscribeServer.Context().Done()
+	select {
+	case <-subscribeServer.Context().Done():
+	case <-s.ctx.Done():
+	}
 	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
 }

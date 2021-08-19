@@ -16,10 +16,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/ethdb/remotedb"
 	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
@@ -116,11 +116,8 @@ func RootCommand() (*cobra.Command, *Flags) {
 				cfg.Datadir = paths.DefaultDataDir()
 			}
 			if cfg.Chaindata == "" {
-				cfg.Chaindata = path.Join(cfg.Datadir, "erigon", "chaindata")
+				cfg.Chaindata = path.Join(cfg.Datadir, "chaindata")
 			}
-			//if cfg.SnapshotDir == "" {
-			//	cfg.SnapshotDir = path.Join(cfg.Datadir, "erigon", "snapshot")
-			//}
 		}
 		return nil
 	}
@@ -189,7 +186,7 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 	if cfg.PrivateApiAddr != "" {
-		conn, err := connectErigon(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, cfg.PrivateApiAddr)
+		conn, err := ConnectCore(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, cfg.PrivateApiAddr)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
@@ -224,7 +221,7 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 	return db, eth, txPool, mining, err
 }
 
-func connectErigon(certFile, keyFile, caCert string, dialAddress string) (*grpc.ClientConn, error) {
+func ConnectCore(certFile, keyFile, caCert string, dialAddress string) (*grpc.ClientConn, error) {
 	var dialOpts []grpc.DialOption
 
 	backoffCfg := backoff.DefaultConfig

@@ -149,7 +149,7 @@ func newCallback(receiver, fn reflect.Value, name string) *callback {
 		outs[i] = fntype.Out(i)
 	}
 	if len(outs) > 2 {
-		log.Warn("Cannot register RPC callback [%s] - maximum 2 return values are allowed, got %d", name, len(outs))
+		log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - maximum 2 return values are allowed, got %d", name, len(outs)))
 		return nil
 	}
 	// If an error is returned, it must be the last returned value.
@@ -158,14 +158,14 @@ func newCallback(receiver, fn reflect.Value, name string) *callback {
 		c.errPos = 0
 	case len(outs) == 2:
 		if isErrorType(outs[0]) || !isErrorType(outs[1]) {
-			log.Warn("Cannot register RPC callback [%s] - error must the last return value", name)
+			log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - error must the last return value", name))
 			return nil
 		}
 		c.errPos = 1
 	}
 	// If there is only one return value (error), and the last argument is *jsoniter.Stream, mark it as streamable
 	if len(outs) != 1 && c.streamable {
-		log.Warn("Cannot register RPC callback [%s] - streamable method may only return 1 value (error)", name)
+		log.Warn(fmt.Sprintf("Cannot register RPC callback [%s] - streamable method may only return 1 value (error)", name))
 		return nil
 	}
 	return c

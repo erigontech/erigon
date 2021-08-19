@@ -342,3 +342,8 @@ multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to r
 Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
 In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
 non-batched way.
+
+### Filesystem's background features are expensive
+
+For example: btrfs's autodefrag option - may increase write IO 100x times
+

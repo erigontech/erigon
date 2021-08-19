@@ -196,6 +196,10 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			if gasFeeCap.BitLen() > 0 || gasTipCap.BitLen() > 0 {
 				gasPrice = math2.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
 			}
+			// Still zero
+			if gasPrice.IsZero() {
+				gasPrice.Set(baseFee)
+			}
 		}
 	}
 	value := new(uint256.Int)
@@ -335,7 +339,6 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 }
 
 func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
@@ -359,6 +362,7 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		ot.r.Output = common.CopyBytes(output)
 	}
 	ignoreError := false
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.compat {
 		ignoreError = depth == 0 && topTrace.Type == CREATE
 	}
@@ -416,7 +420,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		} else {
 			vmTrace = ot.r.VmTrace
 		}
-		if ot.lastVmOp != nil {
+		if ot.lastVmOp != nil && ot.lastVmOp.Ex != nil {
 			// Set the "push" of the last operation
 			var showStack int
 			switch {
