@@ -177,18 +177,16 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		if req == nil {
 			return nil
 		}
-		go func(req *sentry.InboundMessage) {
-			if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-				s, ok := status.FromError(err)
-				doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
-				if doLog {
-					log.Warn("Handling incoming message", "err", err)
-				}
+		if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
+			s, ok := status.FromError(err)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+			if doLog {
+				log.Warn("Handling incoming message", "err", err)
 			}
-			if f.wg != nil {
-				f.wg.Done()
-			}
-		}(req)
+		}
+		if f.wg != nil {
+			f.wg.Done()
+		}
 	}
 }
 
