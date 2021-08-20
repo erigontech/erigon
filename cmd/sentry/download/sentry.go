@@ -3,7 +3,6 @@ package download
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -565,18 +564,19 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
-	ctx                context.Context
-	Protocol           p2p.Protocol
-	discoveryDNS       []string
-	GoodPeers          sync.Map
-	statusData         *proto_sentry.StatusData
-	P2pServer          *p2p.Server
-	TxSubscribed       uint32 // Set to non-zero if downloader is subscribed to transaction messages
-	lock               sync.RWMutex
-	messageStreams     map[proto_sentry.MessageId]*MessageStreams
-	messageStreamsLock sync.RWMutex
-	peersStreams       *PeersStreams
-	p2p                *p2p.Config
+	ctx                  context.Context
+	Protocol             p2p.Protocol
+	discoveryDNS         []string
+	GoodPeers            sync.Map
+	statusData           *proto_sentry.StatusData
+	P2pServer            *p2p.Server
+	TxSubscribed         uint32 // Set to non-zero if downloader is subscribed to transaction messages
+	lock                 sync.RWMutex
+	messageStreams       map[proto_sentry.MessageId]map[uint64]chan *proto_sentry.InboundMessage
+	messagesSubscriberID uint64
+	messageStreamsLock   sync.RWMutex
+	peersStreams         *PeersStreams
+	p2p                  *p2p.Config
 }
 
 func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID string) error {
@@ -905,59 +905,69 @@ func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
 func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b []byte) {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
-	errs := ss.messageStreams[msgID].Broadcast(&proto_sentry.InboundMessage{
+	req := &proto_sentry.InboundMessage{
 		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
 		Id:     msgID,
 		Data:   b,
-	})
-	for _, err := range errs {
-		if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-			continue
-		}
-		log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(msgID)], "error", err)
+	}
+	for i := range ss.messageStreams[msgID] {
+		ss.messageStreams[msgID][i] <- req
 	}
 }
 
 func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
-	return ss.messageStreams[msgID] != nil && ss.messageStreams[msgID].Len() > 0
+	return ss.messageStreams[msgID] != nil && len(ss.messageStreams[msgID]) > 0
 	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
 }
 
-func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, server proto_sentry.Sentry_MessagesServer) func() {
+func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch chan *proto_sentry.InboundMessage) func() {
 	ss.messageStreamsLock.Lock()
 	defer ss.messageStreamsLock.Unlock()
 	if ss.messageStreams == nil {
-		ss.messageStreams = map[proto_sentry.MessageId]*MessageStreams{}
+		ss.messageStreams = map[proto_sentry.MessageId]map[uint64]chan *proto_sentry.InboundMessage{}
 	}
 
-	cleanStack := make([]func(), len(ids))
-	for i, id := range ids {
+	ss.messagesSubscriberID++
+	for _, id := range ids {
 		m, ok := ss.messageStreams[id]
 		if !ok {
-			m = NewStreamsList()
+			m = map[uint64]chan *proto_sentry.InboundMessage{}
 			ss.messageStreams[id] = m
 		}
-
-		cleanStack[i] = m.Add(server)
+		m[ss.messagesSubscriberID] = ch
 	}
+
+	sID := ss.messagesSubscriberID
 	return func() {
-		for i := range cleanStack {
-			cleanStack[i]()
+		ss.messageStreamsLock.Lock()
+		defer ss.messageStreamsLock.Unlock()
+		for _, id := range ids {
+			delete(ss.messageStreams[id], sID)
 		}
 	}
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
 	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
-	clean := ss.addMessagesStream(req.Ids, server)
+	ch := make(chan *proto_sentry.InboundMessage, 1)
+	defer close(ch)
+	clean := ss.addMessagesStream(req.Ids, ch)
 	defer clean()
-	select {
-	case <-ss.ctx.Done():
-		return nil
-	case <-server.Context().Done():
-		return nil
+
+	for {
+		select {
+		case <-ss.ctx.Done():
+			return nil
+		case <-server.Context().Done():
+			return nil
+		case in := <-ch:
+			if err := server.Send(in); err != nil {
+				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "error", err)
+				return err
+			}
+		}
 	}
 }
 
