@@ -35,28 +35,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// Methods of Core called by sentry
-
-func GrpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
-	// creating grpc client connection
-	var dialOpts []grpc.DialOption
-
-	backoffCfg := backoff.DefaultConfig
-	backoffCfg.BaseDelay = 500 * time.Millisecond
-	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
-
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
-	}
-	return direct.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
-}
+// 3 streams:
+// RecvMessage - processing incoming headers/bodies
+// RecvUploadHeadersMessage - sending headers - dedicated stream because headers propagation speed important for network health
+// RecvUploadMessage - sending bodies/receipts - may be heavy, it's ok to not process this messages enough fast, it's also ok to drop some of this messages if can't process.
 
 func RecvUploadMessageLoop(ctx context.Context,
 	sentry direct.SentryClient,
@@ -113,13 +95,96 @@ func RecvUploadMessage(ctx context.Context,
 	defer cancel()
 
 	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH65][eth.GetBlockHeadersMsg],
 		eth.ToProto[eth.ETH65][eth.GetBlockBodiesMsg],
 		eth.ToProto[eth.ETH65][eth.GetReceiptsMsg],
 
-		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
 		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
 		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
+	}}, grpc.WaitForReady(true))
+	if err != nil {
+		return err
+	}
+	var req *proto_sentry.InboundMessage
+	for req, err = stream.Recv(); ; req, err = stream.Recv() {
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			return err
+		}
+		if req == nil {
+			return
+		}
+		if err = handleInboundMessage(ctx, req, sentry); err != nil {
+			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
+		}
+		if wg != nil {
+			wg.Done()
+		}
+
+	}
+}
+
+func RecvUploadHeadersMessageLoop(ctx context.Context,
+	sentry direct.SentryClient,
+	cs *ControlServerImpl,
+	wg *sync.WaitGroup,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
+			s, ok := status.FromError(err)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+			if doLog {
+				log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
+			s, ok := status.FromError(err)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+			if doLog {
+				log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		if err := RecvUploadHeadersMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
+			if isPeerNotFoundErr(err) {
+				continue
+			}
+			s, ok := status.FromError(err)
+			if (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				time.Sleep(time.Second)
+				continue
+			}
+			log.Warn("[RecvUploadMessage]", "err", err)
+			continue
+		}
+	}
+}
+
+func RecvUploadHeadersMessage(ctx context.Context,
+	sentry direct.SentryClient,
+	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
+	wg *sync.WaitGroup,
+) (err error) {
+	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH65][eth.GetBlockHeadersMsg],
+
+		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
 	}}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
@@ -909,4 +974,27 @@ func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
 			Forks:   s.forks,
 		},
 	}
+}
+
+// Methods of Core called by sentry
+
+func GrpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
+	// creating grpc client connection
+	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
+	}
+	return direct.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
 }
