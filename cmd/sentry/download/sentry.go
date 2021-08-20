@@ -912,6 +912,7 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 	}
 	for i := range ss.messageStreams[msgID] {
 		ss.messageStreams[msgID][i] <- req
+		log.Info("le", "len", len(ss.messageStreams[msgID][i]))
 	}
 }
 
@@ -937,11 +938,11 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 			ss.messageStreams[id] = m
 		}
 		m[ss.messagesSubscriberID] = ch
-		log.Info(fmt.Sprintf("[Messages] len of list: %d", len(m)))
 	}
 
 	sID := ss.messagesSubscriberID
 	return func() {
+		log.Info(fmt.Sprintf("[Messages] delete start"))
 		ss.messageStreamsLock.Lock()
 		defer ss.messageStreamsLock.Unlock()
 		for _, id := range ids {
