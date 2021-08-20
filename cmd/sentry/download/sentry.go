@@ -19,6 +19,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
@@ -911,8 +911,18 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 		Data:   b,
 	}
 	for i := range ss.messageStreams[msgID] {
-		ss.messageStreams[msgID][i] <- req
-		log.Info("le", "len", len(ss.messageStreams[msgID][i]))
+		ch := ss.messageStreams[msgID][i]
+		ch <- req
+		if len(ch) > 512 {
+		LRUEvictLoop:
+			for j := 0; j < 256; j++ {
+				select {
+				case <-ch:
+				default:
+					break LRUEvictLoop
+				}
+			}
+		}
 	}
 }
 
@@ -942,18 +952,16 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 
 	sID := ss.messagesSubscriberID
 	return func() {
-		log.Info(fmt.Sprintf("[Messages] delete start"))
 		ss.messageStreamsLock.Lock()
 		defer ss.messageStreamsLock.Unlock()
 		for _, id := range ids {
 			delete(ss.messageStreams[id], sID)
 		}
-		log.Info(fmt.Sprintf("[Messages] deleted"))
 	}
 }
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
+	log.Debug("[Messages] new subscriber", "to", req.Ids)
 	ch := make(chan *proto_sentry.InboundMessage, 1024)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
@@ -966,8 +974,6 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 		case <-server.Context().Done():
 			return nil
 		case in := <-ch:
-
-			log.Info(fmt.Sprintf("[Messages] in: %d,%s", len(ch), req.Ids))
 			if err := server.Send(in); err != nil {
 				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "error", err)
 				return err
@@ -981,75 +987,6 @@ func (ss *SentryServerImpl) Close() {
 	if ss.P2pServer != nil {
 		ss.P2pServer.Stop()
 	}
-}
-
-// MessageStreams - it's safe to use this class as non-pointer
-type MessageStreams struct {
-	mu      sync.RWMutex
-	id      uint
-	streams map[uint]proto_sentry.Sentry_MessagesServer
-}
-
-func NewStreamsList() *MessageStreams {
-	return &MessageStreams{}
-}
-
-func (s *MessageStreams) Add(stream proto_sentry.Sentry_MessagesServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.streams == nil {
-		s.streams = make(map[uint]proto_sentry.Sentry_MessagesServer)
-	}
-	s.id++
-	id := s.id
-	s.streams[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *MessageStreams) doBroadcast(reply *proto_sentry.InboundMessage) (ids []uint, errs []error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for id, stream := range s.streams {
-		err := stream.Send(reply)
-		if err != nil {
-			select {
-			case <-stream.Context().Done():
-				ids = append(ids, id)
-			default:
-			}
-			errs = append(errs, err)
-		}
-	}
-	return
-}
-
-func (s *MessageStreams) Broadcast(reply *proto_sentry.InboundMessage) (errs []error) {
-	var ids []uint
-	ids, errs = s.doBroadcast(reply)
-	if len(ids) > 0 {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-	}
-	for _, id := range ids {
-		delete(s.streams, id)
-	}
-	return errs
-}
-
-func (s *MessageStreams) Len() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.streams)
-}
-
-func (s *MessageStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.streams[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.streams, id)
 }
 
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
