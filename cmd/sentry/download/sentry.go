@@ -912,10 +912,10 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 	for i := range ss.messageStreams[msgID] {
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
-		if len(ch) > 512 {
+		if len(ch) > MessagesQueueSize/2 {
 			log.Warn("[sentry] consuming is slow", "msgID", msgID.String())
 			// evict old messages from channel
-			for j := 0; j < 256; j++ {
+			for j := 0; j < MessagesQueueSize/4; j++ {
 				select {
 				case <-ch:
 				default:
@@ -959,9 +959,10 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 	}
 }
 
+const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
 	log.Debug("[Messages] new subscriber", "to", req.Ids)
-	ch := make(chan *proto_sentry.InboundMessage, 1024)
+	ch := make(chan *proto_sentry.InboundMessage, MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
 	defer clean()
