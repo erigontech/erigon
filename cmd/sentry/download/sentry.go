@@ -914,14 +914,15 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
 		if len(ch) > 512 {
-		LRUEvictLoop:
+		EvictOldLoop:
 			for j := 0; j < 256; j++ {
 				select {
 				case <-ch:
 				default:
-					break LRUEvictLoop
+					break EvictOldLoop
 				}
 			}
+			log.Warn("[sentry] consuming is slow", "msgID", msgID.String())
 		}
 	}
 }
