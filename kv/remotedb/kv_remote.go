@@ -13,6 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -485,13 +487,19 @@ func (tx *remoteTx) closeGrpcStream() {
 		// try graceful close stream
 		err := tx.stream.CloseSend()
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			s, ok := status.FromError(err)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+			if doLog {
 				log.Warn("couldn't send msg CloseSend to server", "err", err)
 			}
 		} else {
 			_, err = tx.stream.Recv()
-			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
-				log.Warn("received unexpected error from server after CloseSend", "err", err)
+			if err != nil {
+				s, ok := status.FromError(err)
+				doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+				if doLog {
+					log.Warn("received unexpected error from server after CloseSend", "err", err)
+				}
 			}
 		}
 	}

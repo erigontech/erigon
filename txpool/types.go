@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -41,6 +42,7 @@ type TxParseContext struct {
 	buf           [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
 	sighash       [32]byte
 	sig           [65]byte
+	reject        func([]byte) bool
 }
 
 func NewTxParseContext() *TxParseContext {
@@ -85,6 +87,10 @@ const (
 )
 
 const ParseTransactionErrorPrefix = "parse transaction payload"
+
+var ErrRejected = errors.New("rejected")
+
+func (ctx *TxParseContext) Reject(f func(hash []byte) bool) { ctx.reject = f }
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
@@ -312,6 +318,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 	//ctx.keccak1.Sum(slot.idHash[:0])
 	_, _ = ctx.keccak1.(io.Reader).Read(slot.idHash[:32])
+	if ctx.reject != nil && ctx.reject(slot.idHash[:32]) {
+		return p, ErrRejected
+	}
+
 	// Computing sigHash (hash used to recover sender from the signature)
 	// Write len Prefix to the sighash
 	if sigHashLen < 56 {

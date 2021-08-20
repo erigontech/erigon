@@ -41,7 +41,7 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, pool, &remote.KVClientMock{}, nil)
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, pool, NewSendersCache(), &remote.KVClientMock{}, nil)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
@@ -150,7 +150,7 @@ func TestOnNewBlock(t *testing.T) {
 		},
 	}
 	pool := &PoolMock{}
-	fetch := NewFetch(ctx, nil, pool, stateChanges, db)
+	fetch := NewFetch(ctx, nil, pool, NewSendersCache(), stateChanges, db)
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))

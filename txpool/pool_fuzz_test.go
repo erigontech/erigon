@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 )
@@ -22,6 +23,10 @@ import (
 //gotip doc testing.F.Fuzz
 
 // gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
+
+func init() {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+}
 
 func FuzzTwoQueue(f *testing.F) {
 	f.Add([]uint8{0b11000, 0b00101, 0b000111})
@@ -260,9 +265,10 @@ func FuzzOnNewBlocks11(f *testing.F) {
 
 		ch := make(chan Hashes, 100)
 		pool, err := New(ch, nil)
+		sendersCache := NewSendersCache()
 		assert.NoError(err)
-		pool.senderInfo = senders
-		pool.senderIDs = senderIDs
+		sendersCache.senderInfo = senders
+		sendersCache.senderIDs = senderIDs
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 			//if pending.Len() > 5 && baseFee.Len() > 5 && queued.Len() > 5 {
@@ -428,19 +434,19 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
-		err = pool.OnNewBlock(nil, map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, pendingBaseFee, 1)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, pendingBaseFee, 1, sendersCache)
 		assert.NoError(err)
 		check(unwindTxs, minedTxs1, "fork1")
 		checkNotify(unwindTxs, minedTxs1, "fork1")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(nil, map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, pendingBaseFee, 2)
+		err = pool.OnNewBlock(nil, map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, pendingBaseFee, 2, sendersCache)
 		assert.NoError(err)
 		check(minedTxs1, minedTxs2, "fork2")
 		checkNotify(minedTxs1, minedTxs2, "fork2")
 
 		// add some remote txs from p2p
-		err = pool.Add(nil, p2pReceived)
+		err = pool.Add(nil, p2pReceived, sendersCache)
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
