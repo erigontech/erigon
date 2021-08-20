@@ -912,9 +912,6 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 	for i := range ss.messageStreams[msgID] {
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
-		if len(ch) > 10 {
-			fmt.Printf("ch: %d,%s\n", len(ch), msgID)
-		}
 		if len(ch) > MessagesQueueSize/2 {
 			log.Warn("[sentry] consuming is slow", "msgID", msgID.String())
 			// evict old messages from channel
