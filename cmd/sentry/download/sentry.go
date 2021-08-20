@@ -951,7 +951,7 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
 	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
-	ch := make(chan *proto_sentry.InboundMessage, 1)
+	ch := make(chan *proto_sentry.InboundMessage, 1024)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
 	defer clean()
@@ -963,6 +963,7 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 		case <-server.Context().Done():
 			return nil
 		case in := <-ch:
+			log.Info(fmt.Sprintf("[Messages] in: %d,%s", len(ch), req.Ids))
 			if err := server.Send(in); err != nil {
 				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "error", err)
 				return err
