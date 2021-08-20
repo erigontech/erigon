@@ -35,29 +35,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// Methods of Core called by sentry
-
-func GrpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
-	// creating grpc client connection
-	var dialOpts []grpc.DialOption
-
-	backoffCfg := backoff.DefaultConfig
-	backoffCfg.BaseDelay = 500 * time.Millisecond
-	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
-
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
-	}
-	return direct.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
-}
-
 // 3 streams:
 // RecvMessage - processing incoming headers/bodies
 // RecvUploadHeadersMessage - sending headers - dedicated stream because headers propagation speed important for network health
@@ -997,4 +974,27 @@ func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
 			Forks:   s.forks,
 		},
 	}
+}
+
+// Methods of Core called by sentry
+
+func GrpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
+	// creating grpc client connection
+	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
+	dialOpts = []grpc.DialOption{
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+	}
+
+	dialOpts = append(dialOpts, grpc.WithInsecure())
+	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
+	}
+	return direct.NewSentryClientRemote(proto_sentry.NewSentryClient(conn)), nil
 }
