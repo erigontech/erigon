@@ -914,12 +914,11 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 		ch <- req
 		if len(ch) > 512 {
 			log.Warn("[sentry] consuming is slow", "msgID", msgID.String())
-		EvictOldLoop:
+			// evict old messages from channel
 			for j := 0; j < 256; j++ {
 				select {
 				case <-ch:
 				default:
-					break EvictOldLoop
 				}
 			}
 		}
