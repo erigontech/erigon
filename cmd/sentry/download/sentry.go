@@ -937,6 +937,7 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 			ss.messageStreams[id] = m
 		}
 		m[ss.messagesSubscriberID] = ch
+		log.Info(fmt.Sprintf("[Messages] len of list: %d", len(m)))
 	}
 
 	sID := ss.messagesSubscriberID
@@ -946,6 +947,7 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 		for _, id := range ids {
 			delete(ss.messageStreams[id], sID)
 		}
+		log.Info(fmt.Sprintf("[Messages] deleted"))
 	}
 }
 
@@ -963,6 +965,7 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 		case <-server.Context().Done():
 			return nil
 		case in := <-ch:
+
 			log.Info(fmt.Sprintf("[Messages] in: %d,%s", len(ch), req.Ids))
 			if err := server.Send(in); err != nil {
 				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "error", err)
