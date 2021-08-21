@@ -648,6 +648,8 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 		log.Info("remove mined", "removed", j, "minedTxsLen", len(minedTxs))
 	}
 
+	changedSenders := map[uint64]*senderInfo{}
+
 	// This can be thought of a reverse operation from the one described before.
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
@@ -658,6 +660,7 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
 	unsafeAddToPool(senders, unwindTxs, pending, PendingSubPool, func(i *metaTx, sender *senderInfo) {
+		changedSenders[i.Tx.senderID] = sender
 		//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
@@ -681,10 +684,9 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 		}
 	})
 
-	senders.forEach(func(sender *senderInfo) {
-		// TODO: aggregate changed senders before call this func
+	for _, sender := range changedSenders {
 		onSenderChange(sender, protocolBaseFee, pendingBaseFee)
-	})
+	}
 
 	pending.EnforceInvariants()
 	baseFee.EnforceInvariants()
