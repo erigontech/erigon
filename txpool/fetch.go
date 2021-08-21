@@ -300,11 +300,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if len(txs.txs) == 0 {
 			return nil
 		}
-		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
-			return f.pool.Add(tx, txs, f.senders)
-		}); err != nil {
-			return err
-		}
+		return f.pool.Add(f.coreDB, txs, f.senders)
 	default:
 		//defer log.Info("dropped", "id", req.Id)
 	}
@@ -434,10 +430,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 			addr := gointerfaces.ConvertH160toAddress(change.Address)
 			diff[string(addr[:])] = senderInfo{nonce: nonce, balance: balance}
 		}
-
-		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, 0, req.BlockHeight, f.senders)
-		}); err != nil {
+		if err := f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, 0, req.BlockHeight, f.senders); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}
 		if f.wg != nil {
