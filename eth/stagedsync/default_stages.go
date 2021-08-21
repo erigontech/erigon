@@ -251,7 +251,6 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.TxPool,
 			Description: "Update transaction pool",
-			Disabled:    true,
 			Forward: func(firstCycle bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
 				return SpawnTxPool(s, tx, txPool, ctx)
 			},
