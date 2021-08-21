@@ -4,8 +4,9 @@
 package txpool
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"sync"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 // Ensure, that PoolMock does implement Pool.
@@ -18,7 +19,7 @@ var _ Pool = &PoolMock{}
 //
 // 		// make and configure a mocked Pool
 // 		mockedPool := &PoolMock{
-// 			AddFunc: func(db kv.Tx, newTxs TxSlots) error {
+// 			AddFunc: func(db kv.Tx, newTxs TxSlots, senders *SendersCache) error {
 // 				panic("mock out the Add method")
 // 			},
 // 			AddNewGoodPeerFunc: func(peerID PeerID)  {
@@ -30,7 +31,7 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(hash []byte) bool {
 // 				panic("mock out the IdHashKnown method")
 // 			},
-// 			OnNewBlockFunc: func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64) error {
+// 			OnNewBlockFunc: func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, senders *SendersCache) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
 // 			StartedFunc: func() bool {
@@ -44,7 +45,7 @@ var _ Pool = &PoolMock{}
 // 	}
 type PoolMock struct {
 	// AddFunc mocks the Add method.
-	AddFunc func(db kv.Tx, newTxs TxSlots) error
+	AddFunc func(db kv.Tx, newTxs TxSlots, senders *SendersCache) error
 
 	// AddNewGoodPeerFunc mocks the AddNewGoodPeer method.
 	AddNewGoodPeerFunc func(peerID PeerID)
@@ -56,7 +57,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(hash []byte) bool
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64) error
+	OnNewBlockFunc func(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, senders *SendersCache) error
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
@@ -69,6 +70,8 @@ type PoolMock struct {
 			Db kv.Tx
 			// NewTxs is the newTxs argument value.
 			NewTxs TxSlots
+			// Senders is the senders argument value.
+			Senders *SendersCache
 		}
 		// AddNewGoodPeer holds details about calls to the AddNewGoodPeer method.
 		AddNewGoodPeer []struct {
@@ -101,6 +104,8 @@ type PoolMock struct {
 			PendingBaseFee uint64
 			// BlockHeight is the blockHeight argument value.
 			BlockHeight uint64
+			// Senders is the senders argument value.
+			Senders *SendersCache
 		}
 		// Started holds details about calls to the Started method.
 		Started []struct {
@@ -115,13 +120,15 @@ type PoolMock struct {
 }
 
 // Add calls AddFunc.
-func (mock *PoolMock) Add(db kv.Tx, newTxs TxSlots) error {
+func (mock *PoolMock) Add(db kv.Tx, newTxs TxSlots, senders *SendersCache) error {
 	callInfo := struct {
-		Db     kv.Tx
-		NewTxs TxSlots
+		Db      kv.Tx
+		NewTxs  TxSlots
+		Senders *SendersCache
 	}{
-		Db:     db,
-		NewTxs: newTxs,
+		Db:      db,
+		NewTxs:  newTxs,
+		Senders: senders,
 	}
 	mock.lockAdd.Lock()
 	mock.calls.Add = append(mock.calls.Add, callInfo)
@@ -132,19 +139,21 @@ func (mock *PoolMock) Add(db kv.Tx, newTxs TxSlots) error {
 		)
 		return errOut
 	}
-	return mock.AddFunc(db, newTxs)
+	return mock.AddFunc(db, newTxs, senders)
 }
 
 // AddCalls gets all the calls that were made to Add.
 // Check the length with:
 //     len(mockedPool.AddCalls())
 func (mock *PoolMock) AddCalls() []struct {
-	Db     kv.Tx
-	NewTxs TxSlots
+	Db      kv.Tx
+	NewTxs  TxSlots
+	Senders *SendersCache
 } {
 	var calls []struct {
-		Db     kv.Tx
-		NewTxs TxSlots
+		Db      kv.Tx
+		NewTxs  TxSlots
+		Senders *SendersCache
 	}
 	mock.lockAdd.RLock()
 	calls = mock.calls.Add
@@ -252,7 +261,7 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64) error {
+func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, senders *SendersCache) error {
 	callInfo := struct {
 		Db              kv.Tx
 		StateChanges    map[string]senderInfo
@@ -261,6 +270,7 @@ func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, u
 		ProtocolBaseFee uint64
 		PendingBaseFee  uint64
 		BlockHeight     uint64
+		Senders         *SendersCache
 	}{
 		Db:              db,
 		StateChanges:    stateChanges,
@@ -269,6 +279,7 @@ func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, u
 		ProtocolBaseFee: protocolBaseFee,
 		PendingBaseFee:  pendingBaseFee,
 		BlockHeight:     blockHeight,
+		Senders:         senders,
 	}
 	mock.lockOnNewBlock.Lock()
 	mock.calls.OnNewBlock = append(mock.calls.OnNewBlock, callInfo)
@@ -279,7 +290,7 @@ func (mock *PoolMock) OnNewBlock(db kv.Tx, stateChanges map[string]senderInfo, u
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(db, stateChanges, unwindTxs, minedTxs, protocolBaseFee, pendingBaseFee, blockHeight)
+	return mock.OnNewBlockFunc(db, stateChanges, unwindTxs, minedTxs, protocolBaseFee, pendingBaseFee, blockHeight, senders)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
@@ -293,6 +304,7 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 	ProtocolBaseFee uint64
 	PendingBaseFee  uint64
 	BlockHeight     uint64
+	Senders         *SendersCache
 } {
 	var calls []struct {
 		Db              kv.Tx
@@ -302,6 +314,7 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 		ProtocolBaseFee uint64
 		PendingBaseFee  uint64
 		BlockHeight     uint64
+		Senders         *SendersCache
 	}
 	mock.lockOnNewBlock.RLock()
 	calls = mock.calls.OnNewBlock

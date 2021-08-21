@@ -43,6 +43,7 @@ type Fetch struct {
 	ctx                context.Context       // Context used for cancellation and closing of the fetcher
 	sentryClients      []sentry.SentryClient // sentry clients that will be used for accessing the network
 	pool               Pool                  // Transaction pool implementation
+	senders            *SendersCache
 	coreDB             kv.RoDB
 	wg                 *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesClient remote.KVClient
@@ -61,11 +62,12 @@ var DefaultTimings = Timings{
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, stateChangesClient remote.KVClient, db kv.RoDB) *Fetch {
+func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, senders *SendersCache, stateChangesClient remote.KVClient, db kv.RoDB) *Fetch {
 	return &Fetch{
 		ctx:                ctx,
 		sentryClients:      sentryClients,
 		pool:               pool,
+		senders:            senders,
 		coreDB:             db,
 		stateChangesClient: stateChangesClient,
 	}
@@ -175,8 +177,12 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		if req == nil {
 			return nil
 		}
-		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			log.Warn("Handling incoming message", "err", err)
+		if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
+			s, ok := status.FromError(err)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+			if doLog {
+				log.Warn("Handling incoming message", "err", err)
+			}
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -271,6 +277,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 
 		parseCtx := NewTxParseContext()
+		parseCtx.Reject(func(hash []byte) bool {
+			//fmt.Printf("check: %t\n", f.pool.IdHashKnown(hash))
+			return f.pool.IdHashKnown(hash)
+		})
 		txs := TxSlots{}
 		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
 			if _, err := ParsePooledTransactions65(req.Data, 0, parseCtx, &txs); err != nil {
@@ -285,10 +295,12 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return nil
 		}
 		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
-			return f.pool.Add(tx, txs)
+			return f.pool.Add(tx, txs, f.senders)
 		}); err != nil {
 			return err
 		}
+	default:
+		//defer log.Info("dropped", "id", req.Id)
 	}
 
 	return nil
@@ -419,7 +431,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 		}
 
 		if err := f.coreDB.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, 0, req.BlockHeight)
+			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, 0, req.BlockHeight, f.senders)
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}
