@@ -84,7 +84,7 @@ var rootCmd = &cobra.Command{
 			sentryClientsCasted[i] = proto_sentry.SentryClient(sentryClients[i])
 		}
 
-		newTxs := make(chan txpool.Hashes, 1)
+		newTxs := make(chan txpool.Hashes, 1024)
 		txPool, err := txpool.New(newTxs, txPoolDB)
 		if err != nil {
 			return err
