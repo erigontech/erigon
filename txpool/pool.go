@@ -93,7 +93,7 @@ const PendingSubPoolLimit = 1024
 const BaseFeeSubPoolLimit = 1024
 const QueuedSubPoolLimit = 1024
 
-const MaxSendersInfoCache = 1024
+const MaxSendersInfoCache = 2 * (PendingSubPoolLimit + BaseFeeSubPoolLimit + QueuedSubPoolLimit)
 
 type nonce2Tx struct{ *btree.BTree }
 
