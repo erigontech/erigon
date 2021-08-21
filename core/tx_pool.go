@@ -633,6 +633,8 @@ func (pool *TxPool) validateTx(tx types.Transaction, local bool) error {
 		fmt.Printf("ErrInsufficientFunds:%d,%x\n", pool.currentState.GetBalance(from).Uint64(), from)
 		return ErrInsufficientFunds
 	}
+	fmt.Printf("check balance:%d,%d\n", pool.currentState.GetBalance(from).Uint64(), tx.Cost())
+
 	// Ensure the transaction has more gas than the basic tx fee.
 	intrGas, err := IntrinsicGas(tx.GetData(), tx.GetAccessList(), tx.GetTo() == nil, true, pool.istanbul)
 	if err != nil {
