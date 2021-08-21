@@ -161,16 +161,12 @@ func (sc *SendersCache) evict() int {
 	}
 
 	count := 0
-	for i := range sc.senderInfo {
-		if sc.senderInfo[i].txNonce2Tx.Len() > 0 {
+	for addr, id := range sc.senderIDs {
+		if sc.senderInfo[id].txNonce2Tx.Len() > 0 {
 			continue
 		}
-		for addr, id := range sc.senderIDs {
-			if id == i {
-				delete(sc.senderIDs, addr)
-			}
-		}
-		delete(sc.senderInfo, i)
+		delete(sc.senderInfo, id)
+		delete(sc.senderIDs, addr)
 		count++
 	}
 	return count
@@ -546,6 +542,11 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 		case p.newTxs <- notifyNewTxs:
 		default:
 		}
+	}
+
+	count := senders.evict()
+	if count > 0 {
+		log.Debug("evicted senders", "amount", count)
 	}
 
 	return nil
@@ -1027,11 +1028,6 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, p *TxPool, senders *SendersC
 		case <-logEvery.C:
 			p.logStats()
 		case <-evictSendersEvery.C:
-			// evict sendersInfo without txs
-			count := senders.evict()
-			if count > 0 {
-				log.Debug("evicted senders", "amount", count)
-			}
 			if db != nil {
 				if err := db.Update(ctx, func(tx kv.RwTx) error {
 					return p.flushIsLocalHistory(tx)
