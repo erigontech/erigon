@@ -193,6 +193,9 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMessage, sentryClient sentry.SentryClient) error {
 	switch req.Id {
 	case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65:
+		if !f.pool.Started() {
+			return nil
+		}
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
@@ -228,6 +231,9 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 		}
 	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66, sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
+		if !f.pool.Started() {
+			return nil
+		}
 		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
 		messageId := sentry.MessageId_POOLED_TRANSACTIONS_66

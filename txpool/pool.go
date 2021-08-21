@@ -146,6 +146,11 @@ func (sc *SendersCache) forEach(f func(info *senderInfo)) {
 		f(sc.senderInfo[i])
 	}
 }
+func (sc *SendersCache) len() int {
+	sc.lock.RLock()
+	defer sc.lock.RUnlock()
+	return len(sc.senderInfo)
+}
 
 func (sc *SendersCache) evict() int {
 	sc.lock.Lock()
@@ -502,7 +507,6 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 	if hasNewVal {
 		p.pendingBaseFee.Store(pendingBaseFee)
 	}
-	log.Debug("set base fee", "protocol", protocolBaseFee, "pending", pendingBaseFee)
 	return protocolBaseFee, p.pendingBaseFee.Load()
 }
 
@@ -510,7 +514,7 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 	if err := senders.onNewBlock(coreDB, stateChanges, unwindTxs, minedTxs, blockHeight); err != nil {
 		return err
 	}
-	log.Debug("[txpool.onNewBlock]", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
+	log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 	if err := unwindTxs.Valid(); err != nil {
 		return err
@@ -521,7 +525,6 @@ func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, un
 
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	//log.Debug("[txpool.onNewBlock]", "senderInfo", len(p.senderInfo))
 	if err := onNewBlock(senders, unwindTxs, minedTxs.txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
@@ -1019,7 +1022,9 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, p *TxPool, senders *SendersC
 		case <-evictSendersEvery.C:
 			// evict sendersInfo without txs
 			count := senders.evict()
-			log.Debug("evicted senders", "amount", count)
+			if count > 0 {
+				log.Debug("evicted senders", "amount", count)
+			}
 			if db != nil {
 				if err := db.Update(ctx, func(tx kv.RwTx) error {
 					return p.flushIsLocalHistory(tx)
