@@ -460,7 +460,7 @@ func (p *TxPool) Started() bool {
 }
 
 func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
-	t := time.Now()
+	//t := time.Now()
 	if err := senders.onNewTxs(coreDB, newTxs); err != nil {
 		return err
 	}
@@ -492,7 +492,7 @@ func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) erro
 		}
 	}
 
-	log.Info("on new txs", "in", time.Since(t))
+	//log.Info("on new txs", "in", time.Since(t))
 	return nil
 }
 func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU) error {
