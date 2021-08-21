@@ -502,7 +502,11 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 		}
 	}
 
+	changedSenders := map[uint64]*senderInfo{}
+
 	unsafeAddToPool(senders, newTxs, pending, PendingSubPool, func(i *metaTx, sender *senderInfo) {
+		changedSenders[i.Tx.senderID] = sender
+
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
 			i.subPool |= IsLocal
@@ -525,10 +529,9 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 		}
 	})
 
-	senders.forEach(func(sender *senderInfo) {
-		// TODO: aggregate changed senders before call this func
+	for _, sender := range changedSenders {
 		onSenderChange(sender, protocolBaseFee, pendingBaseFee)
-	})
+	}
 
 	pending.EnforceInvariants()
 	baseFee.EnforceInvariants()
