@@ -185,6 +185,8 @@ func (sc *SendersCache) onNewTxs(coreDBTx kv.Tx, newTxs TxSlots) error {
 func (sc *SendersCache) onNewBlock(coreDBTx kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, blockHeight uint64) error {
 	//TODO: if see non-continuous block heigh - drop cache and reload from db
 	sc.blockHeight.Store(blockHeight)
+
+	//`loadSenders` goes by network to core - and it must be outside of SendersCache lock. But other methods must be locked
 	sc.mergeStateChanges(stateChanges, unwindTxs, minedTxs)
 	toLoad := sc.setTxSenderID(unwindTxs)
 	diff, err := loadSenders(coreDBTx, toLoad)
@@ -312,7 +314,6 @@ type TxPool struct {
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
 	newTxs                 chan Hashes
-	//lastTxPropagationTimestamp time.Time
 }
 
 func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
