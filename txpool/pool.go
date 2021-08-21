@@ -182,7 +182,9 @@ func (sc *SendersCache) onNewTxs(coreDBTx kv.Tx, newTxs TxSlots) error {
 	return nil
 }
 
-func (sc *SendersCache) onNewBlock(coreDBTx kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots) error {
+func (sc *SendersCache) onNewBlock(coreDBTx kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, blockHeight uint64) error {
+	//TODO: if see non-continuous block heigh - drop cache and reload from db
+	sc.blockHeight.Store(blockHeight)
 	sc.mergeStateChanges(stateChanges, unwindTxs, minedTxs)
 	toLoad := sc.setTxSenderID(unwindTxs)
 	diff, err := loadSenders(coreDBTx, toLoad)
@@ -197,18 +199,6 @@ func (sc *SendersCache) onNewBlock(coreDBTx kv.Tx, stateChanges map[string]sende
 	}
 	sc.set(diff)
 	return nil
-}
-
-func (sc *SendersCache) getTx(senderID uint64, mt *metaTx) *metaTx {
-	if found := sc.get(senderID).txNonce2Tx.Get(&nonce2TxItem{mt}); found != nil {
-		return found.(*nonce2TxItem).metaTx
-	}
-	return nil
-}
-func (sc *SendersCache) ascend(senderID uint64, f func(*metaTx) bool) {
-	sc.get(senderID).txNonce2Tx.Ascend(func(i btree.Item) bool {
-		return f(i.(*nonce2TxItem).metaTx)
-	})
 }
 func (sc *SendersCache) set(diff map[uint64]*senderInfo) {
 	sc.lock.Lock()
@@ -308,7 +298,6 @@ func loadSenders(coreDB kv.Tx, toLoad map[uint64]string) (map[uint64]*senderInfo
 type TxPool struct {
 	lock *sync.RWMutex
 
-	blockHeight     atomic.Uint64
 	protocolBaseFee atomic.Uint64
 	pendingBaseFee  atomic.Uint64
 
@@ -317,9 +306,8 @@ type TxPool struct {
 	pending, baseFee, queued *SubPool
 
 	// track isLocal flag of already mined transactions. used at unwind.
-	localsHistoryCommited time.Time
-	localsHistory         *simplelru.LRU
-	db                    kv.RwDB
+	localsHistory *simplelru.LRU
+	db            kv.RwDB
 
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
@@ -518,11 +506,10 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 }
 
 func (p *TxPool) OnNewBlock(coreDB kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, senders *SendersCache) error {
-	if err := senders.onNewBlock(coreDB, stateChanges, unwindTxs, minedTxs); err != nil {
+	if err := senders.onNewBlock(coreDB, stateChanges, unwindTxs, minedTxs, blockHeight); err != nil {
 		return err
 	}
 	log.Debug("[txpool.onNewBlock]", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
-	p.blockHeight.Store(blockHeight)
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 	if err := unwindTxs.Valid(); err != nil {
 		return err
