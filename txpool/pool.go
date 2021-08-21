@@ -152,6 +152,7 @@ func (sc *SendersCache) len() int {
 	return len(sc.senderInfo)
 }
 
+/*
 func (sc *SendersCache) evict() int {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
@@ -171,6 +172,7 @@ func (sc *SendersCache) evict() int {
 	}
 	return count
 }
+*/
 
 func (sc *SendersCache) onNewTxs(coreDBTx kv.RoDB, newTxs TxSlots) error {
 	sc.ensureSenderIDOnNewTxs(newTxs)
@@ -192,7 +194,7 @@ func (sc *SendersCache) onNewBlock(stateChanges map[string]senderInfo, unwindTxs
 
 	//`loadSenders` goes by network to core - and it must be outside of SendersCache lock. But other methods must be locked
 	sc.mergeStateChanges(stateChanges, unwindTxs, minedTxs)
-	toLoad := sc.setTxSenderID(unwindTxs)
+	_ = sc.setTxSenderID(unwindTxs)
 	/*
 		if len(toLoad) > 0 {
 			diff, err := loadSenders(coreDBTx, toLoad)
@@ -202,11 +204,11 @@ func (sc *SendersCache) onNewBlock(stateChanges map[string]senderInfo, unwindTxs
 			sc.set(diff)
 		}
 	*/
-	toLoad = sc.setTxSenderID(minedTxs)
-	if len(toLoad) == 0 {
-		return nil
-	}
+	_ = sc.setTxSenderID(minedTxs)
 	/*
+		if len(toLoad) == 0 {
+			return nil
+		}
 		diff, err := loadSenders(coreDBTx, toLoad)
 		if err != nil {
 			return err
@@ -552,6 +554,7 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 		return err
 	}
 	//log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
+	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 	if err := unwindTxs.Valid(); err != nil {
 		return err
 	}
@@ -584,7 +587,6 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 	//	log.Debug("evicted senders", "amount", count)
 	//}
 
-	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 	log.Info("on new block", "in", time.Since(t))
 	return nil
 }
