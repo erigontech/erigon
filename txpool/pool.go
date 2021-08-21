@@ -291,6 +291,10 @@ func loadSenders(coreDB kv.Tx, toLoad map[uint64]string) (map[uint64]*senderInfo
 		if err != nil {
 			return nil, err
 		}
+		if len(encoded) == 0 {
+			diff[id] = newSenderInfo(0, *uint256.NewInt(0))
+			continue
+		}
 		nonce, balance, err := DecodeSender(encoded)
 		if err != nil {
 			return nil, err
@@ -586,7 +590,9 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 			localsHistory.Add(i.Tx.idHash, struct{}{})
 		}
 	})
-	//log.Info("remove mined", "removed", j, "minedTxsLen", len(minedTxs))
+	if j > 0 {
+		log.Info("remove mined", "removed", j, "minedTxsLen", len(minedTxs))
+	}
 
 	// This can be thought of a reverse operation from the one described before.
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
@@ -654,13 +660,13 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, queued *SubPool, discard func(tx *metaTx)) {
 	for _, tx := range minedTxs {
 		sender := senders.get(tx.senderID)
-		if sender.txNonce2Tx.Len() > 0 {
-			log.Debug("[txpool] removing mined", "senderID", tx.senderID, "sender.txNonce2Tx.len()", sender.txNonce2Tx.Len())
-		}
+		//if sender.txNonce2Tx.Len() > 0 {
+		//log.Debug("[txpool] removing mined", "senderID", tx.senderID, "sender.txNonce2Tx.len()", sender.txNonce2Tx.Len())
+		//}
 		// delete mined transactions from everywhere
 		sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
 			it := i.(*nonce2TxItem)
-			log.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", it.metaTx.Tx.nonce, "sender.nonce", sender.nonce)
+			//log.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", it.metaTx.Tx.nonce, "sender.nonce", sender.nonce)
 			if it.metaTx.Tx.nonce > sender.nonce {
 				return false
 			}
@@ -679,6 +685,7 @@ func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, qu
 				queued.UnsafeRemove(it.metaTx)
 				discard(it.metaTx)
 			default:
+				fmt.Printf("aaaaaaa\n")
 				//already removed
 			}
 			return true
