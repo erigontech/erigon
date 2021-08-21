@@ -138,14 +138,6 @@ func (sc *SendersCache) get(senderID uint64) *senderInfo {
 	}
 	return sender
 }
-func (sc *SendersCache) forEach(f func(info *senderInfo)) {
-	sc.lock.RLock()
-	defer sc.lock.RUnlock()
-
-	for i := range sc.senderInfo {
-		f(sc.senderInfo[i])
-	}
-}
 func (sc *SendersCache) len() int {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
