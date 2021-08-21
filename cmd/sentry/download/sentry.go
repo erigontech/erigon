@@ -258,13 +258,13 @@ func runPeer(
 		default:
 		}
 		if peerPrinted {
-			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()), "proto", protocol)
+			log.Debug("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
 		}
 	}()
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()), "proto", protocol)
+				log.Debug("Peer stable", "id", peerID, "name", peerInfo.peer.Fullname())
 				peerPrinted = true
 			}
 		}
