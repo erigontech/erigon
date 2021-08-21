@@ -648,7 +648,7 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 		log.Info("remove mined", "removed", j, "minedTxsLen", len(minedTxs))
 	}
 
-	changedSenders := map[uint64]*senderInfo{}
+	changedSenders := make(map[uint64]*senderInfo, len(unwindTxs.txs)/4)
 
 	// This can be thought of a reverse operation from the one described before.
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
