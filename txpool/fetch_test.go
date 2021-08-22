@@ -41,7 +41,7 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, pool, NewSendersCache(), &remote.KVClientMock{}, nil)
+	fetch := NewFetch(ctx, []sentry.SentryClient{sentryClient}, pool, NewSendersCache(), &remote.KVClientMock{}, nil, nil)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
@@ -132,7 +132,7 @@ func TestSendTxPropagate(t *testing.T) {
 func TestOnNewBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	db := memdb.NewTestDB(t)
+	coreDB, db := memdb.NewTestDB(t), memdb.NewTestDB(t)
 
 	i := 0
 	stream := &remote.KV_StateChangesClientMock{
@@ -150,7 +150,7 @@ func TestOnNewBlock(t *testing.T) {
 		},
 	}
 	pool := &PoolMock{}
-	fetch := NewFetch(ctx, nil, pool, NewSendersCache(), stateChanges, db)
+	fetch := NewFetch(ctx, nil, pool, NewSendersCache(), stateChanges, coreDB, db)
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))

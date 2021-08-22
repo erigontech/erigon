@@ -38,9 +38,9 @@ import (
 // there are multiple implementations
 type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
-	IdHashKnown(hash []byte) bool
+	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	Started() bool
-	GetRlp(hash []byte) []byte
+	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	Add(db kv.RoDB, newTxs TxSlots, senders *SendersCache) error
 	OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, senders *SendersCache) error
 
@@ -314,6 +314,83 @@ func (sc *SendersCache) setTxSenderID(txs TxSlots) map[uint64]string {
 	}
 	return toLoad
 }
+func (sc *SendersCache) fromDB(tx kv.Tx) error {
+	sc.lock.Lock()
+	defer sc.lock.Unlock()
+
+	c, err := tx.Cursor(kv.PooledSenderID)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		id := binary.BigEndian.Uint64(v)
+		sc.senderID = id
+		sc.senderIDs[string(v)] = id
+	}
+
+	c, err = tx.Cursor(kv.PooledSender)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		id := binary.BigEndian.Uint64(k)
+		balance := uint256.NewInt(0)
+		balance.SetBytes(v[8:])
+		sc.senderInfo[id] = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
+	}
+
+	height, err := tx.GetOne(kv.PoolInfo, SenderCacheHeightKey)
+	if err != nil {
+		return err
+	}
+	sc.blockHeight.Store(binary.BigEndian.Uint64(height))
+
+	return nil
+}
+
+var SenderCacheHeightKey = []byte("s")
+
+func (sc *SendersCache) flush(tx kv.RwTx) error {
+	sc.lock.RLock()
+	defer sc.lock.RUnlock()
+	encID := make([]byte, 8)
+	for addr, id := range sc.senderIDs {
+		binary.BigEndian.PutUint64(encID, id)
+		err := tx.Put(kv.PooledSenderID, []byte(addr), encID)
+		if err != nil {
+			return err
+		}
+	}
+	v := make([]byte, 8, 8+32)
+	for id, info := range sc.senderInfo {
+		binary.BigEndian.PutUint64(encID, id)
+		binary.BigEndian.PutUint64(v, info.nonce)
+		v = v[:8]
+		v = append(v, info.balance.Bytes()...)
+		err := tx.Put(kv.PooledSender, encID, v)
+		if err != nil {
+			return err
+		}
+	}
+
+	binary.BigEndian.PutUint64(encID, sc.blockHeight.Load())
+	err := tx.Put(kv.PoolInfo, SenderCacheHeightKey, encID)
+	if err != nil {
+		return err
+	}
+
+	//TODO: flush and evict
+
+	return nil
+}
 
 func loadSenders(coreDB kv.RoDB, toLoad map[uint64]string) (map[uint64]senderInfo, error) {
 	diff := make(map[uint64]senderInfo, len(toLoad))
@@ -390,15 +467,15 @@ func (p *TxPool) logStats() {
 	defer p.lock.RUnlock()
 	log.Info(fmt.Sprintf("[txpool] baseFee: protocol=%d,pending=%d; queues size: pending=%d/%d, baseFee=%d/%d, queued=%d/%d", protocolBaseFee, pendingBaseFee, p.pending.Len(), PendingSubPoolLimit, p.baseFee.Len(), BaseFeeSubPoolLimit, p.queued.Len(), QueuedSubPoolLimit))
 }
-func (p *TxPool) GetRlp(hash []byte) []byte {
+func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
 	txn, ok := p.byHash[string(hash)]
-	if !ok {
-		return nil
+	if !ok || txn.Tx.rlp == nil {
+		return tx.GetOne(kv.PooledTransaction, hash)
 	}
-	return txn.Tx.rlp
+	return txn.Tx.rlp, nil
 }
 func (p *TxPool) AppendLocalHashes(buf []byte) []byte {
 	p.lock.RLock()
@@ -428,12 +505,15 @@ func (p *TxPool) AppendAllHashes(buf []byte) []byte {
 	buf = p.AppendRemoteHashes(buf)
 	return buf
 }
-func (p *TxPool) IdHashKnown(hash []byte) bool {
+func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
 	_, ok := p.byHash[string(hash)]
-	return ok
+	if !ok {
+		return tx.Has(kv.PooledTransaction, hash)
+	}
+	return true, nil
 }
 func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 	p.lock.RLock()
@@ -520,6 +600,7 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 			}
 		}
 	})
+	fmt.Printf("aaa: %d\n", pending.Len())
 
 	for _, sender := range changedSenders {
 		onSenderChange(sender, protocolBaseFee, pendingBaseFee)
@@ -596,21 +677,127 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 	log.Info("on new block", "in", time.Since(t))
 	return nil
 }
-func (p *TxPool) flushIsLocalHistory(tx kv.RwTx) error {
+func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
 	txHashes := p.localsHistory.Keys()
-	key := make([]byte, 8)
-	if err := tx.ClearBucket(kv.RecentLocalTransactions); err != nil {
+	encID := make([]byte, 8)
+	if err := tx.ClearBucket(kv.RecentLocalTransaction); err != nil {
 		return err
 	}
 	for i := range txHashes {
-		binary.BigEndian.PutUint64(key, uint64(i))
-		if err := tx.Append(kv.RecentLocalTransactions, key, txHashes[i].([]byte)); err != nil {
+		binary.BigEndian.PutUint64(encID, uint64(i))
+		if err := tx.Append(kv.RecentLocalTransaction, encID, txHashes[i].([]byte)); err != nil {
 			return err
 		}
 	}
+
+	v := make([]byte, 0, 1024)
+	for addr, metaTx := range p.byHash {
+		if metaTx.Tx.rlp == nil {
+			continue
+		}
+		v = ensureEnoughSize(v, 8+8+len(metaTx.Tx.rlp))
+		binary.BigEndian.PutUint64(v, metaTx.Tx.senderID)
+		binary.BigEndian.PutUint64(v[8:], 0) // block num - timestamp
+		copy(v[8+8:], metaTx.Tx.rlp)
+		if err := tx.Put(kv.PooledTransaction, []byte(addr), v); err != nil {
+			return err
+		}
+		metaTx.Tx.rlp = nil
+	}
+	fmt.Printf("ddd: %d\n", len(p.byHash))
+
+	binary.BigEndian.PutUint64(encID, p.protocolBaseFee.Load())
+	if err := tx.Put(kv.PoolInfo, []byte("protocol_base_fee"), encID); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
+	if err := tx.Put(kv.PoolInfo, []byte("pending_base_fee"), encID); err != nil {
+		return err
+	}
+
+	//TODO: flush deletes
+
+	if err := senders.flush(tx); err != nil {
+		return err
+	}
+
+	return nil
+}
+func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if err := senders.fromDB(tx); err != nil {
+		return err
+	}
+
+	c, err := tx.Cursor(kv.RecentLocalTransaction)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		hashID := [32]byte{}
+		copy(hashID[:], v)
+		p.localsHistory.Add(hashID, struct{}{})
+	}
+
+	c, err = tx.Cursor(kv.PooledTransaction)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	txs := TxSlots{}
+	total, err := c.Count()
+	if err != nil {
+		return err
+	}
+	txs.Growth(int(total))
+
+	parseCtx := NewTxParseContext()
+	parseCtx.WithSender(false)
+	i := 0
+	hashID := [32]byte{}
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		txs.txs[i] = &TxSlot{}
+		_, err := parseCtx.ParseTransaction(v, 8+8, txs.txs[i], nil)
+		if err != nil {
+			fmt.Printf("ddd1 load: %s\n", err)
+			return err
+		}
+		txs.txs[i].senderID = binary.BigEndian.Uint64(v)
+		//bkock num = binary.BigEndian.Uint64(v[8:])
+		copy(hashID[:], k)
+		_, isLocalTx := p.localsHistory.Get(hashID)
+		txs.isLocal[i] = isLocalTx
+		i++
+	}
+	fmt.Printf("ddd load: %d\n", len(p.byHash))
+
+	protocolBaseFee, err := tx.GetOne(kv.PoolInfo, []byte("protocol_base_fee"))
+	if err != nil {
+		return err
+	}
+	pendingBaseFee, err := tx.GetOne(kv.PoolInfo, []byte("pending_base_fee"))
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("a:%d,%d,%d\n", total, len(txs.txs), i)
+	if err := onNewTxs(senders, txs, binary.BigEndian.Uint64(protocolBaseFee), binary.BigEndian.Uint64(pendingBaseFee), p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+		return err
+	}
+
+	//TODO: flush deletes
+
 	return nil
 }
 
@@ -742,9 +929,9 @@ func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, qu
 }
 
 // unwind
-func unsafeAddToPool(senders *SendersCache, unwindTxs TxSlots, to *SubPool, subPoolType SubPoolType, beforeAdd func(tx *metaTx, sender *senderInfo)) {
-	for i, tx := range unwindTxs.txs {
-		mt := newMetaTx(tx, unwindTxs.isLocal[i])
+func unsafeAddToPool(senders *SendersCache, newTxs TxSlots, to *SubPool, subPoolType SubPoolType, beforeAdd func(tx *metaTx, sender *senderInfo)) {
+	for i, tx := range newTxs.txs {
+		mt := newMetaTx(tx, newTxs.isLocal[i])
 
 		sender := senders.get(tx.senderID)
 		// Insert to pending pool, if pool doesn't have tx with same Nonce and bigger Tip
@@ -1057,10 +1244,16 @@ func (p *WorstQueue) Pop() interface{} {
 // promote/demote transactions
 // reorgs
 func BroadcastLoop(ctx context.Context, db kv.RwDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, timings Timings) {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return p.fromDB(tx, senders)
+	}); err != nil {
+		log.Error("restore from db", "err", err)
+	}
+
 	logEvery := time.NewTicker(timings.logEvery)
 	defer logEvery.Stop()
-	evictSendersEvery := time.NewTicker(30 * time.Second)
-	defer evictSendersEvery.Stop()
+	commitEvery := time.NewTicker(15 * time.Second)
+	defer commitEvery.Stop()
 
 	syncToNewPeersEvery := time.NewTicker(timings.syncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
@@ -1075,13 +1268,15 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, p *TxPool, senders *SendersC
 		case <-logEvery.C:
 			p.logStats()
 			log.Info("cache", "size", senders.len())
-		case <-evictSendersEvery.C:
+		case <-commitEvery.C:
 			if db != nil {
+				t := time.Now()
 				if err := db.Update(ctx, func(tx kv.RwTx) error {
-					return p.flushIsLocalHistory(tx)
+					return p.flush(tx, senders)
 				}); err != nil {
 					log.Error("flush is local history", "err", err)
 				}
+				log.Info("commit", "in", time.Since(t))
 			}
 		case h := <-newTxs:
 			// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
@@ -1114,7 +1309,7 @@ func restoreIsLocalHistory(db kv.RwDB, localsHistory *simplelru.LRU) error {
 		return nil
 	}
 	return db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForPrefix(kv.RecentLocalTransactions, nil, func(k, v []byte) error {
+		return tx.ForPrefix(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
 			localsHistory.Add(copyBytes(v), struct{}{})
 			return nil
 		})

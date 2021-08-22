@@ -342,11 +342,19 @@ var ChaindataTables = []string{
 }
 
 const (
-	RecentLocalTransactions = "RecentLocalTransactions" // sequence_u64 -> tx_hash
+	RecentLocalTransaction = "RecentLocalTransaction" // sequence_u64 -> tx_hash
+	PooledSenderID         = "PooledSenderID"         // sender_20bytes -> sender_id_u64
+	PooledSender           = "PooledSender"           // sender_id_u64 -> nonce, balance
+	PooledTransaction      = "PooledTransaction"      // txHash -> sender_id_u64+blockNum_u64+tx_rlp
+	PoolInfo               = "PoolInfo"               // option_key -> option_value
 )
 
 var TxPoolTables = []string{
-	RecentLocalTransactions,
+	RecentLocalTransaction,
+	PooledSenderID,
+	PooledSender,
+	PooledTransaction,
+	PoolInfo,
 }
 var SentryTables = []string{}
 

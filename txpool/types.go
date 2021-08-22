@@ -42,14 +42,16 @@ type TxParseContext struct {
 	buf           [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
 	sighash       [32]byte
 	sig           [65]byte
+	withSender    bool
 	reject        func([]byte) bool
 }
 
 func NewTxParseContext() *TxParseContext {
 	ctx := &TxParseContext{
-		keccak1: sha3.NewLegacyKeccak256(),
-		keccak2: sha3.NewLegacyKeccak256(),
-		recCtx:  secp256k1.NewContext(),
+		withSender: true,
+		keccak1:    sha3.NewLegacyKeccak256(),
+		keccak2:    sha3.NewLegacyKeccak256(),
+		recCtx:     secp256k1.NewContext(),
 	}
 	ctx.n27.SetUint64(27)
 	ctx.n28.SetUint64(28)
@@ -91,6 +93,7 @@ const ParseTransactionErrorPrefix = "parse transaction payload"
 var ErrRejected = errors.New("rejected")
 
 func (ctx *TxParseContext) Reject(f func(hash []byte) bool) { ctx.reject = f }
+func (ctx *TxParseContext) WithSender(v bool)               { ctx.withSender = v }
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
@@ -111,7 +114,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%s: empty rlp", ParseTransactionErrorPrefix)
 	}
-	if len(sender) != 20 {
+	if ctx.withSender && len(sender) != 20 {
 		return 0, fmt.Errorf("%s: expect sender buffer of len 20", ParseTransactionErrorPrefix)
 	}
 	// Compute transaction hash
@@ -149,6 +152,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
+			fmt.Printf("ii: %d, %x, %x\n", p, payload, payload[8:])
 			return 0, fmt.Errorf("%s: envelope Prefix: %v", ParseTransactionErrorPrefix, err)
 		}
 		// Hash the envelope, not the full payload
@@ -318,6 +322,9 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 	//ctx.keccak1.Sum(slot.idHash[:0])
 	_, _ = ctx.keccak1.(io.Reader).Read(slot.idHash[:32])
+	if !ctx.withSender {
+		return p, nil
+	}
 	if ctx.reject != nil && ctx.reject(slot.idHash[:32]) {
 		return p, ErrRejected
 	}

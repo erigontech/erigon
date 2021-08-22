@@ -77,7 +77,20 @@ func EncodeU64(i uint64, to []byte) int {
 	return 1
 }
 
-func EncodeString(s []byte, to []byte) {
+func StringLen(sLen int) int {
+	switch {
+	case sLen > 56:
+		beLen := (bits.Len(uint(sLen)) + 7) / 8
+		return 1 + beLen + sLen
+	case sLen == 0:
+		return 1
+	case sLen == 1:
+		return 1 + sLen
+	default: // 1<s<56
+		return 1 + sLen
+	}
+}
+func EncodeString(s []byte, to []byte) int {
 	switch {
 	case len(s) > 56:
 		beLen := (bits.Len(uint(len(s))) + 7) / 8
@@ -87,18 +100,22 @@ func EncodeString(s []byte, to []byte) {
 		to[8-beLen] = byte(beLen) + 183
 		copy(to, to[8-beLen:9])
 		copy(to[1+beLen:], s)
+		return 1 + beLen + len(s)
 	case len(s) == 0:
 		to[0] = 128
+		return 1
 	case len(s) == 1:
 		_ = to[1]
 		if s[0] >= 128 {
 			to[0] = 129
 		}
 		copy(to[1:], s)
+		return 1 + len(s)
 	default: // 1<s<56
 		_ = to[len(s)]
 		to[0] = byte(len(s)) + 128
 		copy(to[1:], s)
+		return 1 + len(s)
 	}
 }
 

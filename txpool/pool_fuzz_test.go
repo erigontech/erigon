@@ -5,13 +5,18 @@ package txpool
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
 
@@ -201,9 +206,40 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		txs.senders = append(txs.senders, senders.At(i%senders.Len())...)
 		txs.isLocal = append(txs.isLocal, false)
 		binary.BigEndian.PutUint64(txs.txs[i].idHash[:], txId.Load())
+		txs.txs[i].rlp = fakeRlpTx(txs.txs[i])
 	}
 
 	return sendersInfo, senderIDs, txs, true
+}
+func fakeRlpTx(slot *TxSlot) []byte {
+	dataLen := rlp.U64Len(1) + //chainID
+		rlp.U64Len(slot.nonce) + rlp.U64Len(slot.tip) + rlp.U64Len(slot.feeCap) +
+		rlp.U64Len(0) + // gas
+		rlp.StringLen(0) + // dest addr
+		rlp.U256Len(&slot.value) +
+		rlp.StringLen(0) + // data
+		rlp.ListPrefixLen(0) + //access list
+		+3 // v,r,s
+
+	buf := make([]byte, 1+rlp.ListPrefixLen(dataLen)+dataLen)
+	buf[0] = byte(DynamicFeeTxType)
+	p := 1
+	p += rlp.EncodeListPrefix(dataLen, buf[p:])
+	p += rlp.EncodeU64(1, buf[p:])
+	p += rlp.EncodeU64(slot.nonce, buf[p:])
+	p += rlp.EncodeU64(slot.tip, buf[p:])
+	p += rlp.EncodeU64(slot.feeCap, buf[p:])
+	p += rlp.EncodeU64(0, buf[p:])           //gas
+	p += rlp.EncodeString([]byte{}, buf[p:]) //destrination addr
+	bb := bytes.NewBuffer(buf[p:p])
+	slot.value.EncodeRLP(bb)
+	p += rlp.U256Len(&slot.value)
+	p += rlp.EncodeString([]byte{}, buf[p:]) //data
+	p += rlp.EncodeListPrefix(0, buf[p:])    // access list
+	p += rlp.EncodeU64(1, buf[p:])           //v
+	p += rlp.EncodeU64(1, buf[p:])           //r
+	p += rlp.EncodeU64(1, buf[p:])           //s
+	return buf[:]
 }
 
 func iterateSubPoolUnordered(subPool *SubPool, f func(tx *metaTx)) {
@@ -242,7 +278,8 @@ func FuzzOnNewBlocks11(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 3, 4)
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, pendingBaseFee1 uint8) {
-		t.Parallel()
+		//t.Parallel()
+
 		protocolBaseFee, pendingBaseFee := uint64(protocolBaseFee1%16+1), uint64(pendingBaseFee1%8+1)
 		if protocolBaseFee == 0 || pendingBaseFee == 0 {
 			t.Skip()
@@ -265,6 +302,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 
 		ch := make(chan Hashes, 100)
 		pool, err := New(ch, nil)
+		assert.NoError(err)
 		sendersCache := NewSendersCache()
 		assert.NoError(err)
 		sendersCache.senderInfo = senders
@@ -450,6 +488,31 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
+
+		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+		t.Cleanup(db.Close)
+		err = db.Update(context.Background(), func(tx kv.RwTx) error { return pool.flush(tx, sendersCache) })
+		require.NoError(t, err)
+		check(p2pReceived, TxSlots{}, "after_flush")
+		checkNotify(p2pReceived, TxSlots{}, "after_flush")
+
+		p2, err := New(ch, nil)
+		assert.NoError(err)
+		s2 := NewSendersCache()
+		err = db.View(context.Background(), func(tx kv.Tx) error { return p2.fromDB(tx, s2) })
+		require.NoError(t, err)
+		check(minedTxs1, TxSlots{}, "fromDB")
+		checkNotify(minedTxs1, TxSlots{}, "fromDB")
+		assert.Equal(pool.pending.Len(), p2.pending.Len())
+		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
+		assert.Equal(pool.queued.Len(), p2.queued.Len())
+		assert.Equal(len(pool.byHash), len(p2.byHash))
+		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
+		//assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
+		//assert.Equal(sendersCache.senderID, s2.senderID)
+		//assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
+		//assert.Equal(len(sendersCache.senderIDs), len(s2.senderIDs))
+		//assert.Equal(len(sendersCache.senderInfo), len(s2.senderInfo))
 	})
 
 }
