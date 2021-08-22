@@ -203,7 +203,7 @@ func (c *SentryClientDirect) PeerCount(ctx context.Context, in *sentry.PeerCount
 	return c.server.PeerCount(ctx, in)
 }
 
-// implements proto_sentry.Sentry_ReceiveMessagesServer
+// SentryReceiveServerDirect implements proto_sentry.Sentry_ReceiveMessagesServer
 type SentryReceiveServerDirect struct {
 	messageCh chan *sentry.InboundMessage
 	ctx       context.Context

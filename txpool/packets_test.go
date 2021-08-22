@@ -129,9 +129,7 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			var err error
 			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
-			require.Equal(tt.expectedErr, err != nil)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			ctx := NewTxParseContext()

@@ -233,7 +233,7 @@ func fakeRlpTx(slot *TxSlot) []byte {
 	p += rlp.EncodeU64(0, buf[p:])           //gas
 	p += rlp.EncodeString([]byte{}, buf[p:]) //destrination addr
 	bb := bytes.NewBuffer(buf[p:p])
-	slot.value.EncodeRLP(bb)
+	_ = slot.value.EncodeRLP(bb)
 	p += rlp.U256Len(&slot.value)
 	p += rlp.EncodeString([]byte{}, buf[p:]) //data
 	p += rlp.EncodeListPrefix(0, buf[p:])    // access list
