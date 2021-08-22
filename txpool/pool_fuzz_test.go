@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/google/btree"
@@ -503,6 +504,8 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		require.NoError(t, err)
 		check(minedTxs1, TxSlots{}, "fromDB")
 		checkNotify(minedTxs1, TxSlots{}, "fromDB")
+		fmt.Printf("bef: %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
+		fmt.Printf("bef2: %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len())
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
 		assert.Equal(pool.queued.Len(), p2.queued.Len())

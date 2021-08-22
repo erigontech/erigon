@@ -600,7 +600,6 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 			}
 		}
 	})
-	fmt.Printf("aaa: %d\n", pending.Len())
 
 	for _, sender := range changedSenders {
 		onSenderChange(sender, protocolBaseFee, pendingBaseFee)
@@ -609,6 +608,7 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 	pending.EnforceInvariants()
 	baseFee.EnforceInvariants()
 	queued.EnforceInvariants()
+	fmt.Printf("aaa2: %d, %d, %d\n", pending.Len(), baseFee.Len(), queued.Len())
 
 	promote(pending, baseFee, queued, func(i *metaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
@@ -618,6 +618,7 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 			localsHistory.Add(i.Tx.idHash, struct{}{})
 		}
 	})
+	fmt.Printf("aaa3: %d, %d, %d\n", pending.Len(), baseFee.Len(), queued.Len())
 
 	return nil
 }
@@ -770,7 +771,6 @@ func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
 		txs.txs[i] = &TxSlot{}
 		_, err := parseCtx.ParseTransaction(v, 8+8, txs.txs[i], nil)
 		if err != nil {
-			fmt.Printf("ddd1 load: %s\n", err)
 			return err
 		}
 		txs.txs[i].senderID = binary.BigEndian.Uint64(v)
@@ -780,21 +780,23 @@ func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
 		txs.isLocal[i] = isLocalTx
 		i++
 	}
-	fmt.Printf("ddd load: %d\n", len(p.byHash))
 
-	protocolBaseFee, err := tx.GetOne(kv.PoolInfo, []byte("protocol_base_fee"))
+	protocolBaseFeeV, err := tx.GetOne(kv.PoolInfo, []byte("protocol_base_fee"))
 	if err != nil {
 		return err
 	}
-	pendingBaseFee, err := tx.GetOne(kv.PoolInfo, []byte("pending_base_fee"))
+	pendingBaseFeeV, err := tx.GetOne(kv.PoolInfo, []byte("pending_base_fee"))
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("a:%d,%d,%d\n", total, len(txs.txs), i)
-	if err := onNewTxs(senders, txs, binary.BigEndian.Uint64(protocolBaseFee), binary.BigEndian.Uint64(pendingBaseFee), p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+	protocolBaseFee := binary.BigEndian.Uint64(protocolBaseFeeV)
+	pendingBaseFee := binary.BigEndian.Uint64(pendingBaseFeeV)
+	if err := onNewTxs(senders, txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
+	p.pendingBaseFee.Store(pendingBaseFee)
+	p.protocolBaseFee.Store(protocolBaseFee)
 
 	//TODO: flush deletes
 
@@ -1034,7 +1036,7 @@ func promote(pending, baseFee, queued *SubPool, discard func(tx *metaTx)) {
 		if worst.subPool >= 0b11111 { // TODO: here must 'subPool == 0b1111' or 'subPool <= 0b1111' ?
 			break
 		}
-		pending.PopWorst()
+		discard(pending.PopWorst())
 	}
 
 	//3. If the top element in the best yellow queue has subPool == 0b1111, promote to the green pool.

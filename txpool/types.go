@@ -152,7 +152,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
-			fmt.Printf("ii: %d, %x, %x\n", p, payload, payload[8:])
 			return 0, fmt.Errorf("%s: envelope Prefix: %v", ParseTransactionErrorPrefix, err)
 		}
 		// Hash the envelope, not the full payload
