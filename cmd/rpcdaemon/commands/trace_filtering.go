@@ -265,7 +265,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		stream.WriteNil()
 		return err
 	}
-	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+
+	var stdlibCompatibleJson = jsoniter.ConfigCompatibleWithStandardLibrary.BorrowStream(stream)
+	defer jsoniter.ConfigCompatibleWithStandardLibrary.ReturnStream(stdlibCompatibleJson)
+
 	stream.WriteArrayStart()
 	first := true
 	// Execute all transactions in picked blocks
@@ -321,18 +324,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					pt.BlockNumber = &blockNumber
 					pt.TransactionHash = &txHash
 					pt.TransactionPosition = &txPosition
-					b, err := json.Marshal(pt)
-					if err != nil {
-						stream.WriteNil()
-						return err
-					}
 					if nSeen > after && nExported < count {
 						if first {
 							first = false
 						} else {
 							stream.WriteMore()
 						}
-						stream.Write(b)
+						stdlibCompatibleJson.WriteVal(pt)
+						stdlibCompatibleJson.Flush()
 						nExported++
 					}
 				}
@@ -353,18 +352,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			*tr.BlockNumber = block.NumberU64()
 			tr.Type = "reward" // nolint: goconst
 			tr.TraceAddress = []int{}
-			b, err := json.Marshal(tr)
-			if err != nil {
-				stream.WriteNil()
-				return err
-			}
 			if nSeen > after && nExported < count {
 				if first {
 					first = false
 				} else {
 					stream.WriteMore()
 				}
-				stream.Write(b)
+				stdlibCompatibleJson.WriteVal(tr)
+				stdlibCompatibleJson.Flush()
 				nExported++
 			}
 		}
@@ -384,18 +379,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					*tr.BlockNumber = block.NumberU64()
 					tr.Type = "reward" // nolint: goconst
 					tr.TraceAddress = []int{}
-					b, err := json.Marshal(tr)
-					if err != nil {
-						stream.WriteNil()
-						return err
-					}
 					if nSeen > after && nExported < count {
 						if first {
 							first = false
 						} else {
 							stream.WriteMore()
 						}
-						stream.Write(b)
+						stdlibCompatibleJson.WriteVal(tr)
+						stdlibCompatibleJson.Flush()
 						nExported++
 					}
 				}
