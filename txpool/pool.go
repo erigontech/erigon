@@ -469,7 +469,7 @@ func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
 func (p *TxPool) printDebug(prefix string) {
 	fmt.Printf("%s.pool.byHash\n", prefix)
 	for _, j := range p.byHash {
-		fmt.Printf("\tsenderID=%d, nonce=%d\n", j.Tx.senderID, j.Tx.nonce)
+		fmt.Printf("\tsenderID=%d, nonce=%d, tip=%d\n", j.Tx.senderID, j.Tx.nonce, j.Tx.tip)
 	}
 	fmt.Printf("%s.pool.queues.len: %d,%d,%d\n", prefix, p.pending.Len(), p.baseFee.Len(), p.queued.Len())
 }
@@ -588,7 +588,18 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 	}
 
 	changedSenders := map[uint64]*senderInfo{}
-	unsafeAddToPool(senders, newTxs, pending, PendingSubPool, byHash, func(i *metaTx, sender *senderInfo) {
+	unsafeAddToPool(senders, newTxs, pending, PendingSubPool, byHash, func(txn *metaTx) {
+		switch txn.currentSubPool {
+		case PendingSubPool:
+			pending.UnsafeRemove(txn)
+		case BaseFeeSubPool:
+			baseFee.UnsafeRemove(txn)
+		case QueuedSubPool:
+			queued.UnsafeRemove(txn)
+		default:
+			//already removed
+		}
+	}, func(i *metaTx, sender *senderInfo) {
 		changedSenders[i.Tx.senderID] = sender
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			i.subPool |= IsLocal
@@ -829,7 +840,18 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	unsafeAddToPool(senders, unwindTxs, pending, PendingSubPool, byHash, func(i *metaTx, sender *senderInfo) {
+	unsafeAddToPool(senders, unwindTxs, pending, PendingSubPool, byHash, func(txn *metaTx) {
+		switch txn.currentSubPool {
+		case PendingSubPool:
+			pending.UnsafeRemove(txn)
+		case BaseFeeSubPool:
+			baseFee.UnsafeRemove(txn)
+		case QueuedSubPool:
+			queued.UnsafeRemove(txn)
+		default:
+			//already removed
+		}
+	}, func(i *metaTx, sender *senderInfo) {
 		changedSenders[i.Tx.senderID] = sender
 		//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
@@ -890,7 +912,6 @@ func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, qu
 				return false
 			}
 			toDel = append(toDel, i)
-			//fmt.Printf("del2: %d\n", it.metaTx.Tx.nonce)
 			// del from sub-pool
 			switch it.metaTx.currentSubPool {
 			case PendingSubPool:
@@ -916,7 +937,7 @@ func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, qu
 }
 
 // unwind
-func unsafeAddToPool(senders *SendersCache, newTxs TxSlots, to *SubPool, subPoolType SubPoolType, byHash map[string]*metaTx, beforeAdd func(tx *metaTx, sender *senderInfo)) {
+func unsafeAddToPool(senders *SendersCache, newTxs TxSlots, to *SubPool, subPoolType SubPoolType, byHash map[string]*metaTx, discard func(tx *metaTx), beforeAdd func(tx *metaTx, sender *senderInfo)) {
 	for i, tx := range newTxs.txs {
 		if _, ok := byHash[string(tx.idHash[:])]; ok {
 			continue
@@ -930,6 +951,7 @@ func unsafeAddToPool(senders *SendersCache, newTxs TxSlots, to *SubPool, subPool
 				continue
 			}
 		}
+
 		byHash[string(mt.Tx.idHash[:])] = mt
 		replaced := sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
 		if replaced != nil {
@@ -937,16 +959,7 @@ func unsafeAddToPool(senders *SendersCache, newTxs TxSlots, to *SubPool, subPool
 			if replacedMT.Tx.idHash != mt.Tx.idHash {
 				delete(byHash, string(replacedMT.Tx.idHash[:]))
 			}
-			switch replacedMT.currentSubPool {
-			case PendingSubPool:
-				to.UnsafeRemove(replacedMT)
-			case BaseFeeSubPool:
-				to.UnsafeRemove(replacedMT)
-			case QueuedSubPool:
-				to.UnsafeRemove(replacedMT)
-			default:
-				//already removed
-			}
+			discard(replacedMT)
 		}
 		beforeAdd(mt, sender)
 		to.UnsafeAdd(mt, subPoolType)
@@ -1166,12 +1179,12 @@ func (p *SubPool) UnsafeAdd(i *metaTx, subPoolType SubPoolType) {
 	p.worst.Push(i)
 	p.best.Push(i)
 }
-func (p *SubPool) DebugPrint() {
+func (p *SubPool) DebugPrint(prefix string) {
 	for i, it := range *p.best {
-		fmt.Printf("best: %d, %d, %d\n", i, it.subPool, it.bestIndex)
+		fmt.Printf("%s.best: %d, %d, %d\n", prefix, i, it.subPool, it.bestIndex)
 	}
 	for i, it := range *p.worst {
-		fmt.Printf("worst: %d, %d, %d\n", i, it.subPool, it.worstIndex)
+		fmt.Printf("%s.worst: %d, %d, %d\n", prefix, i, it.subPool, it.worstIndex)
 	}
 }
 

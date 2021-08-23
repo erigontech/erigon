@@ -489,5 +489,5 @@ func bytesToUint64(buf []byte) (x uint64) {
 }
 
 func (tx *TxSlot) printDebug(prefix string) {
-	fmt.Printf("%s: senderID=%d,nonce=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.idHash)
+	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.idHash)
 }

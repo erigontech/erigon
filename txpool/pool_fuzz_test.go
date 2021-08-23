@@ -5,14 +5,18 @@ package txpool
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // https://blog.golang.org/fuzz-beta
@@ -500,19 +504,19 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
 
-		//db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
-		//t.Cleanup(db.Close)
-		//err = db.Update(context.Background(), func(tx kv.RwTx) error { return pool.flush(tx, sendersCache) })
-		//require.NoError(t, err)
-		//check(p2pReceived, TxSlots{}, "after_flush")
+		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+		t.Cleanup(db.Close)
+		err = db.Update(context.Background(), func(tx kv.RwTx) error { return pool.flush(tx, sendersCache) })
+		require.NoError(t, err)
+		check(p2pReceived, TxSlots{}, "after_flush")
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
-		//p2, err := New(ch, nil)
-		//assert.NoError(err)
-		//s2 := NewSendersCache()
-		//err = db.View(context.Background(), func(tx kv.Tx) error { return p2.fromDB(tx, s2) })
-		//require.NoError(t, err)
-		//check(txs2, TxSlots{}, "fromDB")
+		p2, err := New(ch, nil)
+		assert.NoError(err)
+		s2 := NewSendersCache()
+		err = db.View(context.Background(), func(tx kv.Tx) error { return p2.fromDB(tx, s2) })
+		require.NoError(t, err)
+		check(txs2, TxSlots{}, "fromDB")
 		//checkNotify(txs2, TxSlots{}, "fromDB")
 		//fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
 		//fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
@@ -529,7 +533,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		//		fmt.Printf("no: %d,%d,%d,%d\n", b.Tx.senderID, b.Tx.nonce, sc.nonce, sc2.nonce)
 		//	}
 		//}
-		//assert.Equal(sendersCache.senderID, s2.senderID)
+		assert.Equal(sendersCache.senderID, s2.senderID)
 		//assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
 		//require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
 		//require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
