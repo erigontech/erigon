@@ -257,6 +257,42 @@ FAQ
 
 Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
+### Default Ports and Protocols / Firewalls?
+
+#### `erigon` ports
+|  Port |  Protocol |      Purpose     |  Expose |
+|:-----:|:---------:|:----------------:|:-------:|
+| 30303 | TCP & UDP |  eth/66 peering  |  Public |
+| 30304 | TCP & UDP |  eth/65 peering  |  Public |
+|  9090 |    TCP    | gRPC Connections | Private |
+
+Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
+
+#### `rpcdaemon` ports
+|  Port |  Protocol |      Purpose      |  Expose |
+|:-----:|:---------:|:-----------------:|:-------:|
+|  8545 |    TCP    | HTTP & WebSockets | Private |
+
+Typically 8545 is exposed only interally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
+
+#### `sentry` ports
+|  Port |  Protocol |      Purpose     |  Expose |
+|:-----:|:---------:|:----------------:|:-------:|
+| 30303 | TCP & UDP |      Peering     |  Public |
+|  9091 |    TCP    | gRPC Connections | Private |
+
+Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port 9091 is for internal gRCP connections (e.g erigon -> sentry)
+
+#### Other ports
+| Port | Protocol | Purpose |  Expose |
+|:----:|:--------:|:-------:|:-------:|
+| 6060 |    TCP   |  pprof  | Private |
+| 6060 |    TCP   | metrics | Private |
+
+Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+
+Also, ports 9092 and 9093 are reserved for future use of the consensus engine and shapshot downloader for gRPC (work in progress).
+
 Getting in touch
 ================
 
@@ -346,4 +382,3 @@ non-batched way.
 ### Filesystem's background features are expensive
 
 For example: btrfs's autodefrag option - may increase write IO 100x times
-
