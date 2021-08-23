@@ -128,6 +128,12 @@ func NewSendersCache() *SendersCache {
 		senderInfo: map[uint64]*senderInfo{},
 	}
 }
+func (sc *SendersCache) printDebug(prefix string) {
+	fmt.Printf("%s.SendersCache.senderInfo\n", prefix)
+	for i, j := range sc.senderInfo {
+		fmt.Printf("\tid=%d, nonce=%d, txs.len=%d\n", i, j.nonce, j.txNonce2Tx.Len())
+	}
+}
 
 func (sc *SendersCache) get(senderID uint64) *senderInfo {
 	sc.lock.RLock()
@@ -460,6 +466,13 @@ func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
 	}, nil
 }
 
+func (p *TxPool) printDebug(prefix string) {
+	fmt.Printf("%s.pool.byHash\n", prefix)
+	for _, j := range p.byHash {
+		fmt.Printf("\tsenderID=%d, nonce=%d\n", j.Tx.senderID, j.Tx.nonce)
+	}
+	fmt.Printf("%s.pool.queues.len: %d,%d,%d\n", prefix, p.pending.Len(), p.baseFee.Len(), p.queued.Len())
+}
 func (p *TxPool) logStats() {
 	protocolBaseFee, pendingBaseFee := p.protocolBaseFee.Load(), p.pendingBaseFee.Load()
 

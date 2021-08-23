@@ -197,7 +197,8 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 			tip:    tips[i%len(tips)],
 			feeCap: feeCap[i%len(feeCap)],
 		}
-		_, err := parseCtx.ParseTransaction(fakeRlpTx(txs.txs[i]), 0, txs.txs[i], nil)
+		txRlp := fakeRlpTx(txs.txs[i], senders.At(i%senders.Len()))
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.txs[i], nil)
 		if err != nil {
 			panic(err)
 		}
@@ -207,13 +208,15 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 
 	return sendersInfo, senderIDs, txs, true
 }
-func fakeRlpTx(slot *TxSlot) []byte {
+
+// fakeRlpTx add anything what identifying tx to `data` to make hash unique
+func fakeRlpTx(slot *TxSlot, data []byte) []byte {
 	dataLen := rlp.U64Len(1) + //chainID
 		rlp.U64Len(slot.nonce) + rlp.U64Len(slot.tip) + rlp.U64Len(slot.feeCap) +
 		rlp.U64Len(0) + // gas
 		rlp.StringLen(0) + // dest addr
 		rlp.U256Len(&slot.value) +
-		rlp.StringLen(0) + // data
+		rlp.StringLen(len(data)) + // data
 		rlp.ListPrefixLen(0) + //access list
 		+3 // v,r,s
 
@@ -230,11 +233,11 @@ func fakeRlpTx(slot *TxSlot) []byte {
 	bb := bytes.NewBuffer(buf[p:p])
 	_ = slot.value.EncodeRLP(bb)
 	p += rlp.U256Len(&slot.value)
-	p += rlp.EncodeString([]byte{}, buf[p:]) //data
-	p += rlp.EncodeListPrefix(0, buf[p:])    // access list
-	p += rlp.EncodeU64(1, buf[p:])           //v
-	p += rlp.EncodeU64(1, buf[p:])           //r
-	p += rlp.EncodeU64(1, buf[p:])           //s
+	p += rlp.EncodeString(data, buf[p:])  //data
+	p += rlp.EncodeListPrefix(0, buf[p:]) // access list
+	p += rlp.EncodeU64(1, buf[p:])        //v
+	p += rlp.EncodeU64(1, buf[p:])        //r
+	p += rlp.EncodeU64(1, buf[p:])        //s
 	return buf[:]
 }
 
@@ -479,23 +482,23 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		//err = pool.OnNewBlock(map[string]senderInfo{}, txs2, TxSlots{}, protocolBaseFee, pendingBaseFee, 2, sendersCache)
-		//assert.NoError(err)
-		//check(txs2, TxSlots{}, "fork2")
-		//checkNotify(txs2, TxSlots{}, "fork2")
+		err = pool.OnNewBlock(map[string]senderInfo{}, txs2, TxSlots{}, protocolBaseFee, pendingBaseFee, 2, sendersCache)
+		assert.NoError(err)
+		check(txs2, TxSlots{}, "fork2")
+		checkNotify(txs2, TxSlots{}, "fork2")
 
 		_, _, _ = p2pReceived, txs2, txs3
 
-		//err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, sendersCache)
-		//assert.NoError(err)
-		//check(TxSlots{}, txs3, "fork2 mined")
-		//checkNotify(TxSlots{}, txs3, "fork2 mined")
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, sendersCache)
+		assert.NoError(err)
+		check(TxSlots{}, txs3, "fork2 mined")
+		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
-		//err = pool.Add(nil, p2pReceived, sendersCache)
-		//assert.NoError(err)
-		//check(p2pReceived, TxSlots{}, "p2pmsg1")
-		//checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
+		err = pool.Add(nil, p2pReceived, sendersCache)
+		assert.NoError(err)
+		check(p2pReceived, TxSlots{}, "p2pmsg1")
+		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
 
 		//db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
 		//t.Cleanup(db.Close)
