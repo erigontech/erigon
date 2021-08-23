@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.16
+go 1.17
 
 require (
 	github.com/RoaringBitmap/roaring v0.6.0
