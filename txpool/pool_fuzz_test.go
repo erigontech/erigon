@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/google/btree"
@@ -44,9 +45,9 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 		assert := assert.New(t)
 		{
-			sub := NewSubPool()
+			sub := NewSubPool(PendingSubPool)
 			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			assert.Equal(len(in), sub.best.Len())
 			assert.Equal(len(in), sub.worst.Len())
@@ -70,9 +71,9 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 
 		{
-			sub := NewSubPool()
+			sub := NewSubPool(PendingSubPool)
 			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			var prev *uint8
 			i := sub.Len()
@@ -506,7 +507,10 @@ func FuzzOnNewBlocks11(f *testing.F) {
 
 		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
 		t.Cleanup(db.Close)
-		err = db.Update(context.Background(), func(tx kv.RwTx) error { return pool.flush(tx, sendersCache) })
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		err = pool.flush(tx, sendersCache)
 		require.NoError(t, err)
 		check(p2pReceived, TxSlots{}, "after_flush")
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
@@ -514,35 +518,30 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		p2, err := New(ch, nil)
 		assert.NoError(err)
 		s2 := NewSendersCache()
-		err = db.View(context.Background(), func(tx kv.Tx) error { return p2.fromDB(tx, s2) })
+		err = p2.fromDB(tx, s2)
 		require.NoError(t, err)
 		check(txs2, TxSlots{}, "fromDB")
 		//checkNotify(txs2, TxSlots{}, "fromDB")
-		//fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
-		//fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
-		//for i, b := range pool.byHash {
-		//	c, ok := p2.byHash[i]
-		//	if !ok {
-		//		_ = c
-		//		fmt.Printf("nno:%x\n", i)
-		//		for k, _ := range p2.byHash {
-		//			fmt.Printf("nno2:%x\n", k)
-		//		}
-		//		sc := sendersCache.senderInfo[b.Tx.senderID]
-		//		sc2 := s2.senderInfo[b.Tx.senderID]
-		//		fmt.Printf("no: %d,%d,%d,%d\n", b.Tx.senderID, b.Tx.nonce, sc.nonce, sc2.nonce)
-		//	}
-		//}
 		assert.Equal(sendersCache.senderID, s2.senderID)
 		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
 		require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
 		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
 		require.Equal(t, len(pool.byHash), len(p2.byHash))
-		//assert.Equal(pool.pending.Len(), p2.pending.Len())
-		//assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
-		//assert.Equal(pool.queued.Len(), p2.queued.Len())
-		//assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
-		//assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
+		if pool.pending.Len() != p2.pending.Len() {
+			pool.printDebug("p1")
+			p2.printDebug("p2")
+			sendersCache.printDebug("s1")
+			s2.printDebug("s2")
+
+			fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
+			fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
+		}
+
+		assert.Equal(pool.pending.Len(), p2.pending.Len())
+		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
+		assert.Equal(pool.queued.Len(), p2.queued.Len())
+		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
+		assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
 	})
 
 }
