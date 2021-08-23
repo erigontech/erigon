@@ -129,7 +129,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if dataLen > txMaxSize {
 		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
 	}
-	slot.rlp = payload[pos : dataPos+dataLen]
 
 	//if dataPos+dataLen != len(payload) {
 	//	return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
@@ -160,6 +159,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		p = dataPos
 	}
+	slot.rlp = payload[pos : dataPos+dataLen]
+
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 	// If it is non-legacy tx, chainId follows, but we skip it

@@ -534,10 +534,10 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		//	}
 		//}
 		assert.Equal(sendersCache.senderID, s2.senderID)
-		//assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
-		//require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
-		//require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
-		//require.Equal(t, len(pool.byHash), len(p2.byHash))
+		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
+		require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
+		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
+		require.Equal(t, len(pool.byHash), len(p2.byHash))
 		//assert.Equal(pool.pending.Len(), p2.pending.Len())
 		//assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
 		//assert.Equal(pool.queued.Len(), p2.queued.Len())

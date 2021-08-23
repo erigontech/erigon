@@ -334,8 +334,7 @@ func (sc *SendersCache) fromDB(tx kv.Tx) error {
 			return err
 		}
 		id := binary.BigEndian.Uint64(v)
-		sc.senderID = id
-		sc.senderIDs[string(v)] = id
+		sc.senderIDs[string(k)] = id
 	}
 
 	c, err = tx.Cursor(kv.PooledSender)
@@ -358,11 +357,16 @@ func (sc *SendersCache) fromDB(tx kv.Tx) error {
 		return err
 	}
 	sc.blockHeight.Store(binary.BigEndian.Uint64(height))
+	v, err := tx.GetOne(kv.PoolInfo, []byte("sender_cache_id"))
+	if err != nil {
+		return err
+	}
+	sc.senderID = binary.BigEndian.Uint64(v)
 
 	return nil
 }
 
-var SenderCacheHeightKey = []byte("s")
+var SenderCacheHeightKey = []byte("sender_cache_heght")
 
 func (sc *SendersCache) flush(tx kv.RwTx) error {
 	sc.lock.RLock()
@@ -389,6 +393,11 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 
 	binary.BigEndian.PutUint64(encID, sc.blockHeight.Load())
 	err := tx.Put(kv.PoolInfo, SenderCacheHeightKey, encID)
+	if err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(encID, sc.senderID)
+	err = tx.Put(kv.PoolInfo, []byte("sender_cache_id"), encID)
 	if err != nil {
 		return err
 	}
@@ -771,7 +780,8 @@ func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
 			return err
 		}
 		txs.txs[i] = &TxSlot{}
-		_, err := parseCtx.ParseTransaction(v, 8+8, txs.txs[i], nil)
+
+		_, err := parseCtx.ParseTransaction(v[8+8:], 0, txs.txs[i], nil)
 		if err != nil {
 			return err
 		}
