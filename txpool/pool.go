@@ -128,6 +128,8 @@ func NewSendersCache() *SendersCache {
 		senderInfo: map[uint64]*senderInfo{},
 	}
 }
+
+//nolint
 func (sc *SendersCache) printDebug(prefix string) {
 	fmt.Printf("%s.SendersCache.senderInfo\n", prefix)
 	for i, j := range sc.senderInfo {
@@ -475,6 +477,7 @@ func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
 	}, nil
 }
 
+//nolint
 func (p *TxPool) printDebug(prefix string) {
 	fmt.Printf("%s.pool.byHash\n", prefix)
 	for _, j := range p.byHash {
