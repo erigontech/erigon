@@ -45,6 +45,7 @@ type Fetch struct {
 	pool                 Pool                  // Transaction pool implementation
 	senders              *SendersCache
 	coreDB               kv.RoDB
+	db                   kv.RwDB
 	wg                   *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesClient   remote.KVClient
 	stateChangesParseCtx *TxParseContext
@@ -64,15 +65,15 @@ var DefaultTimings = Timings{
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, senders *SendersCache, stateChangesClient remote.KVClient, db kv.RoDB) *Fetch {
+func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, senders *SendersCache, stateChangesClient remote.KVClient, coreDB kv.RoDB, db kv.RwDB) *Fetch {
 	pooledTxsParseCtx := NewTxParseContext()
-	pooledTxsParseCtx.Reject(func(hash []byte) bool { return pool.IdHashKnown(hash) })
 	return &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
 		pool:                 pool,
 		senders:              senders,
-		coreDB:               db,
+		coreDB:               coreDB,
+		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxParseContext(),
 		pooledTxsParseCtx:    pooledTxsParseCtx,
@@ -197,11 +198,17 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 }
 
 func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMessage, sentryClient sentry.SentryClient) error {
+	if !f.pool.Started() {
+		return nil
+	}
+	tx, err := f.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	switch req.Id {
 	case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65:
-		if !f.pool.Started() {
-			return nil
-		}
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
@@ -213,7 +220,11 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			if err != nil {
 				return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 			}
-			if !f.pool.IdHashKnown(hashbuf[:]) {
+			known, err := f.pool.IdHashKnown(tx, hashbuf[:])
+			if err != nil {
+				return err
+			}
+			if !known {
 				unknownHashes = append(unknownHashes, hashbuf[:]...)
 			}
 		}
@@ -237,9 +248,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 		}
 	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66, sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
-		if !f.pool.Started() {
-			return nil
-		}
 		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
 		messageId := sentry.MessageId_POOLED_TRANSACTIONS_66
@@ -254,7 +262,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			_ = requestID
 			var txs [][]byte
 			for i := 0; i < len(hashes); i += 32 {
-				txn := f.pool.GetRlp(hashes[i : i+32])
+				txn, err := f.pool.GetRlp(tx, hashes[i:i+32])
+				if err != nil {
+					return err
+				}
 				if txn == nil {
 					continue
 				}
@@ -269,7 +280,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 			var txs [][]byte
 			for i := 0; i < len(hashes); i += 32 {
-				txn := f.pool.GetRlp(hashes[i : i+32])
+				txn, err := f.pool.GetRlp(tx, hashes[i:i+32])
+				if err != nil {
+					return err
+				}
 				if txn == nil {
 					continue
 				}
@@ -284,10 +298,12 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return err
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66:
-		if !f.pool.Started() {
-			return nil
-		}
 		txs := TxSlots{}
+		f.pooledTxsParseCtx.Reject(func(hash []byte) bool {
+			known, _ := f.pool.IdHashKnown(tx, hash)
+			return known
+		})
+
 		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
 			if _, err := ParsePooledTransactions65(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
 				return err

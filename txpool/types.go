@@ -42,14 +42,16 @@ type TxParseContext struct {
 	buf           [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
 	sighash       [32]byte
 	sig           [65]byte
+	withSender    bool
 	reject        func([]byte) bool
 }
 
 func NewTxParseContext() *TxParseContext {
 	ctx := &TxParseContext{
-		keccak1: sha3.NewLegacyKeccak256(),
-		keccak2: sha3.NewLegacyKeccak256(),
-		recCtx:  secp256k1.NewContext(),
+		withSender: true,
+		keccak1:    sha3.NewLegacyKeccak256(),
+		keccak2:    sha3.NewLegacyKeccak256(),
+		recCtx:     secp256k1.NewContext(),
 	}
 	ctx.n27.SetUint64(27)
 	ctx.n28.SetUint64(28)
@@ -91,6 +93,7 @@ const ParseTransactionErrorPrefix = "parse transaction payload"
 var ErrRejected = errors.New("rejected")
 
 func (ctx *TxParseContext) Reject(f func(hash []byte) bool) { ctx.reject = f }
+func (ctx *TxParseContext) WithSender(v bool)               { ctx.withSender = v }
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
@@ -111,7 +114,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%s: empty rlp", ParseTransactionErrorPrefix)
 	}
-	if len(sender) != 20 {
+	if ctx.withSender && len(sender) != 20 {
 		return 0, fmt.Errorf("%s: expect sender buffer of len 20", ParseTransactionErrorPrefix)
 	}
 	// Compute transaction hash
@@ -126,7 +129,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if dataLen > txMaxSize {
 		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
 	}
-	slot.rlp = payload[pos : dataPos+dataLen]
 
 	//if dataPos+dataLen != len(payload) {
 	//	return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
@@ -157,6 +159,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		p = dataPos
 	}
+	slot.rlp = payload[pos : dataPos+dataLen]
+
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 	// If it is non-legacy tx, chainId follows, but we skip it
@@ -318,6 +322,9 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 	//ctx.keccak1.Sum(slot.idHash[:0])
 	_, _ = ctx.keccak1.(io.Reader).Read(slot.idHash[:32])
+	if !ctx.withSender {
+		return p, nil
+	}
 	if ctx.reject != nil && ctx.reject(slot.idHash[:32]) {
 		return p, ErrRejected
 	}
@@ -480,4 +487,10 @@ func bytesToUint64(buf []byte) (x uint64) {
 		}
 	}
 	return
+}
+
+//nolint
+func (tx *TxSlot) printDebug(prefix string) {
+	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.value.Uint64())
+	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.idHash)
 }

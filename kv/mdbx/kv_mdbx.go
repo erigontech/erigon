@@ -124,7 +124,7 @@ func (opts MdbxOpts) WithTablessCfg(f TableCfgFunc) MdbxOpts {
 
 func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	if expectMdbxVersionMajor != mdbx.Major || expectMdbxVersionMinor != mdbx.Minor {
-		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", mdbx.Major, mdbx.Minor, expectMdbxVersionMajor, expectMdbxVersionMinor)
+		return nil, fmt.Errorf("unexpected mdbx version: %d.%d, expected %d %d. Please run 'make mdbx'", int(mdbx.Major), int(mdbx.Minor), expectMdbxVersionMajor, expectMdbxVersionMinor)
 	}
 
 	var err error
@@ -558,7 +558,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 }
 
-// ExistingBuckets - all buckets stored as keys of un-named bucket
+// ListBuckets - all buckets stored as keys of un-named bucket
 func (tx *MdbxTx) ListBuckets() ([]string, error) {
 	return tx.tx.ListDBI()
 }
@@ -771,7 +771,6 @@ func (tx *MdbxTx) Rollback() {
 	tx.tx.Abort()
 }
 
-//nolint
 func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
@@ -781,7 +780,6 @@ func (tx *MdbxTx) SpaceDirty() (uint64, uint64, error) {
 	return txInfo.SpaceDirty, tx.db.txSize, nil
 }
 
-//nolint
 func (tx *MdbxTx) PrintDebugInfo() {
 	/*
 		txInfo, err := tx.tx.Info(true)
@@ -1551,7 +1549,7 @@ func (c *MdbxDupSortCursor) DeleteCurrentDuplicates() error {
 	return nil
 }
 
-// Count returns the number of duplicates for the current key. See mdb_cursor_count
+// CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
 func (c *MdbxDupSortCursor) CountDuplicates() (uint64, error) {
 	res, err := c.c.Count()
 	if err != nil {

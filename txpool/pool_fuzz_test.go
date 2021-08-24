@@ -5,14 +5,19 @@ package txpool
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/atomic"
+	"github.com/stretchr/testify/require"
 )
 
 // https://blog.golang.org/fuzz-beta
@@ -40,9 +45,9 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 		assert := assert.New(t)
 		{
-			sub := NewSubPool()
+			sub := NewSubPool(PendingSubPool)
 			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			assert.Equal(len(in), sub.best.Len())
 			assert.Equal(len(in), sub.worst.Len())
@@ -66,9 +71,9 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 
 		{
-			sub := NewSubPool()
+			sub := NewSubPool(PendingSubPool)
 			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}}, PendingSubPool)
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			var prev *uint8
 			i := sub.Len()
@@ -158,8 +163,6 @@ func parseTxs(in []byte) (nonces, tips []uint64, values []uint256.Int) {
 	return
 }
 
-var txId atomic.Uint64
-
 func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*senderInfo, senderIDs map[string]uint64, txs TxSlots, ok bool) {
 	if len(rawTxNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawFeeCap) < 1 || len(rawSender) < 1+1+1 {
 		return nil, nil, txs, false
@@ -190,20 +193,57 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		senderIDs[string(senders.At(i%senders.Len()))] = senderID
 	}
 	txs.txs = make([]*TxSlot, len(txNonce))
+	parseCtx := NewTxParseContext()
+	parseCtx.WithSender(false)
 	for i := range txNonce {
-		txId.Inc()
 		txs.txs[i] = &TxSlot{
 			nonce:  txNonce[i],
 			value:  values[i%len(values)],
 			tip:    tips[i%len(tips)],
 			feeCap: feeCap[i%len(feeCap)],
 		}
+		txRlp := fakeRlpTx(txs.txs[i], senders.At(i%senders.Len()))
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.txs[i], nil)
+		if err != nil {
+			panic(err)
+		}
 		txs.senders = append(txs.senders, senders.At(i%senders.Len())...)
 		txs.isLocal = append(txs.isLocal, false)
-		binary.BigEndian.PutUint64(txs.txs[i].idHash[:], txId.Load())
 	}
 
 	return sendersInfo, senderIDs, txs, true
+}
+
+// fakeRlpTx add anything what identifying tx to `data` to make hash unique
+func fakeRlpTx(slot *TxSlot, data []byte) []byte {
+	dataLen := rlp.U64Len(1) + //chainID
+		rlp.U64Len(slot.nonce) + rlp.U64Len(slot.tip) + rlp.U64Len(slot.feeCap) +
+		rlp.U64Len(0) + // gas
+		rlp.StringLen(0) + // dest addr
+		rlp.U256Len(&slot.value) +
+		rlp.StringLen(len(data)) + // data
+		rlp.ListPrefixLen(0) + //access list
+		+3 // v,r,s
+
+	buf := make([]byte, 1+rlp.ListPrefixLen(dataLen)+dataLen)
+	buf[0] = byte(DynamicFeeTxType)
+	p := 1
+	p += rlp.EncodeListPrefix(dataLen, buf[p:])
+	p += rlp.EncodeU64(1, buf[p:])
+	p += rlp.EncodeU64(slot.nonce, buf[p:])
+	p += rlp.EncodeU64(slot.tip, buf[p:])
+	p += rlp.EncodeU64(slot.feeCap, buf[p:])
+	p += rlp.EncodeU64(0, buf[p:])           //gas
+	p += rlp.EncodeString([]byte{}, buf[p:]) //destrination addr
+	bb := bytes.NewBuffer(buf[p:p])
+	_ = slot.value.EncodeRLP(bb)
+	p += rlp.U256Len(&slot.value)
+	p += rlp.EncodeString(data, buf[p:])  //data
+	p += rlp.EncodeListPrefix(0, buf[p:]) // access list
+	p += rlp.EncodeU64(1, buf[p:])        //v
+	p += rlp.EncodeU64(1, buf[p:])        //r
+	p += rlp.EncodeU64(1, buf[p:])        //s
+	return buf[:]
 }
 
 func iterateSubPoolUnordered(subPool *SubPool, f func(tx *metaTx)) {
@@ -242,7 +282,8 @@ func FuzzOnNewBlocks11(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 3, 4)
 	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, pendingBaseFee1 uint8) {
-		t.Parallel()
+		//t.Parallel()
+
 		protocolBaseFee, pendingBaseFee := uint64(protocolBaseFee1%16+1), uint64(pendingBaseFee1%8+1)
 		if protocolBaseFee == 0 || pendingBaseFee == 0 {
 			t.Skip()
@@ -265,10 +306,12 @@ func FuzzOnNewBlocks11(f *testing.F) {
 
 		ch := make(chan Hashes, 100)
 		pool, err := New(ch, nil)
+		assert.NoError(err)
 		sendersCache := NewSendersCache()
 		assert.NoError(err)
 		sendersCache.senderInfo = senders
 		sendersCache.senderIDs = senderIDs
+		sendersCache.senderID = uint64(len(senderIDs))
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 			//if pending.Len() > 5 && baseFee.Len() > 5 && queued.Len() > 5 {
@@ -403,7 +446,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 			select {
 			case newHashes := <-ch:
-				//assert.Equal(len(unwindTxs.txs), newHashes.Len())
+				//assert.Equal(len(txs1.txs), newHashes.Len())
 				assert.Greater(len(newHashes), 0)
 				for i := 0; i < newHashes.Len(); i++ {
 					foundInUnwind := false
@@ -433,23 +476,72 @@ func FuzzOnNewBlocks11(f *testing.F) {
 
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
-		unwindTxs, minedTxs1, p2pReceived, minedTxs2 := splitDataset(txs)
-		err = pool.OnNewBlock(map[string]senderInfo{}, unwindTxs, minedTxs1, protocolBaseFee, pendingBaseFee, 1, sendersCache)
+		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
+		err = pool.OnNewBlock(map[string]senderInfo{}, txs1, TxSlots{}, protocolBaseFee, pendingBaseFee, 1, sendersCache)
 		assert.NoError(err)
-		check(unwindTxs, minedTxs1, "fork1")
-		checkNotify(unwindTxs, minedTxs1, "fork1")
+		check(txs1, TxSlots{}, "fork1")
+		checkNotify(txs1, TxSlots{}, "fork1")
+
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs2, protocolBaseFee, pendingBaseFee, 1, sendersCache)
+		check(TxSlots{}, txs2, "fork1 mined")
+		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(map[string]senderInfo{}, minedTxs1, minedTxs2, protocolBaseFee, pendingBaseFee, 2, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, txs2, TxSlots{}, protocolBaseFee, pendingBaseFee, 2, sendersCache)
 		assert.NoError(err)
-		check(minedTxs1, minedTxs2, "fork2")
-		checkNotify(minedTxs1, minedTxs2, "fork2")
+		check(txs2, TxSlots{}, "fork2")
+		checkNotify(txs2, TxSlots{}, "fork2")
+
+		_, _, _ = p2pReceived, txs2, txs3
+
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, sendersCache)
+		assert.NoError(err)
+		check(TxSlots{}, txs3, "fork2 mined")
+		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
 		err = pool.Add(nil, p2pReceived, sendersCache)
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
+
+		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+		t.Cleanup(db.Close)
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		err = pool.flush(tx, sendersCache)
+		require.NoError(t, err)
+		check(p2pReceived, TxSlots{}, "after_flush")
+		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
+
+		p2, err := New(ch, nil)
+		assert.NoError(err)
+		s2 := NewSendersCache()
+		err = p2.fromDB(tx, s2)
+		require.NoError(t, err)
+		check(txs2, TxSlots{}, "fromDB")
+		//checkNotify(txs2, TxSlots{}, "fromDB")
+		assert.Equal(sendersCache.senderID, s2.senderID)
+		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
+		require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
+		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
+		require.Equal(t, len(pool.byHash), len(p2.byHash))
+		if pool.pending.Len() != p2.pending.Len() {
+			pool.printDebug("p1")
+			p2.printDebug("p2")
+			sendersCache.printDebug("s1")
+			s2.printDebug("s2")
+
+			fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
+			fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
+		}
+
+		assert.Equal(pool.pending.Len(), p2.pending.Len())
+		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
+		assert.Equal(pool.queued.Len(), p2.queued.Len())
+		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
+		assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
 	})
 
 }

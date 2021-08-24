@@ -24,10 +24,10 @@ var _ Pool = &PoolMock{}
 // 			AddNewGoodPeerFunc: func(peerID PeerID)  {
 // 				panic("mock out the AddNewGoodPeer method")
 // 			},
-// 			GetRlpFunc: func(hash []byte) []byte {
+// 			GetRlpFunc: func(tx kv.Tx, hash []byte) ([]byte, error) {
 // 				panic("mock out the GetRlp method")
 // 			},
-// 			IdHashKnownFunc: func(hash []byte) bool {
+// 			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
 // 				panic("mock out the IdHashKnown method")
 // 			},
 // 			OnNewBlockFunc: func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, senders *SendersCache) error {
@@ -50,10 +50,10 @@ type PoolMock struct {
 	AddNewGoodPeerFunc func(peerID PeerID)
 
 	// GetRlpFunc mocks the GetRlp method.
-	GetRlpFunc func(hash []byte) []byte
+	GetRlpFunc func(tx kv.Tx, hash []byte) ([]byte, error)
 
 	// IdHashKnownFunc mocks the IdHashKnown method.
-	IdHashKnownFunc func(hash []byte) bool
+	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
 	OnNewBlockFunc func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, senders *SendersCache) error
@@ -79,11 +79,15 @@ type PoolMock struct {
 		}
 		// GetRlp holds details about calls to the GetRlp method.
 		GetRlp []struct {
+			// Tx is the tx argument value.
+			Tx kv.Tx
 			// Hash is the hash argument value.
 			Hash []byte
 		}
 		// IdHashKnown holds details about calls to the IdHashKnown method.
 		IdHashKnown []struct {
+			// Tx is the tx argument value.
+			Tx kv.Tx
 			// Hash is the hash argument value.
 			Hash []byte
 		}
@@ -190,10 +194,12 @@ func (mock *PoolMock) AddNewGoodPeerCalls() []struct {
 }
 
 // GetRlp calls GetRlpFunc.
-func (mock *PoolMock) GetRlp(hash []byte) []byte {
+func (mock *PoolMock) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	callInfo := struct {
+		Tx   kv.Tx
 		Hash []byte
 	}{
+		Tx:   tx,
 		Hash: hash,
 	}
 	mock.lockGetRlp.Lock()
@@ -202,19 +208,22 @@ func (mock *PoolMock) GetRlp(hash []byte) []byte {
 	if mock.GetRlpFunc == nil {
 		var (
 			bytesOut []byte
+			errOut   error
 		)
-		return bytesOut
+		return bytesOut, errOut
 	}
-	return mock.GetRlpFunc(hash)
+	return mock.GetRlpFunc(tx, hash)
 }
 
 // GetRlpCalls gets all the calls that were made to GetRlp.
 // Check the length with:
 //     len(mockedPool.GetRlpCalls())
 func (mock *PoolMock) GetRlpCalls() []struct {
+	Tx   kv.Tx
 	Hash []byte
 } {
 	var calls []struct {
+		Tx   kv.Tx
 		Hash []byte
 	}
 	mock.lockGetRlp.RLock()
@@ -224,10 +233,12 @@ func (mock *PoolMock) GetRlpCalls() []struct {
 }
 
 // IdHashKnown calls IdHashKnownFunc.
-func (mock *PoolMock) IdHashKnown(hash []byte) bool {
+func (mock *PoolMock) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	callInfo := struct {
+		Tx   kv.Tx
 		Hash []byte
 	}{
+		Tx:   tx,
 		Hash: hash,
 	}
 	mock.lockIdHashKnown.Lock()
@@ -235,20 +246,23 @@ func (mock *PoolMock) IdHashKnown(hash []byte) bool {
 	mock.lockIdHashKnown.Unlock()
 	if mock.IdHashKnownFunc == nil {
 		var (
-			bOut bool
+			bOut   bool
+			errOut error
 		)
-		return bOut
+		return bOut, errOut
 	}
-	return mock.IdHashKnownFunc(hash)
+	return mock.IdHashKnownFunc(tx, hash)
 }
 
 // IdHashKnownCalls gets all the calls that were made to IdHashKnown.
 // Check the length with:
 //     len(mockedPool.IdHashKnownCalls())
 func (mock *PoolMock) IdHashKnownCalls() []struct {
+	Tx   kv.Tx
 	Hash []byte
 } {
 	var calls []struct {
+		Tx   kv.Tx
 		Hash []byte
 	}
 	mock.lockIdHashKnown.RLock()
