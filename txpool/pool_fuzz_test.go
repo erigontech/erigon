@@ -305,7 +305,11 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		var prevTotal int
 
 		ch := make(chan Hashes, 100)
-		pool, err := New(ch, nil)
+
+		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+		t.Cleanup(db.Close)
+
+		pool, err := New(ch, db)
 		assert.NoError(err)
 		sendersCache := NewSendersCache()
 		assert.NoError(err)
@@ -341,7 +345,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 				}
 
 				// side data structures must have all txs
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), msg)
+				assert.True(senders[i.senderID].txNonce2Tx.Has(&byNonce{tx}), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok)
 
@@ -379,7 +383,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), msg)
+				assert.True(senders[i.senderID].txNonce2Tx.Has(&byNonce{tx}), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
 			})
@@ -406,7 +410,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&nonce2TxItem{tx}), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
+				assert.True(senders[i.senderID].txNonce2Tx.Has(&byNonce{tx}), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
 			})
@@ -419,7 +423,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 			for i := range senders {
 				//assert.True(senders[i].txNonce2Tx.Len() > 0)
 				senders[i].txNonce2Tx.Ascend(func(i btree.Item) bool {
-					mt := i.(*nonce2TxItem).metaTx
+					mt := i.(*byNonce).metaTx
 					assert.True(mt.worstIndex >= 0, msg)
 					assert.True(mt.bestIndex >= 0, msg)
 					return true
@@ -505,8 +509,6 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
 
-		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
-		t.Cleanup(db.Close)
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -524,7 +526,8 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		//checkNotify(txs2, TxSlots{}, "fromDB")
 		assert.Equal(sendersCache.senderID, s2.senderID)
 		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
-		require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
+		//require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
+		require.Equal(t, 0, len(s2.senderIDs))
 		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
 		require.Equal(t, len(pool.byHash), len(p2.byHash))
 		if pool.pending.Len() != p2.pending.Len() {
