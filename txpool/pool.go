@@ -131,22 +131,31 @@ func NewSendersCache() *SendersCache {
 	}
 }
 
-func (sc *SendersCache) id(addr string, tx kv.Tx) (uint64, error) {
+func (sc *SendersCache) Id(addr string, tx kv.Tx) (uint64, bool, error) {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
+	return sc.id(addr, tx)
+}
+func (sc *SendersCache) id(addr string, tx kv.Tx) (uint64, bool, error) {
 	id, ok := sc.senderIDs[addr]
 	if !ok {
 		v, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
 		if err != nil {
-			return 0, err
+			return 0, false, err
+		}
+		if len(v) == 0 {
+			return 0, false, nil
 		}
 		id = binary.BigEndian.Uint64(v)
 	}
-	return id, nil
+	return id, true, nil
 }
-func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
+func (sc *SendersCache) Info(id uint64, tx kv.Tx) (*senderInfo, error) {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
+	return sc.info(id, tx)
+}
+func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
 	info, ok := sc.senderInfo[id]
 	if !ok {
 		encID := make([]byte, 8)
@@ -207,9 +216,14 @@ func (sc *SendersCache) evict() int {
 }
 */
 
-func (sc *SendersCache) onNewTxs(coreDBTx kv.RoDB, newTxs TxSlots) error {
-	sc.ensureSenderIDOnNewTxs(newTxs)
-	toLoad := sc.setTxSenderID(newTxs)
+func (sc *SendersCache) onNewTxs(coreDBTx kv.RoDB, tx kv.Tx, newTxs TxSlots) error {
+	if err := sc.ensureSenderIDOnNewTxs(tx, newTxs); err != nil {
+		return err
+	}
+	toLoad, err := sc.setTxSenderID(tx, newTxs)
+	if err != nil {
+		return err
+	}
 	if len(toLoad) == 0 {
 		return nil
 	}
@@ -221,14 +235,20 @@ func (sc *SendersCache) onNewTxs(coreDBTx kv.RoDB, newTxs TxSlots) error {
 	return nil
 }
 
-func (sc *SendersCache) onNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, blockHeight uint64) error {
+func (sc *SendersCache) onNewBlock(tx kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, blockHeight uint64) error {
 	//TODO: if see non-continuous block heigh - load gap from changesets
 	sc.blockHeight.Store(blockHeight)
 
 	//`loadSenders` goes by network to core - and it must be outside of SendersCache lock. But other methods must be locked
-	sc.mergeStateChanges(stateChanges, unwindTxs, minedTxs)
-	_ = sc.setTxSenderID(unwindTxs)
-	_ = sc.setTxSenderID(minedTxs)
+	if err := sc.mergeStateChanges(tx, stateChanges, unwindTxs, minedTxs); err != nil {
+		return err
+	}
+	if _, err := sc.setTxSenderID(tx, unwindTxs); err != nil {
+		return err
+	}
+	if _, err := sc.setTxSenderID(tx, minedTxs); err != nil {
+		return err
+	}
 	return nil
 }
 func (sc *SendersCache) set(diff map[uint64]senderInfo) {
@@ -239,11 +259,14 @@ func (sc *SendersCache) set(diff map[uint64]senderInfo) {
 		sc.senderInfo[id] = &a
 	}
 }
-func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) {
+func (sc *SendersCache) mergeStateChanges(tx kv.Tx, stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	for addr, v := range stateChanges { // merge state changes
-		id, ok := sc.senderIDs[addr]
+		id, ok, err := sc.id(addr, tx)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
@@ -268,7 +291,10 @@ func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, un
 	*/
 
 	for i := 0; i < unwindedTxs.senders.Len(); i++ {
-		id, ok := sc.senderIDs[string(unwindedTxs.senders.At(i))]
+		id, ok, err := sc.id(string(unwindedTxs.senders.At(i)), tx)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
@@ -282,7 +308,10 @@ func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, un
 	}
 
 	for i := 0; i < len(minedTxs.txs); i++ {
-		id, ok := sc.senderIDs[string(minedTxs.senders.At(i))]
+		id, ok, err := sc.id(string(minedTxs.senders.At(i)), tx)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
@@ -298,22 +327,27 @@ func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, un
 		//	sc.senderInfo[id] = newSenderInfo(v.nonce, v.balance)
 		//}
 	}
+	return nil
 }
 
-func (sc *SendersCache) ensureSenderIDOnNewTxs(newTxs TxSlots) {
+func (sc *SendersCache) ensureSenderIDOnNewTxs(tx kv.Tx, newTxs TxSlots) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	for i := 0; i < len(newTxs.txs); i++ {
-		_, ok := sc.senderIDs[string(newTxs.senders.At(i))]
+		_, ok, err := sc.id(string(newTxs.senders.At(i)), tx)
+		if err != nil {
+			return err
+		}
 		if ok {
 			continue
 		}
 		sc.senderID++
 		sc.senderIDs[string(newTxs.senders.At(i))] = sc.senderID
 	}
+	return nil
 }
 
-func (sc *SendersCache) setTxSenderID(txs TxSlots) map[uint64]string {
+func (sc *SendersCache) setTxSenderID(tx kv.Tx, txs TxSlots) (map[uint64]string, error) {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
 	toLoad := map[uint64]string{}
@@ -321,10 +355,17 @@ func (sc *SendersCache) setTxSenderID(txs TxSlots) map[uint64]string {
 		addr := string(txs.senders.At(i))
 
 		// assign ID to each new sender
-		txs.txs[i].senderID = sc.senderIDs[addr]
+		id, ok, err := sc.id(addr, tx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			panic("not supported yet")
+		}
+		txs.txs[i].senderID = id
 
 		// load data from db if need
-		_, ok := sc.senderInfo[txs.txs[i].senderID]
+		_, ok = sc.senderInfo[txs.txs[i].senderID]
 		if ok {
 			continue
 		}
@@ -334,26 +375,26 @@ func (sc *SendersCache) setTxSenderID(txs TxSlots) map[uint64]string {
 		}
 		toLoad[txs.txs[i].senderID] = addr
 	}
-	return toLoad
+	return toLoad, nil
 }
 func (sc *SendersCache) fromDB(tx kv.Tx) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 
-	c, err := tx.Cursor(kv.PooledSenderID)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		id := binary.BigEndian.Uint64(v)
-		sc.senderIDs[string(k)] = id
-	}
+	//c, err := tx.Cursor(kv.PooledSenderID)
+	//if err != nil {
+	//	return err
+	//}
+	//defer c.Close()
+	//for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	//	if err != nil {
+	//		return err
+	//	}
+	//	id := binary.BigEndian.Uint64(v)
+	//	sc.senderIDs[string(k)] = id
+	//}
 
-	c, err = tx.Cursor(kv.PooledSender)
+	c, err := tx.Cursor(kv.PooledSender)
 	if err != nil {
 		return err
 	}
@@ -602,7 +643,12 @@ func (p *TxPool) Started() bool {
 
 func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
 	t := time.Now()
-	if err := senders.onNewTxs(coreDB, newTxs); err != nil {
+	tx, err := p.db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := senders.onNewTxs(coreDB, tx, newTxs); err != nil {
 		return err
 	}
 	if err := newTxs.Valid(); err != nil {
@@ -698,8 +744,13 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 
 func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, senders *SendersCache) error {
 	t := time.Now()
+	tx, err := p.db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
-	if err := senders.onNewBlock(stateChanges, unwindTxs, minedTxs, blockHeight); err != nil {
+	if err := senders.onNewBlock(tx, stateChanges, unwindTxs, minedTxs, blockHeight); err != nil {
 		return err
 	}
 	//log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
