@@ -91,7 +91,7 @@ var rootCmd = &cobra.Command{
 		}
 		senders := txpool.NewSendersCache()
 
-		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, senders, kvClient, coreDB)
+		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, senders, kvClient, coreDB, txPoolDB)
 		fetcher.ConnectCore()
 		fetcher.ConnectSentries()
 
