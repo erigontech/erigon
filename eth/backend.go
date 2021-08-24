@@ -679,6 +679,9 @@ func (s *Ethereum) Start() error {
 		go func(i int) {
 			download.RecvUploadMessageLoop(s.downloadCtx, s.sentries[i], s.downloadServer, nil)
 		}(i)
+		go func(i int) {
+			download.RecvUploadHeadersMessageLoop(s.downloadCtx, s.sentries[i], s.downloadServer, nil)
+		}(i)
 	}
 
 	go stages2.StageLoop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer.Hd, s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)

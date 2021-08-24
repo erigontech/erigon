@@ -27,7 +27,6 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -145,7 +144,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 				}
 				_ = stream.Flush()
 				if buf.Len() > 0 && answersWithNils[i] == nil {
-					answersWithNils[i] = json.RawMessage(common.CopyBytes(buf.Bytes()))
+					answersWithNils[i] = json.RawMessage(buf.Bytes())
 				}
 			}(i)
 		}
@@ -343,14 +342,14 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 		return nil
 	case msg.isCall():
 		resp := h.handleCall(ctx, msg, stream)
-		var ctx []interface{}
-		ctx = append(ctx, "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start))
 		if resp != nil && resp.Error != nil {
-			ctx = append(ctx, "err", resp.Error.Message)
 			if resp.Error.Data != nil {
-				ctx = append(ctx, "errdata", resp.Error.Data)
+				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+					"err", resp.Error.Message, "errdata", resp.Error.Data)
+			} else {
+				h.log.Warn("Served", "method", msg.Method, "reqid", idForLog{msg.ID}, "t", time.Since(start),
+					"err", resp.Error.Message)
 			}
-			h.log.Warn("Served", ctx...)
 		}
 		h.log.Debug("Served", "t", time.Since(start), "method", msg.Method, "reqid", idForLog{msg.ID}, "params", string(msg.Params))
 		return resp
