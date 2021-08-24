@@ -701,6 +701,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
@@ -738,6 +739,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
@@ -770,6 +772,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
@@ -802,6 +805,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 	if err != nil {
