@@ -398,28 +398,32 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
 	encID := make([]byte, 8)
-	defer func(t time.Time) { fmt.Printf("pool.go:400: %s\n", time.Since(t)) }(time.Now())
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
-		has, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
+		currentV, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
 		if err != nil {
 			return err
 		}
-		if has != nil && !bytes.Equal(has, encID) {
-			if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
-				return err
-			}
+		if currentV != nil && bytes.Equal(currentV, encID) {
+			continue
+		}
+		if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
+			return err
 		}
 	}
-	defer func(t time.Time) { fmt.Printf("pool.go:407: %s\n", time.Since(t)) }(time.Now())
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
 		binary.BigEndian.PutUint64(encID, id)
 		binary.BigEndian.PutUint64(v, info.nonce)
-		v = v[:8]
-		v = append(v, info.balance.Bytes()...)
-		err := tx.Put(kv.PooledSender, encID, v)
+		v = append(v[:8], info.balance.Bytes()...)
+		currentV, err := tx.GetOne(kv.PooledSender, encID)
 		if err != nil {
+			return err
+		}
+		if currentV != nil && bytes.Equal(currentV, v) {
+			continue
+		}
+		if err := tx.Put(kv.PooledSender, encID, v); err != nil {
 			return err
 		}
 	}
@@ -737,7 +741,6 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	defer func(t time.Time) { fmt.Printf("pool.go:695: %s\n", time.Since(t)) }(time.Now())
 
 	for i := 0; i < p.deletedTxs.Len(); i++ {
 		if err := tx.Delete(kv.PooledTransaction, p.deletedTxs.At(i), nil); err != nil {
@@ -758,7 +761,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	}
 
 	v := make([]byte, 0, 1024)
-	for addr, metaTx := range p.byHash {
+	for txHash, metaTx := range p.byHash {
 		if metaTx.Tx.rlp == nil {
 			continue
 		}
@@ -766,7 +769,14 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		binary.BigEndian.PutUint64(v, metaTx.Tx.senderID)
 		binary.BigEndian.PutUint64(v[8:], 0) // block num - timestamp
 		copy(v[8+8:], metaTx.Tx.rlp)
-		if err := tx.Put(kv.PooledTransaction, []byte(addr), v); err != nil {
+		currentV, err := tx.GetOne(kv.PooledTransaction, []byte(txHash))
+		if err != nil {
+			return err
+		}
+		if currentV != nil && bytes.Equal(currentV, v) {
+			continue
+		}
+		if err := tx.Put(kv.PooledTransaction, []byte(txHash), v); err != nil {
 			return err
 		}
 		metaTx.Tx.rlp = nil
