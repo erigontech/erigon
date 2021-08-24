@@ -354,21 +354,30 @@ func (sc *SendersCache) fromDB(tx kv.Tx) error {
 		sc.senderInfo[id] = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
 	}
 
-	height, err := tx.GetOne(kv.PoolInfo, SenderCacheHeightKey)
-	if err != nil {
-		return err
+	{
+		v, err := tx.GetOne(kv.PoolInfo, SenderCacheHeightKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			sc.blockHeight.Store(binary.BigEndian.Uint64(v))
+		}
 	}
-	sc.blockHeight.Store(binary.BigEndian.Uint64(height))
-	v, err := tx.GetOne(kv.PoolInfo, []byte("sender_cache_id"))
-	if err != nil {
-		return err
+	{
+		v, err := tx.GetOne(kv.PoolInfo, []byte("sender_cache_id"))
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			sc.senderID = binary.BigEndian.Uint64(v)
+		}
 	}
-	sc.senderID = binary.BigEndian.Uint64(v)
-
 	return nil
 }
 
 var SenderCacheHeightKey = []byte("sender_cache_heght")
+var PoolPendingBaseFeeKey = []byte("pending_base_fee")
+var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
 func (sc *SendersCache) flush(tx kv.RwTx) error {
 	sc.lock.RLock()
@@ -731,11 +740,11 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	}
 
 	binary.BigEndian.PutUint64(encID, p.protocolBaseFee.Load())
-	if err := tx.Put(kv.PoolInfo, []byte("protocol_base_fee"), encID); err != nil {
+	if err := tx.Put(kv.PoolInfo, PoolProtocolBaseFeeKey, encID); err != nil {
 		return err
 	}
 	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
-	if err := tx.Put(kv.PoolInfo, []byte("pending_base_fee"), encID); err != nil {
+	if err := tx.Put(kv.PoolInfo, PoolPendingBaseFeeKey, encID); err != nil {
 		return err
 	}
 
@@ -801,18 +810,25 @@ func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
 		txs.isLocal[i] = isLocalTx
 		i++
 	}
-
-	protocolBaseFeeV, err := tx.GetOne(kv.PoolInfo, []byte("protocol_base_fee"))
-	if err != nil {
-		return err
+	var protocolBaseFee, pendingBaseFee uint64
+	{
+		v, err := tx.GetOne(kv.PoolInfo, PoolProtocolBaseFeeKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			protocolBaseFee = binary.BigEndian.Uint64(v)
+		}
 	}
-	pendingBaseFeeV, err := tx.GetOne(kv.PoolInfo, []byte("pending_base_fee"))
-	if err != nil {
-		return err
+	{
+		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			pendingBaseFee = binary.BigEndian.Uint64(v)
+		}
 	}
-
-	protocolBaseFee := binary.BigEndian.Uint64(protocolBaseFeeV)
-	pendingBaseFee := binary.BigEndian.Uint64(pendingBaseFeeV)
 	if err := onNewTxs(senders, txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
 		return err
 	}
