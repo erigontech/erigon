@@ -37,7 +37,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/ledgerwatch/erigon-lib v0.0.0-20210825043810-d0ff57bd8e3b
+	github.com/ledgerwatch/erigon-lib v0.0.0-20210825075211-9e6631df29d2
 	github.com/ledgerwatch/log/v3 v3.3.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
