@@ -520,7 +520,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		p2, err := New(ch, nil)
 		assert.NoError(err)
 		s2 := NewSendersCache()
-		err = p2.fromDB(tx, s2)
+		err = p2.fromDB(context.Background(), tx, nil, s2)
 		require.NoError(t, err)
 		check(txs2, TxSlots{}, "fromDB")
 		//checkNotify(txs2, TxSlots{}, "fromDB")

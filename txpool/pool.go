@@ -253,6 +253,9 @@ func (sc *SendersCache) set(diff map[uint64]senderInfo) {
 func (sc *SendersCache) mergeStateChanges(tx kv.Tx, stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
+	return sc.mergeStateChangesLocked(tx, stateChanges, unwindedTxs, minedTxs)
+}
+func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) error {
 	for addr, v := range stateChanges { // merge state changes
 		id, ok, err := sc.id(addr, tx)
 		if err != nil {
@@ -368,7 +371,7 @@ func (sc *SendersCache) setTxSenderID(tx kv.Tx, txs TxSlots) (map[uint64]string,
 	}
 	return toLoad, nil
 }
-func (sc *SendersCache) fromDB(tx kv.Tx) error {
+func (sc *SendersCache) fromDB(ctx context.Context, tx, coreTx kv.Tx) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 
@@ -385,19 +388,14 @@ func (sc *SendersCache) fromDB(tx kv.Tx) error {
 	//	sc.senderIDs[string(k)] = id
 	//}
 
-	c, err := tx.Cursor(kv.PooledSender)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
+	if err := tx.ForEach(kv.PooledSender, nil, func(k, v []byte) error {
 		id := binary.BigEndian.Uint64(k)
 		balance := uint256.NewInt(0)
 		balance.SetBytes(v[8:])
 		sc.senderInfo[id] = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	{
@@ -418,6 +416,37 @@ func (sc *SendersCache) fromDB(tx kv.Tx) error {
 			sc.senderID = binary.BigEndian.Uint64(v)
 		}
 	}
+
+	if coreTx == nil {
+		return nil
+	}
+	/*TODO: tx.ForEach must be implemented as buffered server-side stream
+	encNum := make([]byte, 8)
+	diff := map[string]senderInfo{}
+	binary.BigEndian.PutUint64(encNum, sc.blockHeight.Load())
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	if err := coreTx.ForEach(kv.AccountChangeSet, encNum, func(k, v []byte) error {
+		info, err := loadSender(coreTx, v[:20])
+		if err != nil {
+			return err
+		}
+		diff[string(v[:20])] = *info
+		select {
+		case <-logEvery.C:
+			log.Info("loading changesets", "block", binary.BigEndian.Uint64(k))
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := sc.mergeStateChangesLocked(tx, diff, TxSlots{}, TxSlots{}); err != nil {
+		return err
+	}
+	*/
 	return nil
 }
 
@@ -478,25 +507,32 @@ func loadSenders(coreDB kv.RoDB, toLoad map[uint64]string) (map[uint64]senderInf
 	diff := make(map[uint64]senderInfo, len(toLoad))
 	if err := coreDB.View(context.Background(), func(tx kv.Tx) error {
 		for id := range toLoad {
-			encoded, err := tx.GetOne(kv.PlainState, []byte(toLoad[id]))
+			info, err := loadSender(tx, []byte(toLoad[id]))
 			if err != nil {
 				return err
 			}
-			if len(encoded) == 0 {
-				diff[id] = *newSenderInfo(0, *uint256.NewInt(0))
-				continue
-			}
-			nonce, balance, err := DecodeSender(encoded)
-			if err != nil {
-				return err
-			}
-			diff[id] = *newSenderInfo(nonce, balance)
+			diff[id] = *info
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	return diff, nil
+}
+
+func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
+	encoded, err := coreTx.GetOne(kv.PlainState, addr)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) == 0 {
+		return newSenderInfo(0, *uint256.NewInt(0)), nil
+	}
+	nonce, balance, err := DecodeSender(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return newSenderInfo(nonce, balance), nil
 }
 
 // TxPool - holds all pool-related data structures and lock-based tiny methods
@@ -840,17 +876,16 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		return err
 	}
 
-	//TODO: flush deletes
 	if err := senders.flush(tx); err != nil {
 		return err
 	}
 
 	return nil
 }
-func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
+func (p *TxPool) fromDB(ctx context.Context, tx, coreTx kv.Tx, senders *SendersCache) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if err := senders.fromDB(tx); err != nil {
+	if err := senders.fromDB(ctx, tx, coreTx); err != nil {
 		return err
 	}
 
@@ -926,8 +961,6 @@ func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.protocolBaseFee.Store(protocolBaseFee)
-
-	//TODO: flush deletes
 
 	return nil
 }
@@ -1408,9 +1441,11 @@ func (p *WorstQueue) Pop() interface{} {
 //      - all local pooled byHash to random peers periodically
 // promote/demote transactions
 // reorgs
-func BroadcastLoop(ctx context.Context, db kv.RwDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, timings Timings) {
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return p.fromDB(tx, senders)
+func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, timings Timings) {
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		return coreDB.View(ctx, func(coreTx kv.Tx) error {
+			return p.fromDB(ctx, tx, coreTx, senders)
+		})
 	}); err != nil {
 		log.Error("restore from db", "err", err)
 	}
