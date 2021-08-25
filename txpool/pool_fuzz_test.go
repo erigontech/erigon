@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"testing"
 
 	"github.com/google/btree"
@@ -521,6 +520,8 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.NoError(err)
 		err = p2.fromDB(context.Background(), tx, nil, s2)
 		require.NoError(t, err)
+		//todo: check that after load from db tx linked to same sender
+
 		check(txs2, TxSlots{}, "fromDB")
 		//checkNotify(txs2, TxSlots{}, "fromDB")
 		assert.Equal(sendersCache.senderID, s2.senderID)
@@ -529,15 +530,15 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		require.Equal(t, 0, len(s2.senderIDs))
 		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
 		require.Equal(t, len(pool.byHash), len(p2.byHash))
-		if pool.pending.Len() != p2.pending.Len() {
-			pool.printDebug("p1")
-			p2.printDebug("p2")
-			sendersCache.printDebug("s1")
-			s2.printDebug("s2")
-
-			fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
-			fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
-		}
+		//if pool.pending.Len() != p2.pending.Len() {
+		//	pool.printDebug("p1")
+		//	p2.printDebug("p2")
+		//	sendersCache.printDebug("s1")
+		//	s2.printDebug("s2")
+		//
+		//	fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
+		//	fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
+		//}
 
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
