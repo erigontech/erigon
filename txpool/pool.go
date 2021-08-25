@@ -748,7 +748,7 @@ func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, 
 	promote(pending, baseFee, queued, func(i *metaTx) {
 		delete(byHash, string(i.Tx.idHash[:]))
 		*deletes = append(*deletes, i.Tx.idHash[:]...)
-		sender, err := senders.info(i.Tx.senderID, tx)
+		sender, err := senders.Info(i.Tx.senderID, tx)
 		if err != nil {
 			log.Warn("get sender info", "err", err)
 		} else {
@@ -1031,7 +1031,7 @@ func onNewBlock(tx kv.Tx, senders *SendersCache, unwindTxs TxSlots, minedTxs []*
 		//fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
 		//fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
 		delete(byHash, string(i.Tx.idHash[:]))
-		sender, err := senders.info(i.Tx.senderID, tx)
+		sender, err := senders.Info(i.Tx.senderID, tx)
 		if err != nil {
 			log.Warn("get sender info", "err", err)
 		} else {
@@ -1064,7 +1064,7 @@ func removeMined(tx kv.Tx, senders *SendersCache, minedTxs []*TxSlot, pending, b
 
 	var toDel []btree.Item // can't delete items while iterate them
 	for senderID, nonce := range noncesToRemove {
-		sender, err := senders.info(senderID, tx)
+		sender, err := senders.Info(senderID, tx)
 		if err != nil {
 			return err
 		}
@@ -1112,7 +1112,7 @@ func unsafeAddToPool(tx kv.Tx, senders *SendersCache, newTxs TxSlots, to *SubPoo
 		}
 		mt := newMetaTx(txn, newTxs.isLocal[i])
 
-		sender, err := senders.info(txn.senderID, tx)
+		sender, err := senders.Info(txn.senderID, tx)
 		if err != nil {
 			return err
 		}
@@ -1442,6 +1442,7 @@ func (p *WorstQueue) Pop() interface{} {
 // promote/demote transactions
 // reorgs
 func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, timings Timings) {
+	db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearBucket(kv.PooledSender) })
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		return coreDB.View(ctx, func(coreTx kv.Tx) error {
 			return p.fromDB(ctx, tx, coreTx, senders)
