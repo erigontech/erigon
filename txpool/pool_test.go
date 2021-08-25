@@ -19,10 +19,10 @@ package txpool
 /*
 func TestSubPoolOrder(t *testing.T) {
 	sub := NewSubPool()
-	sub.Add(&metaTx{subPool: 0b10101})
-	sub.Add(&metaTx{subPool: 0b11110})
-	sub.Add(&metaTx{subPool: 0b11101})
-	sub.Add(&metaTx{subPool: 0b10001})
+	sub.OnNewTxs(&metaTx{subPool: 0b10101})
+	sub.OnNewTxs(&metaTx{subPool: 0b11110})
+	sub.OnNewTxs(&metaTx{subPool: 0b11101})
+	sub.OnNewTxs(&metaTx{subPool: 0b10001})
 	require.Equal(t, uint8(0b11110), uint8(sub.Best().subPool))
 	require.Equal(t, uint8(0b10001), uint8(sub.Worst().subPool))
 
@@ -30,10 +30,10 @@ func TestSubPoolOrder(t *testing.T) {
 	require.Equal(t, uint8(sub.Worst().subPool), uint8(sub.PopWorst().subPool))
 
 	sub = NewSubPool()
-	sub.Add(&metaTx{subPool: 0b00001})
-	sub.Add(&metaTx{subPool: 0b01110})
-	sub.Add(&metaTx{subPool: 0b01101})
-	sub.Add(&metaTx{subPool: 0b00101})
+	sub.OnNewTxs(&metaTx{subPool: 0b00001})
+	sub.OnNewTxs(&metaTx{subPool: 0b01110})
+	sub.OnNewTxs(&metaTx{subPool: 0b01101})
+	sub.OnNewTxs(&metaTx{subPool: 0b00101})
 	require.Equal(t, uint8(0b00001), uint8(sub.Worst().subPool))
 	require.Equal(t, uint8(0b01110), uint8(sub.Best().subPool))
 
@@ -47,13 +47,13 @@ func TestSubPoolsPromote(t *testing.T) {
 	s3 := []uint8{0b11000, 0b101, 0b111}
 	pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
 	for _, i := range s1 {
-		pending.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
+		pending.OnNewTxs(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
 	}
 	for _, i := range s2 {
-		baseFee.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
+		baseFee.OnNewTxs(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
 	}
 	for _, i := range s3 {
-		queued.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
+		queued.OnNewTxs(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
 	}
 	promote(pending, baseFee, queued)
 

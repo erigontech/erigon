@@ -24,7 +24,7 @@ import (
 // golang.org/s/draft-fuzzing-design
 //gotip doc testing
 //gotip doc testing.F
-//gotip doc testing.F.Add
+//gotip doc testing.F.OnNewTxs
 //gotip doc testing.F.Fuzz
 
 // gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
@@ -480,30 +480,30 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(map[string]senderInfo{}, txs1, TxSlots{}, protocolBaseFee, pendingBaseFee, 1, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, txs1, TxSlots{}, protocolBaseFee, pendingBaseFee, 1, [32]byte{}, sendersCache)
 		assert.NoError(err)
 		check(txs1, TxSlots{}, "fork1")
 		checkNotify(txs1, TxSlots{}, "fork1")
 
-		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs2, protocolBaseFee, pendingBaseFee, 1, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs2, protocolBaseFee, pendingBaseFee, 1, [32]byte{}, sendersCache)
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(map[string]senderInfo{}, txs2, TxSlots{}, protocolBaseFee, pendingBaseFee, 2, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, txs2, TxSlots{}, protocolBaseFee, pendingBaseFee, 2, [32]byte{}, sendersCache)
 		assert.NoError(err)
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
 
 		_, _, _ = p2pReceived, txs2, txs3
 
-		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, [32]byte{}, sendersCache)
 		assert.NoError(err)
 		check(TxSlots{}, txs3, "fork2 mined")
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
-		err = pool.Add(nil, p2pReceived, sendersCache)
+		err = pool.OnNewTxs(context.Background(), nil, p2pReceived, sendersCache)
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
