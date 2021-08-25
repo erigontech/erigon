@@ -97,7 +97,7 @@ var rootCmd = &cobra.Command{
 
 		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
 
-		txpool.BroadcastLoop(cmd.Context(), txPoolDB, txPool, senders, newTxs, send, txpool.DefaultTimings)
+		txpool.BroadcastLoop(cmd.Context(), txPoolDB, coreDB, txPool, senders, newTxs, send, txpool.DefaultTimings)
 		return nil
 	},
 }
