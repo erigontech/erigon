@@ -430,7 +430,7 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx, coreTx kv.Tx) error {
 	/*TODO: tx.ForEach must be implemented as buffered server-side stream*/
 	encNum := make([]byte, 8)
 	diff := map[string]senderInfo{}
-	binary.BigEndian.PutUint64(encNum, sc.blockHeight.Load())
+	binary.BigEndian.PutUint64(encNum, sc.blockHeight.Load()-1024)
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 	if err := coreTx.ForEach(kv.AccountChangeSet, encNum, func(k, v []byte) error {
