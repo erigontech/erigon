@@ -744,9 +744,8 @@ github.com/tklauser/go-sysconf v0.3.6 h1:oc1sJWvKkmvIxhDHeKWvZS4f6AW+YcoguSfRF2/
 github.com/tklauser/go-sysconf v0.3.6/go.mod h1:MkWzOF4RMCshBAMXuhXJs64Rte09mITnppBXY/rYEFI=
 github.com/tklauser/numcpus v0.2.2 h1:oyhllyrScuYI6g+h/zUvNXNp1wy7x8qQy3t/piefldA=
 github.com/tklauser/numcpus v0.2.2/go.mod h1:x3qojaO3uyYt0i56EW/VUYs7uBvdl2fkfZFu0T9wgjM=
+github.com/torquem-ch/mdbx-go v0.16.0 h1:x4dTXDvy1w9MxjlAX6J3/bDqIqu4XQDqTR/u2jMnTiA=
 github.com/torquem-ch/mdbx-go v0.16.0/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
-github.com/torquem-ch/mdbx-go v0.17.0 h1:X8le6dDqWkkJf/T3H2H+Y/kmsmhBD72ds0fP3vchJgg=
-github.com/torquem-ch/mdbx-go v0.17.0/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
 github.com/ttacon/chalk v0.0.0-20160626202418-22c06c80ed31/go.mod h1:onvgF043R+lC5RZ8IT9rBXDaEDnpnw/Cl+HFiw+v/7Q=
 github.com/tv42/httpunix v0.0.0-20191220191345-2ba4b9c3382c/go.mod h1:hzIxponao9Kjc7aWznkXaL4U4TWaDSs8zcsY4Ka08nM=
 github.com/ugorji/go v1.1.7/go.mod h1:kZn38zHttfInRq0xu/PH0az30d+z6vm202qpg1oXVMw=
