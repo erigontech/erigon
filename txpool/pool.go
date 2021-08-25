@@ -164,9 +164,15 @@ func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(v) == 0 {
+			info = newSenderInfo(0, *uint256.NewInt(0))
+			sc.senderInfo[id] = info
+			return info, nil
+		}
 		balance := uint256.NewInt(0)
 		balance.SetBytes(v[8:])
-		sc.senderInfo[id] = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
+		info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
+		sc.senderInfo[id] = info
 	}
 	return info, nil
 }
