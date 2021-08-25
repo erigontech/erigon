@@ -427,11 +427,11 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx, coreTx kv.Tx) error {
 	if coreTx == nil {
 		return nil
 	}
-	/*TODO: tx.ForEach must be implemented as buffered server-side stream
+	/*TODO: tx.ForEach must be implemented as buffered server-side stream*/
 	encNum := make([]byte, 8)
 	diff := map[string]senderInfo{}
 	binary.BigEndian.PutUint64(encNum, sc.blockHeight.Load())
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 	if err := coreTx.ForEach(kv.AccountChangeSet, encNum, func(k, v []byte) error {
 		info, err := loadSender(coreTx, v[:20])
@@ -453,7 +453,6 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx, coreTx kv.Tx) error {
 	if err := sc.mergeStateChangesLocked(tx, diff, TxSlots{}, TxSlots{}); err != nil {
 		return err
 	}
-	*/
 	return nil
 }
 
@@ -678,7 +677,7 @@ func (p *TxPool) Started() bool {
 }
 
 func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
-	t := time.Now()
+	//t := time.Now()
 	tx, err := p.db.BeginRo(context.Background())
 	if err != nil {
 		return err
@@ -715,7 +714,7 @@ func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) erro
 		}
 	}
 
-	log.Info("on new txs", "in", time.Since(t))
+	//log.Info("on new txs", "in", time.Since(t))
 	return nil
 }
 func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU, discard func(*metaTx, kv.Tx)) error {
