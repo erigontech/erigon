@@ -309,9 +309,8 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
 		t.Cleanup(db.Close)
 
-		pool, err := New(ch, db)
-		assert.NoError(err)
 		sendersCache := NewSendersCache()
+		pool, err := New(ch, sendersCache, db)
 		assert.NoError(err)
 		sendersCache.senderInfo = senders
 		sendersCache.senderIDs = senderIDs
@@ -517,9 +516,9 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		check(p2pReceived, TxSlots{}, "after_flush")
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
-		p2, err := New(ch, nil)
-		assert.NoError(err)
 		s2 := NewSendersCache()
+		p2, err := New(ch, s2, nil)
+		assert.NoError(err)
 		err = p2.fromDB(context.Background(), tx, nil, s2)
 		require.NoError(t, err)
 		check(txs2, TxSlots{}, "fromDB")
