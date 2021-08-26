@@ -7,9 +7,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
-	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -343,7 +343,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 				}
 
 				// side data structures must have all txs
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&byNonce{tx}), msg)
+				assert.True(pool.txNonce2Tx.has(tx), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok)
 
@@ -381,7 +381,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&byNonce{tx}), msg)
+				assert.True(pool.txNonce2Tx.has(tx), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
 			})
@@ -408,21 +408,23 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(senders[i.senderID].txNonce2Tx.Has(&byNonce{tx}), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
+				assert.True(pool.txNonce2Tx.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
 			})
 
 			// all txs in side data structures must be in some queue
 			for _, txn := range pool.byHash {
-				assert.True(txn.bestIndex >= 0, msg)
+				require.True(t, txn.bestIndex >= 0, msg)
 				assert.True(txn.worstIndex >= 0, msg)
 			}
-			for i := range senders {
+			for id := range senders {
 				//assert.True(senders[i].txNonce2Tx.Len() > 0)
-				senders[i].txNonce2Tx.Ascend(func(i btree.Item) bool {
-					mt := i.(*byNonce).metaTx
-					assert.True(mt.worstIndex >= 0, msg)
+				pool.txNonce2Tx.ascend(id, func(mt *metaTx) bool {
+					if mt.worstIndex < 0 {
+						fmt.Printf("here: %d,%d\n", pool.txNonce2Tx.tree.Len(), len(pool.byHash))
+					}
+					require.True(t, mt.worstIndex >= 0, msg)
 					assert.True(mt.bestIndex >= 0, msg)
 					return true
 				})
@@ -484,6 +486,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		check(txs1, TxSlots{}, "fork1")
 		checkNotify(txs1, TxSlots{}, "fork1")
 
+		_, _, _ = p2pReceived, txs2, txs3
 		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs2, protocolBaseFee, pendingBaseFee, 1, [32]byte{}, sendersCache)
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
@@ -493,8 +496,6 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.NoError(err)
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
-
-		_, _, _ = p2pReceived, txs2, txs3
 
 		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, [32]byte{}, sendersCache)
 		assert.NoError(err)
@@ -506,6 +507,9 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
+
+		senderIdsBeforeFlush := len(sendersCache.senderIDs)
+		senderInfoBeforeFlush := len(sendersCache.senderInfo)
 
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
@@ -520,25 +524,22 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.NoError(err)
 		err = p2.fromDB(context.Background(), tx, nil, s2)
 		require.NoError(t, err)
+		for _, txn := range p2.byHash {
+			assert.Nil(txn.Tx.rlp)
+		}
 		//todo: check that after load from db tx linked to same sender
 
 		check(txs2, TxSlots{}, "fromDB")
 		//checkNotify(txs2, TxSlots{}, "fromDB")
 		assert.Equal(sendersCache.senderID, s2.senderID)
 		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
-		//require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
-		require.Equal(t, 0, len(s2.senderIDs))
-		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
-		require.Equal(t, len(pool.byHash), len(p2.byHash))
-		//if pool.pending.Len() != p2.pending.Len() {
-		//	pool.printDebug("p1")
-		//	p2.printDebug("p2")
-		//	sendersCache.printDebug("s1")
-		//	s2.printDebug("s2")
-		//
-		//	fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
-		//	fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
-		//}
+
+		idsCountAfterFlush, idsCountInDbAfterFlush, err := s2.idsCount(tx)
+		assert.NoError(err)
+		assert.LessOrEqual(senderIdsBeforeFlush, idsCountAfterFlush+idsCountInDbAfterFlush)
+		infoCountAfterFlush, infoCountInDbAfterFlush, err := s2.infoCount(tx)
+		assert.NoError(err)
+		assert.LessOrEqual(senderInfoBeforeFlush, infoCountAfterFlush+infoCountInDbAfterFlush)
 
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
