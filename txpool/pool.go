@@ -941,7 +941,6 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		if currentV != nil && bytes.Equal(currentV, v) {
 			continue
 		}
-		fmt.Printf("put to db: %x\n", v[8+8:])
 		if err := tx.Put(kv.PooledTransaction, []byte(txHash), v); err != nil {
 			return err
 		}
