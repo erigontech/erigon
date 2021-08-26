@@ -535,6 +535,7 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 			return err
 		}
 	}
+	sc.senderIDs = map[string]uint64{}
 
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
@@ -552,6 +553,7 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 			return err
 		}
 	}
+	sc.senderIDs = map[string]uint64{}
 
 	binary.BigEndian.PutUint64(encID, sc.blockHeight.Load())
 	if err := tx.Put(kv.PoolInfo, SenderCacheHeightKey, encID); err != nil {
