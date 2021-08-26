@@ -134,27 +134,30 @@ func NewSendersCache() *SendersCache {
 	}
 }
 
-func (sc *SendersCache) idsCount(tx kv.Tx) (int, error) {
+//nolint
+func (sc *SendersCache) idsCount(tx kv.Tx) (inMem int, inDb int, err error) {
 	c, err := tx.Cursor(kv.PooledSenderID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	inDB, err := c.Count()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return int(inDB) + len(sc.senderIDs), nil
+	return int(inDB), len(sc.senderIDs), nil
 }
-func (sc *SendersCache) infoCount(tx kv.Tx) (int, error) {
+
+//nolint
+func (sc *SendersCache) infoCount(tx kv.Tx) (inMem int, inDb int, err error) {
 	c, err := tx.Cursor(kv.PooledSender)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	inDB, err := c.Count()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return int(inDB) + len(sc.senderInfo), nil
+	return int(inDB), len(sc.senderInfo), nil
 }
 func (sc *SendersCache) Id(addr string, tx kv.Tx) (uint64, bool, error) {
 	sc.lock.RLock() //TODO: it may load mapping from db,maybe just use thread-safe maps to don't worry much

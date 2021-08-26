@@ -531,12 +531,12 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.Equal(sendersCache.senderID, s2.senderID)
 		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
 
-		idsCountAfterFlush, err := s2.idsCount(tx)
+		idsCountAfterFlush, idsCountInDbAfterFlush, err := s2.idsCount(tx)
 		assert.NoError(err)
-		assert.LessOrEqual(senderIdsBeforeFlush, idsCountAfterFlush)
-		infoCountAfterFlush, err := s2.infoCount(tx)
+		assert.LessOrEqual(senderIdsBeforeFlush, idsCountAfterFlush+idsCountInDbAfterFlush)
+		infoCountAfterFlush, infoCountInDbAfterFlush, err := s2.infoCount(tx)
 		assert.NoError(err)
-		assert.LessOrEqual(senderInfoBeforeFlush, infoCountAfterFlush)
+		assert.LessOrEqual(senderInfoBeforeFlush, infoCountAfterFlush+infoCountInDbAfterFlush)
 
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
