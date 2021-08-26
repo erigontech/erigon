@@ -524,6 +524,9 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.NoError(err)
 		err = p2.fromDB(context.Background(), tx, nil, s2)
 		require.NoError(t, err)
+		for _, txn := range p2.byHash {
+			assert.Nil(txn.Tx.rlp)
+		}
 		//todo: check that after load from db tx linked to same sender
 
 		check(txs2, TxSlots{}, "fromDB")
