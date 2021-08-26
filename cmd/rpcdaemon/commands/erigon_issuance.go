@@ -1,13 +1,17 @@
 package commands
 
 import (
+	"bytes"
 	"context"
-
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -61,11 +65,18 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 		issuance.Add(&issuance, &p)
 	}
 
+	totalIssued, totalBurnt, err := api.getIssuance(tx, block)
+	if err != nil {
+		return Issuance{}, err
+	}
+
 	var ret Issuance
 	ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
 	ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
 	issuance.Sub(&issuance, &minerReward)
 	ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
+	ret.TotalIssued = hexutil.EncodeBig(totalIssued.ToBig())
+	ret.TotalBurnt = hexutil.EncodeBig(totalBurnt.ToBig())
 	return ret, nil
 }
 
@@ -77,9 +88,35 @@ func (api *ErigonImpl) getBlockByRPCNumber(tx kv.Tx, blockNr rpc.BlockNumber) (*
 	return rawdb.ReadBlockByNumber(tx, blockNum)
 }
 
+func (api *ErigonImpl) getIssuance(tx kv.Tx, block *types.Block) (*uint256.Int, *uint256.Int, error) {
+	totalIssued := uint256.NewInt(0)
+	totalBurnt := uint256.NewInt(0)
+
+	key := dbutils.IssuanceKey(block.NumberU64())
+	v, err := tx.GetOne(kv.Issuance, key)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if v != nil {
+		totals := new(stagedsync.Issuance)
+		reader := bytes.NewBuffer(v)
+		if err := rlp.Decode(reader, totals); err != nil {
+			return nil, nil, err
+		}
+
+		totalIssued.Set(totals.TotalIssued)
+		totalBurnt.Set(totals.TotalBurnt)
+	}
+
+	return totalIssued, totalBurnt, nil
+}
+
 // Issuance structure to return information about issuance
 type Issuance struct {
 	BlockReward string `json:"blockReward,omitempty"`
 	UncleReward string `json:"uncleReward,omitempty"`
 	Issuance    string `json:"issuance,omitempty"`
+	TotalIssued string `json:"totalIssued,omitempty"`
+	TotalBurnt  string `json:"totalBurnt,omitEmpty"`
 }

@@ -261,6 +261,7 @@ func NewStagedSync(
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageIssuanceCfg(db, cfg.Genesis, controlServer.ChainConfig),
 			stagedsync.StageTxPoolCfg(db, txPool, func() {
 				for i := range txPoolServer.Sentries {
 					go func(i int) {

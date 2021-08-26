@@ -35,12 +35,52 @@ var cmdResetState = &cobra.Command{
 	},
 }
 
+var cmdResetIssuance = &cobra.Command{
+	Use:   "reset_issuance",
+	Short: "Reset Issuance stage and buckets",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := utils.RootContext()
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
+		defer db.Close()
+
+		err := resetAllIssuance(db, logger, ctx)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	withDatadir(cmdResetState)
 	withChain(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
+
+	withDatadir(cmdResetIssuance)
+	withChain(cmdResetIssuance)
+
+	rootCmd.AddCommand(cmdResetIssuance)
 }
+
+func resetAllIssuance(db kv.RwDB, logger log.Logger, ctx context.Context) error {
+	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
+		return err
+	}
+	if err := db.Update(ctx, resetIssuance); err != nil {
+		return err
+	}
+
+	fmt.Printf("After reset: \n")
+	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
+		return err
+	}
+	return nil
+}
+
 
 func resetState(db kv.RwDB, logger log.Logger, ctx context.Context) error {
 	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
@@ -152,6 +192,17 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func resetIssuance(tx kv.RwTx) error {
+	if err := tx.ClearBucket(kv.Issuance); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Issuance, 0); err != nil {
+		return err
+	}
+
 	return nil
 }
 
