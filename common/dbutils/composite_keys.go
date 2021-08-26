@@ -159,3 +159,10 @@ func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []by
 	copy(composite[len(key):], encodedTS)
 	return composite, encodedTS
 }
+
+// IssuanceKey = num (uint64 big endian)
+func IssuanceKey(number uint64) []byte {
+	k := make([]byte, NumberLength)
+	binary.BigEndian.PutUint64(k, number)
+	return k
+}

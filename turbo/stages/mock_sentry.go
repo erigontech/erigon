@@ -296,6 +296,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageIssuanceCfg(mock.DB, gspec, mock.ChainConfig),
 			stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 				mock.StreamWg.Add(1)
 				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)

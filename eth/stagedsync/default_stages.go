@@ -25,6 +25,7 @@ func DefaultStages(ctx context.Context,
 	logIndex LogIndexCfg,
 	callTraces CallTracesCfg,
 	txLookup TxLookupCfg,
+	issuance IssuanceCfg,
 	txPool TxPoolCfg,
 	finish FinishCfg,
 	test bool,
@@ -262,6 +263,19 @@ func DefaultStages(ctx context.Context,
 			},
 		},
 		{
+			ID:          stages.Issuance,
+			Description: "Compute issuance/burnt",
+			Forward: func(firstCycle bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
+				return SpawnIssuance(s, tx, issuance, ctx)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindIssuance(u, s, tx, issuance, ctx)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return PruneIssuance(p, tx, issuance, ctx)
+			},
+		},
+		{
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
 			Forward: func(firstCycle bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
@@ -310,6 +324,7 @@ type PruneOrder []stages.SyncStage
 var DefaultUnwindOrder = UnwindOrder{
 	stages.Finish,
 	stages.TxLookup,
+	stages.Issuance,
 	stages.LogIndex,
 	stages.StorageHistoryIndex,
 	stages.AccountHistoryIndex,
