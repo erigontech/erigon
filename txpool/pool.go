@@ -410,10 +410,15 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) er
 			sc.senderID = binary.BigEndian.Uint64(v)
 		}
 	}
-	ok, err := isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
-	if err != nil {
-		return err
+	ok := true
+	if coreTx != nil {
+		var err error
+		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
+		if err != nil {
+			return err
+		}
 	}
+
 	if ok {
 		if err := tx.ForEach(kv.PooledSender, nil, func(k, v []byte) error {
 			id := binary.BigEndian.Uint64(k)
@@ -442,15 +447,13 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) er
 	return nil
 }
 func isCanonical(coreTx kv.Tx, num uint64, hash []byte) (bool, error) {
-	if coreTx == nil {
-		return false, nil
-	}
 	encNum := make([]byte, 8)
 	binary.BigEndian.PutUint64(encNum, num)
 	canonical, err := coreTx.GetOne(kv.HeaderCanonical, encNum)
 	if err != nil {
 		return false, err
 	}
+
 	return bytes.Equal(hash, canonical), nil
 }
 
@@ -926,21 +929,16 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, senders *
 		return err
 	}
 
-	c, err := tx.Cursor(kv.RecentLocalTransaction)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
+	if err := tx.ForEach(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
 		hashID := [32]byte{}
 		copy(hashID[:], v)
 		p.localsHistory.Add(hashID, struct{}{})
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	c, err = tx.Cursor(kv.PooledTransaction)
+	c, err := tx.Cursor(kv.PooledTransaction)
 	if err != nil {
 		return err
 	}
@@ -971,7 +969,6 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, senders *
 		if err != nil {
 			return err
 		}
-		fmt.Printf("load ids:%x,%x\n", senderAddr, v[:8])
 		if len(senderAddr) == 0 {
 			panic("must not happen")
 		}
@@ -1007,6 +1004,10 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, senders *
 		return err
 	}
 	if len(cacheMisses) > 0 {
+		senders.printDebug("miss")
+		for i, j := range cacheMisses {
+			fmt.Printf("miss: %d,%x\n", i, j)
+		}
 		if err := senders.loadFromCore(coreTx, cacheMisses); err != nil {
 			return err
 		}
