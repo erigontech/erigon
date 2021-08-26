@@ -160,6 +160,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		p = dataPos
 	}
 	slot.rlp = payload[pos : dataPos+dataLen]
+	fmt.Printf("set: %d\n", slot.rlp)
 
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
