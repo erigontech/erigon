@@ -429,20 +429,44 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) er
 		}); err != nil {
 			return err
 		}
-		if coreTx == nil {
-			return nil
-		}
-		diff, err := changesets(ctx, sc.blockHeight.Load(), coreTx)
+	}
+	if err := sc.syncMissedStateDiff(ctx, tx, coreTx, 0); err != nil {
+		return err
+	}
+	return nil
+}
+func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, missedTo uint64) error {
+	ok := true
+	if coreTx != nil {
+		var err error
+		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
 		if err != nil {
 			return err
 		}
-		if err := sc.mergeStateChangesLocked(tx, diff, TxSlots{}, TxSlots{}); err != nil {
-			return err
-		}
-	} else {
+	}
+
+	if !ok {
 		if err := tx.ClearBucket(kv.PooledSender); err != nil {
 			return err
 		}
+		sc.senderInfo = map[uint64]*senderInfo{}
+	}
+	if missedTo == 0 {
+		missedTo = sc.blockHeight.Load()
+		if missedTo == 0 {
+			return nil
+		}
+	}
+
+	if coreTx == nil {
+		return nil
+	}
+	diff, err := changesets(ctx, sc.blockHeight.Load(), coreTx)
+	if err != nil {
+		return err
+	}
+	if err := sc.mergeStateChangesLocked(tx, diff, TxSlots{}, TxSlots{}); err != nil {
+		return err
 	}
 	return nil
 }
