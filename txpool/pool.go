@@ -662,9 +662,6 @@ func New(newTxs chan Hashes, senders *SendersCache, db kv.RwDB) (*TxPool, error)
 	if err != nil {
 		return nil, err
 	}
-	if err = restoreIsLocalHistory(db, localsHistory); err != nil {
-		return nil, err
-	}
 	return &TxPool{
 		lock:                   &sync.RWMutex{},
 		byHash:                 map[string]*metaTx{},
@@ -765,10 +762,7 @@ func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 	return txn.subPool&IsLocal != 0
 }
 func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
-
-func (p *TxPool) Started() bool {
-	return p.protocolBaseFee.Load() > 0
-}
+func (p *TxPool) Started() bool                { return p.protocolBaseFee.Load() > 0 }
 
 func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
 	//t := time.Now()
@@ -1618,18 +1612,6 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 			send.PropagatePooledTxsToPeersList(newPeers, remoteTxHashes)
 		}
 	}
-}
-
-func restoreIsLocalHistory(db kv.RwDB, localsHistory *simplelru.LRU) error {
-	if db == nil {
-		return nil
-	}
-	return db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForPrefix(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
-			localsHistory.Add(copyBytes(v), struct{}{})
-			return nil
-		})
-	})
 }
 
 func copyBytes(b []byte) (copiedBytes []byte) {
