@@ -823,7 +823,7 @@ func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, 
 
 	changedSenders := unsafeAddToPendingPool(byNonce, newTxs, pending, baseFee, queued, byHash, discard)
 	for id := range changedSenders {
-		sender, err := senders.info(id, tx)
+		sender, err := senders.Info(id, tx)
 		if err != nil {
 			return err
 		}
@@ -1098,7 +1098,7 @@ func onNewBlock(tx kv.Tx, senders *SendersCache, unwindTxs TxSlots, minedTxs []*
 	// time (up to some "immutability threshold").
 	changedSenders := unsafeAddToPendingPool(byNonce, unwindTxs, pending, baseFee, queued, byHash, discard)
 	for id := range changedSenders {
-		sender, err := senders.info(id, tx)
+		sender, err := senders.Info(id, tx)
 		if err != nil {
 			return err
 		}
