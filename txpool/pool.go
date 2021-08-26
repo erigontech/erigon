@@ -35,7 +35,7 @@ import (
 	"go.uber.org/atomic"
 )
 
-const ASSERT = true
+const ASSERT = false
 
 // Pool is interface for the transaction pool
 // This interface exists for the convinience of testing, and not yet because
