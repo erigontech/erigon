@@ -112,8 +112,6 @@ func makeP2PServer(
 		urls = params.GoerliBootnodes
 	case params.RinkebyGenesisHash:
 		urls = params.RinkebyBootnodes
-	case params.CalaverasGenesisHash:
-		urls = params.CalaverasBootnodes
 	case params.SokolGenesisHash:
 		urls = params.SokolBootnodes
 	}
