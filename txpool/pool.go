@@ -195,7 +195,6 @@ func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
 		balance := uint256.NewInt(0)
 		balance.SetBytes(v[8:])
 		info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
-		sc.senderInfo[id] = info
 	}
 	return info, nil
 }
