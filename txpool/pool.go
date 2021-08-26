@@ -134,6 +134,28 @@ func NewSendersCache() *SendersCache {
 	}
 }
 
+func (sc *SendersCache) idsCount(tx kv.Tx) (int, error) {
+	c, err := tx.Cursor(kv.PooledSenderID)
+	if err != nil {
+		return 0, err
+	}
+	inDB, err := c.Count()
+	if err != nil {
+		return 0, err
+	}
+	return int(inDB) + len(sc.senderIDs), nil
+}
+func (sc *SendersCache) infoCount(tx kv.Tx) (int, error) {
+	c, err := tx.Cursor(kv.PooledSender)
+	if err != nil {
+		return 0, err
+	}
+	inDB, err := c.Count()
+	if err != nil {
+		return 0, err
+	}
+	return int(inDB) + len(sc.senderInfo), nil
+}
 func (sc *SendersCache) Id(addr string, tx kv.Tx) (uint64, bool, error) {
 	sc.lock.RLock() //TODO: it may load mapping from db,maybe just use thread-safe maps to don't worry much
 	defer sc.lock.RUnlock()
@@ -410,26 +432,7 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) er
 			sc.senderID = binary.BigEndian.Uint64(v)
 		}
 	}
-	ok := true
-	if coreTx != nil {
-		var err error
-		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
-		if err != nil {
-			return err
-		}
-	}
 
-	if ok {
-		if err := tx.ForEach(kv.PooledSender, nil, func(k, v []byte) error {
-			id := binary.BigEndian.Uint64(k)
-			balance := uint256.NewInt(0)
-			balance.SetBytes(v[8:])
-			sc.senderInfo[id] = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
 	if err := sc.syncMissedStateDiff(ctx, tx, coreTx, 0); err != nil {
 		return err
 	}

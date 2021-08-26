@@ -508,6 +508,9 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
 
+		senderIdsBeforeFlush := len(sendersCache.senderIDs)
+		senderInfoBeforeFlush := len(sendersCache.senderInfo)
+
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -527,19 +530,13 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		//checkNotify(txs2, TxSlots{}, "fromDB")
 		assert.Equal(sendersCache.senderID, s2.senderID)
 		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
-		//require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
-		require.Equal(t, 0, len(s2.senderIDs))
-		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
-		require.Equal(t, len(pool.byHash), len(p2.byHash))
-		//if pool.pending.Len() != p2.pending.Len() {
-		//	pool.printDebug("p1")
-		//	p2.printDebug("p2")
-		//	sendersCache.printDebug("s1")
-		//	s2.printDebug("s2")
-		//
-		//	fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
-		//	fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
-		//}
+
+		idsCountAfterFlush, err := s2.idsCount(tx)
+		assert.NoError(err)
+		assert.LessOrEqual(senderIdsBeforeFlush, idsCountAfterFlush)
+		infoCountAfterFlush, err := s2.infoCount(tx)
+		assert.NoError(err)
+		assert.LessOrEqual(senderInfoBeforeFlush, infoCountAfterFlush)
 
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
