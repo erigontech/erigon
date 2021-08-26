@@ -515,8 +515,8 @@ var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
 func (sc *SendersCache) flush(tx kv.RwTx) error {
-	sc.lock.RLock()
-	defer sc.lock.RUnlock()
+	sc.lock.Lock()
+	defer sc.lock.Unlock()
 	encID := make([]byte, 8)
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
@@ -553,7 +553,7 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 			return err
 		}
 	}
-	sc.senderIDs = map[string]uint64{}
+	sc.senderInfo = map[uint64]*senderInfo{}
 
 	binary.BigEndian.PutUint64(encID, sc.blockHeight.Load())
 	if err := tx.Put(kv.PoolInfo, SenderCacheHeightKey, encID); err != nil {
