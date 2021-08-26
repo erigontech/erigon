@@ -5,7 +5,9 @@ package txpool
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -14,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // https://blog.golang.org/fuzz-beta
@@ -412,13 +415,16 @@ func FuzzOnNewBlocks11(f *testing.F) {
 
 			// all txs in side data structures must be in some queue
 			for _, txn := range pool.byHash {
-				assert.True(txn.bestIndex >= 0, msg)
+				require.True(t, txn.bestIndex >= 0, msg)
 				assert.True(txn.worstIndex >= 0, msg)
 			}
 			for id := range senders {
 				//assert.True(senders[i].txNonce2Tx.Len() > 0)
 				pool.txNonce2Tx.ascend(id, func(mt *metaTx) bool {
-					assert.True(mt.worstIndex >= 0, msg)
+					if mt.worstIndex < 0 {
+						fmt.Printf("here: %d,%d\n", pool.txNonce2Tx.tree.Len(), len(pool.byHash))
+					}
+					require.True(t, mt.worstIndex >= 0, msg)
 					assert.True(mt.bestIndex >= 0, msg)
 					return true
 				})
@@ -480,6 +486,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		check(txs1, TxSlots{}, "fork1")
 		checkNotify(txs1, TxSlots{}, "fork1")
 
+		_, _, _ = p2pReceived, txs2, txs3
 		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs2, protocolBaseFee, pendingBaseFee, 1, [32]byte{}, sendersCache)
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
@@ -490,58 +497,55 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
 
-		_, _, _ = p2pReceived, txs2, txs3
-		/*
-			err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, [32]byte{}, sendersCache)
-			assert.NoError(err)
-			check(TxSlots{}, txs3, "fork2 mined")
-			checkNotify(TxSlots{}, txs3, "fork2 mined")
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, [32]byte{}, sendersCache)
+		assert.NoError(err)
+		check(TxSlots{}, txs3, "fork2 mined")
+		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
-			// add some remote txs from p2p
-			err = pool.OnNewTxs(context.Background(), nil, p2pReceived, sendersCache)
-			assert.NoError(err)
-			check(p2pReceived, TxSlots{}, "p2pmsg1")
-			checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
+		// add some remote txs from p2p
+		err = pool.OnNewTxs(context.Background(), nil, p2pReceived, sendersCache)
+		assert.NoError(err)
+		check(p2pReceived, TxSlots{}, "p2pmsg1")
+		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
 
-			tx, err := db.BeginRw(context.Background())
-			require.NoError(t, err)
-			defer tx.Rollback()
-			err = pool.flush(tx, sendersCache)
-			require.NoError(t, err)
-			check(p2pReceived, TxSlots{}, "after_flush")
-			//checkNotify(p2pReceived, TxSlots{}, "after_flush")
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		err = pool.flush(tx, sendersCache)
+		require.NoError(t, err)
+		check(p2pReceived, TxSlots{}, "after_flush")
+		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
-			s2 := NewSendersCache()
-			p2, err := New(ch, s2, nil)
-			assert.NoError(err)
-			err = p2.fromDB(context.Background(), tx, nil, s2)
-			require.NoError(t, err)
-			//todo: check that after load from db tx linked to same sender
+		s2 := NewSendersCache()
+		p2, err := New(ch, s2, nil)
+		assert.NoError(err)
+		err = p2.fromDB(context.Background(), tx, nil, s2)
+		require.NoError(t, err)
+		//todo: check that after load from db tx linked to same sender
 
-			check(txs2, TxSlots{}, "fromDB")
-			//checkNotify(txs2, TxSlots{}, "fromDB")
-			assert.Equal(sendersCache.senderID, s2.senderID)
-			assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
-			//require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
-			require.Equal(t, 0, len(s2.senderIDs))
-			require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
-			require.Equal(t, len(pool.byHash), len(p2.byHash))
-			//if pool.pending.Len() != p2.pending.Len() {
-			//	pool.printDebug("p1")
-			//	p2.printDebug("p2")
-			//	sendersCache.printDebug("s1")
-			//	s2.printDebug("s2")
-			//
-			//	fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
-			//	fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
-			//}
+		check(txs2, TxSlots{}, "fromDB")
+		//checkNotify(txs2, TxSlots{}, "fromDB")
+		assert.Equal(sendersCache.senderID, s2.senderID)
+		assert.Equal(sendersCache.blockHeight.Load(), s2.blockHeight.Load())
+		//require.Equal(t, len(sendersCache.senderIDs), len(s2.senderIDs))
+		require.Equal(t, 0, len(s2.senderIDs))
+		require.Equal(t, len(sendersCache.senderInfo), len(s2.senderInfo))
+		require.Equal(t, len(pool.byHash), len(p2.byHash))
+		//if pool.pending.Len() != p2.pending.Len() {
+		//	pool.printDebug("p1")
+		//	p2.printDebug("p2")
+		//	sendersCache.printDebug("s1")
+		//	s2.printDebug("s2")
+		//
+		//	fmt.Printf("bef: %d, %d, %d, %d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len(), len(pool.byHash))
+		//	fmt.Printf("bef2: %d, %d, %d, %d\n", p2.pending.Len(), p2.baseFee.Len(), p2.queued.Len(), len(p2.byHash))
+		//}
 
-			assert.Equal(pool.pending.Len(), p2.pending.Len())
-			assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
-			assert.Equal(pool.queued.Len(), p2.queued.Len())
-			assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
-			assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
-		*/
+		assert.Equal(pool.pending.Len(), p2.pending.Len())
+		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
+		assert.Equal(pool.queued.Len(), p2.queued.Len())
+		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
+		assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
 	})
 
 }
