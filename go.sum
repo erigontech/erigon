@@ -490,8 +490,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210826022402-93ea148972e5 h1:yRoScG6QBHEt8hhOnUJ9wg+liffvQFRodA+VgS9ZKpA=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210826022402-93ea148972e5/go.mod h1:ph/g/4GqHdxeJaDtTfA0iEi2iuODC9/vJIZvo8dJhrY=
+github.com/ledgerwatch/erigon-lib v0.0.0-20210826022733-7506e3c8dbd7 h1:i2KNQASh8expgxOnHiNTjuWLvIskfnlj29+qFPPlcig=
+github.com/ledgerwatch/erigon-lib v0.0.0-20210826022733-7506e3c8dbd7/go.mod h1:MeJOD9uuq8iDAbH83qsJ5V52yuUSTJ13I6ORvm/ft6U=
 github.com/ledgerwatch/log/v3 v3.2.0/go.mod h1:J58eOHHrIYHxl7LKkRsb/0YibKwtLfauUryl5SLRGm0=
 github.com/ledgerwatch/log/v3 v3.3.0 h1:k8N/3NQLILr8CKCMyza261vLFKU7VA+nMNNb0wVyQSc=
 github.com/ledgerwatch/log/v3 v3.3.0/go.mod h1:J58eOHHrIYHxl7LKkRsb/0YibKwtLfauUryl5SLRGm0=
@@ -744,8 +744,8 @@ github.com/tklauser/go-sysconf v0.3.6 h1:oc1sJWvKkmvIxhDHeKWvZS4f6AW+YcoguSfRF2/
 github.com/tklauser/go-sysconf v0.3.6/go.mod h1:MkWzOF4RMCshBAMXuhXJs64Rte09mITnppBXY/rYEFI=
 github.com/tklauser/numcpus v0.2.2 h1:oyhllyrScuYI6g+h/zUvNXNp1wy7x8qQy3t/piefldA=
 github.com/tklauser/numcpus v0.2.2/go.mod h1:x3qojaO3uyYt0i56EW/VUYs7uBvdl2fkfZFu0T9wgjM=
-github.com/torquem-ch/mdbx-go v0.17.0 h1:X8le6dDqWkkJf/T3H2H+Y/kmsmhBD72ds0fP3vchJgg=
-github.com/torquem-ch/mdbx-go v0.17.0/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
+github.com/torquem-ch/mdbx-go v0.16.0 h1:x4dTXDvy1w9MxjlAX6J3/bDqIqu4XQDqTR/u2jMnTiA=
+github.com/torquem-ch/mdbx-go v0.16.0/go.mod h1:T2fsoJDVppxfAPTLd1svUgH1kpPmeXdPESmroSHcL1E=
 github.com/ttacon/chalk v0.0.0-20160626202418-22c06c80ed31/go.mod h1:onvgF043R+lC5RZ8IT9rBXDaEDnpnw/Cl+HFiw+v/7Q=
 github.com/tv42/httpunix v0.0.0-20191220191345-2ba4b9c3382c/go.mod h1:hzIxponao9Kjc7aWznkXaL4U4TWaDSs8zcsY4Ka08nM=
 github.com/ugorji/go v1.1.7/go.mod h1:kZn38zHttfInRq0xu/PH0az30d+z6vm202qpg1oXVMw=
