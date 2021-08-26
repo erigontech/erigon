@@ -1019,7 +1019,9 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, senders *
 			panic(err)
 			return fmt.Errorf("err: %w, rlp: %x\n", err, v[8+8:])
 		}
+		txs.txs[i].rlp = nil
 		txs.txs[i].senderID = binary.BigEndian.Uint64(v)
+
 		senderAddr, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
 		if err != nil {
 			return err
