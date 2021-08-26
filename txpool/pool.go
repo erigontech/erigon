@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"encoding/binary"
@@ -29,6 +30,7 @@ import (
 	"github.com/hashicorp/golang-lru/simplelru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 )
@@ -41,8 +43,8 @@ type Pool interface {
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	Add(db kv.RoDB, newTxs TxSlots, senders *SendersCache) error
-	OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, senders *SendersCache) error
+	OnNewTxs(ctx context.Context, db kv.RoDB, newTxs TxSlots, senders *SendersCache) error
+	OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error
 
 	AddNewGoodPeer(peerID PeerID)
 }
@@ -108,15 +110,16 @@ func newSenderInfo(nonce uint64, balance uint256.Int) *senderInfo {
 	return &senderInfo{nonce: nonce, balance: balance, txNonce2Tx: &nonce2Tx{btree.New(32)}}
 }
 
-type nonce2TxItem struct{ *metaTx }
+type byNonce struct{ *metaTx }
 
-func (i *nonce2TxItem) Less(than btree.Item) bool {
-	return i.metaTx.Tx.nonce < than.(*nonce2TxItem).metaTx.Tx.nonce
+func (i *byNonce) Less(than btree.Item) bool {
+	return i.metaTx.Tx.nonce < than.(*byNonce).metaTx.Tx.nonce
 }
 
 type SendersCache struct {
 	lock        sync.RWMutex
 	blockHeight atomic.Uint64
+	blockHash   atomic.String
 	senderID    uint64
 	senderIDs   map[string]uint64
 	senderInfo  map[uint64]*senderInfo
@@ -129,6 +132,50 @@ func NewSendersCache() *SendersCache {
 	}
 }
 
+func (sc *SendersCache) Id(addr string, tx kv.Tx) (uint64, bool, error) {
+	sc.lock.RLock() //TODO: it may load mapping from db,maybe just use thread-safe maps to don't worry much
+	defer sc.lock.RUnlock()
+	return sc.id(addr, tx)
+}
+func (sc *SendersCache) id(addr string, tx kv.Tx) (uint64, bool, error) {
+	id, ok := sc.senderIDs[addr]
+	if !ok {
+		v, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
+		if err != nil {
+			return 0, false, err
+		}
+		if len(v) == 0 {
+			return 0, false, nil
+		}
+		id = binary.BigEndian.Uint64(v)
+	}
+	return id, true, nil
+}
+func (sc *SendersCache) Info(id uint64, tx kv.Tx) (*senderInfo, error) {
+	sc.lock.RLock()
+	defer sc.lock.RUnlock()
+	return sc.info(id, tx)
+}
+func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
+	info, ok := sc.senderInfo[id]
+	if !ok {
+		encID := make([]byte, 8)
+		binary.BigEndian.PutUint64(encID, id)
+		v, err := tx.GetOne(kv.PooledSender, encID)
+		if err != nil {
+			return nil, err
+		}
+		if len(v) == 0 {
+			return nil, nil // don't fallback to core db, it will be manually done in right place
+		}
+		balance := uint256.NewInt(0)
+		balance.SetBytes(v[8:])
+		info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
+		sc.senderInfo[id] = info
+	}
+	return info, nil
+}
+
 //nolint
 func (sc *SendersCache) printDebug(prefix string) {
 	fmt.Printf("%s.SendersCache.senderInfo\n", prefix)
@@ -137,15 +184,6 @@ func (sc *SendersCache) printDebug(prefix string) {
 	}
 }
 
-func (sc *SendersCache) get(senderID uint64) *senderInfo {
-	sc.lock.RLock()
-	defer sc.lock.RUnlock()
-	sender, ok := sc.senderInfo[senderID]
-	if !ok {
-		panic("not implemented yet")
-	}
-	return sender
-}
 func (sc *SendersCache) len() int {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
@@ -174,62 +212,60 @@ func (sc *SendersCache) evict() int {
 }
 */
 
-func (sc *SendersCache) onNewTxs(coreDBTx kv.RoDB, newTxs TxSlots) error {
-	sc.ensureSenderIDOnNewTxs(newTxs)
-	toLoad := sc.setTxSenderID(newTxs)
-	if len(toLoad) == 0 {
-		return nil
+func (sc *SendersCache) onNewTxs(tx kv.Tx, newTxs TxSlots) (cacheMisses map[uint64]string, err error) {
+	if err := sc.ensureSenderIDOnNewTxs(tx, newTxs); err != nil {
+		return nil, err
 	}
-	diff, err := loadSenders(coreDBTx, toLoad)
+	cacheMisses, err = sc.setTxSenderID(tx, newTxs)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	sc.set(diff)
-	return nil
+	return cacheMisses, nil
 }
-
-func (sc *SendersCache) onNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, blockHeight uint64) error {
-	//TODO: if see non-continuous block heigh - drop cache and reload from db
-	sc.blockHeight.Store(blockHeight)
-
-	//`loadSenders` goes by network to core - and it must be outside of SendersCache lock. But other methods must be locked
-	sc.mergeStateChanges(stateChanges, unwindTxs, minedTxs)
-	_ = sc.setTxSenderID(unwindTxs)
-	/*
-		if len(toLoad) > 0 {
-			diff, err := loadSenders(coreDBTx, toLoad)
-			if err != nil {
-				return err
-			}
-			sc.set(diff)
-		}
-	*/
-	_ = sc.setTxSenderID(minedTxs)
-	/*
-		if len(toLoad) == 0 {
-			return nil
-		}
-		diff, err := loadSenders(coreDBTx, toLoad)
+func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) error {
+	diff := make(map[uint64]senderInfo, len(toLoad))
+	for id := range toLoad {
+		info, err := loadSender(coreTx, []byte(toLoad[id]))
 		if err != nil {
 			return err
 		}
-		sc.set(diff)
-	*/
-	return nil
-}
-func (sc *SendersCache) set(diff map[uint64]senderInfo) {
-	sc.lock.Lock()
-	defer sc.lock.Unlock()
+		diff[id] = *info
+	}
 	for id := range diff { // merge state changes
 		a := diff[id]
 		sc.senderInfo[id] = &a
 	}
+	return nil
 }
-func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) {
+
+func (sc *SendersCache) onNewBlock(tx kv.Tx, stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, blockHeight uint64, blockHash [32]byte) error {
+	//TODO: if see non-continuous block heigh - load gap from changesets
+	sc.blockHeight.Store(blockHeight)
+	sc.blockHash.Store(string(blockHash[:]))
+
+	//`loadSenders` goes by network to core - and it must be outside of SendersCache lock. But other methods must be locked
+	if err := sc.mergeStateChanges(tx, stateChanges, unwindTxs, minedTxs); err != nil {
+		return err
+	}
+	if _, err := sc.setTxSenderID(tx, unwindTxs); err != nil {
+		return err
+	}
+	if _, err := sc.setTxSenderID(tx, minedTxs); err != nil {
+		return err
+	}
+	return nil
+}
+func (sc *SendersCache) mergeStateChanges(tx kv.Tx, stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
+	return sc.mergeStateChangesLocked(tx, stateChanges, unwindedTxs, minedTxs)
+}
+func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) error {
 	for addr, v := range stateChanges { // merge state changes
-		id, ok := sc.senderIDs[addr]
+		id, ok, err := sc.id(addr, tx)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
@@ -254,7 +290,10 @@ func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, un
 	*/
 
 	for i := 0; i < unwindedTxs.senders.Len(); i++ {
-		id, ok := sc.senderIDs[string(unwindedTxs.senders.At(i))]
+		id, ok, err := sc.id(string(unwindedTxs.senders.At(i)), tx)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
@@ -268,7 +307,10 @@ func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, un
 	}
 
 	for i := 0; i < len(minedTxs.txs); i++ {
-		id, ok := sc.senderIDs[string(minedTxs.senders.At(i))]
+		id, ok, err := sc.id(string(minedTxs.senders.At(i)), tx)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
@@ -284,22 +326,27 @@ func (sc *SendersCache) mergeStateChanges(stateChanges map[string]senderInfo, un
 		//	sc.senderInfo[id] = newSenderInfo(v.nonce, v.balance)
 		//}
 	}
+	return nil
 }
 
-func (sc *SendersCache) ensureSenderIDOnNewTxs(newTxs TxSlots) {
+func (sc *SendersCache) ensureSenderIDOnNewTxs(tx kv.Tx, newTxs TxSlots) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	for i := 0; i < len(newTxs.txs); i++ {
-		_, ok := sc.senderIDs[string(newTxs.senders.At(i))]
+		_, ok, err := sc.id(string(newTxs.senders.At(i)), tx)
+		if err != nil {
+			return err
+		}
 		if ok {
 			continue
 		}
 		sc.senderID++
 		sc.senderIDs[string(newTxs.senders.At(i))] = sc.senderID
 	}
+	return nil
 }
 
-func (sc *SendersCache) setTxSenderID(txs TxSlots) map[uint64]string {
+func (sc *SendersCache) setTxSenderID(tx kv.Tx, txs TxSlots) (map[uint64]string, error) {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
 	toLoad := map[uint64]string{}
@@ -307,11 +354,21 @@ func (sc *SendersCache) setTxSenderID(txs TxSlots) map[uint64]string {
 		addr := string(txs.senders.At(i))
 
 		// assign ID to each new sender
-		txs.txs[i].senderID = sc.senderIDs[addr]
+		id, ok, err := sc.id(addr, tx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			panic("not supported yet")
+		}
+		txs.txs[i].senderID = id
 
 		// load data from db if need
-		_, ok := sc.senderInfo[txs.txs[i].senderID]
-		if ok {
+		info, err := sc.info(txs.txs[i].senderID, tx)
+		if err != nil {
+			return nil, err
+		}
+		if info != nil {
 			continue
 		}
 		_, ok = toLoad[txs.txs[i].senderID]
@@ -320,39 +377,11 @@ func (sc *SendersCache) setTxSenderID(txs TxSlots) map[uint64]string {
 		}
 		toLoad[txs.txs[i].senderID] = addr
 	}
-	return toLoad
+	return toLoad, nil
 }
-func (sc *SendersCache) fromDB(tx kv.Tx) error {
+func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
-
-	c, err := tx.Cursor(kv.PooledSenderID)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		id := binary.BigEndian.Uint64(v)
-		sc.senderIDs[string(k)] = id
-	}
-
-	c, err = tx.Cursor(kv.PooledSender)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		id := binary.BigEndian.Uint64(k)
-		balance := uint256.NewInt(0)
-		balance.SetBytes(v[8:])
-		sc.senderInfo[id] = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
-	}
 
 	{
 		v, err := tx.GetOne(kv.PoolInfo, SenderCacheHeightKey)
@@ -364,7 +393,16 @@ func (sc *SendersCache) fromDB(tx kv.Tx) error {
 		}
 	}
 	{
-		v, err := tx.GetOne(kv.PoolInfo, []byte("sender_cache_id"))
+		v, err := tx.GetOne(kv.PoolInfo, SenderCacheHashKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			sc.blockHash.Store(string(v))
+		}
+	}
+	{
+		v, err := tx.GetOne(kv.PoolInfo, SenderCacheIDKey)
 		if err != nil {
 			return err
 		}
@@ -372,10 +410,107 @@ func (sc *SendersCache) fromDB(tx kv.Tx) error {
 			sc.senderID = binary.BigEndian.Uint64(v)
 		}
 	}
+	ok := true
+	if coreTx != nil {
+		var err error
+		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
+		if err != nil {
+			return err
+		}
+	}
+
+	if ok {
+		if err := tx.ForEach(kv.PooledSender, nil, func(k, v []byte) error {
+			id := binary.BigEndian.Uint64(k)
+			balance := uint256.NewInt(0)
+			balance.SetBytes(v[8:])
+			sc.senderInfo[id] = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if err := sc.syncMissedStateDiff(ctx, tx, coreTx, 0); err != nil {
+		return err
+	}
 	return nil
 }
+func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, missedTo uint64) error {
+	ok := true
+	if coreTx != nil {
+		var err error
+		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
+		if err != nil {
+			return err
+		}
+	}
 
-var SenderCacheHeightKey = []byte("sender_cache_heght")
+	if !ok {
+		if err := tx.ClearBucket(kv.PooledSender); err != nil {
+			return err
+		}
+		sc.senderInfo = map[uint64]*senderInfo{}
+	}
+	if missedTo == 0 {
+		missedTo = sc.blockHeight.Load()
+		if missedTo == 0 {
+			return nil
+		}
+	}
+
+	if coreTx == nil {
+		return nil
+	}
+	diff, err := changesets(ctx, sc.blockHeight.Load(), coreTx)
+	if err != nil {
+		return err
+	}
+	if err := sc.mergeStateChangesLocked(tx, diff, TxSlots{}, TxSlots{}); err != nil {
+		return err
+	}
+	return nil
+}
+func isCanonical(coreTx kv.Tx, num uint64, hash []byte) (bool, error) {
+	encNum := make([]byte, 8)
+	binary.BigEndian.PutUint64(encNum, num)
+	canonical, err := coreTx.GetOne(kv.HeaderCanonical, encNum)
+	if err != nil {
+		return false, err
+	}
+
+	return bytes.Equal(hash, canonical), nil
+}
+
+func changesets(ctx context.Context, from uint64, coreTx kv.Tx) (map[string]senderInfo, error) {
+	encNum := make([]byte, 8)
+	diff := map[string]senderInfo{}
+	binary.BigEndian.PutUint64(encNum, from)
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	//TODO: tx.ForEach must be implemented as buffered server-side stream
+	if err := coreTx.ForEach(kv.AccountChangeSet, encNum, func(k, v []byte) error {
+		info, err := loadSender(coreTx, v[:20])
+		if err != nil {
+			return err
+		}
+		diff[string(v[:20])] = *info
+		select {
+		case <-logEvery.C:
+			log.Info("loading changesets", "block", binary.BigEndian.Uint64(k))
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return diff, nil
+}
+
+var SenderCacheIDKey = []byte("sender_cache_id")
+var SenderCacheHeightKey = []byte("sender_cache_block_height")
+var SenderCacheHashKey = []byte("sender_cache_block_hash")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
@@ -385,31 +520,49 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 	encID := make([]byte, 8)
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
-		err := tx.Put(kv.PooledSenderID, []byte(addr), encID)
+		currentV, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
 		if err != nil {
 			return err
 		}
+		if currentV != nil && bytes.Equal(currentV, encID) {
+			continue
+		}
+
+		fmt.Printf("flushed ids:%x,%x\n", []byte(addr), encID)
+		if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
+			return err
+		}
 	}
+
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
 		binary.BigEndian.PutUint64(encID, id)
 		binary.BigEndian.PutUint64(v, info.nonce)
-		v = v[:8]
-		v = append(v, info.balance.Bytes()...)
-		err := tx.Put(kv.PooledSender, encID, v)
+		v = append(v[:8], info.balance.Bytes()...)
+		currentV, err := tx.GetOne(kv.PooledSender, encID)
 		if err != nil {
+			return err
+		}
+		if currentV != nil && bytes.Equal(currentV, v) {
+			continue
+		}
+		if err := tx.Put(kv.PooledSender, encID, v); err != nil {
 			return err
 		}
 	}
 
 	binary.BigEndian.PutUint64(encID, sc.blockHeight.Load())
-	err := tx.Put(kv.PoolInfo, SenderCacheHeightKey, encID)
-	if err != nil {
+	if err := tx.Put(kv.PoolInfo, SenderCacheHeightKey, encID); err != nil {
+		return err
+	}
+	if err := tx.Put(kv.PoolInfo, SenderCacheHashKey, []byte(sc.blockHash.Load())); err != nil {
 		return err
 	}
 	binary.BigEndian.PutUint64(encID, sc.senderID)
-	err = tx.Put(kv.PoolInfo, []byte("sender_cache_id"), encID)
-	if err != nil {
+	if err := tx.Put(kv.PoolInfo, SenderCacheIDKey, encID); err != nil {
 		return err
 	}
 
@@ -418,29 +571,19 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 	return nil
 }
 
-func loadSenders(coreDB kv.RoDB, toLoad map[uint64]string) (map[uint64]senderInfo, error) {
-	diff := make(map[uint64]senderInfo, len(toLoad))
-	if err := coreDB.View(context.Background(), func(tx kv.Tx) error {
-		for id := range toLoad {
-			encoded, err := tx.GetOne(kv.PlainState, []byte(toLoad[id]))
-			if err != nil {
-				return err
-			}
-			if len(encoded) == 0 {
-				diff[id] = *newSenderInfo(0, *uint256.NewInt(0))
-				continue
-			}
-			nonce, balance, err := DecodeSender(encoded)
-			if err != nil {
-				return err
-			}
-			diff[id] = *newSenderInfo(nonce, balance)
-		}
-		return nil
-	}); err != nil {
+func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
+	encoded, err := coreTx.GetOne(kv.PlainState, addr)
+	if err != nil {
 		return nil, err
 	}
-	return diff, nil
+	if len(encoded) == 0 {
+		return newSenderInfo(0, *uint256.NewInt(0)), nil
+	}
+	nonce, balance, err := DecodeSender(encoded)
+	if err != nil {
+		return nil, err
+	}
+	return newSenderInfo(nonce, balance), nil
 }
 
 // TxPool - holds all pool-related data structures and lock-based tiny methods
@@ -462,9 +605,11 @@ type TxPool struct {
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
 	newTxs                 chan Hashes
+	deletedTxs             []*metaTx
+	senders                *SendersCache
 }
 
-func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
+func New(newTxs chan Hashes, senders *SendersCache, db kv.RwDB) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU(1024, nil)
 	if err != nil {
 		return nil, err
@@ -481,6 +626,7 @@ func New(newTxs chan Hashes, db kv.RwDB) (*TxPool, error) {
 		baseFee:                NewSubPool(BaseFeeSubPool),
 		queued:                 NewSubPool(QueuedSubPool),
 		newTxs:                 newTxs,
+		senders:                senders,
 		db:                     db,
 		senderID:               1,
 	}, nil
@@ -500,12 +646,16 @@ func (p *TxPool) printDebug(prefix string) {
 		(*p.queued.best)[i].Tx.printDebug(fmt.Sprintf("%s.queued : %b", prefix, (*p.queued.best)[i].subPool))
 	}
 }
-func (p *TxPool) logStats() {
+func (p *TxPool) logStats(sc *SendersCache) {
 	protocolBaseFee, pendingBaseFee := p.protocolBaseFee.Load(), p.pendingBaseFee.Load()
 
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	log.Info(fmt.Sprintf("[txpool] baseFee: protocol=%d,pending=%d; queues size: pending=%d/%d, baseFee=%d/%d, queued=%d/%d", protocolBaseFee, pendingBaseFee, p.pending.Len(), PendingSubPoolLimit, p.baseFee.Len(), BaseFeeSubPoolLimit, p.queued.Len(), QueuedSubPoolLimit))
+	log.Info(fmt.Sprintf("baseFee: %dm->%dm; queuesSize: pending=%d/%d, baseFee=%d/%d, queued=%d/%d; sendersCache: id=%d,info=%d",
+		protocolBaseFee/1_000_000, pendingBaseFee/1_000_000,
+		p.pending.Len(), PendingSubPoolLimit, p.baseFee.Len(), BaseFeeSubPoolLimit, p.queued.Len(), QueuedSubPoolLimit,
+		len(sc.senderIDs), len(sc.senderInfo),
+	))
 }
 func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	p.lock.RLock()
@@ -571,10 +721,21 @@ func (p *TxPool) Started() bool {
 	return p.protocolBaseFee.Load() > 0
 }
 
-func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
+func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
 	//t := time.Now()
-	if err := senders.onNewTxs(coreDB, newTxs); err != nil {
+	tx, err := p.db.BeginRo(context.Background())
+	if err != nil {
 		return err
+	}
+	defer tx.Rollback()
+	cacheMisses, err := senders.onNewTxs(tx, newTxs)
+	if err != nil {
+		return err
+	}
+	if len(cacheMisses) > 0 {
+		if err := coreDB.View(ctx, func(tx kv.Tx) error { return senders.loadFromCore(tx, cacheMisses) }); err != nil {
+			return err
+		}
 	}
 	if err := newTxs.Valid(); err != nil {
 		return err
@@ -586,7 +747,7 @@ func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) erro
 	}
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if err := onNewTxs(senders, newTxs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+	if err := onNewTxs(tx, senders, newTxs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory, p.discardLocked); err != nil {
 		return err
 	}
 	notifyNewTxs := make(Hashes, 0, 32*len(newTxs.txs))
@@ -607,7 +768,7 @@ func (p *TxPool) Add(coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) erro
 	//log.Info("on new txs", "in", time.Since(t))
 	return nil
 }
-func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU) error {
+func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU, discard func(*metaTx, kv.Tx)) error {
 	for i := range newTxs.txs {
 		if newTxs.txs[i].senderID == 0 {
 			return fmt.Errorf("senderID can't be zero")
@@ -615,7 +776,7 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 	}
 
 	changedSenders := map[uint64]*senderInfo{}
-	unsafeAddToPool(senders, newTxs, pending, PendingSubPool, byHash, func(txn *metaTx) {
+	if err := unsafeAddToPool(tx, senders, newTxs, pending, byHash, func(txn *metaTx) {
 		switch txn.currentSubPool {
 		case PendingSubPool:
 			pending.UnsafeRemove(txn)
@@ -631,7 +792,9 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			i.subPool |= IsLocal
 		}
-	})
+	}); err != nil {
+		return err
+	}
 
 	for _, sender := range changedSenders {
 		onSenderChange(sender, protocolBaseFee, pendingBaseFee)
@@ -642,12 +805,7 @@ func onNewTxs(senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBas
 	queued.EnforceInvariants()
 
 	promote(pending, baseFee, queued, func(i *metaTx) {
-		delete(byHash, string(i.Tx.idHash[:]))
-		senders.get(i.Tx.senderID).txNonce2Tx.Delete(&nonce2TxItem{i})
-		if i.subPool&IsLocal != 0 {
-			//TODO: only add to history if sender is not in list of local-senders
-			localsHistory.Add(i.Tx.idHash, struct{}{})
-		}
+		discard(i, tx)
 	})
 
 	return nil
@@ -666,10 +824,15 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 	return protocolBaseFee, p.pendingBaseFee.Load()
 }
 
-func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, senders *SendersCache) error {
+func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error {
 	t := time.Now()
+	tx, err := p.db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
-	if err := senders.onNewBlock(stateChanges, unwindTxs, minedTxs, blockHeight); err != nil {
+	if err := senders.onNewBlock(tx, stateChanges, unwindTxs, minedTxs, blockHeight, blockHash); err != nil {
 		return err
 	}
 	//log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "protocolBaseFee", protocolBaseFee, "blockHeight", blockHeight)
@@ -682,7 +845,7 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if err := onNewBlock(senders, unwindTxs, minedTxs.txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+	if err := onNewBlock(tx, senders, unwindTxs, minedTxs.txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory, p.discardLocked); err != nil {
 		return err
 	}
 
@@ -709,8 +872,15 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 	return nil
 }
 func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	for i := 0; i < len(p.deletedTxs); i++ {
+		if err := tx.Delete(kv.PooledTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
+			return err
+		}
+	}
+	p.deletedTxs = p.deletedTxs[:0]
 
 	txHashes := p.localsHistory.Keys()
 	encID := make([]byte, 8)
@@ -725,7 +895,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	}
 
 	v := make([]byte, 0, 1024)
-	for addr, metaTx := range p.byHash {
+	for txHash, metaTx := range p.byHash {
 		if metaTx.Tx.rlp == nil {
 			continue
 		}
@@ -733,7 +903,14 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		binary.BigEndian.PutUint64(v, metaTx.Tx.senderID)
 		binary.BigEndian.PutUint64(v[8:], 0) // block num - timestamp
 		copy(v[8+8:], metaTx.Tx.rlp)
-		if err := tx.Put(kv.PooledTransaction, []byte(addr), v); err != nil {
+		currentV, err := tx.GetOne(kv.PooledTransaction, []byte(txHash))
+		if err != nil {
+			return err
+		}
+		if currentV != nil && bytes.Equal(currentV, v) {
+			continue
+		}
+		if err := tx.Put(kv.PooledTransaction, []byte(txHash), v); err != nil {
 			return err
 		}
 		metaTx.Tx.rlp = nil
@@ -748,36 +925,44 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		return err
 	}
 
-	//TODO: flush deletes
-
 	if err := senders.flush(tx); err != nil {
 		return err
 	}
 
 	return nil
 }
-func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
+func (p *TxPool) discardLocked(mt *metaTx, tx kv.Tx) {
+	delete(p.byHash, string(mt.Tx.idHash[:]))
+	p.deletedTxs = append(p.deletedTxs, mt)
+	sender, err := p.senders.Info(mt.Tx.senderID, tx)
+	if err != nil {
+		log.Warn("get sender info", "err", err)
+	} else {
+		sender.txNonce2Tx.Delete(&byNonce{mt})
+	}
+	if mt.subPool&IsLocal != 0 {
+		//TODO: only add to history if sender is not in list of local-senders
+		p.localsHistory.Add(mt.Tx.idHash, struct{}{})
+	}
+}
+
+func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, senders *SendersCache) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if err := senders.fromDB(tx); err != nil {
+	if err := senders.fromDB(ctx, tx, coreTx); err != nil {
 		return err
 	}
 
-	c, err := tx.Cursor(kv.RecentLocalTransaction)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
+	if err := tx.ForEach(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
 		hashID := [32]byte{}
 		copy(hashID[:], v)
 		p.localsHistory.Add(hashID, struct{}{})
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	c, err = tx.Cursor(kv.PooledTransaction)
+	c, err := tx.Cursor(kv.PooledTransaction)
 	if err != nil {
 		return err
 	}
@@ -804,12 +989,21 @@ func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
 			return err
 		}
 		txs.txs[i].senderID = binary.BigEndian.Uint64(v)
+		senderAddr, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+		if err != nil {
+			return err
+		}
+		if len(senderAddr) == 0 {
+			panic("must not happen")
+		}
+		copy(txs.senders.At(i), senderAddr)
 		//bkock num = binary.BigEndian.Uint64(v[8:])
 		copy(hashID[:], k)
 		_, isLocalTx := p.localsHistory.Get(hashID)
 		txs.isLocal[i] = isLocalTx
 		i++
 	}
+
 	var protocolBaseFee, pendingBaseFee uint64
 	{
 		v, err := tx.GetOne(kv.PoolInfo, PoolProtocolBaseFeeKey)
@@ -829,18 +1023,29 @@ func (p *TxPool) fromDB(tx kv.Tx, senders *SendersCache) error {
 			pendingBaseFee = binary.BigEndian.Uint64(v)
 		}
 	}
-	if err := onNewTxs(senders, txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory); err != nil {
+	cacheMisses, err := senders.onNewTxs(tx, txs)
+	if err != nil {
+		return err
+	}
+	if len(cacheMisses) > 0 {
+		senders.printDebug("miss")
+		for i, j := range cacheMisses {
+			fmt.Printf("miss: %d,%x\n", i, j)
+		}
+		if err := senders.loadFromCore(coreTx, cacheMisses); err != nil {
+			return err
+		}
+	}
+	if err := onNewTxs(tx, senders, txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byHash, p.localsHistory, p.discardLocked); err != nil {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.protocolBaseFee.Store(protocolBaseFee)
 
-	//TODO: flush deletes
-
 	return nil
 }
 
-func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU) error {
+func onNewBlock(tx kv.Tx, senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byHash map[string]*metaTx, localsHistory *simplelru.LRU, discard func(*metaTx, kv.Tx)) error {
 	for i := range unwindTxs.txs {
 		if unwindTxs.txs[i].senderID == 0 {
 			return fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero")
@@ -852,16 +1057,10 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 		}
 	}
 
-	j := 0
-	removeMined(senders, minedTxs, pending, baseFee, queued, func(i *metaTx) {
-		j++
-		delete(byHash, string(i.Tx.idHash[:]))
-		if i.subPool&IsLocal != 0 {
-			localsHistory.Add(i.Tx.idHash, struct{}{})
-		}
-	})
-	if j > 0 {
-		log.Info("remove mined", "removed", j, "minedTxsLen", len(minedTxs))
+	if err := removeMined(tx, senders, minedTxs, pending, baseFee, queued, func(i *metaTx) {
+		discard(i, tx)
+	}); err != nil {
+		return err
 	}
 
 	changedSenders := make(map[uint64]*senderInfo, len(unwindTxs.txs)/4)
@@ -875,7 +1074,7 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	unsafeAddToPool(senders, unwindTxs, pending, PendingSubPool, byHash, func(txn *metaTx) {
+	if err := unsafeAddToPool(tx, senders, unwindTxs, pending, byHash, func(txn *metaTx) {
 		switch txn.currentSubPool {
 		case PendingSubPool:
 			pending.UnsafeRemove(txn)
@@ -888,12 +1087,13 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 		}
 	}, func(i *metaTx, sender *senderInfo) {
 		changedSenders[i.Tx.senderID] = sender
-		//fmt.Printf("add: %d,%d\n", i.Tx.senderID, i.Tx.nonce)
 		if _, ok := localsHistory.Get(i.Tx.idHash); ok {
 			//TODO: also check if sender is in list of local-senders
 			i.subPool |= IsLocal
 		}
-	})
+	}); err != nil {
+		return err
+	}
 
 	for _, sender := range changedSenders {
 		onSenderChange(sender, protocolBaseFee, pendingBaseFee)
@@ -904,14 +1104,7 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 	queued.EnforceInvariants()
 
 	promote(pending, baseFee, queued, func(i *metaTx) {
-		//fmt.Printf("del1 nonce: %d, %d,%d\n", i.Tx.senderID, senderInfo[i.Tx.senderID].nonce, i.Tx.nonce)
-		//fmt.Printf("del2 balance: %d,%d,%d\n", i.Tx.value.Uint64(), i.Tx.tip, senderInfo[i.Tx.senderID].balance.Uint64())
-		delete(byHash, string(i.Tx.idHash[:]))
-		senders.get(i.Tx.senderID).txNonce2Tx.Delete(&nonce2TxItem{i})
-		if i.subPool&IsLocal != 0 {
-			//TODO: only add to history if sender is not in list of local-senders
-			localsHistory.Add(i.Tx.idHash, struct{}{})
-		}
+		discard(i, tx)
 	})
 
 	return nil
@@ -924,7 +1117,7 @@ func onNewBlock(senders *SendersCache, unwindTxs TxSlots, minedTxs []*TxSlot, pr
 // modify state_balance and state_nonce, potentially remove some elements (if transaction with some nonce is
 // included into a block), and finally, walk over the transaction records and update SubPool fields depending on
 // the actual presence of nonce gaps and what the balance is.
-func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, queued *SubPool, discard func(tx *metaTx)) {
+func removeMined(tx kv.Tx, senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, queued *SubPool, discard func(tx *metaTx)) error {
 	noncesToRemove := map[uint64]uint64{}
 	for _, tx := range minedTxs {
 		nonce, ok := noncesToRemove[tx.senderID]
@@ -933,31 +1126,31 @@ func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, qu
 		}
 	}
 
-	var toDel []btree.Item // can't delete items while iterate them
+	var toDel []*metaTx // can't delete items while iterate them
 	for senderID, nonce := range noncesToRemove {
-		sender := senders.get(senderID)
+		sender, err := senders.Info(senderID, tx)
+		if err != nil {
+			return err
+		}
 		//if sender.txNonce2Tx.Len() > 0 {
 		//log.Debug("[txpool] removing mined", "senderID", tx.senderID, "sender.txNonce2Tx.len()", sender.txNonce2Tx.Len())
 		//}
 		// delete mined transactions from everywhere
 		sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
-			it := i.(*nonce2TxItem)
+			it := i.(*byNonce)
 			//log.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", it.metaTx.Tx.nonce, "sender.nonce", sender.nonce)
 			if it.metaTx.Tx.nonce > nonce {
 				return false
 			}
-			toDel = append(toDel, i)
+			toDel = append(toDel, it.metaTx)
 			// del from sub-pool
 			switch it.metaTx.currentSubPool {
 			case PendingSubPool:
 				pending.UnsafeRemove(it.metaTx)
-				discard(it.metaTx)
 			case BaseFeeSubPool:
 				baseFee.UnsafeRemove(it.metaTx)
-				discard(it.metaTx)
 			case QueuedSubPool:
 				queued.UnsafeRemove(it.metaTx)
-				discard(it.metaTx)
 			default:
 				//already removed
 			}
@@ -965,40 +1158,45 @@ func removeMined(senders *SendersCache, minedTxs []*TxSlot, pending, baseFee, qu
 		})
 
 		for i := range toDel {
-			sender.txNonce2Tx.Delete(toDel[i])
+			discard(toDel[i])
 		}
 		toDel = toDel[:0]
 	}
+	return nil
 }
 
 // unwind
-func unsafeAddToPool(senders *SendersCache, newTxs TxSlots, to *SubPool, subPoolType SubPoolType, byHash map[string]*metaTx, discard func(tx *metaTx), beforeAdd func(tx *metaTx, sender *senderInfo)) {
-	for i, tx := range newTxs.txs {
-		if _, ok := byHash[string(tx.idHash[:])]; ok {
+func unsafeAddToPool(tx kv.Tx, senders *SendersCache, newTxs TxSlots, to *SubPool, byHash map[string]*metaTx, discard func(tx *metaTx), beforeAdd func(tx *metaTx, sender *senderInfo)) error {
+	for i, txn := range newTxs.txs {
+		if _, ok := byHash[string(txn.idHash[:])]; ok {
 			continue
 		}
-		mt := newMetaTx(tx, newTxs.isLocal[i])
+		mt := newMetaTx(txn, newTxs.isLocal[i])
 
-		sender := senders.get(tx.senderID)
-		// Insert to pending pool, if pool doesn't have tx with same Nonce and bigger Tip
-		if found := sender.txNonce2Tx.Get(&nonce2TxItem{mt}); found != nil {
-			if tx.tip <= found.(*nonce2TxItem).Tx.tip {
+		sender, err := senders.Info(txn.senderID, tx)
+		if err != nil {
+			return err
+		}
+		// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
+		if found := sender.txNonce2Tx.Get(&byNonce{mt}); found != nil {
+			if txn.tip <= found.(*byNonce).Tx.tip {
 				continue
 			}
 		}
 
 		byHash[string(mt.Tx.idHash[:])] = mt
-		replaced := sender.txNonce2Tx.ReplaceOrInsert(&nonce2TxItem{mt})
+		replaced := sender.txNonce2Tx.ReplaceOrInsert(&byNonce{mt})
 		if replaced != nil {
-			replacedMT := replaced.(*nonce2TxItem).metaTx
+			replacedMT := replaced.(*byNonce).metaTx
 			if replacedMT.Tx.idHash != mt.Tx.idHash {
 				delete(byHash, string(replacedMT.Tx.idHash[:]))
 			}
 			discard(replacedMT)
 		}
 		beforeAdd(mt, sender)
-		to.UnsafeAdd(mt, subPoolType)
+		to.UnsafeAdd(mt)
 	}
+	return nil
 }
 
 func onSenderChange(sender *senderInfo, protocolBaseFee, pendingBaseFee uint64) {
@@ -1007,7 +1205,7 @@ func onSenderChange(sender *senderInfo, protocolBaseFee, pendingBaseFee uint64) 
 	minFeeCap := uint64(math.MaxUint64)
 	minTip := uint64(math.MaxUint64)
 	sender.txNonce2Tx.Ascend(func(i btree.Item) bool {
-		it := i.(*nonce2TxItem)
+		it := i.(*byNonce)
 
 		// Sender has enough balance for: gasLimit x feeCap + transferred_value
 		needBalance := uint256.NewInt(it.metaTx.Tx.gas)
@@ -1215,8 +1413,8 @@ func (p *SubPool) UnsafeRemove(i *metaTx) {
 	p.best.Swap(i.bestIndex, p.best.Len()-1)
 	p.best.Pop()
 }
-func (p *SubPool) UnsafeAdd(i *metaTx, subPoolType SubPoolType) {
-	i.currentSubPool = subPoolType
+func (p *SubPool) UnsafeAdd(i *metaTx) {
+	i.currentSubPool = p.t
 	p.worst.Push(i)
 	p.best.Push(i)
 }
@@ -1304,12 +1502,16 @@ func (p *WorstQueue) Pop() interface{} {
 //      - all local pooled byHash to random peers periodically
 // promote/demote transactions
 // reorgs
-func BroadcastLoop(ctx context.Context, db kv.RwDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, timings Timings) {
+func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, timings Timings) {
+	//db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearBucket(kv.PooledSender) })
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return p.fromDB(tx, senders)
+		return coreDB.View(ctx, func(coreTx kv.Tx) error {
+			return p.fromDB(ctx, tx, coreTx, senders)
+		})
 	}); err != nil {
 		log.Error("restore from db", "err", err)
 	}
+	p.logStats(senders)
 
 	logEvery := time.NewTicker(timings.logEvery)
 	defer logEvery.Stop()
@@ -1327,13 +1529,22 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, p *TxPool, senders *SendersC
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			p.logStats()
+			p.logStats(senders)
 			log.Info("cache", "size", senders.len())
 		case <-commitEvery.C:
 			if db != nil {
 				t := time.Now()
 				if err := db.Update(ctx, func(tx kv.RwTx) error {
-					return p.flush(tx, senders)
+					if err := p.flush(tx, senders); err != nil {
+						return err
+					}
+					sd, _, err := tx.(*mdbx.MdbxTx).SpaceDirty()
+					if err != nil {
+						return err
+					}
+					log.Info("flush", "in", time.Since(t), "dirty_kb", sd/1024)
+					t = time.Now()
+					return nil
 				}); err != nil {
 					log.Error("flush is local history", "err", err)
 				}

@@ -13,7 +13,7 @@ require (
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/matryer/moq v0.2.3
 	github.com/stretchr/testify v1.7.0
-	github.com/torquem-ch/mdbx-go v0.17.0
+	github.com/torquem-ch/mdbx-go v0.16.0
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	google.golang.org/grpc v1.39.1

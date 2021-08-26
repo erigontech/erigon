@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -141,7 +142,7 @@ func TestOnNewBlock(t *testing.T) {
 				return nil, io.EOF
 			}
 			i++
-			return &remote.StateChange{Txs: [][]byte{decodeHex(txParseTests[0].payloadStr), decodeHex(txParseTests[1].payloadStr), decodeHex(txParseTests[2].payloadStr)}}, nil
+			return &remote.StateChange{Txs: [][]byte{decodeHex(txParseTests[0].payloadStr), decodeHex(txParseTests[1].payloadStr), decodeHex(txParseTests[2].payloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})}, nil
 		},
 	}
 	stateChanges := &remote.KVClientMock{
