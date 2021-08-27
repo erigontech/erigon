@@ -1131,6 +1131,24 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 		return err
 	}
 
+	if ASSERT {
+		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			if err != nil {
+				return err
+			}
+			if len(vv) == 0 {
+				tx.ForEach(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
+					fmt.Printf("found:%x,%x\n", k, v)
+					return nil
+				})
+				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
+				panic("no-no")
+			}
+			return nil
+		})
+	}
+
 	txs := TxSlots{}
 	parseCtx := NewTxParseContext()
 	parseCtx.WithSender(false)
@@ -1189,10 +1207,6 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 		return err
 	}
 	if len(cacheMisses) > 0 {
-		p.senders.printDebug("miss")
-		for i, j := range cacheMisses {
-			fmt.Printf("miss: %d,%x\n", i, j)
-		}
 		if err := p.senders.loadFromCore(coreTx, cacheMisses); err != nil {
 			return err
 		}
