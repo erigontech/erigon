@@ -571,6 +571,13 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
 			return nil
 		}
+		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			senderID := binary.BigEndian.Uint64(v[:8])
+			if senderID == binary.BigEndian.Uint64(id) {
+				panic("why?")
+			}
+			return nil
+		})
 		if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
 			return err
 		}
@@ -585,6 +592,17 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 	}); err != nil {
 		return err
 	}
+	tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+		vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+		if err != nil {
+			return err
+		}
+		if len(vv) == 0 {
+			panic("no-no")
+		}
+		return nil
+	})
+
 	fmt.Printf("evicted: %d\n", i)
 
 	encID := make([]byte, 8)
