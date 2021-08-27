@@ -123,6 +123,7 @@ type SendersCache struct {
 	blockHeight atomic.Uint64
 	blockHash   atomic.String
 	senderID    uint64
+	commitID    uint64
 	senderIDs   map[string]uint64
 	senderInfo  map[uint64]*senderInfo
 }
@@ -436,6 +437,15 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) er
 			sc.senderID = binary.BigEndian.Uint64(v)
 		}
 	}
+	{
+		v, err := tx.GetOne(kv.PoolInfo, SenderCommitIDKey)
+		if err != nil {
+			return err
+		}
+		if len(v) > 0 {
+			sc.commitID = binary.BigEndian.Uint64(v)
+		}
+	}
 
 	if err := sc.syncMissedStateDiff(ctx, tx, coreTx, 0); err != nil {
 		return err
@@ -449,7 +459,7 @@ func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, cor
 	if missedTo > 0 && missedTo-sc.blockHeight.Load() > 1024 {
 		dropLocalSendersCache = true
 	}
-	lastCommitTimeV, err := tx.GetOne(kv.PoolInfo, SenderLastCommitTimeKey)
+	lastCommitTimeV, err := tx.GetOne(kv.PoolInfo, SenderCommitTimeKey)
 	if err != nil {
 		return err
 	}
@@ -462,6 +472,17 @@ func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, cor
 			dropLocalSendersCache = true
 		}
 	}
+	if coreTx != nil {
+		var err error
+		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			dropLocalSendersCache = true
+		}
+	}
+
 	if dropLocalSendersCache {
 		if err := tx.ClearBucket(kv.PooledSender); err != nil {
 			return err
@@ -469,20 +490,6 @@ func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, cor
 		sc.senderInfo = map[uint64]*senderInfo{}
 	}
 
-	if coreTx != nil {
-		var err error
-		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
-		if err != nil {
-			return err
-		}
-	}
-
-	if !ok {
-		if err := tx.ClearBucket(kv.PooledSender); err != nil {
-			return err
-		}
-		sc.senderInfo = map[uint64]*senderInfo{}
-	}
 	if missedTo == 0 {
 		missedTo = sc.blockHeight.Load()
 		if missedTo == 0 {
@@ -540,8 +547,9 @@ func changesets(ctx context.Context, from uint64, coreTx kv.Tx) (map[string]send
 	return diff, nil
 }
 
-var SenderLastCommitTimeKey = []byte("sender_last_commit_time")
+var SenderCommitTimeKey = []byte("sender_commit_time")
 var SenderCacheIDKey = []byte("sender_cache_id")
+var SenderCommitIDKey = []byte("sender_commit_id")
 var SenderCacheHeightKey = []byte("sender_cache_block_height")
 var SenderCacheHashKey = []byte("sender_cache_block_hash")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
@@ -551,6 +559,7 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	encID := make([]byte, 8)
+	encIDs := make([]byte, 0, 1024)
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
 		currentV, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
@@ -567,6 +576,7 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
 			return err
 		}
+		encIDs = append(encIDs, encID...)
 	}
 	sc.senderIDs = map[string]uint64{}
 
@@ -599,11 +609,15 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 	if err := tx.Put(kv.PoolInfo, SenderCacheIDKey, encID); err != nil {
 		return err
 	}
+	binary.BigEndian.PutUint64(encID, sc.commitID)
+	if err := tx.Put(kv.PoolInfo, SenderCommitIDKey, encID); err != nil {
+		return err
+	}
 	lastCommitTime, err := time.Now().MarshalBinary()
 	if err != nil {
 		return err
 	}
-	if err := tx.Put(kv.PoolInfo, SenderLastCommitTimeKey, lastCommitTime); err != nil {
+	if err := tx.Put(kv.PoolInfo, SenderCommitTimeKey, lastCommitTime); err != nil {
 		return err
 	}
 
@@ -663,6 +677,13 @@ func (b *ByNonce) ascend(senderID uint64, f func(tx *metaTx) bool) {
 		}
 		return f(mt)
 	})
+}
+func (b *ByNonce) count(senderID uint64) (count uint64) {
+	b.ascend(senderID, func(tx *metaTx) bool {
+		count++
+		return true
+	})
+	return count
 }
 func (b *ByNonce) get(senderID, txNonce uint64) *metaTx {
 	if found := b.tree.Get(&sortByNonce{&metaTx{Tx: &TxSlot{senderID: senderID, nonce: txNonce}}}); found != nil {
@@ -983,6 +1004,21 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
 	if err := tx.Put(kv.PoolInfo, PoolPendingBaseFeeKey, encID); err != nil {
 		return err
+	}
+
+	counts := map[uint64]uint64{}
+	tx.ForEach(kv.PooledSenderID, nil, func(k, v []byte) error {
+		id := binary.BigEndian.Uint64(k)
+		count := p.txNonce2Tx.count(id)
+		_, ok := counts[count]
+		if !ok {
+			counts[count] = 0
+		}
+		counts[count]++
+		return nil
+	})
+	for i, j := range counts {
+		fmt.Printf("counts: %d,%d\n", i, j)
 	}
 
 	if err := senders.flush(tx); err != nil {
