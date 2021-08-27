@@ -571,13 +571,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
 			return nil
 		}
-		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			senderID := binary.BigEndian.Uint64(v[:8])
-			if senderID == binary.BigEndian.Uint64(id) {
-				panic("why?")
-			}
-			return nil
-		})
 		if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
 			return err
 		}
