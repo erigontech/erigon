@@ -566,10 +566,10 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err != nil {
 			return err
 		}
+		fmt.Printf("del:%d,%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID, evicted)
 		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
 			break
 		}
-		fmt.Printf("del:%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID)
 		for i := 0; i < len(v); i += 8 {
 			senderID := binary.BigEndian.Uint64(v[i : i+8])
 			if _, ok := sc.senderInfo[senderID]; ok {
