@@ -786,6 +786,7 @@ func (p *TxPool) logStats(tx kv.Tx) error {
 		p.pending.Len(), PendingSubPoolLimit, p.baseFee.Len(), BaseFeeSubPoolLimit, p.queued.Len(), QueuedSubPoolLimit,
 		idsInMem, idsInDb, infoInMem, infoInDb,
 	))
+	return nil
 }
 func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	p.lock.RLock()
