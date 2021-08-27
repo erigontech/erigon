@@ -118,5 +118,5 @@ type Issuance struct {
 	UncleReward string `json:"uncleReward,omitempty"`
 	Issuance    string `json:"issuance,omitempty"`
 	TotalIssued string `json:"totalIssued,omitempty"`
-	TotalBurnt  string `json:"totalBurnt,omitEmpty"`
+	TotalBurnt  string `json:"totalBurnt,omitempty"`
 }
