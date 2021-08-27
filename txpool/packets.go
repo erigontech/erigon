@@ -17,7 +17,6 @@
 package txpool
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 
@@ -189,16 +188,10 @@ func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txS
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
+				i--
 				continue
 			}
 			return 0, err
-		}
-		if ASSERT {
-			if bytes.Equal(txSlots.senders.At(i), EmptyAddr[:]) {
-				fmt.Printf("etmpy: %#v\n", txSlots.txs[i])
-				fmt.Printf("etmpy: %x\n", txSlots.senders)
-				panic("?????")
-			}
 		}
 	}
 	return pos, nil
@@ -224,6 +217,7 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txS
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
+				i--
 				continue
 			}
 			return requestID, 0, err
