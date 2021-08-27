@@ -558,6 +558,26 @@ var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
+
+	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. We need more soft eviction policy.
+	if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
+		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
+			return nil
+		}
+		if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.PooledSenderIDToAdress, id, nil); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.PooledSender, id, nil); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	encID := make([]byte, 8)
 	encIDs := make([]byte, 0, 1024)
 	for addr, id := range sc.senderIDs {
@@ -577,25 +597,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 			return err
 		}
 		encIDs = append(encIDs, encID...)
-	}
-
-	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. We need more soft eviction policy.
-	if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
-		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
-			return nil
-		}
-		if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
-			return err
-		}
-		if err := tx.Delete(kv.PooledSenderIDToAdress, id, nil); err != nil {
-			return err
-		}
-		if err := tx.Delete(kv.PooledSender, id, nil); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	sc.senderIDs = map[string]uint64{}
