@@ -222,28 +222,6 @@ func (sc *SendersCache) len() int {
 	return len(sc.senderInfo)
 }
 
-/*
-func (sc *SendersCache) evict() int {
-	sc.lock.Lock()
-	defer sc.lock.Unlock()
-
-	if len(sc.senderIDs) < MaxSendersInfoCache {
-		return 0
-	}
-
-	count := 0
-	for addr, id := range sc.senderIDs {
-		if sc.senderInfo[id].txNonce2Tx.Len() > 0 {
-			continue
-		}
-		delete(sc.senderInfo, id)
-		delete(sc.senderIDs, addr)
-		count++
-	}
-	return count
-}
-*/
-
 func (sc *SendersCache) onNewTxs(tx kv.Tx, newTxs TxSlots) (cacheMisses map[uint64]string, err error) {
 	if err := sc.ensureSenderIDOnNewTxs(tx, newTxs); err != nil {
 		return nil, err
@@ -578,7 +556,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 	}
 
-	c, err := tx.Cursor(kv.PoolStateEviction)
+	c, err := tx.RwCursor(kv.PoolStateEviction)
 	if err != nil {
 		return err
 	}
@@ -618,6 +596,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			}
 			evicted++
 		}
+		if err := c.DeleteCurrent(); err != nil {
+			return err
+		}
 	}
 	fmt.Printf("evicted:%d\n", evicted)
 
@@ -647,13 +628,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		binary.BigEndian.PutUint64(encID, id)
 		binary.BigEndian.PutUint64(v, info.nonce)
 		v = append(v[:8], info.balance.Bytes()...)
-		//currentV, err := tx.GetOne(kv.PooledSender, encID)
-		//if err != nil {
-		//	return err
-		//}
-		//if currentV != nil && bytes.Equal(currentV, v) {
-		//	continue
-		//}
 		if err := tx.Put(kv.PooledSender, encID, v); err != nil {
 			return err
 		}
@@ -1034,10 +1008,6 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 		default:
 		}
 	}
-	//count := senders.evict()
-	//if count > 0 {
-	//	log.Debug("evicted senders", "amount", count)
-	//}
 
 	log.Info("on new block", "in", time.Since(t))
 	return nil
