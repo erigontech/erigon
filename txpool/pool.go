@@ -1078,13 +1078,18 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		binary.BigEndian.PutUint64(v, metaTx.Tx.senderID)
 		binary.BigEndian.PutUint64(v[8:], 0) // block num - timestamp
 		copy(v[8+8:], metaTx.Tx.rlp)
-		currentV, err := tx.GetOne(kv.PooledTransaction, []byte(txHash))
-		if err != nil {
-			return err
+		if ASSERT {
+			if _, ok := p.senders.senderInfo[metaTx.Tx.senderID]; !ok {
+				info, err := p.senders.info(metaTx.Tx.senderID, tx)
+				if err != nil {
+					panic(err)
+				}
+				if info == nil {
+					panic("lost")
+				}
+			}
 		}
-		if currentV != nil && bytes.Equal(currentV, v) {
-			continue
-		}
+
 		if err := tx.Put(kv.PooledTransaction, []byte(txHash), v); err != nil {
 			return err
 		}
@@ -1715,7 +1720,7 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 
 	logEvery := time.NewTicker(timings.logEvery)
 	defer logEvery.Stop()
-	commitEvery := time.NewTicker(3 * time.Second)
+	commitEvery := time.NewTicker(1 * time.Second)
 	defer commitEvery.Stop()
 
 	syncToNewPeersEvery := time.NewTicker(timings.syncToNewPeersEvery)
