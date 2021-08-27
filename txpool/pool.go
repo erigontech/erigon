@@ -626,6 +626,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 				return err
 			}
 			if len(vv) == 0 {
+				fmt.Printf("%x,%x,%x\n", k, v, vv)
 				panic("no-no")
 			}
 			return nil
