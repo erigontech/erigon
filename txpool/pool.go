@@ -569,7 +569,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
 			break
 		}
-		fmt.Printf("del:%d\n", binary.BigEndian.Uint64(k))
+		fmt.Printf("del:%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID)
 		for i := 0; i < len(v); i += 8 {
 			senderID := binary.BigEndian.Uint64(v[i : i+8])
 			if _, ok := sc.senderInfo[senderID]; ok {
@@ -976,9 +976,6 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 		return err
 	}
 	defer tx.Rollback()
-
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	protocolBaseFee, pendingBaseFee = p.setBaseFee(protocolBaseFee, pendingBaseFee)
 	if err := senders.onNewBlock(tx, stateChanges, unwindTxs, minedTxs, blockHeight, blockHash); err != nil {
 		return err
@@ -991,6 +988,8 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 		return err
 	}
 
+	p.lock.Lock()
+	defer p.lock.Unlock()
 	if err := onNewBlock(tx, senders, unwindTxs, minedTxs.txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
 		return err
 	}
