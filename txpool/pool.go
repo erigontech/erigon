@@ -1138,11 +1138,13 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 				return err
 			}
 			if len(vv) == 0 {
-				tx.ForEach(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
-					fmt.Printf("found:%x,%x\n", k, v)
+				tx.ForEach(kv.PooledSenderIDToAdress, nil, func(k, vvvv []byte) error {
+					if bytes.HasPrefix(k, v[:7]) {
+						fmt.Printf("found:%x,%x\n", k, vvvv)
+					}
 					return nil
 				})
-				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
+				fmt.Printf("not foundd: %x,%x,%x\n", k, v, vv)
 				panic("no-no")
 			}
 			return nil
