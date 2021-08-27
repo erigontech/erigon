@@ -565,6 +565,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 		if _, ok := sc.senderIDs[string(addr)]; ok {
 			return nil
 		}
+		if _, ok := sc.senderInfo[binary.BigEndian.Uint64(id)]; ok {
+			return nil
+		}
 		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
 			return nil
 		}
