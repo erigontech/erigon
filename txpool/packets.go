@@ -188,6 +188,7 @@ func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txS
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
+				txSlots.Shrink(i)
 				i--
 				continue
 			}
@@ -217,6 +218,7 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txS
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
+				txSlots.Shrink(i)
 				i--
 				continue
 			}

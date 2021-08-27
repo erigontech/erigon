@@ -414,10 +414,9 @@ func FuzzOnNewBlocks11(f *testing.F) {
 			})
 
 			// all txs in side data structures must be in some queue
-			for addr, txn := range pool.byHash {
+			for _, txn := range pool.byHash {
 				require.True(t, txn.bestIndex >= 0, msg)
 				assert.True(txn.worstIndex >= 0, msg)
-				assert.NotEqual(EmptyAddr, []byte(addr))
 			}
 			for id := range senders {
 				//assert.True(senders[i].txNonce2Tx.Len() > 0)

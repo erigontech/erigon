@@ -142,4 +142,23 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			require.Equal(fmt.Sprintf("%x", tt.txs[1]), fmt.Sprintf("%x", slots.txs[1].rlp))
 		})
 	}
+	for i, tt := range ptp66EncodeTests {
+		t.Run("reject_all_"+strconv.Itoa(i), func(t *testing.T) {
+			require := require.New(t)
+			var encodeBuf []byte
+			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
+			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
+
+			ctx := NewTxParseContext()
+			ctx.reject = func(bytes []byte) bool { return true }
+			slots := &TxSlots{}
+			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
+			require.NoError(err)
+			require.Equal(tt.requestId, requestId)
+			require.Equal(0, len(slots.txs))
+			require.Equal(0, slots.senders.Len())
+			require.Equal(0, len(slots.isLocal))
+		})
+	}
+
 }
