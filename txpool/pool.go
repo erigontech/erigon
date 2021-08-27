@@ -1007,7 +1007,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	}
 
 	counts := map[uint64]uint64{}
-	tx.ForEach(kv.PooledSenderID, nil, func(k, v []byte) error {
+	tx.ForEach(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
 		id := binary.BigEndian.Uint64(k)
 		count := p.txNonce2Tx.count(id)
 		_, ok := counts[count]
