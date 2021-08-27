@@ -606,6 +606,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			if _, ok := sc.senderIDs[string(addr)]; ok {
 				return nil
 			}
+			fmt.Printf("del:%d\n", senderID)
 			if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
 				return err
 			}
