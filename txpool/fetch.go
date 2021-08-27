@@ -66,7 +66,6 @@ var DefaultTimings = Timings{
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
 func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, senders *SendersCache, stateChangesClient remote.KVClient, coreDB kv.RoDB, db kv.RwDB) *Fetch {
-	pooledTxsParseCtx := NewTxParseContext()
 	return &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
@@ -76,7 +75,7 @@ func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Poo
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
 		stateChangesParseCtx: NewTxParseContext(),
-		pooledTxsParseCtx:    pooledTxsParseCtx,
+		pooledTxsParseCtx:    NewTxParseContext(),
 	}
 }
 

@@ -913,13 +913,6 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 		return err
 	}
 
-	if ASSERT {
-		for i := range p.senders.senderIDs {
-			if bytes.Equal([]byte(i), EmptyAddr[:]) {
-				panic(8)
-			}
-		}
-	}
 	protocolBaseFee, pendingBaseFee := p.protocolBaseFee.Load(), p.pendingBaseFee.Load()
 	if protocolBaseFee == 0 || pendingBaseFee == 0 {
 		return fmt.Errorf("non-zero base fee: %d,%d", protocolBaseFee, pendingBaseFee)

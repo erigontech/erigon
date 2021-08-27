@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -191,6 +192,12 @@ func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txS
 				continue
 			}
 			return 0, err
+		}
+		if ASSERT {
+			if bytes.Equal(txSlots.txs[i].idHash[:], EmptyAddr[:]) {
+				fmt.Printf("etmpy: %#v\n", txSlots.txs[i])
+				panic("?????")
+			}
 		}
 	}
 	return pos, nil
