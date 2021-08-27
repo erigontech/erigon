@@ -1715,7 +1715,7 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 
 	logEvery := time.NewTicker(timings.logEvery)
 	defer logEvery.Stop()
-	commitEvery := time.NewTicker(5 * time.Second)
+	commitEvery := time.NewTicker(3 * time.Second)
 	defer commitEvery.Stop()
 
 	syncToNewPeersEvery := time.NewTicker(timings.syncToNewPeersEvery)
