@@ -559,6 +559,7 @@ var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
+	sc.commitID++
 
 	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. We need more soft eviction policy.
 
@@ -626,7 +627,11 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 				return err
 			}
 			if len(vv) == 0 {
-				fmt.Printf("%x,%x,%x\n", k, v, vv)
+				tx.ForEach(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
+					fmt.Printf("found:%x,%x\n", k, v)
+					return nil
+				})
+				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
 				panic("no-no")
 			}
 			return nil
