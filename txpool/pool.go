@@ -294,6 +294,9 @@ func (sc *SendersCache) mergeStateChanges(tx kv.Tx, stateChanges map[string]send
 	defer sc.lock.Unlock()
 	return sc.mergeStateChangesLocked(tx, stateChanges, unwindedTxs, minedTxs)
 }
+
+var EmptyAddr = [20]byte{}
+
 func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[string]senderInfo, unwindedTxs, minedTxs TxSlots) error {
 	for addr, v := range stateChanges { // merge state changes
 		id, ok, err := sc.id(addr, tx)
@@ -303,6 +306,9 @@ func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[strin
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
+			if bytes.Equal(EmptyAddr[:], []byte(addr)) {
+				panic(1)
+			}
 			sc.senderIDs[addr] = id
 		}
 		sc.senderInfo[id] = newSenderInfo(v.nonce, v.balance)
@@ -324,6 +330,9 @@ func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[strin
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
+			if bytes.Equal(EmptyAddr[:], unwindedTxs.senders.At(i)) {
+				panic(3)
+			}
 			sc.senderIDs[string(unwindedTxs.senders.At(i))] = id
 		}
 		if _, ok := sc.senderInfo[id]; !ok {
@@ -341,6 +350,9 @@ func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[strin
 		if !ok {
 			sc.senderID++
 			id = sc.senderID
+			if bytes.Equal(EmptyAddr[:], minedTxs.senders.At(i)) {
+				panic(2)
+			}
 			sc.senderIDs[string(minedTxs.senders.At(i))] = id
 		}
 		if _, ok := sc.senderInfo[id]; !ok {
@@ -618,7 +630,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 		if currentV != nil && bytes.Equal(currentV, encID) {
 			continue
 		}
-		fmt.Printf("put: %x\n", addr)
 		if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
 			return err
 		}
