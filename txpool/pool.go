@@ -555,7 +555,7 @@ var SenderCacheHashKey = []byte("sender_cache_block_hash")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
-func (sc *SendersCache) flush(tx kv.RwTx) error {
+func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	encID := make([]byte, 8)
@@ -578,6 +578,26 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 		}
 		encIDs = append(encIDs, encID...)
 	}
+
+	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. To change in future.
+	if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
+		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
+			return nil
+		}
+		if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.PooledSenderIDToAdress, id, nil); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.PooledSender, id, nil); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	sc.senderIDs = map[string]uint64{}
 
 	v := make([]byte, 8, 8+32)
@@ -1006,22 +1026,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		return err
 	}
 
-	counts := map[uint64]uint64{}
-	tx.ForEach(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
-		id := binary.BigEndian.Uint64(k)
-		count := p.txNonce2Tx.count(id)
-		_, ok := counts[count]
-		if !ok {
-			counts[count] = 0
-		}
-		counts[count]++
-		return nil
-	})
-	for i, j := range counts {
-		fmt.Printf("counts: %d,%d\n", i, j)
-	}
-
-	if err := senders.flush(tx); err != nil {
+	if err := senders.flush(tx, p.txNonce2Tx); err != nil {
 		return err
 	}
 
