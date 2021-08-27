@@ -561,6 +561,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 
 	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. We need more soft eviction policy.
 	if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
+		if _, ok := sc.senderIDs[string(addr)]; ok {
+			return nil
+		}
 		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
 			return nil
 		}
