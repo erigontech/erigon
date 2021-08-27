@@ -566,7 +566,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err != nil {
 			return err
 		}
-		if sc.commitID-binary.BigEndian.Uint64(k) < 2 {
+		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
 			break
 		}
 		for i := 0; i < len(v); i += 8 {
