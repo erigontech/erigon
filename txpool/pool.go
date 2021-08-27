@@ -1666,7 +1666,7 @@ func (p *TxPool) forceCheckState(ctx context.Context, db, coreDB kv.RoDB) error 
 					if remoteProgress != p.senders.blockHeight.Load() { // skip
 						return nil
 					}
-					v2, err := coreTx.GetOne(kv.PooledSender, k)
+					v2, err := coreTx.GetOne(kv.PlainState, k)
 					if err != nil {
 						return err
 					}
