@@ -637,25 +637,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 		encIDs = append(encIDs, encID...)
 	}
-	if ASSERT {
-		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			if err != nil {
-				return err
-			}
-			if len(vv) == 0 {
-				tx.ForEach(kv.PooledSenderIDToAdress, nil, func(k, vvvv []byte) error {
-					if bytes.HasPrefix(k, v[:7]) {
-						fmt.Printf("found:%x,%x\n", k, vvvv)
-					}
-					return nil
-				})
-				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
-				panic("no-no")
-			}
-			return nil
-		})
-	}
 
 	sc.senderIDs = map[string]uint64{}
 
