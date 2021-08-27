@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -314,6 +315,13 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 		if len(txs.txs) == 0 {
 			return nil
+		}
+		if ASSERT {
+			for i := 0; i < txs.senders.Len(); i++ {
+				if bytes.Equal(txs.senders.At(i), EmptyAddr[:]) {
+					panic("here")
+				}
+			}
 		}
 		return f.pool.OnNewTxs(ctx, f.coreDB, txs, f.senders)
 	default:
