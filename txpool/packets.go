@@ -194,8 +194,9 @@ func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txS
 			return 0, err
 		}
 		if ASSERT {
-			if bytes.Equal(txSlots.txs[i].idHash[:], EmptyAddr[:]) {
+			if bytes.Equal(txSlots.senders.At(i), EmptyAddr[:]) {
 				fmt.Printf("etmpy: %#v\n", txSlots.txs[i])
+				fmt.Printf("etmpy: %x\n", txSlots.senders)
 				panic("?????")
 			}
 		}
