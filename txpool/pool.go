@@ -556,52 +556,77 @@ var SenderCacheHashKey = []byte("sender_cache_block_hash")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
-func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
+func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithDiscardedTransactions map[uint64]struct{}) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	sc.commitID++
 
 	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. We need more soft eviction policy.
-
-	i := 0
-	if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
+	encID := make([]byte, 8)
+	for id := range sendersWithDiscardedTransactions {
+		binary.BigEndian.PutUint64(encID, id)
+		addr, err := tx.GetOne(kv.PooledSenderID, encID)
+		if err != nil {
+			return err
+		}
 		if _, ok := sc.senderIDs[string(addr)]; ok {
 			return nil
 		}
-		if _, ok := sc.senderInfo[binary.BigEndian.Uint64(id)]; ok {
+		if _, ok := sc.senderInfo[id]; ok {
 			return nil
 		}
-		if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
+		if byNonce.count(id) > 0 {
 			return nil
-		}
-		if ASSERT {
-			tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-				senderID := binary.BigEndian.Uint64(v[:8])
-				if senderID == binary.BigEndian.Uint64(id) {
-					panic("why?")
-				}
-				return nil
-			})
 		}
 		if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
 			return err
 		}
-		if err := tx.Delete(kv.PooledSenderIDToAdress, id, nil); err != nil {
+		if err := tx.Delete(kv.PooledSenderIDToAdress, encID, nil); err != nil {
 			return err
 		}
-		if err := tx.Delete(kv.PooledSender, id, nil); err != nil {
+		if err := tx.Delete(kv.PooledSender, encID, nil); err != nil {
 			return err
 		}
-
-		i++
-		return nil
-	}); err != nil {
-		return err
 	}
+	/*
+		i := 0
+		if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
+			if _, ok := sc.senderIDs[string(addr)]; ok {
+				return nil
+			}
+			if _, ok := sc.senderInfo[binary.BigEndian.Uint64(id)]; ok {
+				return nil
+			}
+			if byNonce.count(binary.BigEndian.Uint64(id)) > 0 {
+				return nil
+			}
+			if ASSERT {
+				tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+					senderID := binary.BigEndian.Uint64(v[:8])
+					if senderID == binary.BigEndian.Uint64(id) {
+						panic("why?")
+					}
+					return nil
+				})
+			}
+			if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.PooledSenderIDToAdress, id, nil); err != nil {
+				return err
+			}
+			if err := tx.Delete(kv.PooledSender, id, nil); err != nil {
+				return err
+			}
 
-	fmt.Printf("evicted: %d\n", i)
+			i++
+			return nil
+		}); err != nil {
+			return err
+		}
+		fmt.Printf("evicted: %d\n", i)
+	*/
 
-	encID := make([]byte, 8)
 	encIDs := make([]byte, 0, 1024)
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
@@ -1025,7 +1050,9 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	sendersWithDiscardedTransactions := map[uint64]struct{}{}
 	for i := 0; i < len(p.deletedTxs); i++ {
+		sendersWithDiscardedTransactions[p.deletedTxs[i].Tx.senderID] = struct{}{}
 		if err := tx.Delete(kv.PooledTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
 			return err
 		}
@@ -1075,7 +1102,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		return err
 	}
 
-	if err := senders.flush(tx, p.txNonce2Tx); err != nil {
+	if err := senders.flush(tx, p.txNonce2Tx, sendersWithDiscardedTransactions); err != nil {
 		return err
 	}
 
@@ -1677,7 +1704,7 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 
 	logEvery := time.NewTicker(timings.logEvery)
 	defer logEvery.Stop()
-	commitEvery := time.NewTicker(15 * time.Second)
+	commitEvery := time.NewTicker(5 * time.Second)
 	defer commitEvery.Stop()
 
 	syncToNewPeersEvery := time.NewTicker(timings.syncToNewPeersEvery)
