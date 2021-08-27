@@ -452,11 +452,13 @@ func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, cor
 		return err
 	}
 	lastCommitTime := time.Time{}
-	if err := lastCommitTime.UnmarshalBinary(lastCommitTimeV); err != nil {
-		return err
-	}
-	if time.Since(lastCommitTime) > 3*24*time.Hour {
-		dropLocalSendersCache = true
+	if len(lastCommitTimeV) > 0 {
+		if err := lastCommitTime.UnmarshalBinary(lastCommitTimeV); err != nil {
+			return err
+		}
+		if time.Since(lastCommitTime) > 3*24*time.Hour {
+			dropLocalSendersCache = true
+		}
 	}
 	if dropLocalSendersCache {
 		if err := tx.ClearBucket(kv.PooledSender); err != nil {
