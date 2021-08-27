@@ -664,13 +664,13 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		binary.BigEndian.PutUint64(encID, id)
 		binary.BigEndian.PutUint64(v, info.nonce)
 		v = append(v[:8], info.balance.Bytes()...)
-		currentV, err := tx.GetOne(kv.PooledSender, encID)
-		if err != nil {
-			return err
-		}
-		if currentV != nil && bytes.Equal(currentV, v) {
-			continue
-		}
+		//currentV, err := tx.GetOne(kv.PooledSender, encID)
+		//if err != nil {
+		//	return err
+		//}
+		//if currentV != nil && bytes.Equal(currentV, v) {
+		//	continue
+		//}
 		if err := tx.Put(kv.PooledSender, encID, v); err != nil {
 			return err
 		}
