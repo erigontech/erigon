@@ -319,6 +319,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if ASSERT {
 			for i := 0; i < txs.senders.Len(); i++ {
 				if bytes.Equal(txs.senders.At(i), EmptyAddr[:]) {
+					fmt.Printf("here: %s, %x\n", req.Id, req.Data)
 					panic("here")
 				}
 			}
