@@ -569,6 +569,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
 			break
 		}
+		fmt.Printf("del:%d\n", binary.BigEndian.Uint64(k))
 		for i := 0; i < len(v); i += 8 {
 			senderID := binary.BigEndian.Uint64(v[i : i+8])
 			if _, ok := sc.senderInfo[senderID]; ok {
@@ -584,7 +585,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			if _, ok := sc.senderIDs[string(addr)]; ok {
 				return nil
 			}
-			fmt.Printf("del:%d\n", senderID)
 			if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
 				return err
 			}
@@ -611,7 +611,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if currentV != nil && bytes.Equal(currentV, encID) {
 			continue
 		}
-		fmt.Printf("Put: %d\n", id)
+		//fmt.Printf("Put: %d\n", id)
 		if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
 			return err
 		}
