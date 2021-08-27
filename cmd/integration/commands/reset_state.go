@@ -81,7 +81,6 @@ func resetAllIssuance(db kv.RwDB, logger log.Logger, ctx context.Context) error 
 	return nil
 }
 
-
 func resetState(db kv.RwDB, logger log.Logger, ctx context.Context) error {
 	if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
 		return err
@@ -200,6 +199,9 @@ func resetIssuance(tx kv.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Issuance, 0); err != nil {
+		return err
+	}
+	if err := stages.SaveStagePruneProgress(tx, stages.Issuance, 0); err != nil {
 		return err
 	}
 
