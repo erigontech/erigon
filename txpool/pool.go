@@ -563,18 +563,21 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 
 	encID := make([]byte, 8)
 	encIDs := make([]byte, 0, 8*len(sendersWithoutTransactions))
-	// Eviction logic. store into db list of senders:
+	// Eviction logic. Store into db list of senders:
 	//      - which have discarded transactions at this commit
 	//      - but have no active transactions left
-	// after some time read this senders from DB and if they still have no transactions - evict them
+	// after some time read old records from DB and if such senders still have no transactions - evict them
 	for id := range sendersWithoutTransactions {
 		binary.BigEndian.PutUint64(encID, id)
 		encIDs = append(encIDs, encID...)
 		binary.BigEndian.PutUint64(encID, sc.commitID)
+	}
+	if len(encIDs) > 0 {
 		if err := tx.Append(kv.PoolStateEviction, encID, encIDs); err != nil {
 			return err
 		}
 	}
+
 	c, err := tx.Cursor(kv.PoolStateEviction)
 	if err != nil {
 		return err
