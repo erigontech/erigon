@@ -35,7 +35,7 @@ import (
 	"go.uber.org/atomic"
 )
 
-const ASSERT = false
+const ASSERT = true
 
 // Pool is interface for the transaction pool
 // This interface exists for the convinience of testing, and not yet because
@@ -790,7 +790,7 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 	}
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if err := onNewTxs(tx, senders, newTxs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.localsHistory, p.discardLocked); err != nil {
+	if err := onNewTxs(tx, senders, newTxs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
 		return err
 	}
 	notifyNewTxs := make(Hashes, 0, 32*len(newTxs.txs))
@@ -811,7 +811,7 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 	//log.Info("on new txs", "in", time.Since(t))
 	return nil
 }
-func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byNonce *ByNonce, byHash map[string]*metaTx, localsHistory *simplelru.LRU, discard func(*metaTx)) error {
+func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byNonce *ByNonce, byHash map[string]*metaTx, discard func(*metaTx)) error {
 	for i := range newTxs.txs {
 		if newTxs.txs[i].senderID == 0 {
 			return fmt.Errorf("senderID can't be zero")
@@ -969,10 +969,10 @@ func (p *TxPool) discardLocked(mt *metaTx) {
 	}
 }
 
-func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, senders *SendersCache) error {
+func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if err := senders.fromDB(ctx, tx, coreTx); err != nil {
+	if err := p.senders.fromDB(ctx, tx, coreTx); err != nil {
 		return err
 	}
 
@@ -1048,20 +1048,20 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, senders *
 			pendingBaseFee = binary.BigEndian.Uint64(v)
 		}
 	}
-	cacheMisses, err := senders.onNewTxs(tx, txs)
+	cacheMisses, err := p.senders.onNewTxs(tx, txs)
 	if err != nil {
 		return err
 	}
 	if len(cacheMisses) > 0 {
-		senders.printDebug("miss")
+		p.senders.printDebug("miss")
 		for i, j := range cacheMisses {
 			fmt.Printf("miss: %d,%x\n", i, j)
 		}
-		if err := senders.loadFromCore(coreTx, cacheMisses); err != nil {
+		if err := p.senders.loadFromCore(coreTx, cacheMisses); err != nil {
 			return err
 		}
 	}
-	if err := onNewTxs(tx, senders, txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.localsHistory, p.discardLocked); err != nil {
+	if err := onNewTxs(tx, p.senders, txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
@@ -1544,12 +1544,19 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 	//db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearBucket(kv.PooledSender) })
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return coreDB.View(ctx, func(coreTx kv.Tx) error {
-			return p.fromDB(ctx, tx, coreTx, senders)
+			return p.fromDB(ctx, tx, coreTx)
 		})
 	}); err != nil {
 		log.Error("restore from db", "err", err)
 	}
 	p.logStats(senders)
+	if ASSERT {
+		go func() {
+			if err := p.forceCheckState(ctx, db, coreDB); err != nil {
+				log.Error("restore from db", "err", err)
+			}
+		}()
+	}
 
 	logEvery := time.NewTicker(timings.logEvery)
 	defer logEvery.Stop()
@@ -1610,6 +1617,34 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 			}
 			remoteTxHashes = p.AppendAllHashes(remoteTxHashes[:0])
 			send.PropagatePooledTxsToPeersList(newPeers, remoteTxHashes)
+		}
+	}
+}
+
+func (p *TxPool) forceCheckState(ctx context.Context, db, coreDB kv.RoDB) error {
+	for {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			return coreDB.View(ctx, func(coreTx kv.Tx) error {
+				return tx.ForPrefix(kv.PooledSender, nil, func(k, v []byte) error {
+					stageProgress, err := coreTx.GetOne(kv.SyncStageProgress, []byte("Finish"))
+					if err != nil {
+						return err
+					}
+					if binary.BigEndian.Uint64(stageProgress) != p.senders.blockHeight.Load() { // skip
+						return nil
+					}
+					v2, err := coreTx.GetOne(kv.PooledSender, k)
+					if err != nil {
+						return err
+					}
+					if !bytes.Equal(v, v2) {
+						return fmt.Errorf("state check failed: key=%x, local value=%x, remote value=%x\n", k, v, v2)
+					}
+					return nil
+				})
+			})
+		}); err != nil {
+			return err
 		}
 	}
 }
