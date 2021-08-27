@@ -262,6 +262,8 @@ func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) err
 		}
 		diff[id] = *info
 	}
+	sc.lock.Lock()
+	defer sc.lock.Unlock()
 	for id := range diff { // merge state changes
 		a := diff[id]
 		sc.senderInfo[id] = &a
