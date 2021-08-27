@@ -595,6 +595,13 @@ func (sc *SendersCache) flush(tx kv.RwTx) error {
 	if err := tx.Put(kv.PoolInfo, SenderCacheIDKey, encID); err != nil {
 		return err
 	}
+	lastCommitTime, err := time.Now().MarshalBinary()
+	if err != nil {
+		return err
+	}
+	if err := tx.Put(kv.PoolInfo, SenderLastCommitTimeKey, lastCommitTime); err != nil {
+		return err
+	}
 
 	//TODO: flush and evict
 
