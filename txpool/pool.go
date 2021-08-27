@@ -1131,12 +1131,9 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 				return err
 			}
 			if len(vv) == 0 {
-				tx.ForEach(kv.PooledSenderIDToAdress, nil, func(kkk, vvvv []byte) error {
-					if bytes.HasPrefix(kkk, v[:6]) {
-						fmt.Printf("found:%x,%x\n", kkk, vvvv)
-					}
-					return nil
-				})
+				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+				last, lastAddr, _ := cc.Last()
+				fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
 				fmt.Printf("now: %d\n", p.senders.senderID)
 				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
 				panic("no-no")
