@@ -380,6 +380,9 @@ func (sc *SendersCache) ensureSenderIDOnNewTxs(tx kv.Tx, newTxs TxSlots) error {
 			continue
 		}
 		sc.senderID++
+		if bytes.Equal(EmptyAddr[:], newTxs.senders.At(i)) {
+			panic(8)
+		}
 		sc.senderIDs[string(newTxs.senders.At(i))] = sc.senderID
 	}
 	return nil
