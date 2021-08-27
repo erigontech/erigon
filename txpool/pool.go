@@ -618,7 +618,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 		if currentV != nil && bytes.Equal(currentV, encID) {
 			continue
 		}
-
+		fmt.Printf("put: %x\n", addr)
 		if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
 			return err
 		}
