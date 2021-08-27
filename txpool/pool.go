@@ -600,7 +600,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return err
 		}
 	}
-	fmt.Printf("evicted:%d\n", evicted)
+	a, _ := c.Count()
+
+	fmt.Printf("evicted:%d,%d\n", evicted, a)
 
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
