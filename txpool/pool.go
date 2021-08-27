@@ -442,6 +442,29 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) er
 }
 func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, missedTo uint64) error {
 	ok := true
+
+	dropLocalSendersCache := false
+	if missedTo > 0 && missedTo-sc.blockHeight.Load() > 1024 {
+		dropLocalSendersCache = true
+	}
+	lastCommitTimeV, err := tx.GetOne(kv.PoolInfo, SenderLastCommitTimeKey)
+	if err != nil {
+		return err
+	}
+	lastCommitTime := time.Time{}
+	if err := lastCommitTime.UnmarshalBinary(lastCommitTimeV); err != nil {
+		return err
+	}
+	if time.Since(lastCommitTime) > 3*24*time.Hour {
+		dropLocalSendersCache = true
+	}
+	if dropLocalSendersCache {
+		if err := tx.ClearBucket(kv.PooledSender); err != nil {
+			return err
+		}
+		sc.senderInfo = map[uint64]*senderInfo{}
+	}
+
 	if coreTx != nil {
 		var err error
 		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
@@ -513,6 +536,7 @@ func changesets(ctx context.Context, from uint64, coreTx kv.Tx) (map[string]send
 	return diff, nil
 }
 
+var SenderLastCommitTimeKey = []byte("sender_last_commit_time")
 var SenderCacheIDKey = []byte("sender_cache_id")
 var SenderCacheHeightKey = []byte("sender_cache_block_height")
 var SenderCacheHashKey = []byte("sender_cache_block_hash")
@@ -985,26 +1009,13 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 		return err
 	}
 
-	c, err := tx.Cursor(kv.PooledTransaction)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
 	txs := TxSlots{}
-	total, err := c.Count()
-	if err != nil {
-		return err
-	}
-	txs.Growth(int(total))
-
 	parseCtx := NewTxParseContext()
 	parseCtx.WithSender(false)
 	i := 0
 	hashID := [32]byte{}
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
+	if err := tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+		txs.Growth(i + 1)
 		txs.txs[i] = &TxSlot{}
 
 		_, err := parseCtx.ParseTransaction(v[8+8:], 0, txs.txs[i], nil)
@@ -1027,6 +1038,9 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 		_, isLocalTx := p.localsHistory.Get(hashID)
 		txs.isLocal[i] = isLocalTx
 		i++
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	var protocolBaseFee, pendingBaseFee uint64
@@ -1621,16 +1635,24 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 	}
 }
 
+func coreProgress(coreTx kv.Tx) (uint64, error) {
+	stageProgress, err := coreTx.GetOne(kv.SyncStageProgress, []byte("Finish"))
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(stageProgress), err
+}
+
 func (p *TxPool) forceCheckState(ctx context.Context, db, coreDB kv.RoDB) error {
 	for {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			return coreDB.View(ctx, func(coreTx kv.Tx) error {
 				return tx.ForPrefix(kv.PooledSender, nil, func(k, v []byte) error {
-					stageProgress, err := coreTx.GetOne(kv.SyncStageProgress, []byte("Finish"))
+					remoteProgress, err := coreProgress(coreTx)
 					if err != nil {
 						return err
 					}
-					if binary.BigEndian.Uint64(stageProgress) != p.senders.blockHeight.Load() { // skip
+					if remoteProgress != p.senders.blockHeight.Load() { // skip
 						return nil
 					}
 					v2, err := coreTx.GetOne(kv.PooledSender, k)

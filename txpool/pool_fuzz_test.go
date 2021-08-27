@@ -522,7 +522,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		s2 := NewSendersCache()
 		p2, err := New(ch, s2, nil)
 		assert.NoError(err)
-		err = p2.fromDB(context.Background(), tx, nil, s2)
+		err = p2.fromDB(context.Background(), tx, nil)
 		require.NoError(t, err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.Tx.rlp)
