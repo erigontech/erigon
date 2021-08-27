@@ -514,6 +514,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
+
 		err = pool.flush(tx, sendersCache)
 		require.NoError(t, err)
 		check(p2pReceived, TxSlots{}, "after_flush")

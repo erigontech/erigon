@@ -562,19 +562,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 
 	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. We need more soft eviction policy.
 
-	if ASSERT {
-		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			if err != nil {
-				return err
-			}
-			if len(vv) == 0 {
-				panic("no-no")
-			}
-			return nil
-		})
-	}
-
 	i := 0
 	if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
 		if _, ok := sc.senderIDs[string(addr)]; ok {
@@ -605,19 +592,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 			return err
 		}
 
-		if ASSERT {
-			tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-				vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-				if err != nil {
-					return err
-				}
-				if len(vv) == 0 {
-					fmt.Printf("no: %x,%x\n", id, addr)
-					panic("no-no")
-				}
-				return nil
-			})
-		}
 		i++
 		return nil
 	}); err != nil {
@@ -644,6 +618,18 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 			return err
 		}
 		encIDs = append(encIDs, encID...)
+	}
+	if ASSERT {
+		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			if err != nil {
+				return err
+			}
+			if len(vv) == 0 {
+				panic("no-no")
+			}
+			return nil
+		})
 	}
 
 	sc.senderIDs = map[string]uint64{}
