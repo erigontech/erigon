@@ -561,6 +561,20 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce) error {
 	defer sc.lock.Unlock()
 
 	//TODO: it's very naive eviction of all senders without transactions - and with O(n) complexity. We need more soft eviction policy.
+
+	if ASSERT {
+		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			if err != nil {
+				return err
+			}
+			if len(vv) == 0 {
+				panic("no-no")
+			}
+			return nil
+		})
+	}
+
 	i := 0
 	if err := tx.ForEach(kv.PooledSenderID, nil, func(addr, id []byte) error {
 		if _, ok := sc.senderIDs[string(addr)]; ok {
