@@ -1120,19 +1120,6 @@ func (p *TxPool) discardLocked(mt *metaTx) {
 func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if err := p.senders.fromDB(ctx, tx, coreTx); err != nil {
-		return err
-	}
-
-	if err := tx.ForEach(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
-		hashID := [32]byte{}
-		copy(hashID[:], v)
-		p.localsHistory.Add(hashID, struct{}{})
-		return nil
-	}); err != nil {
-		return err
-	}
-
 	if ASSERT {
 		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
 			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
@@ -1151,6 +1138,18 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 			}
 			return nil
 		})
+	}
+	if err := p.senders.fromDB(ctx, tx, coreTx); err != nil {
+		return err
+	}
+
+	if err := tx.ForEach(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
+		hashID := [32]byte{}
+		copy(hashID[:], v)
+		p.localsHistory.Add(hashID, struct{}{})
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	txs := TxSlots{}
