@@ -1,8 +1,0 @@
-go test fuzz v1
-[]byte(",,\xff\xb5\xff\xff\xb1Y")
-[]byte(",")
-[]byte("\x01\x05")
-[]byte(",")
-[]byte(",,\xff")
-byte('\x04')
-byte('\x02')
