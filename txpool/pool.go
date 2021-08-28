@@ -691,6 +691,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
 	encoded, err := coreTx.GetOne(kv.PlainState, addr)
 	if err != nil {
+		panic(err)
 		return nil, err
 	}
 	if len(encoded) == 0 {
@@ -699,6 +700,7 @@ func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
 	}
 	nonce, balance, err := DecodeSender(encoded)
 	if err != nil {
+		panic(err)
 		return nil, err
 	}
 	return newSenderInfo(nonce, balance), nil
