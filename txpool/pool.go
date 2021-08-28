@@ -542,26 +542,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return evicted, err
 		}
 	}
-	if ASSERT {
-		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			if err != nil {
-				return err
-			}
-			if len(vv) == 0 {
-				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
-				last, lastAddr, _ := cc.Last()
-				if len(last) > 0 {
-					fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
-				}
-				fmt.Printf("now: %d\n", sc.senderID)
-				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
-				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
-				panic("no-no")
-			}
-			return nil
-		})
-	}
 
 	c, err := tx.RwCursor(kv.PoolStateEviction)
 	if err != nil {
@@ -607,28 +587,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return evicted, err
 		}
 	}
-	if ASSERT {
-		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			if err != nil {
-				return err
-			}
-			if len(vv) == 0 {
-				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
-				last, lastAddr, _ := cc.Last()
-				if len(last) > 0 {
-					fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
-				}
-				fmt.Printf("now: %d\n", sc.senderID)
-				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
-				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
-				fmt.Printf("justDeleted: %d\n", justDeleted)
-				sc.printDebug("senders")
-				panic("no-no")
-			}
-			return nil
-		})
-	}
 
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
@@ -646,25 +604,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
 			return evicted, err
 		}
-	}
-
-	if ASSERT {
-		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			if err != nil {
-				return err
-			}
-			if len(vv) == 0 {
-				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
-				last, lastAddr, _ := cc.Last()
-				fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
-				fmt.Printf("now: %d\n", sc.senderID)
-				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
-				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
-				panic("no-no")
-			}
-			return nil
-		})
 	}
 
 	v := make([]byte, 8, 8+32)
@@ -1059,24 +998,6 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	if ASSERT {
-		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			if err != nil {
-				return err
-			}
-			if len(vv) == 0 {
-				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
-				last, lastAddr, _ := cc.Last()
-				fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
-				fmt.Printf("now: %d\n", p.senders.senderID)
-				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
-				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
-				panic("no-no")
-			}
-			return nil
-		})
-	}
 
 	sendersWithoutTransactionsUnique := map[uint64]struct{}{}
 	sendersWithoutTransactions := []uint64{}
@@ -1104,6 +1025,26 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 		if err := tx.Append(kv.RecentLocalTransaction, encID, txHashes[i].([]byte)); err != nil {
 			return evicted, err
 		}
+	}
+
+	if ASSERT {
+		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			if err != nil {
+				return err
+			}
+			if len(vv) == 0 {
+				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+				last, lastAddr, _ := cc.Last()
+				if len(last) > 0 {
+					fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
+				}
+				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
+				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
+				panic("no-no")
+			}
+			return nil
+		})
 	}
 
 	v := make([]byte, 0, 1024)
