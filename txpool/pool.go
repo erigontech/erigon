@@ -1031,10 +1031,26 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 	log.Info("on new block", "in", time.Since(t))
 	return nil
 }
-func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err error) {
+func (p *TxPool) flush(db kv.RwDB) (evicted, written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-
+	//it's important that write db tx is done inside lock, to make last writes visible for all read operations
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		evicted, err = p.flushLocked(tx)
+		if err != nil {
+			return err
+		}
+		written, _, err = tx.(*mdbx.MdbxTx).SpaceDirty()
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return 0, 0, err
+	}
+	return evicted, written, nil
+}
+func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 	sendersWithoutTransactionsUnique := map[uint64]struct{}{}
 	sendersWithoutTransactions := []uint64{}
 	for i := 0; i < len(p.deletedTxs); i++ {
@@ -1165,7 +1181,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 		return evicted, err
 	}
 
-	evicted, err = senders.flush(tx, p.txNonce2Tx, sendersWithoutTransactions, p.cfg.evictSendersAfterRounds)
+	evicted, err = p.senders.flush(tx, p.txNonce2Tx, sendersWithoutTransactions, p.cfg.evictSendersAfterRounds)
 	if err != nil {
 		return evicted, err
 	}
@@ -1810,22 +1826,12 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 		case <-commitEvery.C:
 			if db != nil {
 				t := time.Now()
-				if err := db.Update(ctx, func(tx kv.RwTx) error {
-					evicted, err := p.flush(tx, senders)
-					if err != nil {
-						return err
-					}
-					sd, _, err := tx.(*mdbx.MdbxTx).SpaceDirty()
-					if err != nil {
-						return err
-					}
-					log.Info("flush", "in", time.Since(t), "write_kb", sd/1024, "evicted", evicted)
-					t = time.Now()
-					return nil
-				}); err != nil {
+				evicted, written, err := p.flush(db)
+				if err != nil {
 					log.Error("flush is local history", "err", err)
+					continue
 				}
-				log.Info("commit", "in", time.Since(t))
+				log.Info("flush", "written_kb", written/1024, "evicted", evicted, "in", time.Since(t))
 			}
 		case h := <-newTxs:
 			// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
