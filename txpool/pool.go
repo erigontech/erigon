@@ -603,6 +603,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
 				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
 				fmt.Printf("justDeleted: %d\n", justDeleted)
+				sc.printDebug("senders")
 				panic("no-no")
 			}
 			return nil
