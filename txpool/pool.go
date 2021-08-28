@@ -588,6 +588,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 	}
 
+	justInserted := []uint64{}
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
 		currentV, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
@@ -604,6 +605,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
 			return evicted, err
 		}
+		justInserted = append(justInserted, id)
 	}
 
 	v := make([]byte, 8, 8+32)
@@ -628,6 +630,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 				fmt.Printf("now: %d\n", sc.senderID)
 				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
 				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
+				fmt.Printf("justDeleted:%d, justInserted:%d\n", justDeleted, justInserted)
 				panic("no-no")
 			}
 			return nil
