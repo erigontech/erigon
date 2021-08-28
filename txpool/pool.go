@@ -694,8 +694,8 @@ func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
 		return nil, err
 	}
 	if len(encoded) == 0 {
-		return nil, nil
-		//return newSenderInfo(0, *uint256.NewInt(0)), nil
+		//return nil, nil
+		return newSenderInfo(0, *uint256.NewInt(0)), nil
 	}
 	nonce, balance, err := DecodeSender(encoded)
 	if err != nil {
