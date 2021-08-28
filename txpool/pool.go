@@ -625,8 +625,18 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 				return err
 			}
 			if len(vv) == 0 {
+				parseCtx := NewTxParseContext()
 				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
 				last, lastAddr, _ := cc.Last()
+				slots := TxSlots{}
+				slots.Growth(1)
+				slots.txs[0] = &TxSlot{}
+				_, err := parseCtx.ParseTransaction(v[8+8:], 0, slots.txs[0], slots.senders.At(0))
+				if err != nil {
+					log.Error("er", "er", err)
+				}
+				fmt.Printf("sender:%x, txHash: %x\n", slots.senders.At(0), slots.txs[0].idHash)
+
 				fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
 				fmt.Printf("now: %d\n", sc.senderID)
 				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
@@ -1081,6 +1091,47 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 			return evicted, err
 		}
 		metaTx.Tx.rlp = nil
+	}
+
+	if ASSERT {
+		txs := TxSlots{}
+		parseCtx := NewTxParseContext()
+		parseCtx.WithSender(false)
+		i := 0
+		hashID := [32]byte{}
+		if err := tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			txs.Growth(i + 1)
+			txs.txs[i] = &TxSlot{}
+
+			_, err := parseCtx.ParseTransaction(v[8+8:], 0, txs.txs[i], nil)
+			if err != nil {
+				return fmt.Errorf("err: %w, rlp: %x\n", err, v[8+8:])
+			}
+			txs.txs[i].rlp = nil // means that we don't need store it in db anymore
+			txs.txs[i].senderID = binary.BigEndian.Uint64(v)
+
+			senderAddr, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			if err != nil {
+				return err
+			}
+			if len(senderAddr) == 0 {
+				panic("must not happen")
+			}
+			copy(txs.senders.At(i), senderAddr)
+			//bkock num = binary.BigEndian.Uint64(v[8:])
+			copy(hashID[:], k)
+			_, isLocalTx := p.localsHistory.Get(hashID)
+			txs.isLocal[i] = isLocalTx
+			i++
+
+			if !p.txNonce2Tx.has(newMetaTx(txs.txs[i], txs.isLocal[i])) {
+				panic("aaaaaa")
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+
 	}
 
 	binary.BigEndian.PutUint64(encID, p.protocolBaseFee.Load())
