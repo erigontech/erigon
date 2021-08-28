@@ -1663,7 +1663,7 @@ func (p *WorstQueue) Pop() interface{} {
 //      - all local pooled byHash to random peers periodically
 // promote/demote transactions
 // reorgs
-func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, cfg Config) {
+func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send) {
 	//db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearBucket(kv.PooledSender) })
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return coreDB.View(ctx, func(coreTx kv.Tx) error {
@@ -1683,12 +1683,12 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 		}()
 	}
 
-	logEvery := time.NewTicker(cfg.logEvery)
+	logEvery := time.NewTicker(p.cfg.logEvery)
 	defer logEvery.Stop()
-	commitEvery := time.NewTicker(cfg.commitEvery)
+	commitEvery := time.NewTicker(p.cfg.commitEvery)
 	defer commitEvery.Stop()
 
-	syncToNewPeersEvery := time.NewTicker(cfg.syncToNewPeersEvery)
+	syncToNewPeersEvery := time.NewTicker(p.cfg.syncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
 
 	localTxHashes := make([]byte, 0, 128)
