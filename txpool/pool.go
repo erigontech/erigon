@@ -539,7 +539,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	}
 	if len(encIDs) > 0 {
 		if err := tx.Append(kv.PoolStateEviction, encID, encIDs); err != nil {
-			return err
+			return evicted, err
 		}
 	}
 
