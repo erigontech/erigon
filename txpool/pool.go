@@ -585,9 +585,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return evicted, err
 		}
 	}
-	a, _ := c.Count()
-
-	fmt.Printf("evicted:%d,%d\n", evicted, a)
 
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
@@ -661,9 +658,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		return evicted, err
 	}
 
-	//TODO: flush and evict
-	fmt.Printf("senders flush finish\n")
-
 	return evicted, nil
 }
 
@@ -704,6 +698,7 @@ type TxPool struct {
 	deletedTxs             []*metaTx
 	senders                *SendersCache
 	txNonce2Tx             *ByNonce // senderID => (sorted map of tx nonce => *metaTx)
+	cfg                    Config
 }
 
 type ByNonce struct {
@@ -754,7 +749,7 @@ func (b *ByNonce) replaceOrInsert(mt *metaTx) *metaTx {
 	return nil
 }
 
-func New(newTxs chan Hashes, senders *SendersCache, db kv.RwDB) (*TxPool, error) {
+func New(newTxs chan Hashes, senders *SendersCache, db kv.RwDB, cfg Config) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU(1024, nil)
 	if err != nil {
 		return nil, err
@@ -771,6 +766,7 @@ func New(newTxs chan Hashes, senders *SendersCache, db kv.RwDB) (*TxPool, error)
 		newTxs:                 newTxs,
 		senders:                senders,
 		db:                     db,
+		cfg:                    cfg,
 		senderID:               1,
 	}, nil
 }
@@ -1667,7 +1663,7 @@ func (p *WorstQueue) Pop() interface{} {
 //      - all local pooled byHash to random peers periodically
 // promote/demote transactions
 // reorgs
-func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, timings Timings) {
+func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, senders *SendersCache, newTxs chan Hashes, send *Send, cfg Config) {
 	//db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearBucket(kv.PooledSender) })
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return coreDB.View(ctx, func(coreTx kv.Tx) error {
@@ -1687,12 +1683,12 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 		}()
 	}
 
-	logEvery := time.NewTicker(timings.logEvery)
+	logEvery := time.NewTicker(cfg.logEvery)
 	defer logEvery.Stop()
-	commitEvery := time.NewTicker(2 * time.Second)
+	commitEvery := time.NewTicker(cfg.commitEvery)
 	defer commitEvery.Stop()
 
-	syncToNewPeersEvery := time.NewTicker(timings.syncToNewPeersEvery)
+	syncToNewPeersEvery := time.NewTicker(cfg.syncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
 
 	localTxHashes := make([]byte, 0, 128)

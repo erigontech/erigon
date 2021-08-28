@@ -52,14 +52,18 @@ type Fetch struct {
 	pooledTxsParseCtx    *TxParseContext
 }
 
-type Timings struct {
-	syncToNewPeersEvery time.Duration
-	logEvery            time.Duration
+type Config struct {
+	syncToNewPeersEvery     time.Duration
+	commitEvery             time.Duration
+	logEvery                time.Duration
+	evictSendersAfterRounds int
 }
 
-var DefaultTimings = Timings{
-	syncToNewPeersEvery: 2 * time.Minute,
-	logEvery:            30 * time.Second,
+var DefaultConfig = Config{
+	syncToNewPeersEvery:     2 * time.Minute,
+	commitEvery:             2 * time.Second,
+	logEvery:                30 * time.Second,
+	evictSendersAfterRounds: 2,
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
