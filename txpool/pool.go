@@ -941,7 +941,7 @@ func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPee
 func (p *TxPool) Started() bool                { return p.protocolBaseFee.Load() > 0 }
 
 func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
-	defer func(t time.Time) { fmt.Printf("pool.go:944: %s\n", time.Since(t)) }(time.Now())
+	t := time.Now()
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -986,7 +986,7 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 		}
 	}
 
-	//log.Info("on new txs", "in", time.Since(t))
+	log.Info("on new txs", "in", time.Since(t))
 	return nil
 }
 func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byNonce *ByNonce, byHash map[string]*metaTx, discard func(*metaTx)) error {
