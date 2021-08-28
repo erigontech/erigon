@@ -604,8 +604,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 	}
 
-	sc.senderIDs = map[string]uint64{}
-
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
 		binary.BigEndian.PutUint64(encID, id)
@@ -615,7 +613,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return evicted, err
 		}
 	}
-	sc.senderInfo = map[uint64]*senderInfo{}
 	if ASSERT {
 		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
 			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
@@ -658,6 +655,8 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		return evicted, err
 	}
 
+	sc.senderIDs = map[string]uint64{}
+	sc.senderInfo = map[uint64]*senderInfo{}
 	return evicted, nil
 }
 
@@ -1013,7 +1012,6 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 	sort.Slice(sendersWithoutTransactions, func(i, j int) bool {
 		return sendersWithoutTransactions[i] < sendersWithoutTransactions[j]
 	})
-	p.deletedTxs = p.deletedTxs[:0]
 
 	txHashes := p.localsHistory.Keys()
 	encID := make([]byte, 8)
@@ -1072,6 +1070,11 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 	if err != nil {
 		return evicted, err
 	}
+
+	// clean - in-memory data structure as later as possible - because if during this Tx will happen error,
+	// DB will stay consitant but some in-memory structures may be alread cleaned, and retry will not work
+	// failed write transaction must not create side-effects
+	p.deletedTxs = p.deletedTxs[:0]
 
 	return evicted, nil
 }
