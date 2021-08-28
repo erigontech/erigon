@@ -224,6 +224,13 @@ func (sc *SendersCache) onNewTxs(tx kv.Tx, newTxs TxSlots) (cacheMisses map[uint
 	if err != nil {
 		return nil, err
 	}
+	if ASSERT {
+		if len(cacheMisses) > 0 {
+			for i, j := range cacheMisses {
+				fmt.Printf("cache misses: %d,%x\n", i, j)
+			}
+		}
+	}
 	return cacheMisses, nil
 }
 func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) error {
@@ -232,6 +239,11 @@ func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) err
 		info, err := loadSender(coreTx, []byte(toLoad[id]))
 		if err != nil {
 			return err
+		}
+		if info == nil {
+			if ASSERT {
+				fmt.Printf("core returned nil: %d,%x\n", id, toLoad[id])
+			}
 		}
 		diff[id] = info
 	}
@@ -1135,15 +1147,6 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 			}
 			txs.txs[i].rlp = nil // means that we don't need store it in db anymore
 			txs.txs[i].senderID = binary.BigEndian.Uint64(v)
-
-			//senderAddr, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			//if err != nil {
-			//	return err
-			//}
-			//if len(senderAddr) == 0 {
-			//	panic("must not happen")
-			//}
-			//copy(txs.senders.At(i), senderAddr)
 			//bkock num = binary.BigEndian.Uint64(v[8:])
 			copy(hashID[:], k)
 			_, isLocalTx := p.localsHistory.Get(hashID)
