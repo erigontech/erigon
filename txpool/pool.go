@@ -220,9 +220,11 @@ func (sc *SendersCache) onNewTxs(tx kv.Tx, newTxs TxSlots) (cacheMisses map[uint
 	if err != nil {
 		return nil, err
 	}
-	if len(cacheMisses) > 0 {
-		for i, j := range cacheMisses {
-			fmt.Printf("cache misses: %d,%x\n", i, j)
+	if ASSERT {
+		if len(cacheMisses) > 0 {
+			for i, j := range cacheMisses {
+				fmt.Printf("cache misses: %d,%x\n", i, j)
+			}
 		}
 	}
 	return cacheMisses, nil
@@ -1449,6 +1451,9 @@ func unsafeAddToPendingPool(byNonce *ByNonce, newTxs TxSlots, pending, baseFee, 
 }
 
 func onSenderChange(senderID uint64, sender *senderInfo, byNonce *ByNonce, protocolBaseFee, pendingBaseFee uint64) {
+	if ASSERT && sender == nil {
+		fmt.Printf("nil sender info: %d\n", senderID)
+	}
 	noGapsNonce := sender.nonce + 1
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint64(math.MaxUint64)
