@@ -1110,14 +1110,14 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 			txs.txs[i].rlp = nil // means that we don't need store it in db anymore
 			txs.txs[i].senderID = binary.BigEndian.Uint64(v)
 
-			senderAddr, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
-			if err != nil {
-				return err
-			}
-			if len(senderAddr) == 0 {
-				panic("must not happen")
-			}
-			copy(txs.senders.At(i), senderAddr)
+			//senderAddr, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			//if err != nil {
+			//	return err
+			//}
+			//if len(senderAddr) == 0 {
+			//	panic("must not happen")
+			//}
+			//copy(txs.senders.At(i), senderAddr)
 			//bkock num = binary.BigEndian.Uint64(v[8:])
 			copy(hashID[:], k)
 			_, isLocalTx := p.localsHistory.Get(hashID)
