@@ -607,7 +607,12 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return err
 		}
 	}
-	fmt.Printf("last sender id:%d\n", sc.senderID)
+
+	{
+		cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+		last, _, _ := cc.Last()
+		fmt.Printf("last sender id:%d,%d\n", sc.senderID, binary.BigEndian.Uint64(last))
+	}
 	sc.senderIDs = map[string]uint64{}
 
 	v := make([]byte, 8, 8+32)
