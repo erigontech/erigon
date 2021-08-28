@@ -630,7 +630,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 		justInserted = append(justInserted, id)
 	}
-
+	sort.Slice(justInserted, func(i, j int) bool { return justInserted[i] < justInserted[j] })
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
 		binary.BigEndian.PutUint64(encID, id)
