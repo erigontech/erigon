@@ -958,7 +958,6 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 		if err := coreDB.View(ctx, func(tx kv.Tx) error { return senders.loadFromCore(tx, cacheMisses) }); err != nil {
 			return err
 		}
-		fmt.Printf("misses:%d\n", len(cacheMisses))
 	}
 	if err := newTxs.Valid(); err != nil {
 		return err
