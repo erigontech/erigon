@@ -67,6 +67,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 
+		log.Info("TxPool started", "db", path.Join(datadir, "txpool"))
 		txPoolDB, err := mdbx.NewMDBX(log.New()).Path(path.Join(datadir, "txpool")).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).Open()
 		if err != nil {
 			return err
