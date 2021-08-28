@@ -554,6 +554,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 		fmt.Printf("del:%d,%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID, evicted)
 		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
+			fmt.Printf("del break:%d,%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID, evicted)
 			break
 		}
 		for i := 0; i < len(v); i += 8 {
@@ -668,6 +669,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	}
 
 	//TODO: flush and evict
+	fmt.Printf("senders flush finish\n")
 
 	return nil
 }
@@ -1078,6 +1080,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	}
 
 	if err := senders.flush(tx, p.txNonce2Tx, sendersWithoutTransactions); err != nil {
+		panic(err)
 		return err
 	}
 
