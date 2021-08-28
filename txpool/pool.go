@@ -772,6 +772,9 @@ func (b *ByNonce) delete(mt *metaTx) {
 	}
 }
 func (b *ByNonce) replaceOrInsert(mt *metaTx) *metaTx {
+	if ASSERT && (mt == nil || mt.Tx == nil || mt.Tx.senderID == 0) {
+		panic("must never happen")
+	}
 	it := b.tree.ReplaceOrInsert(&sortByNonce{mt})
 	if it != nil {
 		return it.(*sortByNonce).metaTx
