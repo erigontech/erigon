@@ -594,7 +594,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			if len(vv) == 0 {
 				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
 				last, lastAddr, _ := cc.Last()
-				fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
+				if len(last) > 0 {
+					fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
+				}
 				fmt.Printf("now: %d\n", sc.senderID)
 				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
 				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
