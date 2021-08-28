@@ -1036,6 +1036,11 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		if metaTx.Tx.rlp == nil {
 			continue
 		}
+		if ASSERT {
+			if p.txNonce2Tx.count(metaTx.Tx.senderID) == 0 {
+				panic("here i am")
+			}
+		}
 		v = ensureEnoughSize(v, 8+8+len(metaTx.Tx.rlp))
 		binary.BigEndian.PutUint64(v, metaTx.Tx.senderID)
 		binary.BigEndian.PutUint64(v[8:], 0) // block num - timestamp
