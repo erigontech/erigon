@@ -941,6 +941,7 @@ func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPee
 func (p *TxPool) Started() bool                { return p.protocolBaseFee.Load() > 0 }
 
 func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
+	defer func(t time.Time) { fmt.Printf("pool.go:944: %s\n", time.Since(t)) }(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -957,6 +958,7 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 		if err := coreDB.View(ctx, func(tx kv.Tx) error { return senders.loadFromCore(tx, cacheMisses) }); err != nil {
 			return err
 		}
+		fmt.Printf("misses:%d\n", len(cacheMisses))
 	}
 	if err := newTxs.Valid(); err != nil {
 		return err
