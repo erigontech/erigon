@@ -561,17 +561,17 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		for i := 0; i < len(v); i += 8 {
 			senderID := binary.BigEndian.Uint64(v[i : i+8])
 			if _, ok := sc.senderInfo[senderID]; ok {
-				return nil
+				break
 			}
 			if byNonce.count(senderID) > 0 {
-				return nil
+				break
 			}
 			addr, err := tx.GetOne(kv.PooledSenderID, encID)
 			if err != nil {
 				return err
 			}
 			if _, ok := sc.senderIDs[string(addr)]; ok {
-				return nil
+				break
 			}
 			if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
 				return err
