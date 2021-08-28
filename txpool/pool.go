@@ -1782,7 +1782,7 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 	if ASSERT {
 		go func() {
 			if err := p.forceCheckState(ctx, db, coreDB); err != nil {
-				log.Error("restore from db", "err", err)
+				log.Error("forceCheckState", "err", err)
 			}
 		}()
 	}
@@ -1865,6 +1865,12 @@ func (p *TxPool) forceCheckState(ctx context.Context, db, coreDB kv.RoDB) error 
 					v2, err := coreTx.GetOne(kv.PlainState, k)
 					if err != nil {
 						return err
+					}
+					if v2 == nil {
+						// for now skip this case because we do create
+						// account with 0 nonce and 0 balance for unknown senders (because
+						// they may become known in near future)
+						return nil
 					}
 					if !bytes.Equal(v, v2) {
 						return fmt.Errorf("state check failed: key=%x, local value=%x, remote value=%x\n", k, v, v2)
