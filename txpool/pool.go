@@ -1094,6 +1094,24 @@ func (p *TxPool) discardLocked(mt *metaTx) {
 func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	if ASSERT {
+		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			if err != nil {
+				return err
+			}
+			if len(vv) == 0 {
+				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+				last, lastAddr, _ := cc.Last()
+				fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
+				fmt.Printf("now: %d\n", p.senders.senderID)
+				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
+				panic("no-no")
+			}
+			return nil
+		})
+	}
+
 	if err := p.senders.fromDB(ctx, tx, coreTx); err != nil {
 		return err
 	}
