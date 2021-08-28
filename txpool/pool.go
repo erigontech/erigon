@@ -47,9 +47,9 @@ type Config struct {
 
 var DefaultConfig = Config{
 	syncToNewPeersEvery:     2 * time.Minute,
-	commitEvery:             2 * time.Second,
+	commitEvery:             15 * time.Second,
 	logEvery:                30 * time.Second,
-	evictSendersAfterRounds: 2,
+	evictSendersAfterRounds: 10,
 }
 
 // Pool is interface for the transaction pool
