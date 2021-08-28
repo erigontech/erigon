@@ -554,7 +554,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 		fmt.Printf("del:%d,%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID, evicted)
 		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
-			fmt.Printf("del break:%d,%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID, evicted)
+			fmt.Printf("del break\n")
 			break
 		}
 		for i := 0; i < len(v); i += 8 {
