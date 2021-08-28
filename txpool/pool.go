@@ -521,7 +521,7 @@ var SenderCacheHashKey = []byte("sender_cache_block_hash")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
-func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransactions []uint64) error {
+func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransactions []uint64) (evicted uint64, err error) {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	sc.commitID++
@@ -545,17 +545,14 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 
 	c, err := tx.RwCursor(kv.PoolStateEviction)
 	if err != nil {
-		return err
+		return evicted, err
 	}
 	defer c.Close()
-	evicted := 0
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
-			return err
+			return evicted, err
 		}
-		fmt.Printf("del:%d,%d,%d\n", binary.BigEndian.Uint64(k), sc.commitID, evicted)
 		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
-			fmt.Printf("del break\n")
 			break
 		}
 		for i := 0; i < len(v); i += 8 {
@@ -568,24 +565,24 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			}
 			addr, err := tx.GetOne(kv.PooledSenderID, encID)
 			if err != nil {
-				return err
+				return evicted, err
 			}
 			if _, ok := sc.senderIDs[string(addr)]; ok {
 				break
 			}
 			if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
-				return err
+				return evicted, err
 			}
 			if err := tx.Delete(kv.PooledSenderIDToAdress, encID, nil); err != nil {
-				return err
+				return evicted, err
 			}
 			if err := tx.Delete(kv.PooledSender, encID, nil); err != nil {
-				return err
+				return evicted, err
 			}
 			evicted++
 		}
 		if err := c.DeleteCurrent(); err != nil {
-			return err
+			return evicted, err
 		}
 	}
 	a, _ := c.Count()
@@ -596,29 +593,20 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		binary.BigEndian.PutUint64(encID, id)
 		currentV, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
 		if err != nil {
-			return err
+			return evicted, err
 		}
 		if currentV != nil && bytes.Equal(currentV, encID) {
 			continue
 		}
 		//fmt.Printf("Put: %d\n", id)
 		if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
-			return err
+			return evicted, err
 		}
 		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
-			return err
+			return evicted, err
 		}
 	}
 
-	{
-		cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
-		last, _, _ := cc.Last()
-		if len(last) > 0 {
-			fmt.Printf("last sender id:%d,%d\n", sc.senderID, binary.BigEndian.Uint64(last))
-		} else {
-			fmt.Printf("last sender id:%d,%d\n", sc.senderID, -1)
-		}
-	}
 	sc.senderIDs = map[string]uint64{}
 
 	v := make([]byte, 8, 8+32)
@@ -627,7 +615,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		binary.BigEndian.PutUint64(v, info.nonce)
 		v = append(v[:8], info.balance.Bytes()...)
 		if err := tx.Put(kv.PooledSender, encID, v); err != nil {
-			return err
+			return evicted, err
 		}
 	}
 	sc.senderInfo = map[uint64]*senderInfo{}
@@ -652,31 +640,31 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 
 	binary.BigEndian.PutUint64(encID, sc.blockHeight.Load())
 	if err := tx.Put(kv.PoolInfo, SenderCacheHeightKey, encID); err != nil {
-		return err
+		return evicted, err
 	}
 	if err := tx.Put(kv.PoolInfo, SenderCacheHashKey, []byte(sc.blockHash.Load())); err != nil {
-		return err
+		return evicted, err
 	}
 	binary.BigEndian.PutUint64(encID, sc.senderID)
 	if err := tx.Put(kv.PoolInfo, SenderCacheIDKey, encID); err != nil {
-		return err
+		return evicted, err
 	}
 	binary.BigEndian.PutUint64(encID, sc.commitID)
 	if err := tx.Put(kv.PoolInfo, SenderCommitIDKey, encID); err != nil {
-		return err
+		return evicted, err
 	}
 	lastCommitTime, err := time.Now().MarshalBinary()
 	if err != nil {
-		return err
+		return evicted, err
 	}
 	if err := tx.Put(kv.PoolInfo, SenderCommitTimeKey, lastCommitTime); err != nil {
-		return err
+		return evicted, err
 	}
 
 	//TODO: flush and evict
 	fmt.Printf("senders flush finish\n")
 
-	return nil
+	return evicted, nil
 }
 
 func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
@@ -1010,7 +998,7 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 	log.Info("on new block", "in", time.Since(t))
 	return nil
 }
-func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
+func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -1018,16 +1006,11 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	sendersWithoutTransactions := []uint64{}
 	for i := 0; i < len(p.deletedTxs); i++ {
 		if p.txNonce2Tx.count(p.deletedTxs[i].Tx.senderID) == 0 {
-			if ASSERT {
-				if _, ok := p.byHash[string(p.deletedTxs[i].Tx.idHash[:])]; ok {
-					panic("here i am")
-				}
-			}
 			sendersWithoutTransactionsUnique[p.deletedTxs[i].Tx.senderID] = struct{}{}
 			sendersWithoutTransactions = append(sendersWithoutTransactions, p.deletedTxs[i].Tx.senderID)
 		}
 		if err := tx.Delete(kv.PooledTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
-			return err
+			return evicted, err
 		}
 		p.deletedTxs[i] = nil // for gc
 	}
@@ -1039,12 +1022,12 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	txHashes := p.localsHistory.Keys()
 	encID := make([]byte, 8)
 	if err := tx.ClearBucket(kv.RecentLocalTransaction); err != nil {
-		return err
+		return evicted, err
 	}
 	for i := range txHashes {
 		binary.BigEndian.PutUint64(encID, uint64(i))
 		if err := tx.Append(kv.RecentLocalTransaction, encID, txHashes[i].([]byte)); err != nil {
-			return err
+			return evicted, err
 		}
 	}
 
@@ -1075,26 +1058,26 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 		}
 
 		if err := tx.Put(kv.PooledTransaction, []byte(txHash), v); err != nil {
-			return err
+			return evicted, err
 		}
 		metaTx.Tx.rlp = nil
 	}
 
 	binary.BigEndian.PutUint64(encID, p.protocolBaseFee.Load())
 	if err := tx.Put(kv.PoolInfo, PoolProtocolBaseFeeKey, encID); err != nil {
-		return err
+		return evicted, err
 	}
 	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
 	if err := tx.Put(kv.PoolInfo, PoolPendingBaseFeeKey, encID); err != nil {
-		return err
+		return evicted, err
 	}
 
-	if err := senders.flush(tx, p.txNonce2Tx, sendersWithoutTransactions); err != nil {
-		panic(err)
-		return err
+	evicted, err = senders.flush(tx, p.txNonce2Tx, sendersWithoutTransactions)
+	if err != nil {
+		return evicted, err
 	}
 
-	return nil
+	return evicted, nil
 }
 func (p *TxPool) discardLocked(mt *metaTx) {
 	delete(p.byHash, string(mt.Tx.idHash[:]))
@@ -1727,14 +1710,15 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, s
 			if db != nil {
 				t := time.Now()
 				if err := db.Update(ctx, func(tx kv.RwTx) error {
-					if err := p.flush(tx, senders); err != nil {
+					evicted, err := p.flush(tx, senders)
+					if err != nil {
 						return err
 					}
 					sd, _, err := tx.(*mdbx.MdbxTx).SpaceDirty()
 					if err != nil {
 						return err
 					}
-					log.Info("flush", "in", time.Since(t), "dirty_kb", sd/1024)
+					log.Info("flush", "in", time.Since(t), "write_kb", sd/1024, "evicted", evicted)
 					t = time.Now()
 					return nil
 				}); err != nil {
