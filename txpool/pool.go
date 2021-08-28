@@ -628,6 +628,31 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	}
 	fmt.Printf("justDeleted:%d, justInserted:%d\n", justDeleted, justInserted)
 	if ASSERT {
+		{
+			duplicates := map[string]uint64{}
+			_ = tx.ForPrefix(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
+				id, ok := duplicates[string(v)]
+				if ok {
+					fmt.Printf("duplicate: %d,%d,%x\n", id, binary.BigEndian.Uint64(k), string(v))
+					panic(1)
+				}
+				return nil
+			})
+		}
+		{
+			duplicates := map[uint64]string{}
+			_ = tx.ForPrefix(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
+				id := binary.BigEndian.Uint64(v)
+				addr, ok := duplicates[id]
+				if ok {
+					fmt.Printf("duplicate: %x,%x,%d\n", addr, k, binary.BigEndian.Uint64(v))
+					panic(1)
+				}
+				return nil
+			})
+		}
+	}
+	if ASSERT {
 		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
 			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
 			if err != nil {
