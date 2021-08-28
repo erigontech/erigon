@@ -195,6 +195,7 @@ func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
 			return nil, err
 		}
 		if len(v) == 0 {
+			fmt.Printf("sender not loaded in advance: %d\n", id)
 			panic("all senders must be loaded in advance")
 			return nil, nil // don't fallback to core db, it will be manually done in right place
 		}
