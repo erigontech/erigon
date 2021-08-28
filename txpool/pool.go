@@ -38,6 +38,20 @@ import (
 
 const ASSERT = true
 
+type Config struct {
+	syncToNewPeersEvery     time.Duration
+	commitEvery             time.Duration
+	logEvery                time.Duration
+	evictSendersAfterRounds uint64
+}
+
+var DefaultConfig = Config{
+	syncToNewPeersEvery:     2 * time.Minute,
+	commitEvery:             2 * time.Second,
+	logEvery:                30 * time.Second,
+	evictSendersAfterRounds: 2,
+}
+
 // Pool is interface for the transaction pool
 // This interface exists for the convinience of testing, and not yet because
 // there are multiple implementations
@@ -654,17 +668,24 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	}
 	if ASSERT {
 		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			id := binary.BigEndian.Uint64(v[:8])
+			for _, senderID := range justDeleted {
+				if senderID == id {
+					fmt.Printf("delted id still has tx in db: %d,%x\n", id, k)
+					panic(1)
+				}
+			}
 			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
 			if err != nil {
 				return err
 			}
 			if len(vv) == 0 {
-				parseCtx := NewTxParseContext()
 				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
 				last, lastAddr, _ := cc.Last()
 				slots := TxSlots{}
 				slots.Growth(1)
 				slots.txs[0] = &TxSlot{}
+				parseCtx := NewTxParseContext()
 				_, err := parseCtx.ParseTransaction(v[8+8:], 0, slots.txs[0], slots.senders.At(0))
 				if err != nil {
 					log.Error("er", "er", err)

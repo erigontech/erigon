@@ -52,20 +52,6 @@ type Fetch struct {
 	pooledTxsParseCtx    *TxParseContext
 }
 
-type Config struct {
-	syncToNewPeersEvery     time.Duration
-	commitEvery             time.Duration
-	logEvery                time.Duration
-	evictSendersAfterRounds uint64
-}
-
-var DefaultConfig = Config{
-	syncToNewPeersEvery:     2 * time.Minute,
-	commitEvery:             2 * time.Second,
-	logEvery:                30 * time.Second,
-	evictSendersAfterRounds: 2,
-}
-
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
