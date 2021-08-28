@@ -517,13 +517,9 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		require.NoError(err)
 		defer tx.Rollback()
 
-		evicted, err := pool.flush(tx, sendersCache)
+		_, err = pool.flush(tx, sendersCache) // we don't test eviction here, because dedicated test exists
 		require.NoError(err)
-		assert.Zero(evicted)
 		check(p2pReceived, TxSlots{}, "after_flush")
-		evicted, err = pool.flush(tx, sendersCache)
-		require.NoError(err)
-		assert.NotZero(evicted)
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
 		s2 := NewSendersCache()
