@@ -220,22 +220,27 @@ func (sc *SendersCache) onNewTxs(tx kv.Tx, newTxs TxSlots) (cacheMisses map[uint
 	if err != nil {
 		return nil, err
 	}
+	if len(cacheMisses) > 0 {
+		for i, j := range cacheMisses {
+			fmt.Printf("cache misses: %d,%x\n", i, j)
+		}
+	}
 	return cacheMisses, nil
 }
 func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) error {
-	diff := make(map[uint64]senderInfo, len(toLoad))
+	diff := make(map[uint64]*senderInfo, len(toLoad))
 	for id := range toLoad {
 		info, err := loadSender(coreTx, []byte(toLoad[id]))
 		if err != nil {
 			return err
 		}
-		diff[id] = *info
+		diff[id] = info
 	}
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	for id := range diff { // merge state changes
 		a := diff[id]
-		sc.senderInfo[id] = &a
+		sc.senderInfo[id] = a
 	}
 	return nil
 }
@@ -682,7 +687,8 @@ func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
 		return nil, err
 	}
 	if len(encoded) == 0 {
-		return newSenderInfo(0, *uint256.NewInt(0)), nil
+		return nil, err
+		//return newSenderInfo(0, *uint256.NewInt(0)), nil
 	}
 	nonce, balance, err := DecodeSender(encoded)
 	if err != nil {
