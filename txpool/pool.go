@@ -548,6 +548,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		return evicted, err
 	}
 	defer c.Close()
+	justDeleted := []uint64{}
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return evicted, err
@@ -580,6 +581,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 				return evicted, err
 			}
 			evicted++
+			justDeleted = append(justDeleted, senderID)
 		}
 		if err := c.DeleteCurrent(); err != nil {
 			return evicted, err
@@ -600,6 +602,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 				fmt.Printf("now: %d\n", sc.senderID)
 				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
 				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
+				fmt.Printf("justDeleted: %d\n", justDeleted)
 				panic("no-no")
 			}
 			return nil
