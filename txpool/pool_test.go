@@ -15,3 +15,23 @@
 */
 
 package txpool
+
+import (
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/require"
+)
+
+func TestSenders(t *testing.T) {
+	senders, require := NewSendersCache(), require.New(t)
+	senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
+	_, tx := memdb.NewTestTx(t)
+	evicted, err := senders.flush(tx, &ByNonce{}, []uint64{1}, 1)
+	require.NoError(err)
+	require.Zero(evicted)
+	evicted, err = senders.flush(tx, &ByNonce{}, []uint64{1}, 1)
+	require.NoError(err)
+	require.NotZero(evicted)
+}

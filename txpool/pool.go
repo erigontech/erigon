@@ -521,7 +521,7 @@ var SenderCacheHashKey = []byte("sender_cache_block_hash")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
-func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransactions []uint64) (evicted uint64, err error) {
+func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransactions []uint64, evictAfterRounds uint64) (evicted uint64, err error) {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	sc.commitID++
@@ -552,7 +552,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err != nil {
 			return evicted, err
 		}
-		if sc.commitID-binary.BigEndian.Uint64(k) < 5 {
+		if sc.commitID-binary.BigEndian.Uint64(k) < evictAfterRounds {
 			break
 		}
 		for i := 0; i < len(v); i += 8 {
@@ -1068,7 +1068,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 		return evicted, err
 	}
 
-	evicted, err = senders.flush(tx, p.txNonce2Tx, sendersWithoutTransactions)
+	evicted, err = senders.flush(tx, p.txNonce2Tx, sendersWithoutTransactions, p.cfg.evictSendersAfterRounds)
 	if err != nil {
 		return evicted, err
 	}

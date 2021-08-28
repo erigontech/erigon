@@ -56,7 +56,7 @@ type Config struct {
 	syncToNewPeersEvery     time.Duration
 	commitEvery             time.Duration
 	logEvery                time.Duration
-	evictSendersAfterRounds int
+	evictSendersAfterRounds uint64
 }
 
 var DefaultConfig = Config{
