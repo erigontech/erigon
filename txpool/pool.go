@@ -224,13 +224,6 @@ func (sc *SendersCache) onNewTxs(tx kv.Tx, newTxs TxSlots) (cacheMisses map[uint
 	if err != nil {
 		return nil, err
 	}
-	if ASSERT {
-		if len(cacheMisses) > 0 {
-			for i, j := range cacheMisses {
-				fmt.Printf("cache misses: %d,%x\n", i, j)
-			}
-		}
-	}
 	return cacheMisses, nil
 }
 func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) error {
@@ -1160,7 +1153,6 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 		}); err != nil {
 			panic(err)
 		}
-
 	}
 
 	binary.BigEndian.PutUint64(encID, p.protocolBaseFee.Load())
