@@ -441,6 +441,17 @@ func (s *TxSlots) Growth(targetSize int) {
 		s.isLocal = append(s.isLocal, false)
 	}
 }
+func (s *TxSlots) Shrink(targetSize int) {
+	for len(s.txs) > targetSize {
+		s.txs = s.txs[:targetSize]
+	}
+	for s.senders.Len() > targetSize {
+		s.senders = s.senders[:20*targetSize]
+	}
+	for len(s.isLocal) > targetSize {
+		s.isLocal = s.isLocal[:targetSize]
+	}
+}
 
 var addressesGrowth = make([]byte, 20)
 

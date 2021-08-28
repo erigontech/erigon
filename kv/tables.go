@@ -350,6 +350,7 @@ const (
 	PooledSenderIDToAdress = "PooledSenderIDToAddress" // sender_id_u64 -> sender_20bytes
 	PooledSender           = "PooledSender"            // sender_id_u64 -> nonce, balance
 	PooledTransaction      = "PooledTransaction"       // txHash -> sender_id_u64+blockNum_u64+tx_rlp
+	PoolStateEviction      = "PoolStateEviction"       // commit_id_u64 -> [sender_id_u64]  - list of senders who had no transactions at this time, if after some time they still have no transactions - evict them.
 	PoolInfo               = "PoolInfo"                // option_key -> option_value
 )
 
@@ -359,6 +360,7 @@ var TxPoolTables = []string{
 	PooledSenderIDToAdress,
 	PooledSender,
 	PooledTransaction,
+	PoolStateEviction,
 	PoolInfo,
 }
 var SentryTables = []string{}

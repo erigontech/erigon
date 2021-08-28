@@ -16,69 +16,44 @@
 
 package txpool
 
-/*
-func TestSubPoolOrder(t *testing.T) {
-	sub := NewSubPool()
-	sub.OnNewTxs(&metaTx{subPool: 0b10101})
-	sub.OnNewTxs(&metaTx{subPool: 0b11110})
-	sub.OnNewTxs(&metaTx{subPool: 0b11101})
-	sub.OnNewTxs(&metaTx{subPool: 0b10001})
-	require.Equal(t, uint8(0b11110), uint8(sub.Best().subPool))
-	require.Equal(t, uint8(0b10001), uint8(sub.Worst().subPool))
+import (
+	"testing"
 
-	require.Equal(t, uint8(sub.Best().subPool), uint8(sub.PopBest().subPool))
-	require.Equal(t, uint8(sub.Worst().subPool), uint8(sub.PopWorst().subPool))
+	"github.com/google/btree"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/require"
+)
 
-	sub = NewSubPool()
-	sub.OnNewTxs(&metaTx{subPool: 0b00001})
-	sub.OnNewTxs(&metaTx{subPool: 0b01110})
-	sub.OnNewTxs(&metaTx{subPool: 0b01101})
-	sub.OnNewTxs(&metaTx{subPool: 0b00101})
-	require.Equal(t, uint8(0b00001), uint8(sub.Worst().subPool))
-	require.Equal(t, uint8(0b01110), uint8(sub.Best().subPool))
+func TestSenders(t *testing.T) {
+	t.Run("evict_all_on_next_round", func(t *testing.T) {
+		senders, require := NewSendersCache(), require.New(t)
+		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
+		_, tx := memdb.NewTestPoolTx(t)
+		byNonce := &ByNonce{btree.New(16)}
 
-	require.Equal(t, uint8(sub.Worst().subPool), uint8(sub.PopWorst().subPool))
-	require.Equal(t, uint8(sub.Best().subPool), uint8(sub.PopBest().subPool))
+		evicted, err := senders.flush(tx, byNonce, []uint64{1, 2}, 1)
+		require.NoError(err)
+		require.Zero(evicted)
+		evicted, err = senders.flush(tx, byNonce, []uint64{}, 1)
+		require.NoError(err)
+		require.Equal(2, int(evicted))
+	})
+	t.Run("do_not_evict_if_used_in_current_round", func(t *testing.T) {
+		senders, require := NewSendersCache(), require.New(t)
+		_, tx := memdb.NewTestPoolTx(t)
+		byNonce := &ByNonce{btree.New(16)}
+
+		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
+		evicted, err := senders.flush(tx, byNonce, []uint64{1, 2}, 1)
+		require.NoError(err)
+		require.Zero(evicted)
+		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1)) // means used in current round, but still has 0 transactions
+		evicted, err = senders.flush(tx, byNonce, []uint64{1}, 1)
+		require.NoError(err)
+		require.Equal(1, int(evicted))
+	})
+
 }
-
-func TestSubPoolsPromote(t *testing.T) {
-	s1 := []uint8{0b11000, 0b101, 0b111}
-	s2 := []uint8{0b11000, 0b101, 0b111}
-	s3 := []uint8{0b11000, 0b101, 0b111}
-	pending, baseFee, queued := NewSubPool(), NewSubPool(), NewSubPool()
-	for _, i := range s1 {
-		pending.OnNewTxs(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
-	}
-	for _, i := range s2 {
-		baseFee.OnNewTxs(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
-	}
-	for _, i := range s3 {
-		queued.OnNewTxs(&metaTx{subPool: SubPoolMarker(i & 0b11111)})
-	}
-	promote(pending, baseFee, queued)
-
-	if pending.Worst() != nil {
-		require.Less(t, uint8(0b01111), uint8(pending.Worst().subPool))
-	}
-	if baseFee.Worst() != nil {
-		require.Less(t, uint8(0b01111), uint8(baseFee.Worst().subPool))
-	}
-	if queued.Worst() != nil {
-		require.Less(t, uint8(0b01111), uint8(queued.Worst().subPool))
-	}
-	// if limit reached, worst must be greater than X
-}
-
-//nolint
-func hexToSubPool(s string) []uint8 {
-	a, err := hex.DecodeString(s)
-	if err != nil {
-		panic(err)
-	}
-	for i := range a {
-		a[i] &= 0b11111
-	}
-
-	return a
-}
-*/

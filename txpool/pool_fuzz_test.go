@@ -297,7 +297,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 			t.Skip()
 		}
 
-		assert := assert.New(t)
+		assert, require := assert.New(t), require.New(t)
 		err := txs.Valid()
 		assert.NoError(err)
 
@@ -309,7 +309,9 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		t.Cleanup(db.Close)
 
 		sendersCache := NewSendersCache()
-		pool, err := New(ch, sendersCache, db)
+		cfg := DefaultConfig
+		cfg.evictSendersAfterRounds = 1
+		pool, err := New(ch, sendersCache, db, cfg)
 		assert.NoError(err)
 		sendersCache.senderInfo = senders
 		sendersCache.senderIDs = senderIDs
@@ -415,7 +417,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 
 			// all txs in side data structures must be in some queue
 			for _, txn := range pool.byHash {
-				require.True(t, txn.bestIndex >= 0, msg)
+				require.True(txn.bestIndex >= 0, msg)
 				assert.True(txn.worstIndex >= 0, msg)
 			}
 			for id := range senders {
@@ -424,7 +426,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					if mt.worstIndex < 0 {
 						fmt.Printf("here: %d,%d\n", pool.txNonce2Tx.tree.Len(), len(pool.byHash))
 					}
-					require.True(t, mt.worstIndex >= 0, msg)
+					require.True(mt.worstIndex >= 0, msg)
 					assert.True(mt.bestIndex >= 0, msg)
 					return true
 				})
@@ -512,18 +514,19 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		senderInfoBeforeFlush := len(sendersCache.senderInfo)
 
 		tx, err := db.BeginRw(context.Background())
-		require.NoError(t, err)
+		require.NoError(err)
 		defer tx.Rollback()
-		err = pool.flush(tx, sendersCache)
-		require.NoError(t, err)
+
+		_, err = pool.flushLocked(tx) // we don't test eviction here, because dedicated test exists
+		require.NoError(err)
 		check(p2pReceived, TxSlots{}, "after_flush")
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
 		s2 := NewSendersCache()
-		p2, err := New(ch, s2, nil)
+		p2, err := New(ch, s2, nil, DefaultConfig)
 		assert.NoError(err)
-		err = p2.fromDB(context.Background(), tx, nil, s2)
-		require.NoError(t, err)
+		err = p2.fromDB(context.Background(), tx, nil)
+		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.Tx.rlp)
 		}

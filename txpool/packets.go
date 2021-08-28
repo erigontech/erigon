@@ -104,7 +104,7 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 	}
 	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
 
-	for i := 0; pos != len(payload); i++ {
+	for i := 0; pos < len(payload); i++ {
 		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
 		if err != nil {
 			return 0, hashes, 0, err
@@ -126,7 +126,7 @@ func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hash
 	}
 	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
 
-	for i := 0; pos != len(payload); i++ {
+	for i := 0; pos < len(payload); i++ {
 		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
 		if err != nil {
 			return hashes, 0, err
@@ -188,6 +188,8 @@ func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txS
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
+				txSlots.Shrink(i)
+				i--
 				continue
 			}
 			return 0, err
@@ -216,6 +218,8 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txS
 		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
+				txSlots.Shrink(i)
+				i--
 				continue
 			}
 			return requestID, 0, err

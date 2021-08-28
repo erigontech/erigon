@@ -35,6 +35,24 @@ func NewTestDB(t testing.TB) kv.RwDB {
 	t.Cleanup(db.Close)
 	return db
 }
+func NewTestPoolDB(t testing.TB) kv.RwDB {
+	logger := log.New() //TODO: move higher
+	db := mdbx.NewMDBX(logger).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+	t.Cleanup(db.Close)
+	return db
+}
+
+func NewTestPoolTx(t testing.TB) (kv.RwDB, kv.RwTx) {
+	db := NewTestPoolDB(t)
+	tx, err := db.BeginRw(context.Background()) //nolint
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t != nil {
+		t.Cleanup(tx.Rollback)
+	}
+	return db, tx
+}
 
 func NewTestTx(t testing.TB) (kv.RwDB, kv.RwTx) {
 	db := New()
@@ -43,11 +61,6 @@ func NewTestTx(t testing.TB) (kv.RwDB, kv.RwTx) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	switch tt := t.(type) {
-	case *testing.T:
-		if tt != nil {
-			tt.Cleanup(tx.Rollback)
-		}
-	}
+	t.Cleanup(tx.Rollback)
 	return db, tx
 }
