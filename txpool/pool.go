@@ -732,7 +732,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
 	encoded, err := coreTx.GetOne(kv.PlainState, addr)
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
 	if len(encoded) == 0 {
@@ -741,7 +740,6 @@ func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
 	}
 	nonce, balance, err := DecodeSender(encoded)
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
 	return newSenderInfo(nonce, balance), nil
@@ -941,7 +939,7 @@ func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPee
 func (p *TxPool) Started() bool                { return p.protocolBaseFee.Load() > 0 }
 
 func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
-	t := time.Now()
+	//t := time.Now()
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -985,7 +983,7 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 		}
 	}
 
-	log.Info("on new txs", "in", time.Since(t))
+	//log.Info("on new txs", "in", time.Since(t))
 	return nil
 }
 func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, pending, baseFee, queued *SubPool, byNonce *ByNonce, byHash map[string]*metaTx, discard func(*metaTx)) error {
