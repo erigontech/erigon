@@ -207,19 +207,8 @@ func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
 func (sc *SendersCache) printDebug(prefix string) {
 	fmt.Printf("%s.SendersCache.senderInfo\n", prefix)
 	for i, j := range sc.senderInfo {
-		//txsAmount := 0
-		//txs, ok := sc.txNonce2Tx[i]
-		//if ok {
-		//	txsAmount = txs.Len()
-		//}
 		fmt.Printf("\tid=%d,nonce=%d,balance=%d\n", i, j.nonce, j.balance.Uint64())
 	}
-}
-
-func (sc *SendersCache) len() int {
-	sc.lock.RLock()
-	defer sc.lock.RUnlock()
-	return len(sc.senderInfo)
 }
 
 func (sc *SendersCache) onNewTxs(tx kv.Tx, newTxs TxSlots) (cacheMisses map[uint64]string, err error) {
@@ -432,8 +421,6 @@ func (sc *SendersCache) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) er
 	return nil
 }
 func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, coreTx kv.Tx, missedTo uint64) error {
-	ok := true
-
 	dropLocalSendersCache := false
 	if missedTo > 0 && missedTo-sc.blockHeight.Load() > 1024 {
 		dropLocalSendersCache = true
@@ -452,8 +439,7 @@ func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, cor
 		}
 	}
 	if coreTx != nil {
-		var err error
-		ok, err = isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
+		ok, err := isCanonical(coreTx, sc.blockHeight.Load(), []byte(sc.blockHash.Load()))
 		if err != nil {
 			return err
 		}
@@ -620,7 +606,6 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
 			return err
 		}
-		encIDs = append(encIDs, encID...)
 	}
 
 	sc.senderIDs = map[string]uint64{}
@@ -636,7 +621,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	}
 	sc.senderInfo = map[uint64]*senderInfo{}
 	if ASSERT {
-		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
 			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
 			if err != nil {
 				return err
@@ -1102,7 +1087,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 		return err
 	}
 	if ASSERT {
-		tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
 			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
 			if err != nil {
 				return err
@@ -1789,6 +1774,7 @@ func (p *TxPool) forceCheckState(ctx context.Context, db, coreDB kv.RoDB) error 
 	}
 }
 
+//nolint
 func copyBytes(b []byte) (copiedBytes []byte) {
 	copiedBytes = make([]byte, len(b))
 	copy(copiedBytes, b)
