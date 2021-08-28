@@ -195,6 +195,7 @@ func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
 			return nil, err
 		}
 		if len(v) == 0 {
+			panic("all senders must be loaded in advance")
 			return nil, nil // don't fallback to core db, it will be manually done in right place
 		}
 		balance := uint256.NewInt(0)
