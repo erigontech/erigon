@@ -1,0 +1,8 @@
+go test fuzz v1
+[]byte("\x10\xf4\xf4\x05")
+[]byte("\x10")
+[]byte("\x10")
+[]byte("\x10")
+[]byte("\x10\xf4\xf4\x05\xfa\x16")
+byte('\x02')
+byte('\x06')

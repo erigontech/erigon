@@ -1,0 +1,8 @@
+go test fuzz v1
+[]byte("\x04\x1aآaN\xff\xff\x85\x86\x8a\xff\u007fi\xff\x85")
+[]byte("\x04")
+[]byte("\x04")
+[]byte("\x8a")
+[]byte("\x04\x1a\xd8")
+byte('\x05')
+byte('L')

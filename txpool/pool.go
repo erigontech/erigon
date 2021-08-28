@@ -233,8 +233,8 @@ func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) err
 		if err != nil {
 			return err
 		}
-		if info == nil {
-			if ASSERT {
+		if ASSERT {
+			if info == nil || info.nonce == 0 {
 				fmt.Printf("core returned nil: %d,%x\n", id, toLoad[id])
 			}
 		}
