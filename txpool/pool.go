@@ -542,6 +542,26 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return evicted, err
 		}
 	}
+	if ASSERT {
+		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			if err != nil {
+				return err
+			}
+			if len(vv) == 0 {
+				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+				last, lastAddr, _ := cc.Last()
+				if len(last) > 0 {
+					fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
+				}
+				fmt.Printf("now: %d\n", sc.senderID)
+				fmt.Printf("not foundd: %d,%x,%x,%x\n", binary.BigEndian.Uint64(v[:8]), k, v, vv)
+				fmt.Printf("aa: %x,%x,%x\n", k, v, vv)
+				panic("no-no")
+			}
+			return nil
+		})
+	}
 
 	c, err := tx.RwCursor(kv.PoolStateEviction)
 	if err != nil {
