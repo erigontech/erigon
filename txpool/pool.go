@@ -1122,11 +1122,11 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 			copy(hashID[:], k)
 			_, isLocalTx := p.localsHistory.Get(hashID)
 			txs.isLocal[i] = isLocalTx
-			i++
 
 			if !p.txNonce2Tx.has(newMetaTx(txs.txs[i], txs.isLocal[i])) {
 				panic("aaaaaa")
 			}
+			i++
 			return nil
 		}); err != nil {
 			panic(err)
