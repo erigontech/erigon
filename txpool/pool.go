@@ -180,12 +180,12 @@ func (sc *SendersCache) id(addr string, tx kv.Tx) (uint64, bool, error) {
 	}
 	return id, true, nil
 }
-func (sc *SendersCache) Info(id uint64, tx kv.Tx) (*senderInfo, error) {
+func (sc *SendersCache) Info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo, error) {
 	sc.lock.RLock()
 	defer sc.lock.RUnlock()
-	return sc.info(id, tx)
+	return sc.info(id, tx, expectMiss)
 }
-func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
+func (sc *SendersCache) info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo, error) {
 	info, ok := sc.senderInfo[id]
 	if !ok {
 		encID := make([]byte, 8)
@@ -195,8 +195,10 @@ func (sc *SendersCache) info(id uint64, tx kv.Tx) (*senderInfo, error) {
 			return nil, err
 		}
 		if len(v) == 0 {
-			fmt.Printf("sender not loaded in advance: %d\n", id)
-			panic("all senders must be loaded in advance")
+			if !expectMiss {
+				fmt.Printf("sender not loaded in advance: %d\n", id)
+				panic("all senders must be loaded in advance")
+			}
 			return nil, nil // don't fallback to core db, it will be manually done in right place
 		}
 		balance := uint256.NewInt(0)
@@ -374,7 +376,7 @@ func (sc *SendersCache) setTxSenderID(tx kv.Tx, txs TxSlots) (map[uint64]string,
 		txs.txs[i].senderID = id
 
 		// load data from db if need
-		info, err := sc.info(txs.txs[i].senderID, tx)
+		info, err := sc.info(txs.txs[i].senderID, tx, true)
 		if err != nil {
 			return nil, err
 		}
@@ -957,7 +959,7 @@ func onNewTxs(tx kv.Tx, senders *SendersCache, newTxs TxSlots, protocolBaseFee, 
 
 	changedSenders := unsafeAddToPendingPool(byNonce, newTxs, pending, baseFee, queued, byHash, discard)
 	for id := range changedSenders {
-		sender, err := senders.Info(id, tx)
+		sender, err := senders.Info(id, tx, false)
 		if err != nil {
 			return err
 		}
@@ -1097,7 +1099,7 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) (evicted uint64, err e
 		copy(v[8+8:], metaTx.Tx.rlp)
 		if ASSERT {
 			if _, ok := p.senders.senderInfo[metaTx.Tx.senderID]; !ok {
-				info, err := p.senders.info(metaTx.Tx.senderID, tx)
+				info, err := p.senders.info(metaTx.Tx.senderID, tx, false)
 				if err != nil {
 					panic(err)
 				}
@@ -1320,7 +1322,7 @@ func onNewBlock(tx kv.Tx, senders *SendersCache, unwindTxs TxSlots, minedTxs []*
 	// time (up to some "immutability threshold").
 	changedSenders := unsafeAddToPendingPool(byNonce, unwindTxs, pending, baseFee, queued, byHash, discard)
 	for id := range changedSenders {
-		sender, err := senders.Info(id, tx)
+		sender, err := senders.Info(id, tx, false)
 		if err != nil {
 			return err
 		}
