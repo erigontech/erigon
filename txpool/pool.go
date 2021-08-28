@@ -617,6 +617,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return evicted, err
 		}
 	}
+	fmt.Printf("justDeleted:%d, justInserted:%d\n", justDeleted, justInserted)
 	if ASSERT {
 		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
 			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
