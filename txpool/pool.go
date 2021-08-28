@@ -1028,6 +1028,9 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 }
 
 func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
 	t := time.Now()
 	tx, err := p.db.BeginRo(context.Background())
 	if err != nil {
@@ -1046,8 +1049,6 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 		return err
 	}
 
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	if err := onNewBlock(tx, senders, unwindTxs, minedTxs.txs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
 		return err
 	}
