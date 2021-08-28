@@ -943,7 +943,9 @@ func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPee
 func (p *TxPool) Started() bool                { return p.protocolBaseFee.Load() > 0 }
 
 func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
-	//t := time.Now()
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
 	tx, err := p.db.BeginRo(context.Background())
 	if err != nil {
 		return err
@@ -966,8 +968,6 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 	if protocolBaseFee == 0 || pendingBaseFee == 0 {
 		return fmt.Errorf("non-zero base fee: %d,%d", protocolBaseFee, pendingBaseFee)
 	}
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	if err := onNewTxs(tx, senders, newTxs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
 		return err
 	}
