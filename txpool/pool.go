@@ -236,6 +236,11 @@ func (sc *SendersCache) loadFromCore(coreTx kv.Tx, toLoad map[uint64]string) err
 		if err != nil {
 			return err
 		}
+		if info == nil {
+			if ASSERT {
+				fmt.Printf("core returned nil: %d,%x\n", id, toLoad[id])
+			}
+		}
 		diff[id] = info
 	}
 	sc.lock.Lock()
@@ -689,7 +694,7 @@ func loadSender(coreTx kv.Tx, addr []byte) (*senderInfo, error) {
 		return nil, err
 	}
 	if len(encoded) == 0 {
-		return nil, err
+		return nil, nil
 		//return newSenderInfo(0, *uint256.NewInt(0)), nil
 	}
 	nonce, balance, err := DecodeSender(encoded)
