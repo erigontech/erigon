@@ -1870,6 +1870,8 @@ func (p *TxPool) forceCheckState(ctx context.Context, db, coreDB kv.RoDB) error 
 						// for now skip this case because we do create
 						// account with 0 nonce and 0 balance for unknown senders (because
 						// they may become known in near future)
+						// But we need maybe store them as a thumbstone - to separate
+						// deleted accounts from not know
 						return nil
 					}
 					if !bytes.Equal(v, v2) {
