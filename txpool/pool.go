@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -520,7 +521,7 @@ var SenderCacheHashKey = []byte("sender_cache_block_hash")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
 var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
-func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransactions map[uint64]struct{}) error {
+func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransactions []uint64) error {
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	sc.commitID++
@@ -531,7 +532,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	//      - which have discarded transactions at this commit
 	//      - but have no active transactions left
 	// after some time read old records from DB and if such senders still have no transactions - evict them
-	for id := range sendersWithoutTransactions {
+	for _, id := range sendersWithoutTransactions {
 		binary.BigEndian.PutUint64(encID, id)
 		encIDs = append(encIDs, encID...)
 		binary.BigEndian.PutUint64(encID, sc.commitID)
@@ -1013,7 +1014,8 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	sendersWithoutTransactions := map[uint64]struct{}{}
+	sendersWithoutTransactionsUnique := map[uint64]struct{}{}
+	sendersWithoutTransactions := []uint64{}
 	for i := 0; i < len(p.deletedTxs); i++ {
 		if p.txNonce2Tx.count(p.deletedTxs[i].Tx.senderID) == 0 {
 			if ASSERT {
@@ -1021,13 +1023,17 @@ func (p *TxPool) flush(tx kv.RwTx, senders *SendersCache) error {
 					panic("here i am")
 				}
 			}
-			sendersWithoutTransactions[p.deletedTxs[i].Tx.senderID] = struct{}{}
+			sendersWithoutTransactionsUnique[p.deletedTxs[i].Tx.senderID] = struct{}{}
+			sendersWithoutTransactions = append(sendersWithoutTransactions, p.deletedTxs[i].Tx.senderID)
 		}
 		if err := tx.Delete(kv.PooledTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
 			return err
 		}
 		p.deletedTxs[i] = nil // for gc
 	}
+	sort.Slice(sendersWithoutTransactions, func(i, j int) bool {
+		return sendersWithoutTransactions[i] < sendersWithoutTransactions[j]
+	})
 	p.deletedTxs = p.deletedTxs[:0]
 
 	txHashes := p.localsHistory.Keys()
