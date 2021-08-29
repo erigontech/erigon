@@ -129,9 +129,6 @@ func executeBlock(
 		}
 	}
 	if writeCallTraces {
-		panic(1)
-	}
-	if writeCallTraces {
 		callTracer.tos[block.Coinbase()] = false
 		for _, uncle := range block.Uncles() {
 			callTracer.tos[uncle.Coinbase] = false
