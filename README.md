@@ -134,11 +134,13 @@ Windows users may run erigon in 3 possible ways:
 
 ### Beacon Chain
 
-Erigon can be used as an execution client for beacon chain consensus clients (Eth2).
+Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2 
+rely on availability of receipts - don't prune them: don't add 
+character `r` to `--prune` flag or set large `--prune.r.older=2_000_000`.
 
-You must run the JSON-RPC daemon in addition to the Erigon client, instructions for building and running the JSON-RPC daemon can be found [here](#json-rpc-daemon).
+You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
 
-If you are running your beacon chain client on a different device, you will also need to include `--http.addr 0.0.0.0` as the JSON-RPC daemon will only listen on localhost by default.
+If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default).
 
 Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`, where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
 
