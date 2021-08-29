@@ -51,7 +51,7 @@ func TestCallTrace(t *testing.T) {
 	assert.NoError(err)
 
 	// forward 0->20
-	err = promoteCallTraces("test", tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "")
+	err = promoteCallTraces("test", tx, 0, 20, 1, time.Nanosecond, ctx.Done(), "")
 	assert.NoError(err)
 	assert.Equal([]uint64{6, 16}, froms().ToArray())
 	assert.Equal([]uint64{1, 11}, tos().ToArray())
@@ -63,8 +63,12 @@ func TestCallTrace(t *testing.T) {
 	assert.Equal([]uint64{1}, tos().ToArray())
 
 	// forward 10->30
-	err = promoteCallTraces("test", tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "")
+	err = promoteCallTraces("test", tx, 10, 30, 1, time.Nanosecond, ctx.Done(), "")
 	assert.NoError(err)
 	assert.Equal([]uint64{6, 16, 26}, froms().ToArray())
 	assert.Equal([]uint64{1, 11, 21}, tos().ToArray())
+
+	// prune 0 -> 10
+	err = pruneCallTraces(tx, "test", 10, ctx, "")
+	assert.NoError(err)
 }
