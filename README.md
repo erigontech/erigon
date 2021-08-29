@@ -13,6 +13,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Mining](#mining)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
+    + [Beacon Chain](#beacon-chain)
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
     + [Faster Initial Sync](#faster-initial-sync)
@@ -130,6 +131,20 @@ Windows users may run erigon in 3 possible ways:
   limitations apply.
   **Please also note the default WSL2 environment has its own IP address which does not match the one of the network
   interface of Windows host: take this into account when configuring NAT for port 30303 on your router.**
+
+### Beacon Chain
+
+Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2 
+rely on availability of receipts - don't prune them: don't add 
+character `r` to `--prune` flag or set large `--prune.r.older=2_000_000`.
+
+You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
+
+If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default).
+
+Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`, where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
+
+Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
 
 Key features
 ============ 
