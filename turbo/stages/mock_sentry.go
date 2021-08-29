@@ -11,6 +11,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -61,7 +61,7 @@ type MockSentry struct {
 	downloader      *download.ControlServerImpl
 	Key             *ecdsa.PrivateKey
 	Genesis         *types.Block
-	SentryClient    remote.SentryClient
+	SentryClient    direct.SentryClient
 	PeerId          *ptypes.H512
 	TxPoolP2PServer *txpool.P2PServer
 	UpdateHead      func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
@@ -110,8 +110,11 @@ func (ms *MockSentry) SendMessageToAll(_ context.Context, r *proto_sentry.Outbou
 func (ms *MockSentry) SentMessage(i int) *proto_sentry.OutboundMessageData {
 	return ms.sentMessages[i]
 }
+func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
+	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+}
 func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
-	return &proto_sentry.SetStatusReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+	return &proto_sentry.SetStatusReply{}, nil
 }
 func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_sentry.Sentry_MessagesServer) error {
 	if ms.streams == nil {
@@ -158,8 +161,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		ChainConfig: gspec.Config,
 		Key:         key,
 		Notifications: &stagedsync.Notifications{
-			Events:      privateapi.NewEvents(),
-			Accumulator: &shards.Accumulator{},
+			Events:               privateapi.NewEvents(),
+			Accumulator:          &shards.Accumulator{},
+			StateChangesConsumer: nil,
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
@@ -181,6 +185,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {
 	}
 	cfg := ethconfig.Defaults
+	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.BodyDownloadTimeoutSeconds = 10
 	cfg.TxPool.Journal = ""
@@ -193,8 +198,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {
 	}
 	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
-	txSentryClient := remote.NewSentryClientDirect(eth.ETH66, mock)
-	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, []remote.SentryClient{txSentryClient}, txPool)
+	txSentryClient := direct.NewSentryClientDirect(eth.ETH66, mock)
+	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, []direct.SentryClient{txSentryClient}, txPool)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -220,8 +225,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.SentryClient = remote.NewSentryClientDirect(eth.ETH66, mock)
-	sentries := []remote.SentryClient{mock.SentryClient}
+	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
+	sentries := []direct.SentryClient{mock.SentryClient}
 	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
 		if t != nil {
@@ -270,7 +275,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
-				nil,
+				&shards.Accumulator{},
 				cfg.StateStream,
 				mock.tmpdir,
 			),
@@ -293,7 +298,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageTxPoolCfg(mock.DB, txPool, func() {
 				mock.StreamWg.Add(1)
-				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
+				go txpool.RecvTxMessageLoop(mock.Ctx, mock.SentryClient, mock.TxPoolP2PServer.HandleInboundMessage, &mock.ReceiveWg)
 				go txpropagate.BroadcastPendingTxsToNetwork(mock.Ctx, txPool, mock.TxPoolP2PServer.RecentPeers, mock.downloader)
 				mock.StreamWg.Wait()
 				mock.TxPoolP2PServer.TxFetcher.Start()
@@ -332,6 +337,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
 	go download.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	mock.StreamWg.Wait()
+	mock.StreamWg.Add(1)
+	go download.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	if t != nil {
 		t.Cleanup(func() {
@@ -415,7 +423,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	if err := StageLoopStep(ms.Ctx, ms.Log, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	// Check if the latest header was imported or rolled back

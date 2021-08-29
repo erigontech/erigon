@@ -10,11 +10,10 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_testing "github.com/ledgerwatch/erigon-lib/gointerfaces/testing"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -93,10 +92,10 @@ func grpcTestDriverServer(ctx context.Context, testingAddr string) (*TestDriverS
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
+	//if metrics.Enabled {
+	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	//}
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
@@ -116,9 +115,9 @@ func grpcTestDriverServer(ctx context.Context, testingAddr string) (*TestDriverS
 
 	testDriverServer := NewTestDriverServer(ctx)
 	proto_testing.RegisterTestDriverServer(grpcServer, testDriverServer)
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
+	//if metrics.Enabled {
+	//	grpc_prometheus.Register(grpcServer)
+	//}
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Test driver server fail", "err", err1)
@@ -152,10 +151,10 @@ func grpcTestSentryServer(ctx context.Context, sentryAddr string) (*TestSentrySe
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
+	//if metrics.Enabled {
+	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	//}
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
@@ -175,9 +174,9 @@ func grpcTestSentryServer(ctx context.Context, sentryAddr string) (*TestSentrySe
 
 	testSentryServer := NewTestSentryServer(ctx)
 	proto_sentry.RegisterSentryServer(grpcServer, testSentryServer)
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
+	//if metrics.Enabled {
+	//	grpc_prometheus.Register(grpcServer)
+	//}
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Test driver server fail", "err", err1)

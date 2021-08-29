@@ -20,10 +20,10 @@ var rootCmd = &cobra.Command{
 			panic(err)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "erigon", "chaindata")
+			chaindata = path.Join(datadir, "chaindata")
 		}
 		if snapshotDir == "" {
-			snapshotDir = path.Join(datadir, "erigon", "snapshot")
+			snapshotDir = path.Join(datadir, "snapshot")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

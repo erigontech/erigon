@@ -8,12 +8,8 @@ import (
 	"sort"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -27,12 +23,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
-
-var stageExecutionGauge = metrics2.GetOrCreateCounter("stage_execution")
 
 const (
 	logInterval = 30 * time.Second
@@ -101,19 +97,22 @@ func executeBlock(
 	writeChangesets bool,
 	writeReceipts bool,
 	writeCallTraces bool,
-	checkTEVM func(contractHash common.Hash) (bool, error),
+	contractHasTEVM func(contractHash common.Hash) (bool, error),
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter := newStateReaderWriter(batch, tx, blockNum, block.Hash(), writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	if err != nil {
+		return err
+	}
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
-	callTracer := NewCallTracer(checkTEVM)
+	callTracer := NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, checkTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, contractHasTEVM)
 	if err != nil {
 		return err
 	}
@@ -188,13 +187,12 @@ func executeBlock(
 func newStateReaderWriter(
 	batch ethdb.Database,
 	tx kv.RwTx,
-	blockNum uint64,
-	blockHash common.Hash,
+	block *types.Block,
 	writeChangesets bool,
 	accumulator *shards.Accumulator,
 	initialCycle bool,
 	stateStream bool,
-) (state.StateReader, state.WriterWithChangeSets) {
+) (state.StateReader, state.WriterWithChangeSets, error) {
 
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -202,17 +200,25 @@ func newStateReaderWriter(
 	stateReader = state.NewPlainStateReader(batch)
 
 	if !initialCycle && stateStream {
-		accumulator.StartChange(blockNum, blockHash, false)
+		txs, err := rawdb.RawTransactionsRange(tx, block.NumberU64(), block.NumberU64())
+		if err != nil {
+			return nil, nil, err
+		}
+		var blockBaseFee uint64
+		if block.BaseFee() != nil {
+			blockBaseFee = block.BaseFee().Uint64()
+		}
+		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, blockBaseFee, false)
 	} else {
 		accumulator = nil
 	}
 	if writeChangesets {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum).SetAccumulator(accumulator)
+		stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
 	} else {
 		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
 	}
 
-	return stateReader, stateWriter
+	return stateReader, stateWriter, nil
 }
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
@@ -278,17 +284,17 @@ Loop:
 
 		lastLogTx += uint64(block.Transactions().Len())
 
-		var checkTEVMCode func(contractHash common.Hash) (bool, error)
+		var contractHasTEVM func(contractHash common.Hash) (bool, error)
 
 		if cfg.vmConfig.EnableTEMV {
-			checkTEVMCode = ethdb.GetCheckTEVM(tx)
+			contractHasTEVM = ethdb.GetHasTEVM(tx)
 		}
 
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
@@ -327,7 +333,7 @@ Loop:
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
 			gas = 0
 			tx.CollectMetrics()
-			stageExecutionGauge.Set(blockNum)
+			syncMetrics[stages.Execution].Set(blockNum)
 		}
 	}
 
@@ -365,7 +371,7 @@ func pruneChangeSets(tx kv.RwTx, logPrefix string, table string, pruneTo uint64,
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", table, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -438,11 +444,22 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 
 	var accumulator *shards.Accumulator
 	if !initialCycle && cfg.stateStream {
+		accumulator = cfg.accumulator
+
 		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}
-		accumulator.StartChange(u.UnwindPoint, hash, true /* unwind */)
+		txs, err := rawdb.RawTransactionsRange(tx, u.UnwindPoint, s.BlockNumber)
+		if err != nil {
+			return err
+		}
+		targetHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
+		var protocolBaseFee uint64
+		if targetHeader.BaseFee != nil {
+			protocolBaseFee = targetHeader.BaseFee.Uint64()
+		}
+		accumulator.StartChange(u.UnwindPoint, hash, txs, protocolBaseFee, true /* unwind */)
 	}
 
 	changes := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
@@ -483,7 +500,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
 				if accumulator != nil {
-					accumulator.ChangeAccount(address, newV)
+					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
 				if err := next(k, k, newV); err != nil {
 					return err
@@ -635,7 +652,7 @@ func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Receipts, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Receipts, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -661,7 +678,7 @@ func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Log, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
@@ -690,7 +707,7 @@ func pruneCallTracesSet(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:

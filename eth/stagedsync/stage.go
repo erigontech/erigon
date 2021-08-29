@@ -48,6 +48,9 @@ func (s *StageState) LogPrefix() string { return s.state.LogPrefix() }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
+	if m, ok := syncMetrics[s.ID]; ok {
+		m.Set(newBlockNum)
+	}
 	return stages.SaveStageProgress(db, s.ID, newBlockNum)
 }
 
@@ -88,7 +91,7 @@ type PruneState struct {
 	state           *Sync
 }
 
-func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() }
+func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" }
 func (s *PruneState) Done(db kv.Putter) error {
 	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
 }

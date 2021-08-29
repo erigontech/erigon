@@ -16,8 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 )
 
-func GetAsOf(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
-	v, err := FindByHistory(tx, storage, key, timestamp)
+func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+	v, err := FindByHistory(tx, indexC, changesC, storage, key, timestamp)
 	if err == nil {
 		return v, nil
 	}
@@ -27,7 +27,7 @@ func GetAsOf(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, erro
 	return tx.GetOne(kv.PlainState, key)
 }
 
-func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte, error) {
+func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	var csBucket string
 	if storage {
 		csBucket = kv.StorageChangeSet
@@ -35,12 +35,7 @@ func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte
 		csBucket = kv.AccountChangeSet
 	}
 
-	ch, err := tx.Cursor(changeset.Mapper[csBucket].IndexBucket)
-	if err != nil {
-		return nil, err
-	}
-	defer ch.Close()
-	k, v, seekErr := ch.Seek(changeset.Mapper[csBucket].IndexChunkKey(key, timestamp))
+	k, v, seekErr := indexC.Seek(changeset.Mapper[csBucket].IndexChunkKey(key, timestamp))
 	if seekErr != nil {
 		return nil, seekErr
 	}
@@ -66,16 +61,12 @@ func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte
 	changeSetBlock := found
 
 	var data []byte
+	var err error
 	if ok {
-		c, err := tx.CursorDupSort(csBucket)
-		if err != nil {
-			return nil, err
-		}
-		defer c.Close()
 		if storage {
-			data, err = changeset.Mapper[csBucket].Find(c, changeSetBlock, key)
+			data, err = changeset.Mapper[csBucket].Find(changesC, changeSetBlock, key)
 		} else {
-			data, err = changeset.Mapper[csBucket].Find(c, changeSetBlock, key)
+			data, err = changeset.Mapper[csBucket].Find(changesC, changeSetBlock, key)
 		}
 		if err != nil {
 			if !errors.Is(err, changeset.ErrNotFound) {
@@ -101,7 +92,7 @@ func FindByHistory(tx kv.Tx, storage bool, key []byte, timestamp uint64) ([]byte
 				return nil, err
 			}
 			if len(codeHash) > 0 {
-				acc.CodeHash = common.BytesToHash(codeHash)
+				acc.CodeHash.SetBytes(codeHash)
 			}
 			data = make([]byte, acc.EncodingLengthForStorage())
 			acc.EncodeForStorage(data)

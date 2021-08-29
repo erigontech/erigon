@@ -140,7 +140,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 			continue
 		}
 
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 		for _, tx := range body.Transactions {
 			pool.RemoveTx(tx.Hash(), true /* outofbound */)
 		}
@@ -267,7 +267,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 			continue
 		}
 
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 		body.SendersToTxs(senders[blockNumber-from-1])
 		txsToInject = append(txsToInject, body.Transactions...)
 	}

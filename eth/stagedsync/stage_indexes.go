@@ -167,11 +167,10 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 			}
 		}
 
-		kStr := string(k)
-		m, ok := updates[kStr]
+		m, ok := updates[string(k)]
 		if !ok {
 			m = roaring64.New()
-			updates[kStr] = m
+			updates[string(k)] = m
 		}
 		m.Add(blockN)
 
@@ -446,7 +445,7 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:

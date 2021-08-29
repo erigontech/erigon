@@ -19,7 +19,9 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
+	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -28,13 +30,11 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
@@ -194,6 +194,9 @@ func handShake(
 		if uint(reply.ProtocolVersion) < minVersion {
 			return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", reply.ProtocolVersion, minVersion)
 		}
+		if uint(reply.ProtocolVersion) > version {
+			return fmt.Errorf("version is more than what this senty supports: theirs %d, max %d", reply.ProtocolVersion, version)
+		}
 		if reply.Genesis != genesisHash {
 			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 		}
@@ -255,13 +258,13 @@ func runPeer(
 		default:
 		}
 		if peerPrinted {
-			log.Info(fmt.Sprintf("Peer %s [%s] disconnected", peerID, peerInfo.peer.Fullname()), "proto", protocol)
+			log.Debug("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
 		}
 	}()
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				log.Info(fmt.Sprintf("Peer %s [%s] stable", peerID, peerInfo.peer.Fullname()), "proto", protocol)
+				log.Debug("Peer stable", "id", peerID, "name", peerInfo.peer.Fullname())
 				peerPrinted = true
 			}
 		}
@@ -415,7 +418,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) error {
+func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry P2P server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
@@ -426,7 +429,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	}
 	lis, err := listenConfig.Listen(ctx, "tcp", sentryAddr)
 	if err != nil {
-		return fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
+		return nil, fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
 	}
 	var (
 		streamInterceptors []grpc.StreamServerInterceptor
@@ -434,10 +437,10 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	)
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
+	//if metrics.Enabled {
+	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	//}
 
 	var grpcServer *grpc.Server
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
@@ -458,15 +461,15 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	grpcServer = grpc.NewServer(opts...)
 
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
+	//if metrics.Enabled {
+	//	grpc_prometheus.Register(grpcServer)
+	//}
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry P2P server fail", "err", err1)
 		}
 	}()
-	return nil
+	return grpcServer, nil
 }
 
 func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint) *SentryServerImpl {
@@ -546,30 +549,33 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 
-	err := grpcSentryServer(ctx, sentryAddr, sentryServer)
+	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer)
 	if err != nil {
 		return err
 	}
 	sentryServer.discoveryDNS = discoveryDNS
 
 	<-ctx.Done()
+	grpcServer.GracefulStop()
+	sentryServer.Close()
 	return nil
 }
 
 type SentryServerImpl struct {
 	proto_sentry.UnimplementedSentryServer
-	ctx                context.Context
-	Protocol           p2p.Protocol
-	discoveryDNS       []string
-	GoodPeers          sync.Map
-	statusData         *proto_sentry.StatusData
-	P2pServer          *p2p.Server
-	TxSubscribed       uint32 // Set to non-zero if downloader is subscribed to transaction messages
-	lock               sync.RWMutex
-	messageStreams     map[proto_sentry.MessageId]*MessageStreams
-	messageStreamsLock sync.RWMutex
-	peersStreams       *PeersStreams
-	p2p                *p2p.Config
+	ctx                  context.Context
+	Protocol             p2p.Protocol
+	discoveryDNS         []string
+	GoodPeers            sync.Map
+	statusData           *proto_sentry.StatusData
+	P2pServer            *p2p.Server
+	TxSubscribed         uint32 // Set to non-zero if downloader is subscribed to transaction messages
+	lock                 sync.RWMutex
+	messageStreams       map[proto_sentry.MessageId]map[uint64]chan *proto_sentry.InboundMessage
+	messagesSubscriberID uint64
+	messageStreamsLock   sync.RWMutex
+	peersStreams         *PeersStreams
+	p2p                  *p2p.Config
 }
 
 func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID string) error {
@@ -813,18 +819,22 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
-	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
-
-	ss.lock.Lock()
-	defer ss.lock.Unlock()
-	reply := &proto_sentry.SetStatusReply{}
+func (ss *SentryServerImpl) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
+	reply := &proto_sentry.HandShakeReply{}
 	switch ss.Protocol.Version {
 	case eth.ETH66:
 		reply.Protocol = proto_sentry.Protocol_ETH66
 	case eth.ETH65:
 		reply.Protocol = proto_sentry.Protocol_ETH65
 	}
+	return reply, nil
+}
+func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
+	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
+
+	ss.lock.Lock()
+	defer ss.lock.Unlock()
+	reply := &proto_sentry.SetStatusReply{}
 
 	if ss.P2pServer == nil {
 		var err error
@@ -894,131 +904,94 @@ func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
 func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b []byte) {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
-	errs := ss.messageStreams[msgID].Broadcast(&proto_sentry.InboundMessage{
+	req := &proto_sentry.InboundMessage{
 		PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
 		Id:     msgID,
 		Data:   b,
-	})
-	for _, err := range errs {
-		log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(msgID)], "error", err)
+	}
+	for i := range ss.messageStreams[msgID] {
+		ch := ss.messageStreams[msgID][i]
+		ch <- req
+		if len(ch) > MessagesQueueSize/2 {
+			log.Debug("[sentry] consuming is slow", "msgID", msgID.String())
+			// evict old messages from channel
+			for j := 0; j < MessagesQueueSize/4; j++ {
+				select {
+				case <-ch:
+				default:
+				}
+			}
+		}
 	}
 }
 
 func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
-	return ss.messageStreams[msgID] != nil && ss.messageStreams[msgID].Len() > 0
+	return ss.messageStreams[msgID] != nil && len(ss.messageStreams[msgID]) > 0
 	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
 }
 
-func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, server proto_sentry.Sentry_MessagesServer) func() {
+func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch chan *proto_sentry.InboundMessage) func() {
 	ss.messageStreamsLock.Lock()
 	defer ss.messageStreamsLock.Unlock()
 	if ss.messageStreams == nil {
-		ss.messageStreams = map[proto_sentry.MessageId]*MessageStreams{}
+		ss.messageStreams = map[proto_sentry.MessageId]map[uint64]chan *proto_sentry.InboundMessage{}
 	}
 
-	cleanStack := make([]func(), len(ids))
-	for i, id := range ids {
+	ss.messagesSubscriberID++
+	for _, id := range ids {
 		m, ok := ss.messageStreams[id]
 		if !ok {
-			m = NewStreamsList()
+			m = map[uint64]chan *proto_sentry.InboundMessage{}
 			ss.messageStreams[id] = m
 		}
-
-		cleanStack[i] = m.Add(server)
+		m[ss.messagesSubscriberID] = ch
 	}
+
+	sID := ss.messagesSubscriberID
 	return func() {
-		for i := range cleanStack {
-			cleanStack[i]()
+		ss.messageStreamsLock.Lock()
+		defer ss.messageStreamsLock.Unlock()
+		for _, id := range ids {
+			delete(ss.messageStreams[id], sID)
 		}
 	}
 }
 
+const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Debug(fmt.Sprintf("[Messages] new subscriber to: %s", req.Ids))
-	clean := ss.addMessagesStream(req.Ids, server)
+	log.Debug("[Messages] new subscriber", "to", req.Ids)
+	ch := make(chan *proto_sentry.InboundMessage, MessagesQueueSize)
+	defer close(ch)
+	clean := ss.addMessagesStream(req.Ids, ch)
 	defer clean()
-	select {
-	case <-ss.ctx.Done():
-		return nil
-	case <-server.Context().Done():
-		return nil
-	}
-}
 
-// MessageStreams - it's safe to use this class as non-pointer
-type MessageStreams struct {
-	mu      sync.RWMutex
-	id      uint
-	streams map[uint]proto_sentry.Sentry_MessagesServer
-}
-
-func NewStreamsList() *MessageStreams {
-	return &MessageStreams{}
-}
-
-func (s *MessageStreams) Add(stream proto_sentry.Sentry_MessagesServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.streams == nil {
-		s.streams = make(map[uint]proto_sentry.Sentry_MessagesServer)
-	}
-	s.id++
-	id := s.id
-	s.streams[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *MessageStreams) doBroadcast(reply *proto_sentry.InboundMessage) (ids []uint, errs []error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for id, stream := range s.streams {
-		err := stream.Send(reply)
-		if err != nil {
-			select {
-			case <-stream.Context().Done():
-				ids = append(ids, id)
-			default:
+	for {
+		select {
+		case <-ss.ctx.Done():
+			return nil
+		case <-server.Context().Done():
+			return nil
+		case in := <-ch:
+			if err := server.Send(in); err != nil {
+				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "error", err)
+				return err
 			}
-			errs = append(errs, err)
 		}
 	}
-	return
 }
 
-func (s *MessageStreams) Broadcast(reply *proto_sentry.InboundMessage) (errs []error) {
-	var ids []uint
-	ids, errs = s.doBroadcast(reply)
-	if len(ids) > 0 {
-		s.mu.Lock()
-		defer s.mu.Unlock()
+// Close performs cleanup operations for the sentry
+func (ss *SentryServerImpl) Close() {
+	if ss.P2pServer != nil {
+		ss.P2pServer.Stop()
 	}
-	for _, id := range ids {
-		delete(s.streams, id)
-	}
-	return errs
-}
-
-func (s *MessageStreams) Len() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.streams)
-}
-
-func (s *MessageStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.streams[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.streams, id)
 }
 
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
-		log.Error("Sending new peer notice to core P2P failed", "error", err)
+		log.Warn("Sending new peer notice to core P2P failed", "error", err)
 	}
 }
 

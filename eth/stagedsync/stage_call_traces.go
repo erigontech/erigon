@@ -16,9 +16,9 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
@@ -343,7 +343,7 @@ func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTr
 	}
 }
 
-func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	ct.froms[from] = struct{}{}
 
 	created, ok := ct.tos[to]
@@ -352,8 +352,8 @@ func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Add
 	}
 
 	if !created && create {
-		if !accounts.IsEmptyCodeHash(codeHash) && ct.hasTEVM != nil {
-			has, err := ct.hasTEVM(codeHash)
+		if len(code) > 0 && ct.hasTEVM != nil {
+			has, err := ct.hasTEVM(common.BytesToHash(crypto.Keccak256(code)))
 			if !has {
 				ct.tos[to] = true
 			}
@@ -371,7 +371,7 @@ func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
-func (ct *CallTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ct *CallTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	return nil
 }
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
@@ -484,7 +484,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 				}
 				select {
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallFromIndex, "block", blockNum)
+					log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "block", blockNum)
 				case <-ctx.Done():
 					return common.ErrStopped
 				default:
@@ -519,7 +519,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 				}
 				select {
 				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallToIndex, "block", blockNum)
+					log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "block", blockNum)
 				case <-ctx.Done():
 					return common.ErrStopped
 				default:

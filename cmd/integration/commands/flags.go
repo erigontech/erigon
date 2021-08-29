@@ -113,7 +113,7 @@ func withBatchSize(cmd *cobra.Command) {
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", true, "enable slow data-integrity checks")
+	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
 	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
 }
 

@@ -27,8 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/wcharczuk/go-chart"
-	"github.com/wcharczuk/go-chart/util"
+	"github.com/wcharczuk/go-chart/v2"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -66,7 +65,7 @@ var (
 )
 
 func readData(filename string) (blocks []float64, hours []float64, dbsize []float64, trienodes []float64, heap []float64) {
-	err := util.File.ReadByLines(filename, func(line string) error {
+	err := chart.ReadLines(filename, func(line string) error {
 		parts := strings.Split(line, ",")
 		blocks = append(blocks, tool.ParseFloat64(strings.Trim(parts[0], " ")))
 		hours = append(hours, tool.ParseFloat64(strings.Trim(parts[1], " ")))
@@ -115,7 +114,6 @@ func mychart() {
 	mainSeries := &chart.ContinuousSeries{
 		Name: "Cumulative sync time (bolt)",
 		Style: chart.Style{
-			Show:        true,
 			StrokeColor: chart.ColorBlue,
 			FillColor:   chart.ColorBlue.WithAlpha(100),
 		},
@@ -125,7 +123,6 @@ func mychart() {
 	badgerSeries := &chart.ContinuousSeries{
 		Name: "Cumulative sync time (badger)",
 		Style: chart.Style{
-			Show:        true,
 			StrokeColor: chart.ColorRed,
 			FillColor:   chart.ColorRed.WithAlpha(100),
 		},
@@ -135,7 +132,7 @@ func mychart() {
 	dbsizeSeries := &chart.ContinuousSeries{
 		Name: "Database size (bolt)",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorBlack,
 		},
 		YAxis:   chart.YAxisSecondary,
@@ -145,7 +142,7 @@ func mychart() {
 	dbsizeSeries0 := &chart.ContinuousSeries{
 		Name: "Database size (badger)",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorOrange,
 		},
 		YAxis:   chart.YAxisSecondary,
@@ -163,8 +160,8 @@ func mychart() {
 		},
 		YAxis: chart.YAxis{
 			Name:      "Elapsed time",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -172,15 +169,15 @@ func mychart() {
 				return fmt.Sprintf("%d h", int(v.(float64)))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorBlue,
 				StrokeWidth: 1.0,
 			},
 			GridLines: days(),
 		},
 		YAxisSecondary: chart.YAxis{
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -189,15 +186,13 @@ func mychart() {
 			},
 		},
 		XAxis: chart.XAxis{
-			Name: "Blocks, million",
-			Style: chart.Style{
-				Show: true,
-			},
+			Name:  "Blocks, million",
+			Style: chart.Style{},
 			ValueFormatter: func(v interface{}) string {
 				return fmt.Sprintf("%.3fm", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
@@ -222,7 +217,7 @@ func mychart() {
 	heapSeries := &chart.ContinuousSeries{
 		Name: "Allocated heap",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorYellow,
 			FillColor:   chart.ColorYellow.WithAlpha(100),
 		},
@@ -232,7 +227,7 @@ func mychart() {
 	trienodesSeries := &chart.ContinuousSeries{
 		Name: "Trie nodes",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorGreen,
 		},
 		YAxis:   chart.YAxisSecondary,
@@ -249,8 +244,8 @@ func mychart() {
 		},
 		YAxis: chart.YAxis{
 			Name:      "Allocated heap",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -258,15 +253,15 @@ func mychart() {
 				return fmt.Sprintf("%.1f G", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorYellow,
 				StrokeWidth: 1.0,
 			},
 			GridLines: days(),
 		},
 		YAxisSecondary: chart.YAxis{
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -275,15 +270,13 @@ func mychart() {
 			},
 		},
 		XAxis: chart.XAxis{
-			Name: "Blocks, million",
-			Style: chart.Style{
-				Show: true,
-			},
+			Name:  "Blocks, million",
+			Style: chart.Style{},
 			ValueFormatter: func(v interface{}) string {
 				return fmt.Sprintf("%.3fm", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
@@ -380,7 +373,7 @@ func trieChart() {
 	shortsSeries := &chart.ContinuousSeries{
 		Name: "Short nodes",
 		Style: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.ColorBlue,
 			FillColor:   chart.ColorBlue.WithAlpha(100),
 		},
@@ -392,7 +385,7 @@ func trieChart() {
 		countSeries[i] = &chart.ContinuousSeries{
 			Name: fmt.Sprintf("%d-nodes", i),
 			Style: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.GetAlternateColor(i),
 			},
 			XValues: thresholds,
@@ -400,15 +393,13 @@ func trieChart() {
 		}
 	}
 	xaxis := &chart.XAxis{
-		Name: "Dust theshold",
-		Style: chart.Style{
-			Show: true,
-		},
+		Name:  "Dust theshold",
+		Style: chart.Style{},
 		ValueFormatter: func(v interface{}) string {
 			return fmt.Sprintf("%d wei", int(v.(float64)))
 		},
 		GridMajorStyle: chart.Style{
-			Show:        true,
+
 			StrokeColor: chart.DefaultStrokeColor,
 			StrokeWidth: 1.0,
 		},
@@ -445,8 +436,8 @@ func trieChart() {
 		XAxis: *xaxis,
 		YAxis: chart.YAxis{
 			Name:      "Node count",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -454,7 +445,7 @@ func trieChart() {
 				return fmt.Sprintf("%dm", int(v.(float64)/1e6))
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.DefaultStrokeColor,
 				StrokeWidth: 1.0,
 			},
@@ -480,8 +471,8 @@ func trieChart() {
 		XAxis: *xaxis,
 		YAxis: chart.YAxis{
 			Name:      "Node count",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -489,7 +480,7 @@ func trieChart() {
 				return fmt.Sprintf("%.2fm", v.(float64)/1e6)
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.DefaultStrokeColor,
 				StrokeWidth: 1.0,
 			},
@@ -516,8 +507,8 @@ func trieChart() {
 		XAxis: *xaxis,
 		YAxis: chart.YAxis{
 			Name:      "Node count",
-			NameStyle: chart.StyleShow(),
-			Style:     chart.StyleShow(),
+			NameStyle: chart.Shown(),
+			Style:     chart.Shown(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
 			},
@@ -525,7 +516,7 @@ func trieChart() {
 				return fmt.Sprintf("%.2fk", v.(float64)/1e3)
 			},
 			GridMajorStyle: chart.Style{
-				Show:        true,
+
 				StrokeColor: chart.DefaultStrokeColor,
 				StrokeWidth: 1.0,
 			},
@@ -867,7 +858,7 @@ func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 	for !interrupt {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		tool.Check(err)
-		body := rawdb.ReadBody(tx, blockHash, blockNum)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNum)
 
 		if body == nil {
 			break
@@ -1371,25 +1362,9 @@ func extractCode(chaindata string) error {
 func iterateOverCode(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	var contractCount int
-	var contractKeyTotalLength int
-	var contractValTotalLength int
-	var codeHashTotalLength int
-	var codeTotalLength int // Total length of all byte code (just to illustrate iterating)
+	hashes := make(map[common.Hash][]byte)
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainContractCode)
-		if err != nil {
-			return err
-		}
-		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			contractKeyTotalLength += len(k)
-			contractValTotalLength += len(v)
-		}
-		c, err = tx.Cursor(kv.Code)
+		c, err := tx.Cursor(kv.Code)
 		if err != nil {
 			return err
 		}
@@ -1398,16 +1373,29 @@ func iterateOverCode(chaindata string) error {
 			if err != nil {
 				return err
 			}
-			codeHashTotalLength += len(k)
-			codeTotalLength += len(v)
-			contractCount++
+			if len(v) > 0 && v[0] == 0xef {
+				fmt.Printf("Found code with hash %x: %x\n", k, v)
+				hashes[common.BytesToHash(k)] = common.CopyBytes(v)
+			}
+		}
+		c, err = tx.Cursor(kv.PlainContractCode)
+		if err != nil {
+			return err
+		}
+		// This is a mapping of contractAddress + incarnation => CodeHash
+		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			hash := common.BytesToHash(v)
+			if code, ok := hashes[hash]; ok {
+				fmt.Printf("address: %x: %x\n", k[:20], code)
+			}
 		}
 		return nil
 	}); err1 != nil {
 		return err1
 	}
-	fmt.Printf("contractCount: %d,contractKeyTotalLength: %d, contractValTotalLength: %d, codeHashTotalLength: %d, codeTotalLength: %d\n",
-		contractCount, contractKeyTotalLength, contractValTotalLength, codeHashTotalLength, codeTotalLength)
 	return nil
 }
 
@@ -1468,7 +1456,7 @@ func mint(chaindata string, block uint64) error {
 			fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
 		}
 		prevBlock = blockNumber
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
 		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNumber)
 		if errSenders != nil {
@@ -1592,7 +1580,7 @@ func extractBodies(chaindata string, block uint64) error {
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
-		_, baseTxId, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, blockNumber)
+		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
 		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
 	}
 	return nil
@@ -2168,7 +2156,7 @@ func scanReceipts(chaindata string, block uint64) error {
 			}
 			var body *types.Body
 			if chainConfig.IsBerlin(blockNum) {
-				body = rawdb.ReadBody(tx, hash, blockNum)
+				body = rawdb.ReadBodyWithTransactions(tx, hash, blockNum)
 			}
 			receipts = make(types.Receipts, len(oldReceipts))
 			for i, oldReceipt := range oldReceipts {
@@ -2199,7 +2187,8 @@ func scanReceipts(chaindata string, block uint64) error {
 		intraBlockState := state.New(dbstate)
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-		receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, nil /* checkTEVM */, block, vmConfig)
+		contractHasTEVM := ethdb.GetHasTEVM(tx)
+		receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, contractHasTEVM, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -2231,7 +2220,7 @@ func scanReceipts(chaindata string, block uint64) error {
 }
 
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
+	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
@@ -2244,7 +2233,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	rules := chainConfig.Rules(block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, checkTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}

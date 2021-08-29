@@ -498,7 +498,10 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 	defer tx.Rollback()
 
 	if reset {
-		return stagedsync.ResetIH(tx)
+		if err := stagedsync.ResetIH(tx); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	execStage := stage(sync, tx, nil, stages.Execution)
 	s := stage(sync, tx, nil, stages.IntermediateHashes)
@@ -529,12 +532,12 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(s, nil /* Unwinder */, tx, cfg, ctx); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(s, sync /* Unwinder */, tx, cfg, ctx); err != nil {
 			return err
 		}
 	}
 	integrity.Trie(tx, integritySlow, ctx)
-	return nil
+	return tx.Commit()
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
@@ -880,7 +883,7 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	snapshotDir = path.Join(datadir, "erigon", "snapshot")
+	snapshotDir = path.Join(datadir, "snapshot")
 	logger := log.New()
 
 	var pm prune.Mode
@@ -888,6 +891,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if err = db.View(context.Background(), func(tx kv.Tx) error {
 		pm, err = prune.Get(tx)
 		if err != nil {
+			return err
+		}
+		if err = stagedsync.UpdateMetrics(tx); err != nil {
 			return err
 		}
 		return nil

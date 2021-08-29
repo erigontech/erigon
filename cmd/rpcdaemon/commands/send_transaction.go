@@ -49,12 +49,17 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, err
 	}
 	defer tx.Rollback()
+
 	// Print a log with full txn details for manual investigations and interventions
 	blockNum := rawdb.ReadCurrentBlockNumber(tx)
 	if blockNum == nil {
 		return common.Hash{}, err
 	}
-	signer := types.MakeSigner(api.ChainConfig(), *blockNum)
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	signer := types.MakeSigner(cc, *blockNum)
 	from, err := txn.Sender(*signer)
 	if err != nil {
 		return common.Hash{}, err

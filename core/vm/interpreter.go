@@ -69,10 +69,15 @@ type keccakState interface {
 
 // EVMInterpreter represents an EVM interpreter
 type EVMInterpreter struct {
+	*VM
+	jt *JumpTable // EVM instruction table
+}
+
+//structcheck doesn't see embedding
+//nolint:structcheck
+type VM struct {
 	evm *EVM
 	cfg Config
-
-	jt *JumpTable // EVM instruction table
 
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
@@ -115,9 +120,49 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 
 	return &EVMInterpreter{
-		evm: evm,
-		cfg: cfg,
-		jt:  jt,
+		VM: &VM{
+			evm: evm,
+			cfg: cfg,
+		},
+		jt: jt,
+	}
+}
+
+func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
+	var jt *JumpTable
+	switch {
+	case vm.evm.ChainRules.IsLondon:
+		jt = &londonInstructionSet
+	case vm.evm.ChainRules.IsBerlin:
+		jt = &berlinInstructionSet
+	case vm.evm.ChainRules.IsIstanbul:
+		jt = &istanbulInstructionSet
+	case vm.evm.ChainRules.IsConstantinople:
+		jt = &constantinopleInstructionSet
+	case vm.evm.ChainRules.IsByzantium:
+		jt = &byzantiumInstructionSet
+	case vm.evm.ChainRules.IsEIP158:
+		jt = &spuriousDragonInstructionSet
+	case vm.evm.ChainRules.IsEIP150:
+		jt = &tangerineWhistleInstructionSet
+	case vm.evm.ChainRules.IsHomestead:
+		jt = &homesteadInstructionSet
+	default:
+		jt = &frontierInstructionSet
+	}
+	if len(vm.cfg.ExtraEips) > 0 {
+		for i, eip := range vm.cfg.ExtraEips {
+			if err := EnableEIP(eip, jt); err != nil {
+				// Disable it, so caller can check if it's activated or not
+				vm.cfg.ExtraEips = append(vm.cfg.ExtraEips[:i], vm.cfg.ExtraEips[i+1:]...)
+				log.Error("EIP activation failed", "eip", eip, "error", err)
+			}
+		}
+	}
+
+	return &EVMInterpreter{
+		VM: vm,
+		jt: jt,
 	}
 }
 
@@ -134,10 +179,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
-	if readOnly && !in.readOnly {
-		in.readOnly = true
-		defer func() { in.readOnly = false }()
-	}
+	callback := in.setReadonly(readOnly)
+	defer func() {
+		callback()
+	}()
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
@@ -274,7 +319,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// if the operation clears the return data (e.g. it has returning data)
 		// set the last return to the result of the operation.
 		if operation.returns {
-			in.returnData = common.CopyBytes(res)
+			in.returnData = res
 		}
 
 		switch {
@@ -289,4 +334,18 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 	}
 	return nil, nil
+}
+
+func (vm *VM) setReadonly(outerReadonly bool) func() {
+	if outerReadonly && !vm.readOnly {
+		vm.readOnly = true
+		return func() {
+			vm.readOnly = false
+		}
+	}
+	return func() {}
+}
+
+func (vm *VM) getReadonly() bool {
+	return vm.readOnly
 }

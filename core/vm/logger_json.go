@@ -42,7 +42,7 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 	return l
 }
 
-func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	return nil
 }
 
@@ -79,7 +79,7 @@ func (l *JSONLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint
 }
 
 // CaptureEnd is triggered at end of execution.
-func (l *JSONLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (l *JSONLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	type endLog struct {
 		Output  string              `json:"output"`
 		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
@@ -93,7 +93,7 @@ func (l *JSONLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time
 	if err != nil {
 		errMsg = err.Error()
 	}
-	return l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), t, errMsg})
+	return l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(startGas - endGas), t, errMsg})
 }
 
 func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {

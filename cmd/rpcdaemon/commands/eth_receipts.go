@@ -37,8 +37,8 @@ func getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig,
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		return rawdb.ReadHeader(tx, hash, number)
 	}
-	checkTEVM := ethdb.GetCheckTEVM(tx)
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, checkTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
+	contractHasTEVM := ethdb.GetHasTEVM(tx)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig,
 	var usedGas = new(uint64)
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, checkTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, contractHasTEVM)
 		if err != nil {
 			return nil, err
 		}

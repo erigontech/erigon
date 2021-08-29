@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -60,7 +61,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/remote"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
@@ -110,7 +110,7 @@ type Ethereum struct {
 	downloadServer  *download.ControlServerImpl
 	sentryServers   []*download.SentryServerImpl
 	txPoolP2PServer *txpool.P2PServer
-	sentries        []remote.SentryClient
+	sentries        []direct.SentryClient
 	stagedSync      *stagedsync.Sync
 
 	notifications *stagedsync.Notifications
@@ -181,7 +181,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	kvRPC := remotedbserver2.NewKvServer(ctx, chainKv)
 	backend := &Ethereum{
+		downloadCtx:          ctx,
+		downloadCancel:       ctxCancel,
 		config:               config,
 		logger:               logger,
 		chainKV:              chainKv,
@@ -192,10 +196,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
 		waitForMiningStop:    make(chan struct{}),
-		sentries:             []remote.SentryClient{},
+		sentries:             []direct.SentryClient{},
 		notifications: &stagedsync.Notifications{
-			Events:      privateapi.NewEvents(),
-			Accumulator: &shards.Accumulator{},
+			Events:               privateapi.NewEvents(),
+			Accumulator:          &shards.Accumulator{},
+			StateChangesConsumer: kvRPC,
 		},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
@@ -286,10 +291,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	kvRPC := remotedbserver2.NewKvServer(backend.chainKV)
-	ethBackendRPC := privateapi.NewEthBackendServer(backend, backend.notifications.Events)
-	txPoolRPC := privateapi.NewTxPoolServer(context.Background(), backend.txPool)
-	miningRPC := privateapi.NewMiningServer(context.Background(), backend, ethashApi)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.notifications.Events)
+	txPoolRPC := privateapi.NewTxPoolServer(ctx, backend.txPool)
+	miningRPC := privateapi.NewMiningServer(ctx, backend, ethashApi)
 
 	if stack.Config().PrivateApiAddr != "" {
 
@@ -351,7 +355,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
-	backend.downloadCtx, backend.downloadCancel = context.WithCancel(context.Background())
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
 			sentry, err := download.GrpcSentryClient(backend.downloadCtx, addr)
@@ -380,7 +383,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg66.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth66")
 		server66 := download.NewSentryServer(backend.downloadCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
-		backend.sentries = []remote.SentryClient{remote.NewSentryClientDirect(eth.ETH66, server66)}
+		backend.sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
 		cfg65 := stack.Config().P2P
 		cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
 		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
@@ -390,7 +393,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg65.ListenAddr = cfg65.ListenAddr65
 		server65 := download.NewSentryServer(backend.downloadCtx, d65, readNodeInfo, &cfg65, eth.ETH65)
 		backend.sentryServers = append(backend.sentryServers, server65)
-		backend.sentries = append(backend.sentries, remote.NewSentryClientDirect(eth.ETH65, server65))
+		backend.sentries = append(backend.sentries, direct.NewSentryClientDirect(eth.ETH65, server65))
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()
@@ -676,14 +679,12 @@ func (s *Ethereum) Start() error {
 		go func(i int) {
 			download.RecvUploadMessageLoop(s.downloadCtx, s.sentries[i], s.downloadServer, nil)
 		}(i)
+		go func(i int) {
+			download.RecvUploadHeadersMessageLoop(s.downloadCtx, s.sentries[i], s.downloadServer, nil)
+		}(i)
 	}
 
-	go stages2.StageLoop(
-		s.downloadCtx, s.logger, s.chainKV,
-		s.stagedSync, s.downloadServer.Hd,
-		s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop,
-		s.config.SyncLoopThrottle,
-	)
+	go stages2.StageLoop(s.downloadCtx, s.chainKV, s.stagedSync, s.downloadServer.Hd, s.notifications, s.downloadServer.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 
 	return nil
 }
@@ -694,11 +695,6 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.downloadCancel()
 	s.txPoolP2PServer.TxFetcher.Stop()
-	s.txPool.Stop()
-	if s.quitMining != nil {
-		close(s.quitMining)
-	}
-
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
@@ -711,6 +707,10 @@ func (s *Ethereum) Stop() error {
 		case <-shutdownDone:
 		}
 	}
+	s.txPool.Stop()
+	if s.quitMining != nil {
+		close(s.quitMining)
+	}
 
 	//s.miner.Stop()
 	s.engine.Close()
@@ -721,5 +721,9 @@ func (s *Ethereum) Stop() error {
 	if s.config.Miner.Enabled {
 		<-s.waitForMiningStop
 	}
+	for _, sentryServer := range s.sentryServers {
+		sentryServer.Close()
+	}
+	s.chainKV.Close()
 	return nil
 }

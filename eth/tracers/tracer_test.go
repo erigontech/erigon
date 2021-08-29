@@ -57,8 +57,8 @@ type vmContext struct {
 
 func testCtx() *vmContext {
 	return &vmContext{blockCtx: vm.BlockContext{
-		BlockNumber: 1,
-		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
+		BlockNumber:     1,
+		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 	}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
 }
 
@@ -71,11 +71,11 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	contract := vm.NewContract(account{}, account{}, value, startGas, false, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
-	if err := tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())), contract.CodeHash); err != nil {
+	if err := tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())), contract.Code); err != nil {
 		return nil, err
 	}
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	if err1 := tracer.CaptureEnd(0, ret, startGas-contract.Gas, 1, err); err1 != nil {
+	if err1 := tracer.CaptureEnd(0, ret, startGas, contract.Gas, 1, err); err1 != nil {
 		return nil, err1
 	}
 	if err != nil {
@@ -88,8 +88,8 @@ func TestTracer(t *testing.T) {
 	execTracer := func(code string) []byte {
 		t.Helper()
 		ctx := &vmContext{blockCtx: vm.BlockContext{
-			BlockNumber: 1,
-			CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
+			BlockNumber:     1,
+			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
 		tracer, err := New(code, ctx.txCtx)
 		if err != nil {
@@ -161,8 +161,8 @@ func TestHaltBetweenSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := vm.NewEVM(vm.BlockContext{
-		BlockNumber: 1,
-		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
+		BlockNumber:     1,
+		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 	}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false, false)
 

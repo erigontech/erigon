@@ -1,6 +1,8 @@
 package shards
 
 import (
+	"context"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
@@ -14,15 +16,31 @@ type Accumulator struct {
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
+type StateChangeConsumer interface {
+	SendStateChanges(sc *remote.StateChange)
+}
+
 func (a *Accumulator) Reset() {
 	a.changes = nil
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
 }
+func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
+	if a == nil || c == nil || len(a.changes) == 0 {
+		return
+	}
+	for i := range a.changes {
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return
+		}
+		c.SendStateChanges(&a.changes[i])
+	}
+	a.Reset()
+}
 
-// StartChanges begins accumulation of changes for a new block
-func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, unwind bool) {
+// StartChange begins accumulation of changes for a new block
+func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs [][]byte, protocolBaseFee uint64, unwind bool) {
 	a.changes = append(a.changes, remote.StateChange{})
 	a.latestChange = &a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight
@@ -34,15 +52,22 @@ func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, unw
 	}
 	a.accountChangeIndex = make(map[common.Address]int)
 	a.storageChangeIndex = make(map[common.Address]map[common.Hash]int)
+	if txs != nil {
+		a.latestChange.Txs = make([][]byte, len(txs))
+		for i := range txs {
+			a.latestChange.Txs[i] = common.CopyBytes(txs[i])
+		}
+	}
+	a.latestChange.ProtocolBaseFee = protocolBaseFee
 }
 
-// ChangeAction adds modification of account balance or nonce (or both) to the latest change
-func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
+// ChangeAccount adds modification of account balance or nonce (or both) to the latest change
+func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok {
+	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
@@ -54,6 +79,7 @@ func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
 	case remote.Action_DELETE:
 		panic("")
 	}
+	accountChange.Incarnation = incarnation
 	accountChange.Data = data
 }
 
@@ -63,7 +89,7 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 	if !ok {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address)})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
@@ -79,10 +105,10 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 // ChangeCode adds code to the latest change
 func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, code []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok {
+	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_CODE})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]
@@ -100,10 +126,10 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 
 func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, location common.Hash, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok {
+	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
 		// Account has not been changed in the latest block yet
 		i = len(a.latestChange.Changes)
-		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{})
+		a.latestChange.Changes = append(a.latestChange.Changes, &remote.AccountChange{Address: gointerfaces.ConvertAddressToH160(address), Action: remote.Action_STORAGE})
 		a.accountChangeIndex[address] = i
 	}
 	accountChange := a.latestChange.Changes[i]

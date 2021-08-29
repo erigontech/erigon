@@ -551,7 +551,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 		}
 		cfg.PrivateKey = key
 	default:
-		cfg.PrivateKey = nodeKey(path.Join(dataDir, "erigon", "nodekey"))
+		cfg.PrivateKey = nodeKey(path.Join(dataDir, "nodekey"))
 	}
 }
 
@@ -687,7 +687,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
-	serverKey := nodeKey(path.Join(datadir, "erigon", "nodekey"))
+	serverKey := nodeKey(path.Join(datadir, "nodekey"))
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
@@ -969,7 +969,7 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
 	} else {
-		cfg.Ethash.DatasetDir = path.Join(datadir, "erigon", "ethash-dags")
+		cfg.Ethash.DatasetDir = path.Join(datadir, "ethash-dags")
 	}
 	if ctx.GlobalIsSet(EthashCachesInMemoryFlag.Name) {
 		cfg.Ethash.CachesInMem = ctx.GlobalInt(EthashCachesInMemoryFlag.Name)

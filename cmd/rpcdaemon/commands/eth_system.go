@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -12,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -103,64 +104,125 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
-	oracle := gasprice.NewOracle(api, ethconfig.Defaults.GPO)
-	price, err := oracle.SuggestPrice(ctx)
-	return (*hexutil.Big)(price), err
-}
-
-// HeaderByNumber is necessary for gasprice.OracleBackend implementation
-func (api *APIImpl) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	oracle := gasprice.NewOracle(&GasPriceOracleBackend{tx: tx, cc: cc}, ethconfig.Defaults.GPO)
+	tipcap, err := oracle.SuggestTipCap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
+		tipcap.Add(tipcap, head.BaseFee)
+	}
+	return (*hexutil.Big)(tipcap), err
+}
 
-	blockNum, err := getBlockNumber(number, tx)
+// MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
+func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	oracle := gasprice.NewOracle(&GasPriceOracleBackend{tx: tx, cc: cc}, ethconfig.Defaults.GPO)
+	tipcap, err := oracle.SuggestTipCap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return (*hexutil.Big)(tipcap), err
+}
+
+type feeHistoryResult struct {
+	OldestBlock  *hexutil.Big     `json:"oldestBlock"`
+	Reward       [][]*hexutil.Big `json:"reward,omitempty"`
+	BaseFee      []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
+	GasUsedRatio []float64        `json:"gasUsedRatio"`
+}
+
+func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	cc, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	oracle := gasprice.NewOracle(&GasPriceOracleBackend{tx: tx, cc: cc}, ethconfig.Defaults.GPO)
+
+	oldest, reward, baseFee, gasUsed, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
+	if err != nil {
+		return nil, err
+	}
+	results := &feeHistoryResult{
+		OldestBlock:  (*hexutil.Big)(oldest),
+		GasUsedRatio: gasUsed,
+	}
+	if reward != nil {
+		results.Reward = make([][]*hexutil.Big, len(reward))
+		for i, w := range reward {
+			results.Reward[i] = make([]*hexutil.Big, len(w))
+			for j, v := range w {
+				results.Reward[i][j] = (*hexutil.Big)(v)
+			}
+		}
+	}
+	if baseFee != nil {
+		results.BaseFee = make([]*hexutil.Big, len(baseFee))
+		for i, v := range baseFee {
+			results.BaseFee[i] = (*hexutil.Big)(v)
+		}
+	}
+	return results, nil
+}
+
+type GasPriceOracleBackend struct {
+	tx kv.Tx
+	cc *params.ChainConfig
+}
+
+func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
+	blockNum, err := getBlockNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}
 
-	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	header := rawdb.ReadHeaderByNumber(b.tx, blockNum)
 	if header == nil {
 		return nil, fmt.Errorf("header not found: %d", blockNum)
 	}
 	return header, nil
 }
-
-// BlockByNumber is necessary for gasprice.OracleBackend implementation
-func (api *APIImpl) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockNum, err := getBlockNumber(number, tx)
+func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
+	blockNum, err := getBlockNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}
 
-	block, _, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
+	block, _, err := rawdb.ReadBlockByNumberWithSenders(b.tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	return block, nil
 }
-
-// ChainConfig is necessary for gasprice.OracleBackend implementation
-func (api *APIImpl) ChainConfig() *params.ChainConfig {
-	tx, err := api.db.BeginRo(context.TODO())
-	if err != nil {
-		log.Warn("Could not read chain config from the db, defaulting to MainnetChainConfig", "err", err)
-		return params.MainnetChainConfig
-	}
-	defer tx.Rollback()
-
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		log.Warn("Could not read chain config from the db, defaulting to MainnetChainConfig", "err", err)
-		return params.MainnetChainConfig
-	}
-	return chainConfig
+func (b *GasPriceOracleBackend) ChainConfig() *params.ChainConfig {
+	return b.cc
+}
+func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
+	return rawdb.ReadReceiptsByHash(b.tx, hash)
+}
+func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
+	return nil, nil
 }

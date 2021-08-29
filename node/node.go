@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -34,18 +35,17 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/prometheus/tsdb/fileutil"
 )
 
 // Node is a container on which services can be registered.
 type Node struct {
 	config        *Config
 	log           log.Logger
-	dirLock       fileutil.Releaser // prevents concurrent use of instance directory
-	stop          chan struct{}     // Channel to wait for termination notifications
-	server        *p2p.Server       // Currently running P2P networking layer
-	startStopLock sync.Mutex        // Start/Stop are protected by an additional lock
-	state         int               // Tracks state of node lifecycle
+	dirLock       *flock.Flock  // prevents concurrent use of instance directory
+	stop          chan struct{} // Channel to wait for termination notifications
+	server        *p2p.Server   // Currently running P2P networking layer
+	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
+	state         int           // Tracks state of node lifecycle
 
 	lock          sync.Mutex
 	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
@@ -273,24 +273,28 @@ func (n *Node) openDataDir() error {
 		return nil // ephemeral
 	}
 
-	instdir := n.config.instanceDir()
+	instdir := n.config.DataDir
 	if err := os.MkdirAll(instdir, 0700); err != nil {
 		return err
 	}
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
-	release, _, err := fileutil.Flock(filepath.Join(instdir, "LOCK"))
+	l := flock.New(filepath.Join(instdir, "LOCK"))
+	locked, err := l.TryLock()
 	if err != nil {
 		return convertFileLockError(err)
 	}
-	n.dirLock = release
+	if !locked {
+		return fmt.Errorf("%w: %s\n", ErrDatadirUsed, instdir)
+	}
+	n.dirLock = l
 	return nil
 }
 
 func (n *Node) closeDataDir() {
 	// Release instance directory lock.
 	if n.dirLock != nil {
-		if err := n.dirLock.Release(); err != nil {
+		if err := n.dirLock.Unlock(); err != nil {
 			n.log.Error("Can't release datadir lock", "err", err)
 		}
 		n.dirLock = nil
@@ -471,7 +475,7 @@ func (n *Node) DataDir() string {
 
 // InstanceDir retrieves the instance directory used by the protocol stack.
 func (n *Node) InstanceDir() string {
-	return n.config.instanceDir()
+	return n.config.DataDir
 }
 
 // HTTPEndpoint returns the URL of the HTTP server. Note that this URL does not
@@ -503,7 +507,13 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		db = memdb.New()
 		return db, nil
 	}
-	dbPath := config.ResolvePath(name)
+
+	oldDbPath := filepath.Join(config.DataDir, "erigon", name)
+	dbPath := filepath.Join(config.DataDir, name)
+	if _, err := os.Stat(oldDbPath); err == nil {
+		log.Error("Old data directory found", "path", oldDbPath, "please move to new path", dbPath)
+		return nil, fmt.Errorf("safety error, see log message")
+	}
 
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)

@@ -265,10 +265,24 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		stream.WriteNil()
 		return err
 	}
-	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+
+	var stdlibCompatibleJson = jsoniter.ConfigCompatibleWithStandardLibrary.BorrowStream(stream)
+	defer jsoniter.ConfigCompatibleWithStandardLibrary.ReturnStream(stdlibCompatibleJson)
+
 	stream.WriteArrayStart()
 	first := true
 	// Execute all transactions in picked blocks
+
+	count := uint64(^uint(0)) // this just makes it easier to use below
+	if req.Count != nil {
+		count = *req.Count
+	}
+	after := uint64(0) // this just makes it easier to use below
+	if req.After != nil {
+		after = *req.After
+	}
+	nSeen := uint64(0)
+	nExported := uint64(0)
 
 	it := allBlocks.Iterator()
 	for it.HasNext() {
@@ -305,26 +319,27 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			// Check if transaction concerns any of the addresses we wanted
 			for _, pt := range trace.Trace {
 				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+					nSeen++
 					pt.BlockHash = &blockHash
 					pt.BlockNumber = &blockNumber
 					pt.TransactionHash = &txHash
 					pt.TransactionPosition = &txPosition
-					b, err := json.Marshal(pt)
-					if err != nil {
-						stream.WriteNil()
-						return err
+					if nSeen > after && nExported < count {
+						if first {
+							first = false
+						} else {
+							stream.WriteMore()
+						}
+						stdlibCompatibleJson.WriteVal(pt)
+						stdlibCompatibleJson.Flush()
+						nExported++
 					}
-					if first {
-						first = false
-					} else {
-						stream.WriteMore()
-					}
-					stream.Write(b)
 				}
 			}
 		}
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
+			nSeen++
 			var tr ParityTrace
 			var rewardAction = &RewardTraceAction{}
 			rewardAction.Author = block.Coinbase()
@@ -337,21 +352,21 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			*tr.BlockNumber = block.NumberU64()
 			tr.Type = "reward" // nolint: goconst
 			tr.TraceAddress = []int{}
-			b, err := json.Marshal(tr)
-			if err != nil {
-				stream.WriteNil()
-				return err
+			if nSeen > after && nExported < count {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stdlibCompatibleJson.WriteVal(tr)
+				stdlibCompatibleJson.Flush()
+				nExported++
 			}
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
-			}
-			stream.Write(b)
 		}
 		for i, uncle := range block.Uncles() {
 			if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 				if i < len(uncleRewards) {
+					nSeen++
 					var tr ParityTrace
 					rewardAction := &RewardTraceAction{}
 					rewardAction.Author = uncle.Coinbase
@@ -364,17 +379,16 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					*tr.BlockNumber = block.NumberU64()
 					tr.Type = "reward" // nolint: goconst
 					tr.TraceAddress = []int{}
-					b, err := json.Marshal(tr)
-					if err != nil {
-						stream.WriteNil()
-						return err
+					if nSeen > after && nExported < count {
+						if first {
+							first = false
+						} else {
+							stream.WriteMore()
+						}
+						stdlibCompatibleJson.WriteVal(tr)
+						stdlibCompatibleJson.Flush()
+						nExported++
 					}
-					if first {
-						first = false
-					} else {
-						stream.WriteMore()
-					}
-					stream.Write(b)
 				}
 			}
 		}
