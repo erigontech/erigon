@@ -446,7 +446,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 				}
 			}
 			if v[common.AddressLength]&2 > 0 {
-				if err := tos.Collect(v[:common.AddressLength], nil); err != nil {
+				if err := tos.Collect(mapKey, nil); err != nil {
 					return err
 				}
 			}
