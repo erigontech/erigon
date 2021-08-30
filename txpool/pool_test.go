@@ -19,6 +19,7 @@ package txpool
 import (
 	"testing"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -33,10 +34,14 @@ func TestSenders(t *testing.T) {
 		_, tx := memdb.NewTestPoolTx(t)
 		byNonce := &ByNonce{btree.New(16)}
 
-		evicted, err := senders.flush(tx, byNonce, []uint64{1, 2}, 1)
+		changed := roaring64.New()
+		changed.AddMany([]uint64{1, 2})
+		evicted, err := senders.flush(tx, byNonce, changed, 1)
 		require.NoError(err)
 		require.Zero(evicted)
-		evicted, err = senders.flush(tx, byNonce, []uint64{}, 1)
+
+		changed.Clear()
+		evicted, err = senders.flush(tx, byNonce, changed, 1)
 		require.NoError(err)
 		require.Equal(2, int(evicted))
 	})
@@ -47,11 +52,17 @@ func TestSenders(t *testing.T) {
 
 		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
 		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
-		evicted, err := senders.flush(tx, byNonce, []uint64{1, 2}, 1)
+
+		changed := roaring64.New()
+		changed.AddMany([]uint64{1, 2})
+		evicted, err := senders.flush(tx, byNonce, changed, 1)
 		require.NoError(err)
 		require.Zero(evicted)
+
 		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1)) // means used in current round, but still has 0 transactions
-		evicted, err = senders.flush(tx, byNonce, []uint64{1}, 1)
+		changed.Clear()
+		changed.AddMany([]uint64{1})
+		evicted, err = senders.flush(tx, byNonce, changed, 1)
 		require.NoError(err)
 		require.Equal(1, int(evicted))
 	})
