@@ -297,7 +297,7 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 }
 
 // OnNewTxs calls OnNewTxsFunc.
-func (mock *PoolMock) OnNewTxs(ctx context.Context, db kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
+func (mock *PoolMock) OnNewTxs(ctx context.Context, db kv.RoDB, newTxs TxSlots) error {
 	callInfo := struct {
 		Ctx     context.Context
 		Db      kv.RoDB

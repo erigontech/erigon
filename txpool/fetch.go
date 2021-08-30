@@ -305,7 +305,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if len(txs.txs) == 0 {
 			return nil
 		}
-		return f.pool.OnNewTxs(ctx, f.coreDB, txs, f.senders)
+		return f.pool.OnNewTxs(ctx, f.coreDB, txs)
 	default:
 		//defer log.Info("dropped", "id", req.Id)
 	}

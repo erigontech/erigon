@@ -68,7 +68,7 @@ type Pool interface {
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	OnNewTxs(ctx context.Context, db kv.RoDB, newTxs TxSlots, senders *SendersCache) error
+	OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots) error
 	OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error
 
 	AddNewGoodPeer(peerID PeerID)
@@ -160,7 +160,7 @@ func NewSendersCache() *SendersCache {
 
 //nolint
 func (sc *SendersCache) idsCount(tx kv.Tx) (inMem int, inDb int, err error) {
-	c, err := tx.Cursor(kv.PooledSenderID)
+	c, err := tx.Cursor(kv.PoolSenderID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -173,7 +173,7 @@ func (sc *SendersCache) idsCount(tx kv.Tx) (inMem int, inDb int, err error) {
 
 //nolint
 func (sc *SendersCache) infoCount(tx kv.Tx) (inMem int, inDb int, err error) {
-	c, err := tx.Cursor(kv.PooledSender)
+	c, err := tx.Cursor(kv.PoolSender)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -191,7 +191,7 @@ func (sc *SendersCache) Id(addr string, tx kv.Tx) (uint64, bool, error) {
 func (sc *SendersCache) id(addr string, tx kv.Tx) (uint64, bool, error) {
 	id, ok := sc.senderIDs[addr]
 	if !ok {
-		v, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
+		v, err := tx.GetOne(kv.PoolSenderID, []byte(addr))
 		if err != nil {
 			return 0, false, err
 		}
@@ -208,52 +208,29 @@ func (sc *SendersCache) Info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo,
 	return sc.info(id, tx, expectMiss)
 }
 func (sc *SendersCache) info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo, error) {
+	cacheTotalCounter.Inc()
 	info, ok := sc.senderInfo[id]
-	if !ok {
-		encID := make([]byte, 8)
-		binary.BigEndian.PutUint64(encID, id)
-		v, err := tx.GetOne(kv.PooledSender, encID)
-		if err != nil {
-			return nil, err
-		}
-		if len(v) == 0 {
-			if !expectMiss {
-				fmt.Printf("sender not loaded in advance: %d\n", id)
-				panic("all senders must be loaded in advance")
-			}
-			return nil, nil // don't fallback to core db, it will be manually done in right place
-		}
-		balance := uint256.NewInt(0)
-		balance.SetBytes(v[8:])
-		info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
-	}
-	return info, nil
-
-	/*
-		cacheTotalCounter.Inc()
-		info, ok := sc.senderInfo[id]
-		if ok {
-			cacheHitCounter.Inc()
-			return info, nil
-		}
-		encID := make([]byte, 8)
-		binary.BigEndian.PutUint64(encID, id)
-		v, err := tx.GetOne(kv.PooledSender, encID)
-		if err != nil {
-			return nil, err
-		}
-		if len(v) == 0 {
-			if !expectMiss {
-				fmt.Printf("sender not loaded in advance: %d\n", id)
-				panic("all senders must be loaded in advance")
-			}
-			return nil, nil // don't fallback to core db, it will be manually done in right place
-		}
+	if ok {
 		cacheHitCounter.Inc()
-		balance := uint256.NewInt(0)
-		balance.SetBytes(v[8:])
-		return newSenderInfo(binary.BigEndian.Uint64(v), *balance), nil
-	*/
+		return info, nil
+	}
+	encID := make([]byte, 8)
+	binary.BigEndian.PutUint64(encID, id)
+	v, err := tx.GetOne(kv.PoolSender, encID)
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		if !expectMiss {
+			fmt.Printf("sender not loaded in advance: %d\n", id)
+			panic("all senders must be loaded in advance")
+		}
+		return nil, nil // don't fallback to core db, it will be manually done in right place
+	}
+	cacheHitCounter.Inc()
+	balance := uint256.NewInt(0)
+	balance.SetBytes(v[8:])
+	return newSenderInfo(binary.BigEndian.Uint64(v), *balance), nil
 }
 
 //nolint
@@ -502,7 +479,7 @@ func (sc *SendersCache) syncMissedStateDiff(ctx context.Context, tx kv.RwTx, cor
 	}
 
 	if dropLocalSendersCache {
-		if err := tx.ClearBucket(kv.PooledSender); err != nil {
+		if err := tx.ClearBucket(kv.PoolSender); err != nil {
 			return err
 		}
 		sc.senderInfo = map[uint64]*senderInfo{}
@@ -616,20 +593,20 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			if byNonce.count(senderID) > 0 {
 				continue
 			}
-			addr, err := tx.GetOne(kv.PooledSenderID, encID)
+			addr, err := tx.GetOne(kv.PoolSenderID, encID)
 			if err != nil {
 				return evicted, err
 			}
 			if _, ok := sc.senderIDs[string(addr)]; ok {
 				continue
 			}
-			if err := tx.Delete(kv.PooledSenderID, addr, nil); err != nil {
+			if err := tx.Delete(kv.PoolSenderID, addr, nil); err != nil {
 				return evicted, err
 			}
-			if err := tx.Delete(kv.PooledSenderIDToAdress, encID, nil); err != nil {
+			if err := tx.Delete(kv.PoolSenderIDToAdress, encID, nil); err != nil {
 				return evicted, err
 			}
-			if err := tx.Delete(kv.PooledSender, encID, nil); err != nil {
+			if err := tx.Delete(kv.PoolSender, encID, nil); err != nil {
 				return evicted, err
 			}
 			evicted++
@@ -644,7 +621,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
-		currentV, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
+		currentV, err := tx.GetOne(kv.PoolSenderID, []byte(addr))
 		if err != nil {
 			return evicted, err
 		}
@@ -652,10 +629,10 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			continue
 		}
 		//fmt.Printf("Put: %d\n", id)
-		if err := tx.Put(kv.PooledSenderID, []byte(addr), encID); err != nil {
+		if err := tx.Put(kv.PoolSenderID, []byte(addr), encID); err != nil {
 			return evicted, err
 		}
-		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
+		if err := tx.Put(kv.PoolSenderIDToAdress, encID, []byte(addr)); err != nil {
 			return evicted, err
 		}
 		if ASSERT {
@@ -668,14 +645,14 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
-		//if info.nonce == 0 && info.balance.IsZero() {
-		//	continue
-		//}
+		if info.nonce == 0 && info.balance.IsZero() {
+			continue
+		}
 		binary.BigEndian.PutUint64(encID, id)
 		binary.BigEndian.PutUint64(v, info.nonce)
 		v = append(v[:8], info.balance.Bytes()...)
 		//TODO: check that nothing changed
-		if err := tx.Put(kv.PooledSender, encID, v); err != nil {
+		if err := tx.Put(kv.PoolSender, encID, v); err != nil {
 			return evicted, err
 		}
 	}
@@ -683,7 +660,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	if ASSERT {
 		{
 			duplicates := map[string]uint64{}
-			_ = tx.ForPrefix(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
+			_ = tx.ForPrefix(kv.PoolSenderIDToAdress, nil, func(k, v []byte) error {
 				id, ok := duplicates[string(v)]
 				if ok {
 					fmt.Printf("duplicate: %d,%d,%x\n", id, binary.BigEndian.Uint64(k), string(v))
@@ -694,7 +671,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 		{
 			duplicates := map[uint64]string{}
-			_ = tx.ForPrefix(kv.PooledSenderIDToAdress, nil, func(k, v []byte) error {
+			_ = tx.ForPrefix(kv.PoolSenderIDToAdress, nil, func(k, v []byte) error {
 				id := binary.BigEndian.Uint64(v)
 				addr, ok := duplicates[id]
 				if ok {
@@ -706,7 +683,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		}
 	}
 	if ASSERT {
-		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+		_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
 			//id := binary.BigEndian.Uint64(v[:8])
 			//for _, senderID := range justDeleted {
 			//	if senderID == id {
@@ -714,12 +691,12 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			//		panic(1)
 			//	}
 			//}
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+			vv, err := tx.GetOne(kv.PoolSenderIDToAdress, v[:8])
 			if err != nil {
 				return err
 			}
 			if len(vv) == 0 {
-				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+				cc, _ := tx.Cursor(kv.PoolSenderIDToAdress)
 				last, lastAddr, _ := cc.Last()
 				slots := TxSlots{}
 				slots.Growth(1)
@@ -924,7 +901,7 @@ func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 
 	txn, ok := p.byHash[string(hash)]
 	if !ok || txn.Tx.rlp == nil {
-		return tx.GetOne(kv.PooledTransaction, hash)
+		return tx.GetOne(kv.PoolTransaction, hash)
 	}
 	return txn.Tx.rlp, nil
 }
@@ -962,7 +939,7 @@ func (p *TxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 
 	_, ok := p.byHash[string(hash)]
 	if !ok {
-		return tx.Has(kv.PooledTransaction, hash)
+		return tx.Has(kv.PoolTransaction, hash)
 	}
 	return true, nil
 }
@@ -979,7 +956,7 @@ func (p *TxPool) IdHashIsLocal(hash []byte) bool {
 func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                { return p.protocolBaseFee.Load() > 0 }
 
-func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
+func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots) error {
 	if len(newTxs.txs) == 0 {
 		return nil
 	}
@@ -993,12 +970,12 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 		return err
 	}
 	defer tx.Rollback()
-	cacheMisses, err := senders.onNewTxs(tx, newTxs)
+	cacheMisses, err := p.senders.onNewTxs(tx, newTxs)
 	if err != nil {
 		return err
 	}
 	if len(cacheMisses) > 0 {
-		if err := coreDB.View(ctx, func(tx kv.Tx) error { return senders.loadFromCore(tx, cacheMisses) }); err != nil {
+		if err := coreDB.View(ctx, func(tx kv.Tx) error { return p.senders.loadFromCore(tx, cacheMisses) }); err != nil {
 			return err
 		}
 	}
@@ -1010,7 +987,7 @@ func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, s
 	if protocolBaseFee == 0 || pendingBaseFee == 0 {
 		return fmt.Errorf("non-zero base fee: %d,%d", protocolBaseFee, pendingBaseFee)
 	}
-	if err := onNewTxs(tx, senders, newTxs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
+	if err := onNewTxs(tx, p.senders, newTxs, protocolBaseFee, pendingBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
 		return err
 	}
 	notifyNewTxs := make(Hashes, 0, 32*len(newTxs.txs))
@@ -1141,7 +1118,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 			sendersWithoutTransactionsUnique[p.deletedTxs[i].Tx.senderID] = struct{}{}
 			sendersWithoutTransactions = append(sendersWithoutTransactions, p.deletedTxs[i].Tx.senderID)
 		}
-		if err := tx.Delete(kv.PooledTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
+		if err := tx.Delete(kv.PoolTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
 			return evicted, err
 		}
 		p.deletedTxs[i] = nil // for gc
@@ -1163,13 +1140,13 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 	}
 
 	if ASSERT {
-		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+		_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PoolSenderIDToAdress, v[:8])
 			if err != nil {
 				return err
 			}
 			if len(vv) == 0 {
-				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+				cc, _ := tx.Cursor(kv.PoolSenderIDToAdress)
 				last, lastAddr, _ := cc.Last()
 				if len(last) > 0 {
 					fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
@@ -1208,7 +1185,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 			}
 		}
 
-		if err := tx.Put(kv.PooledTransaction, []byte(txHash), v); err != nil {
+		if err := tx.Put(kv.PoolTransaction, []byte(txHash), v); err != nil {
 			return evicted, err
 		}
 		metaTx.Tx.rlp = nil
@@ -1220,7 +1197,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 		parseCtx.WithSender(false)
 		i := 0
 		hashID := [32]byte{}
-		if err := tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+		if err := tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
 			txs.Growth(i + 1)
 			txs.txs[i] = &TxSlot{}
 
@@ -1333,13 +1310,13 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	if ASSERT {
-		_ = tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
-			vv, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+		_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+			vv, err := tx.GetOne(kv.PoolSenderIDToAdress, v[:8])
 			if err != nil {
 				return err
 			}
 			if len(vv) == 0 {
-				cc, _ := tx.Cursor(kv.PooledSenderIDToAdress)
+				cc, _ := tx.Cursor(kv.PoolSenderIDToAdress)
 				last, lastAddr, _ := cc.Last()
 				fmt.Printf("last: %d,%x\n", binary.BigEndian.Uint64(last), lastAddr)
 				fmt.Printf("now: %d\n", p.senders.senderID)
@@ -1368,7 +1345,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 	parseCtx.WithSender(false)
 	i := 0
 	hashID := [32]byte{}
-	if err := tx.ForEach(kv.PooledTransaction, nil, func(k, v []byte) error {
+	if err := tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
 		txs.Growth(i + 1)
 		txs.txs[i] = &TxSlot{}
 
@@ -1379,7 +1356,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.RwTx, coreTx kv.Tx) error {
 		txs.txs[i].rlp = nil // means that we don't need store it in db anymore
 		txs.txs[i].senderID = binary.BigEndian.Uint64(v)
 
-		senderAddr, err := tx.GetOne(kv.PooledSenderIDToAdress, v[:8])
+		senderAddr, err := tx.GetOne(kv.PoolSenderIDToAdress, v[:8])
 		if err != nil {
 			return err
 		}
@@ -1633,7 +1610,6 @@ func onSenderChange(senderID uint64, sender *senderInfo, byNonce *ByNonce, proto
 			mt.subPool |= EnoughFeeCapProtocol
 		} else {
 			mt.subPool = 0 // TODO: we immediately drop all transactions if they have no first bit - then maybe we don't need this bit at all? And don't add such transactions to queue?
-			discard(mt)
 			return true
 		}
 
@@ -1995,7 +1971,7 @@ func (p *TxPool) forceCheckState(ctx context.Context, db, coreDB kv.RoDB) error 
 	for {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			return coreDB.View(ctx, func(coreTx kv.Tx) error {
-				return tx.ForPrefix(kv.PooledSender, nil, func(k, v []byte) error {
+				return tx.ForPrefix(kv.PoolSender, nil, func(k, v []byte) error {
 					remoteProgress, err := coreProgress(coreTx)
 					if err != nil {
 						return err
