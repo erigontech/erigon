@@ -33,7 +33,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
 
 NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 
-**Disclaimer: this software is currenly a tech preview. We will do our best to keep it stable and make no breaking
+**Disclaimer: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.**
 
 
