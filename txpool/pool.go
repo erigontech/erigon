@@ -1116,7 +1116,7 @@ func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, mined
 		}
 	}
 
-	log.Info("on new block", "in", time.Since(t))
+	log.Info("new block", "number", blockHeight, "in", time.Since(t))
 	return nil
 }
 func (p *TxPool) flush(db kv.RwDB) (evicted, written uint64, err error) {
