@@ -209,51 +209,51 @@ func (sc *SendersCache) Info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo,
 	return sc.info(id, tx, expectMiss)
 }
 func (sc *SendersCache) info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo, error) {
-	info, ok := sc.senderInfo[id]
-	if !ok {
-		encID := make([]byte, 8)
-		binary.BigEndian.PutUint64(encID, id)
-		v, err := tx.GetOne(kv.PoolSender, encID)
-		if err != nil {
-			return nil, err
-		}
-		if len(v) == 0 {
-			if !expectMiss {
-				fmt.Printf("sender not loaded in advance: %d\n", id)
-				panic("all senders must be loaded in advance")
-			}
-			return nil, nil // don't fallback to core db, it will be manually done in right place
-		}
-		balance := uint256.NewInt(0)
-		balance.SetBytes(v[8:])
-		info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
-	}
-	return info, nil
 	/*
-		cacheTotalCounter.Inc()
 		info, ok := sc.senderInfo[id]
-		if ok {
-			cacheHitCounter.Inc()
-			return info, nil
-		}
-		encID := make([]byte, 8)
-		binary.BigEndian.PutUint64(encID, id)
-		v, err := tx.GetOne(kv.PoolSender, encID)
-		if err != nil {
-			return nil, err
-		}
-		if len(v) == 0 {
-			if !expectMiss {
-				fmt.Printf("sender not loaded in advance: %d\n", id)
-				panic("all senders must be loaded in advance")
+		if !ok {
+			encID := make([]byte, 8)
+			binary.BigEndian.PutUint64(encID, id)
+			v, err := tx.GetOne(kv.PoolSender, encID)
+			if err != nil {
+				return nil, err
 			}
-			return nil, nil // don't fallback to core db, it will be manually done in right place
+			if len(v) == 0 {
+				if !expectMiss {
+					fmt.Printf("sender not loaded in advance: %d\n", id)
+					panic("all senders must be loaded in advance")
+				}
+				return nil, nil // don't fallback to core db, it will be manually done in right place
+			}
+			balance := uint256.NewInt(0)
+			balance.SetBytes(v[8:])
+			info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
 		}
-		cacheHitCounter.Inc()
-		balance := uint256.NewInt(0)
-		balance.SetBytes(v[8:])
-		return newSenderInfo(binary.BigEndian.Uint64(v), *balance), nil
+		return info, nil
 	*/
+	cacheTotalCounter.Inc()
+	info, ok := sc.senderInfo[id]
+	if ok {
+		cacheHitCounter.Inc()
+		return info, nil
+	}
+	encID := make([]byte, 8)
+	binary.BigEndian.PutUint64(encID, id)
+	v, err := tx.GetOne(kv.PoolSender, encID)
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		if !expectMiss {
+			fmt.Printf("sender not loaded in advance: %d\n", id)
+			panic("all senders must be loaded in advance")
+		}
+		return nil, nil // don't fallback to core db, it will be manually done in right place
+	}
+	cacheHitCounter.Inc()
+	balance := uint256.NewInt(0)
+	balance.SetBytes(v[8:])
+	return newSenderInfo(binary.BigEndian.Uint64(v), *balance), nil
 }
 
 //nolint
@@ -675,9 +675,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
-		//if info.nonce == 0 && info.balance.IsZero() {
-		//	continue
-		//}
+		if info.nonce == 0 && info.balance.IsZero() {
+			continue
+		}
 		binary.BigEndian.PutUint64(encID, id)
 		binary.BigEndian.PutUint64(v, info.nonce)
 		v = append(v[:8], info.balance.Bytes()...)
