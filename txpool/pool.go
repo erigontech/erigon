@@ -619,7 +619,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			return evicted, err
 		}
 	}
-	fmt.Printf("justDeleted:%d, justInserted:%d\n", justDeleted, justInserted)
+	//fmt.Printf("justDeleted:%d, justInserted:%d\n", justDeleted, justInserted)
 	if ASSERT {
 		{
 			duplicates := map[string]uint64{}
