@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/simplelru"
@@ -555,19 +556,23 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	defer sc.lock.Unlock()
 	sc.commitID++
 
+	encIDs := roaring64.New()
 	encID := make([]byte, 8)
-	encIDs := make([]byte, 0, 8*len(sendersWithoutTransactions))
 	// Eviction logic. Store into db list of senders:
 	//      - which have discarded transactions at this commit
 	//      - but have no active transactions left
 	// after some time read old records from DB and if such senders still have no transactions - evict them
 	for _, id := range sendersWithoutTransactions {
-		binary.BigEndian.PutUint64(encID, id)
-		encIDs = append(encIDs, encID...)
+		encIDs.Add(id)
 		binary.BigEndian.PutUint64(encID, sc.commitID)
 	}
-	if len(encIDs) > 0 {
-		if err := tx.Append(kv.PoolStateEviction, encID, encIDs); err != nil {
+	if encIDs.GetCardinality() > 0 {
+		encIDs.RunOptimize()
+		b, err := encIDs.ToBytes()
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.Append(kv.PoolStateEviction, encID, b); err != nil {
 			return evicted, err
 		}
 	}
@@ -585,8 +590,11 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if sc.commitID-binary.BigEndian.Uint64(k) < evictAfterRounds {
 			break
 		}
-		for i := 0; i < len(v); i += 8 {
-			senderID := binary.BigEndian.Uint64(v[i : i+8])
+		ids := roaring64.New()
+		if err := ids.UnmarshalBinary(v); err != nil {
+			return 0, err
+		}
+		for _, senderID := range ids.ToArray() {
 			if _, ok := sc.senderInfo[senderID]; ok {
 				continue
 			}
@@ -1236,55 +1244,56 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 		return evicted, err
 	}
 
-	/*
-		if ASSERT {
-			_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
-				found := false
-				_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
-					if bytes.Equal(v[:8], idBytes) {
-						found = true
-						return fmt.Errorf("stop")
-					}
-					return nil
-				})
-				if !found {
-					found = false
-					_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
-						for i := 0; i < len(v); i += 8 {
-							vv := v[i : i+8]
-							if bytes.Equal(vv, idBytes) {
-								found = true
-								return fmt.Errorf("stop")
-							}
-						}
-						return nil
-					})
-				}
-				if !found {
-					if p.txNonce2Tx.count(binary.BigEndian.Uint64(idBytes)) > 0 {
-						panic("?")
-					}
-					_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
-						fmt.Printf("ev: %x\n", v)
-						return nil
-					})
-					_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
-						fmt.Printf("tr: %x\n", v)
-						return nil
-					})
-					_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
-						fmt.Printf("id2addr: %x\n", idBytes)
-						return nil
-					})
-					p.senders.printDebug("gb")
-					fmt.Printf("sz:%d,%d\n", p.txNonce2Tx.tree.Len(), sendersWithoutTransactions)
-					fmt.Printf("garbage found: %x\n", idBytes)
-					panic(1)
+	if ASSERT {
+		_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
+			found := false
+			_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+				if bytes.Equal(v[:8], idBytes) {
+					found = true
+					return fmt.Errorf("stop")
 				}
 				return nil
 			})
-		}
-	*/
+			if !found {
+				found = false
+				_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
+					ids := roaring64.New()
+					if err := ids.UnmarshalBinary(v); err != nil {
+						return err
+					}
+					for _, id := range ids.ToArray() {
+						if binary.BigEndian.Uint64(idBytes) == id {
+							found = true
+							return fmt.Errorf("stop")
+						}
+					}
+					return nil
+				})
+			}
+			if !found {
+				if p.txNonce2Tx.count(binary.BigEndian.Uint64(idBytes)) > 0 {
+					panic("?")
+				}
+				_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
+					fmt.Printf("ev: %x\n", v)
+					return nil
+				})
+				_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+					fmt.Printf("tr: %x\n", v)
+					return nil
+				})
+				_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
+					fmt.Printf("id2addr: %x\n", idBytes)
+					return nil
+				})
+				p.senders.printDebug("gb")
+				fmt.Printf("sz:%d,%d\n", p.txNonce2Tx.tree.Len(), sendersWithoutTransactions)
+				fmt.Printf("garbage found: %x\n", idBytes)
+				panic(1)
+			}
+			return nil
+		})
+	}
 
 	// clean - in-memory data structure as later as possible - because if during this Tx will happen error,
 	// DB will stay consitant but some in-memory structures may be alread cleaned, and retry will not work
