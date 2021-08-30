@@ -208,28 +208,6 @@ func (sc *SendersCache) Info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo,
 	return sc.info(id, tx, expectMiss)
 }
 func (sc *SendersCache) info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo, error) {
-	/*
-		info, ok := sc.senderInfo[id]
-		if !ok {
-			encID := make([]byte, 8)
-			binary.BigEndian.PutUint64(encID, id)
-			v, err := tx.GetOne(kv.PoolSender, encID)
-			if err != nil {
-				return nil, err
-			}
-			if len(v) == 0 {
-				if !expectMiss {
-					fmt.Printf("sender not loaded in advance: %d\n", id)
-					panic("all senders must be loaded in advance")
-				}
-				return nil, nil // don't fallback to core db, it will be manually done in right place
-			}
-			balance := uint256.NewInt(0)
-			balance.SetBytes(v[8:])
-			info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
-		}
-		return info, nil
-	*/
 	cacheTotalCounter.Inc()
 	info, ok := sc.senderInfo[id]
 	if ok {
@@ -328,14 +306,6 @@ func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[strin
 		sc.senderInfo[id] = newSenderInfo(v.nonce, v.balance)
 	}
 
-	/*
-		for addr, id := range sc.senderIDs { // merge state changes
-			if v, ok := stateChanges[addr]; ok {
-				sc.senderInfo[id] = newSenderInfo(v.nonce, v.balance)
-			}
-		}
-	*/
-
 	for i := 0; i < unwindedTxs.senders.Len(); i++ {
 		id, ok, err := sc.id(string(unwindedTxs.senders.At(i)), tx)
 		if err != nil {
@@ -368,10 +338,6 @@ func (sc *SendersCache) mergeStateChangesLocked(tx kv.Tx, stateChanges map[strin
 				sc.senderInfo[id] = newSenderInfo(0, *uint256.NewInt(0))
 			}
 		}
-
-		//if v, ok := stateChanges[string(minedTxs.senders.At(i))]; ok {
-		//	sc.senderInfo[id] = newSenderInfo(v.nonce, v.balance)
-		//}
 	}
 	return nil
 }
@@ -1474,29 +1440,6 @@ func onNewBlock(tx kv.Tx, senders *SendersCache, unwindTxs TxSlots, minedTxs []*
 
 	promote(pending, baseFee, queued, discard)
 
-	if ASSERT {
-		byNonce.tree.Ascend(func(i btree.Item) bool {
-			mt := i.(*sortByNonce).metaTx
-			if mt.worstIndex < 0 {
-				panic(1)
-			}
-
-			_, ok := byHash[string(mt.Tx.idHash[:])]
-			if !ok {
-				panic(3)
-			}
-			return true
-		})
-		for _, txn := range byHash {
-			if !byNonce.has(txn) {
-				panic(1)
-			}
-		}
-	}
-	if ASSERT && byNonce.tree.Len() != len(byHash) {
-		panic(1)
-	}
-
 	return nil
 }
 
@@ -1590,23 +1533,10 @@ func unsafeAddToPendingPool(byNonce *ByNonce, newTxs TxSlots, pending, baseFee, 
 		changedSenders[txn.senderID] = struct{}{}
 		pending.UnsafeAdd(mt)
 	}
-	if ASSERT {
-		for _, txn := range byHash {
-			if !byNonce.has(txn) {
-				panic(1)
-			}
-		}
-	}
-	if ASSERT && byNonce.tree.Len() != len(byHash) {
-		panic(1)
-	}
 	return changedSenders
 }
 
 func onSenderChange(senderID uint64, sender *senderInfo, byNonce *ByNonce, protocolBaseFee, pendingBaseFee uint64, discard func(*metaTx)) {
-	if ASSERT && sender == nil {
-		fmt.Printf("nil sender info: %d\n", senderID)
-	}
 	noGapsNonce := sender.nonce + 1
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint64(math.MaxUint64)
