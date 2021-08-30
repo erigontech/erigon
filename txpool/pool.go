@@ -602,9 +602,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 			sendersWithoutTransactions.Add(id)
 		}
 	}
-	if ASSERT {
-		sort.Slice(justInserted, func(i, j int) bool { return justInserted[i] < justInserted[j] })
-	}
+	//if ASSERT {
+	//	sort.Slice(justInserted, func(i, j int) bool { return justInserted[i] < justInserted[j] })
+	//}
 
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
