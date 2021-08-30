@@ -504,18 +504,8 @@ func (b *ByNonce) has(mt *metaTx) bool {
 	found := b.tree.Get(&sortByNonce{mt})
 	return found != nil
 }
-func (b *ByNonce) delete(mt *metaTx) {
-	deleted := b.tree.Delete(&sortByNonce{mt})
-	if ASSERT {
-		if deleted != nil && deleted.(*sortByNonce).metaTx.Tx.idHash != mt.Tx.idHash {
-			panic(1)
-		}
-	}
-}
+func (b *ByNonce) delete(mt *metaTx) { b.tree.Delete(&sortByNonce{mt}) }
 func (b *ByNonce) replaceOrInsert(mt *metaTx) *metaTx {
-	if ASSERT && (mt == nil || mt.Tx == nil || mt.Tx.senderID == 0) {
-		panic("must never happen")
-	}
 	it := b.tree.ReplaceOrInsert(&sortByNonce{mt})
 	if it != nil {
 		return it.(*sortByNonce).metaTx
