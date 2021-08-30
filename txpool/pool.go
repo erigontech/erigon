@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/simplelru"
 	"github.com/holiman/uint256"
@@ -34,6 +35,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
+)
+
+var (
+	onNewTxsTimer     = metrics.NewSummary("pool_new_txs")
+	onNewBlockTimer   = metrics.NewSummary("pool_new_block")
+	cacheHitCounter   = metrics.NewCounter("pool_cache_hit")
+	cacheTotalCounter = metrics.NewCounter("pool_cache_total")
 )
 
 const ASSERT = false
@@ -220,6 +228,32 @@ func (sc *SendersCache) info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo,
 		info = newSenderInfo(binary.BigEndian.Uint64(v), *balance)
 	}
 	return info, nil
+
+	/*
+		cacheTotalCounter.Inc()
+		info, ok := sc.senderInfo[id]
+		if ok {
+			cacheHitCounter.Inc()
+			return info, nil
+		}
+		encID := make([]byte, 8)
+		binary.BigEndian.PutUint64(encID, id)
+		v, err := tx.GetOne(kv.PooledSender, encID)
+		if err != nil {
+			return nil, err
+		}
+		if len(v) == 0 {
+			if !expectMiss {
+				fmt.Printf("sender not loaded in advance: %d\n", id)
+				panic("all senders must be loaded in advance")
+			}
+			return nil, nil // don't fallback to core db, it will be manually done in right place
+		}
+		cacheHitCounter.Inc()
+		balance := uint256.NewInt(0)
+		balance.SetBytes(v[8:])
+		return newSenderInfo(binary.BigEndian.Uint64(v), *balance), nil
+	*/
 }
 
 //nolint
@@ -566,7 +600,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		return evicted, err
 	}
 	defer c.Close()
-	//justDeleted := []uint64{}
+	var justDeleted, justInserted []uint64
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return evicted, err
@@ -599,14 +633,15 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 				return evicted, err
 			}
 			evicted++
-			//justDeleted = append(justDeleted, senderID)
+			if ASSERT {
+				justDeleted = append(justDeleted, senderID)
+			}
 		}
 		if err := c.DeleteCurrent(); err != nil {
 			return evicted, err
 		}
 	}
 
-	//justInserted := []uint64{}
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
 		currentV, err := tx.GetOne(kv.PooledSenderID, []byte(addr))
@@ -623,15 +658,23 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err := tx.Put(kv.PooledSenderIDToAdress, encID, []byte(addr)); err != nil {
 			return evicted, err
 		}
-		//justInserted = append(justInserted, id)
+		if ASSERT {
+			justInserted = append(justInserted, id)
+		}
 	}
-	//sort.Slice(justInserted, func(i, j int) bool { return justInserted[i] < justInserted[j] })
+	if ASSERT {
+		sort.Slice(justInserted, func(i, j int) bool { return justInserted[i] < justInserted[j] })
+	}
 
 	v := make([]byte, 8, 8+32)
 	for id, info := range sc.senderInfo {
+		//if info.nonce == 0 && info.balance.IsZero() {
+		//	continue
+		//}
 		binary.BigEndian.PutUint64(encID, id)
 		binary.BigEndian.PutUint64(v, info.nonce)
 		v = append(v[:8], info.balance.Bytes()...)
+		//TODO: check that nothing changed
 		if err := tx.Put(kv.PooledSender, encID, v); err != nil {
 			return evicted, err
 		}
@@ -937,6 +980,10 @@ func (p *TxPool) AddNewGoodPeer(peerID PeerID) { p.recentlyConnectedPeers.AddPee
 func (p *TxPool) Started() bool                { return p.protocolBaseFee.Load() > 0 }
 
 func (p *TxPool) OnNewTxs(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots, senders *SendersCache) error {
+	if len(newTxs.txs) == 0 {
+		return nil
+	}
+	defer onNewTxsTimer.UpdateDuration(time.Now())
 	//t := time.Now()
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -1023,6 +1070,7 @@ func (p *TxPool) setBaseFee(protocolBaseFee, pendingBaseFee uint64) (uint64, uin
 }
 
 func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, protocolBaseFee, pendingBaseFee, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error {
+	defer onNewBlockTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -1210,6 +1258,56 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 	if err != nil {
 		return evicted, err
 	}
+
+	/*
+		if ASSERT {
+			_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
+				found := false
+				_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+					if bytes.Equal(v[:8], idBytes) {
+						found = true
+						return fmt.Errorf("stop")
+					}
+					return nil
+				})
+				if !found {
+					found = false
+					_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
+						for i := 0; i < len(v); i += 8 {
+							vv := v[i : i+8]
+							if bytes.Equal(vv, idBytes) {
+								found = true
+								return fmt.Errorf("stop")
+							}
+						}
+						return nil
+					})
+				}
+				if !found {
+					if p.txNonce2Tx.count(binary.BigEndian.Uint64(idBytes)) > 0 {
+						panic("?")
+					}
+					_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
+						fmt.Printf("ev: %x\n", v)
+						return nil
+					})
+					_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+						fmt.Printf("tr: %x\n", v)
+						return nil
+					})
+					_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
+						fmt.Printf("id2addr: %x\n", idBytes)
+						return nil
+					})
+					p.senders.printDebug("gb")
+					fmt.Printf("sz:%d,%d\n", p.txNonce2Tx.tree.Len(), sendersWithoutTransactions)
+					fmt.Printf("garbage found: %x\n", idBytes)
+					panic(1)
+				}
+				return nil
+			})
+		}
+	*/
 
 	// clean - in-memory data structure as later as possible - because if during this Tx will happen error,
 	// DB will stay consitant but some in-memory structures may be alread cleaned, and retry will not work
