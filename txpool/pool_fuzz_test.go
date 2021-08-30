@@ -274,20 +274,19 @@ func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
 	return p1, p2, p3, p4
 }
 
-func FuzzOnNewBlocks11(f *testing.F) {
+func FuzzOnNewBlocks12(f *testing.F) {
 	var u64 = [1 * 4]byte{1}
 	var sender = [1 + 1 + 1]byte{1}
-	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 1, 2)
-	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 3, 4)
-	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 10, 12)
-	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, protocolBaseFee1, pendingBaseFee1 uint8) {
+	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 12)
+	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 14)
+	f.Add(u64[:], u64[:], u64[:], u64[:], sender[:], 123)
+	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, sender []byte, currentBaseFee1 uint8) {
 		//t.Parallel()
 
-		protocolBaseFee, pendingBaseFee := uint64(protocolBaseFee1%16+1), uint64(pendingBaseFee1%8+1)
-		if protocolBaseFee == 0 || pendingBaseFee == 0 {
+		currentBaseFee := uint64(currentBaseFee1%16 + 1)
+		if currentBaseFee == 0 {
 			t.Skip()
 		}
-		pendingBaseFee += protocolBaseFee
 		if len(sender) < 1+1+1 {
 			t.Skip()
 		}
@@ -338,10 +337,10 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					//assert.True(tx.SenderHasEnoughBalance)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(currentBaseFee), tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(currentBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				// side data structures must have all txs
@@ -377,10 +376,10 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					//assert.True(tx.SenderHasEnoughBalance, msg)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(currentBaseFee), tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(currentBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				assert.True(pool.txNonce2Tx.has(tx), msg)
@@ -404,10 +403,10 @@ func FuzzOnNewBlocks11(f *testing.F) {
 					//assert.True(tx.SenderHasEnoughBalance, msg)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(protocolBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(currentBaseFee), tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(currentBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				assert.True(pool.txNonce2Tx.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
@@ -478,28 +477,35 @@ func FuzzOnNewBlocks11(f *testing.F) {
 			}
 			prevTotal = pending.Len() + baseFee.Len() + queued.Len()
 		}
+		checkDB := func(tx kv.Tx) {
+			c1, _ := tx.Cursor(kv.PoolSenderID)
+			c2, _ := tx.Cursor(kv.PoolSenderIDToAdress)
+			count1, _ := c1.Count()
+			count2, _ := c2.Count()
+			assert.Equal(count1, count2)
+		}
 		//fmt.Printf("-------\n")
 
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(map[string]senderInfo{}, txs1, TxSlots{}, protocolBaseFee, pendingBaseFee, 1, [32]byte{}, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, txs1, TxSlots{}, currentBaseFee, 1, [32]byte{}, sendersCache)
 		assert.NoError(err)
 		check(txs1, TxSlots{}, "fork1")
 		checkNotify(txs1, TxSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txs2, txs3
-		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs2, protocolBaseFee, pendingBaseFee, 1, [32]byte{}, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs2, currentBaseFee, 1, [32]byte{}, sendersCache)
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(map[string]senderInfo{}, txs2, TxSlots{}, protocolBaseFee, pendingBaseFee, 2, [32]byte{}, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, txs2, TxSlots{}, currentBaseFee, 2, [32]byte{}, sendersCache)
 		assert.NoError(err)
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
 
-		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, protocolBaseFee, pendingBaseFee, 2, [32]byte{}, sendersCache)
+		err = pool.OnNewBlock(map[string]senderInfo{}, TxSlots{}, txs3, currentBaseFee, 2, [32]byte{}, sendersCache)
 		assert.NoError(err)
 		check(TxSlots{}, txs3, "fork2 mined")
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
@@ -520,6 +526,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		_, err = pool.flushLocked(tx) // we don't test eviction here, because dedicated test exists
 		require.NoError(err)
 		check(p2pReceived, TxSlots{}, "after_flush")
+		checkDB(tx)
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
 		s2 := NewSendersCache()
@@ -527,6 +534,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.NoError(err)
 		err = p2.fromDB(context.Background(), tx, nil)
 		require.NoError(err)
+		checkDB(tx)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.Tx.rlp)
 		}
@@ -547,7 +555,7 @@ func FuzzOnNewBlocks11(f *testing.F) {
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
 		assert.Equal(pool.queued.Len(), p2.queued.Len())
-		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
+		assert.Equal(pool.currentBaseFee.Load(), p2.currentBaseFee.Load())
 		assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
 	})
 

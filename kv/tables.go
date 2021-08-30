@@ -350,7 +350,7 @@ const (
 	PoolSenderIDToAdress   = "PoolSenderIDToAddress"  // sender_id_u64 -> sender_20bytes
 	PoolSender             = "PoolSender"             // sender_id_u64 -> nonce, balance
 	PoolTransaction        = "PoolTransaction"        // txHash -> sender_id_u64+blockNum_u64+tx_rlp
-	PoolStateEviction      = "PoolStateEviction"      // commit_id_u64 -> [sender_id_u64]  - list of senders who had no transactions at this time, if after some time they still have no transactions - evict them.
+	PoolStateEviction      = "PoolStateEviction"      // commit_id_u64 -> roaring([sender_id_u64])  - list of senders who had no transactions at this time, if after some time they still have no transactions - evict them.
 	PoolInfo               = "PoolInfo"               // option_key -> option_value
 )
 

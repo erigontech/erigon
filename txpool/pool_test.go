@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -29,12 +30,15 @@ import (
 func TestSenders(t *testing.T) {
 	t.Run("evict_all_on_next_round", func(t *testing.T) {
 		senders, require := NewSendersCache(), require.New(t)
-		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
-		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
 		_, tx := memdb.NewTestPoolTx(t)
 		byNonce := &ByNonce{btree.New(16)}
-
 		changed := roaring64.New()
+
+		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
+		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderIDs[fmt.Sprintf("%020x", 2)] = 2
+		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
+
 		changed.AddMany([]uint64{1, 2})
 		evicted, err := senders.flush(tx, byNonce, changed, 1)
 		require.NoError(err)
@@ -43,15 +47,18 @@ func TestSenders(t *testing.T) {
 		changed.Clear()
 		evicted, err = senders.flush(tx, byNonce, changed, 1)
 		require.NoError(err)
+
 		require.Equal(2, int(evicted))
 	})
-	t.Run("do_not_evict_if_used_in_current_round", func(t *testing.T) {
+	t.Run("evict_even_if_used_in_current_round_but_no_txs", func(t *testing.T) {
 		senders, require := NewSendersCache(), require.New(t)
 		_, tx := memdb.NewTestPoolTx(t)
 		byNonce := &ByNonce{btree.New(16)}
 
 		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
 		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderIDs[fmt.Sprintf("%020x", 2)] = 2
 
 		changed := roaring64.New()
 		changed.AddMany([]uint64{1, 2})
@@ -60,11 +67,12 @@ func TestSenders(t *testing.T) {
 		require.Zero(evicted)
 
 		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1)) // means used in current round, but still has 0 transactions
+		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
 		changed.Clear()
 		changed.AddMany([]uint64{1})
 		evicted, err = senders.flush(tx, byNonce, changed, 1)
 		require.NoError(err)
-		require.Equal(1, int(evicted))
+		require.Equal(2, int(evicted))
 	})
 
 }

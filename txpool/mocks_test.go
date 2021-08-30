@@ -28,7 +28,7 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
 // 				panic("mock out the IdHashKnown method")
 // 			},
-// 			OnNewBlockFunc: func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error {
+// 			OnNewBlockFunc: func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
 // 			OnNewTxsFunc: func(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots) error {
@@ -54,7 +54,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error
+	OnNewBlockFunc func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error
 
 	// OnNewTxsFunc mocks the OnNewTxs method.
 	OnNewTxsFunc func(ctx context.Context, coreDB kv.RoDB, newTxs TxSlots) error
@@ -91,10 +91,8 @@ type PoolMock struct {
 			UnwindTxs TxSlots
 			// MinedTxs is the minedTxs argument value.
 			MinedTxs TxSlots
-			// ProtocolBaseFee is the protocolBaseFee argument value.
-			ProtocolBaseFee uint64
-			// PendingBaseFee is the pendingBaseFee argument value.
-			PendingBaseFee uint64
+			// BaseFee is the baseFee argument value.
+			BaseFee uint64
 			// BlockHeight is the blockHeight argument value.
 			BlockHeight uint64
 			// BlockHash is the blockHash argument value.
@@ -233,25 +231,23 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, protocolBaseFee uint64, pendingBaseFee uint64, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error {
+func (mock *PoolMock) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte, senders *SendersCache) error {
 	callInfo := struct {
-		StateChanges    map[string]senderInfo
-		UnwindTxs       TxSlots
-		MinedTxs        TxSlots
-		ProtocolBaseFee uint64
-		PendingBaseFee  uint64
-		BlockHeight     uint64
-		BlockHash       [32]byte
-		Senders         *SendersCache
+		StateChanges map[string]senderInfo
+		UnwindTxs    TxSlots
+		MinedTxs     TxSlots
+		BaseFee      uint64
+		BlockHeight  uint64
+		BlockHash    [32]byte
+		Senders      *SendersCache
 	}{
-		StateChanges:    stateChanges,
-		UnwindTxs:       unwindTxs,
-		MinedTxs:        minedTxs,
-		ProtocolBaseFee: protocolBaseFee,
-		PendingBaseFee:  pendingBaseFee,
-		BlockHeight:     blockHeight,
-		BlockHash:       blockHash,
-		Senders:         senders,
+		StateChanges: stateChanges,
+		UnwindTxs:    unwindTxs,
+		MinedTxs:     minedTxs,
+		BaseFee:      baseFee,
+		BlockHeight:  blockHeight,
+		BlockHash:    blockHash,
+		Senders:      senders,
 	}
 	mock.lockOnNewBlock.Lock()
 	mock.calls.OnNewBlock = append(mock.calls.OnNewBlock, callInfo)
@@ -262,31 +258,29 @@ func (mock *PoolMock) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs T
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(stateChanges, unwindTxs, minedTxs, protocolBaseFee, pendingBaseFee, blockHeight, blockHash, senders)
+	return mock.OnNewBlockFunc(stateChanges, unwindTxs, minedTxs, baseFee, blockHeight, blockHash, senders)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
 // Check the length with:
 //     len(mockedPool.OnNewBlockCalls())
 func (mock *PoolMock) OnNewBlockCalls() []struct {
-	StateChanges    map[string]senderInfo
-	UnwindTxs       TxSlots
-	MinedTxs        TxSlots
-	ProtocolBaseFee uint64
-	PendingBaseFee  uint64
-	BlockHeight     uint64
-	BlockHash       [32]byte
-	Senders         *SendersCache
+	StateChanges map[string]senderInfo
+	UnwindTxs    TxSlots
+	MinedTxs     TxSlots
+	BaseFee      uint64
+	BlockHeight  uint64
+	BlockHash    [32]byte
+	Senders      *SendersCache
 } {
 	var calls []struct {
-		StateChanges    map[string]senderInfo
-		UnwindTxs       TxSlots
-		MinedTxs        TxSlots
-		ProtocolBaseFee uint64
-		PendingBaseFee  uint64
-		BlockHeight     uint64
-		BlockHash       [32]byte
-		Senders         *SendersCache
+		StateChanges map[string]senderInfo
+		UnwindTxs    TxSlots
+		MinedTxs     TxSlots
+		BaseFee      uint64
+		BlockHeight  uint64
+		BlockHash    [32]byte
+		Senders      *SendersCache
 	}
 	mock.lockOnNewBlock.RLock()
 	calls = mock.calls.OnNewBlock
