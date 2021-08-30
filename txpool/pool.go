@@ -577,7 +577,7 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 	sc.lock.Lock()
 	defer sc.lock.Unlock()
 	sc.commitID++
-	var justDeleted, justInserted []uint64
+	//var justDeleted, justInserted []uint64
 	encID := make([]byte, 8)
 	for addr, id := range sc.senderIDs {
 		binary.BigEndian.PutUint64(encID, id)
@@ -595,9 +595,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 		if err := tx.Put(kv.PoolSenderIDToAdress, encID, []byte(addr)); err != nil {
 			return evicted, err
 		}
-		if ASSERT {
-			justInserted = append(justInserted, id)
-		}
+		//if ASSERT {
+		//	justInserted = append(justInserted, id)
+		//}
 		if byNonce.count(id) == 0 {
 			sendersWithoutTransactions.Add(id)
 		}
@@ -702,9 +702,9 @@ func (sc *SendersCache) flush(tx kv.RwTx, byNonce *ByNonce, sendersWithoutTransa
 				return evicted, err
 			}
 			evicted++
-			if ASSERT {
-				justDeleted = append(justDeleted, senderID)
-			}
+			//if ASSERT {
+			//	justDeleted = append(justDeleted, senderID)
+			//}
 		}
 		if err := c.DeleteCurrent(); err != nil {
 			return evicted, err
