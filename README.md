@@ -36,7 +36,6 @@ NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 **Disclaimer: this software is currenly a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.**
 
-The current version is currently based on Go-Ethereum 1.10.1
 
 System Requirements
 ===================
