@@ -67,4 +67,8 @@ func TestCallTrace(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal([]uint64{6, 16, 26}, froms().ToArray())
 	assert.Equal([]uint64{1, 11, 21}, tos().ToArray())
+
+	// prune 0 -> 10
+	err = pruneCallTraces(tx, "test", 10, ctx, "")
+	assert.NoError(err)
 }

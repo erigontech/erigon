@@ -128,7 +128,6 @@ func executeBlock(
 			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
 		}
 	}
-
 	if writeCallTraces {
 		callTracer.tos[block.Coinbase()] = false
 		for _, uncle := range block.Uncles() {
