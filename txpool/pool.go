@@ -1266,58 +1266,56 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 	if err != nil {
 		return evicted, err
 	}
-	/*
-		if ASSERT {
-			_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
-				found := false
-				_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
-					if bytes.Equal(v[:8], idBytes) {
-						found = true
-						return fmt.Errorf("stop")
-					}
-					return nil
-				})
-				if !found {
-					found = false
-					_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
-						ids := roaring64.New()
-						if err := ids.UnmarshalBinary(v); err != nil {
-							return err
-						}
-						for _, id := range ids.ToArray() {
-							if binary.BigEndian.Uint64(idBytes) == id {
-								found = true
-								return fmt.Errorf("stop")
-							}
-						}
-						return nil
-					})
-				}
-				if !found {
-					if p.txNonce2Tx.count(binary.BigEndian.Uint64(idBytes)) > 0 {
-						panic("?")
-					}
-					_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
-						fmt.Printf("ev: %x\n", v)
-						return nil
-					})
-					_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
-						fmt.Printf("tr: %x\n", v)
-						return nil
-					})
-					_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
-						fmt.Printf("id2addr: %x\n", idBytes)
-						return nil
-					})
-					p.senders.printDebug("gb")
-					fmt.Printf("sz:%d,%d\n", p.txNonce2Tx.tree.Len(), sendersWithoutTransactions)
-					fmt.Printf("garbage found: %x\n", idBytes)
-					panic(1)
+	if ASSERT {
+		_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
+			found := false
+			_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+				if bytes.Equal(v[:8], idBytes) {
+					found = true
+					return fmt.Errorf("stop")
 				}
 				return nil
 			})
-		}
-	*/
+			if !found {
+				found = false
+				_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
+					ids := roaring64.New()
+					if err := ids.UnmarshalBinary(v); err != nil {
+						return err
+					}
+					for _, id := range ids.ToArray() {
+						if binary.BigEndian.Uint64(idBytes) == id {
+							found = true
+							return fmt.Errorf("stop")
+						}
+					}
+					return nil
+				})
+			}
+			if !found {
+				if p.txNonce2Tx.count(binary.BigEndian.Uint64(idBytes)) > 0 {
+					panic("?")
+				}
+				_ = tx.ForEach(kv.PoolStateEviction, nil, func(k, v []byte) error {
+					fmt.Printf("ev: %x\n", v)
+					return nil
+				})
+				_ = tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+					fmt.Printf("tr: %x\n", v)
+					return nil
+				})
+				_ = tx.ForEach(kv.PoolSenderIDToAdress, nil, func(idBytes, addr []byte) error {
+					fmt.Printf("id2addr: %x\n", idBytes)
+					return nil
+				})
+				p.senders.printDebug("gb")
+				fmt.Printf("sz:%d,%d\n", p.txNonce2Tx.tree.Len(), sendersWithoutTransactions)
+				fmt.Printf("garbage found: %x\n", idBytes)
+				panic(1)
+			}
+			return nil
+		})
+	}
 
 	// clean - in-memory data structure as later as possible - because if during this Tx will happen error,
 	// DB will stay consitant but some in-memory structures may be alread cleaned, and retry will not work
