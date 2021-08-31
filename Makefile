@@ -1,6 +1,6 @@
 GO = go
 GOBIN = $(CURDIR)/build/bin
-GOTEST = GODEBUG=cgocheck=1 $(GO) test -gcflags=all=-d=checkptr ./... -p 2
+GOTEST = GODEBUG=cgocheck=2 $(GO) test -gcflags=all=-d=checkptr ./... -p 2
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
