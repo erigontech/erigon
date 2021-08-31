@@ -91,13 +91,13 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, senders, kvClient, coreDB, txPoolDB)
+		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, kvClient, coreDB, txPoolDB)
 		fetcher.ConnectCore()
 		fetcher.ConnectSentries()
 
 		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
 
-		txpool.BroadcastLoop(cmd.Context(), txPoolDB, coreDB, txPool, senders, newTxs, send)
+		txpool.BroadcastLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send)
 		return nil
 	},
 }
