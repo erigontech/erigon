@@ -29,7 +29,7 @@ import (
 
 func TestSenders(t *testing.T) {
 	t.Run("evict_all_on_next_round", func(t *testing.T) {
-		senders, require := NewSendersCache(), require.New(t)
+		senders, require := newSendersCache(), require.New(t)
 		_, tx := memdb.NewTestPoolTx(t)
 		byNonce := &ByNonce{btree.New(16)}
 		changed := roaring64.New()
@@ -51,7 +51,7 @@ func TestSenders(t *testing.T) {
 		require.Equal(2, int(evicted))
 	})
 	t.Run("evict_even_if_used_in_current_round_but_no_txs", func(t *testing.T) {
-		senders, require := NewSendersCache(), require.New(t)
+		senders, require := newSendersCache(), require.New(t)
 		_, tx := memdb.NewTestPoolTx(t)
 		byNonce := &ByNonce{btree.New(16)}
 

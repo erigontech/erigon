@@ -43,7 +43,6 @@ type Fetch struct {
 	ctx                  context.Context       // Context used for cancellation and closing of the fetcher
 	sentryClients        []sentry.SentryClient // sentry clients that will be used for accessing the network
 	pool                 Pool                  // Transaction pool implementation
-	senders              *SendersCache
 	coreDB               kv.RoDB
 	db                   kv.RwDB
 	wg                   *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
@@ -55,12 +54,11 @@ type Fetch struct {
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, senders *SendersCache, stateChangesClient remote.KVClient, coreDB kv.RoDB, db kv.RwDB) *Fetch {
+func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, stateChangesClient remote.KVClient, coreDB kv.RoDB, db kv.RwDB) *Fetch {
 	return &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
 		pool:                 pool,
-		senders:              senders,
 		coreDB:               coreDB,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
@@ -435,7 +433,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 			addr := gointerfaces.ConvertH160toAddress(change.Address)
 			diff[string(addr[:])] = senderInfo{nonce: nonce, balance: balance}
 		}
-		if err := f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight, gointerfaces.ConvertH256ToHash(req.BlockHash), f.senders); err != nil {
+		if err := f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight, gointerfaces.ConvertH256ToHash(req.BlockHash)); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}
 		if f.wg != nil {
