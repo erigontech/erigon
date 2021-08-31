@@ -20,7 +20,7 @@ After the last stage is finished, the process starts from the beginning, by look
 
 If the app is restarted in between stages, it restarts from the first stage.
 
-If the app is restared in the middle of the stage execution, it restarts from that stage, giving it the opportunity to complete.
+If the app is restarted in the middle of the stage execution, it restarts from that stage, giving it the opportunity to complete.
 
 ### How long do the stages take?
 
@@ -146,7 +146,7 @@ This stage build the Merkle trie and checks the root hash for the current state.
 
 It also builds Intermediate Hashes along the way and stores them into the database.
 
-If there were no intermediate hashes stored before (that could happend during the first inital sync), it builds the full Merkle Trie and its root hash.
+If there were no intermediate hashes stored before (that could happend during the first initial sync), it builds the full Merkle Trie and its root hash.
 
 If there are intermediate hashes in the database, it uses the block history to figure out which ones are outdated and which ones are still up to date. Then it builds a partial Merkle trie using the up-to-date hashes and only rebuilding the outdated ones.
 
