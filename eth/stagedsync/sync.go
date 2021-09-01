@@ -352,7 +352,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 	took := time.Since(t)
 	if took > 60*time.Second {
 		logPrefix := s.LogPrefix()
-		log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", t)
+		log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: time.Since(t)})
 	return nil
