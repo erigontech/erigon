@@ -49,13 +49,6 @@ func TestDefaultGenesisBlock(t *testing.T) {
 	if block.Hash() != params.RopstenGenesisHash {
 		t.Errorf("wrong ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
 	}
-	block, _, err = core.DefaultCalaverasGenesisBlock().ToBlock()
-	if err != nil {
-		t.Errorf("error: %w", err)
-	}
-	if block.Hash() != params.CalaverasGenesisHash {
-		t.Errorf("wrong ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
-	}
 
 	block, _, err = core.DefaultSokolGenesisBlock().ToBlock()
 	if err != nil {
