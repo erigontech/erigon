@@ -327,7 +327,7 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, b
 
 func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	t := time.Now()
-	log.Info("Unwind...", "stage", stage.ID)
+	log.Debug("Unwind...", "stage", stage.ID)
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
@@ -349,11 +349,11 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
-	//took := time.Since(t)
-	//if took > 60*time.Second {
-	logPrefix := s.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", t)
-	//}
+	took := time.Since(t)
+	if took > 60*time.Second {
+		logPrefix := s.LogPrefix()
+		log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", t)
+	}
 	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: time.Since(t)})
 	return nil
 }

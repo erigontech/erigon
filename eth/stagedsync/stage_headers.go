@@ -89,7 +89,6 @@ func HeadersForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	if hash == (common.Hash{}) {
-		fmt.Printf("Fixing after unwind\n")
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx); err != nil {
 			return err
