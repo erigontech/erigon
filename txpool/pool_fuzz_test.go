@@ -23,7 +23,7 @@ import (
 // golang.org/s/draft-fuzzing-design
 //gotip doc testing
 //gotip doc testing.F
-//gotip doc testing.F.OnNewTxs
+//gotip doc testing.F.OnNewRemoteTxs
 //gotip doc testing.F.Fuzz
 
 // gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
@@ -37,20 +37,42 @@ func FuzzTwoQueue(f *testing.F) {
 	f.Add([]uint8{0b10101, 0b11110, 0b11101, 0b10001})
 	f.Fuzz(func(t *testing.T, in []uint8) {
 		t.Parallel()
-		for i := range in {
-			if in[i] > 0b11111 {
-				t.Skip()
-			}
-		}
 		assert := assert.New(t)
 		{
-			sub := NewSubPool(PendingSubPool)
+			sub := NewPendingSubPool(PendingSubPool)
+			for _, i := range in {
+				sub.UnsafeAdd(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
+			}
+			sub.EnforceInvariants()
+			assert.Equal(len(in), sub.best.Len())
+			assert.Equal(len(in), sub.worst.Len())
+			assert.Equal(len(in), sub.Len())
+
+			var prevBest *uint8
+			for i := range sub.best {
+				best := uint8(sub.best[i].subPool)
+				if prevBest != nil {
+					assert.LessOrEqual(best, *prevBest)
+				}
+				assert.Equal(i, sub.best[i].bestIndex)
+				prevBest = &best
+			}
+		}
+		{
+			sub := NewSubPool(BaseFeeSubPool)
 			for _, i := range in {
 				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			assert.Equal(len(in), sub.best.Len())
 			assert.Equal(len(in), sub.worst.Len())
 			assert.Equal(len(in), sub.Len())
+
+			for i := range *sub.best {
+				assert.Equal(i, (*sub.best)[i].bestIndex)
+			}
+			for i := range *sub.worst {
+				assert.Equal(i, (*sub.worst)[i].worstIndex)
+			}
 
 			var prevBest *uint8
 			i := sub.Len()
@@ -70,7 +92,7 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 
 		{
-			sub := NewSubPool(PendingSubPool)
+			sub := NewSubPool(QueuedSubPool)
 			for _, i := range in {
 				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
@@ -327,7 +349,7 @@ func FuzzOnNewBlocks12(f *testing.F) {
 			if worst != nil && worst.subPool < 0b11110 {
 				t.Fatalf("pending worst too small %b", worst.subPool)
 			}
-			iterateSubPoolUnordered(pending, func(tx *metaTx) {
+			for _, tx := range pending.best {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
@@ -356,7 +378,7 @@ func FuzzOnNewBlocks12(f *testing.F) {
 					tx2 := mtx2.Tx
 					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce, msg)
 				})
-			})
+			}
 
 			best, worst = baseFee.Best(), baseFee.Worst()
 
@@ -510,7 +532,8 @@ func FuzzOnNewBlocks12(f *testing.F) {
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
-		err = pool.OnNewTxs(context.Background(), nil, p2pReceived)
+		pool.OnNewRemoteTxs(context.Background(), p2pReceived)
+		err = pool.processRemoteTxs(context.Background(), nil)
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")

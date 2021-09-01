@@ -429,28 +429,28 @@ func (s TxSlots) Valid() error {
 	return nil
 }
 
-// Growth all internal arrays to len=targetSize. It rely on `append` algorithm of realloc
-func (s *TxSlots) Growth(targetSize int) {
-	for len(s.txs) < targetSize {
+// Resize internal arrays to len=targetSize, shrinks if need. It rely on `append` algorithm to realloc
+func (s *TxSlots) Resize(targetSize uint) {
+	for uint(len(s.txs)) < targetSize {
 		s.txs = append(s.txs, nil)
 	}
-	for s.senders.Len() < targetSize {
+	for uint(s.senders.Len()) < targetSize {
 		s.senders = append(s.senders, addressesGrowth...)
 	}
-	for len(s.isLocal) < targetSize {
+	for uint(len(s.isLocal)) < targetSize {
 		s.isLocal = append(s.isLocal, false)
 	}
+	//todo: set nil to overflow txs
+	s.txs = s.txs[:targetSize]
+	s.senders = s.senders[:20*targetSize]
+	s.isLocal = s.isLocal[:targetSize]
 }
-func (s *TxSlots) Shrink(targetSize int) {
-	for len(s.txs) > targetSize {
-		s.txs = s.txs[:targetSize]
-	}
-	for s.senders.Len() > targetSize {
-		s.senders = s.senders[:20*targetSize]
-	}
-	for len(s.isLocal) > targetSize {
-		s.isLocal = s.isLocal[:targetSize]
-	}
+func (s *TxSlots) Append(slot *TxSlot, sender []byte, isLocal bool) {
+	n := len(s.txs)
+	s.Resize(uint(len(s.txs) + 1))
+	s.txs[n] = slot
+	s.isLocal[n] = isLocal
+	copy(s.senders.At(n), sender)
 }
 
 var addressesGrowth = make([]byte, 20)

@@ -94,18 +94,22 @@ func TestParseTransactionRLP(t *testing.T) {
 func TestTxSlotsGrowth(t *testing.T) {
 	assert := assert.New(t)
 	s := &TxSlots{}
-	s.Growth(11)
+	s.Resize(11)
 	assert.Equal(11, len(s.txs))
 	assert.Equal(11, s.senders.Len())
-	s.Growth(23)
+	s.Resize(23)
 	assert.Equal(23, len(s.txs))
 	assert.Equal(23, s.senders.Len())
 
 	s = &TxSlots{txs: make([]*TxSlot, 20), senders: make(Addresses, 20*20)}
-	s.Growth(20)
+	s.Resize(20)
 	assert.Equal(20, len(s.txs))
 	assert.Equal(20, s.senders.Len())
-	s.Growth(23)
+	s.Resize(23)
 	assert.Equal(23, len(s.txs))
 	assert.Equal(23, s.senders.Len())
+
+	s.Resize(2)
+	assert.Equal(2, len(s.txs))
+	assert.Equal(2, s.senders.Len())
 }

@@ -91,10 +91,11 @@ func (f *Fetch) ConnectCore() {
 			default:
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
-				s, ok := status.FromError(err)
-				retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
-				if retryLater {
+				if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
 					time.Sleep(time.Second)
+					continue
+				}
+				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 					continue
 				}
 				log.Warn("[txpool.handleStateChanges]", "err", err)
@@ -111,10 +112,11 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 		default:
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			s, ok := status.FromError(err)
-			retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
-			if retryLater {
+			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
 				time.Sleep(time.Second)
+				continue
+			}
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				continue
 			}
 			// Report error and wait more
@@ -123,15 +125,14 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 		}
 
 		if err := f.receiveMessage(f.ctx, sentryClient); err != nil {
-			s, ok := status.FromError(err)
-			retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
-			if retryLater {
+			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
 				time.Sleep(time.Second)
 				continue
 			}
-
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				continue
+			}
 			log.Warn("[txpool.recvMessage]", "err", err)
-			continue
 		}
 	}
 }
@@ -172,11 +173,17 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			return nil
 		}
 		if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			s, ok := status.FromError(err)
-			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
-			if doLog {
-				log.Warn("Handling incoming message", "err", err)
+			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
+				time.Sleep(time.Second)
+				continue
 			}
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				continue
+			}
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				continue
+			}
+			log.Warn("Handling incoming message", "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -303,12 +310,16 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if len(txs.txs) == 0 {
 			return nil
 		}
-		return f.pool.OnNewTxs(ctx, f.coreDB, txs)
+		f.pool.OnNewRemoteTxs(ctx, txs)
 	default:
 		//defer log.Info("dropped", "id", req.Id)
 	}
 
 	return nil
+}
+
+func retryLater(code codes.Code) bool {
+	return code == codes.Unavailable || code == codes.Canceled || code == codes.ResourceExhausted
 }
 
 func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
@@ -319,10 +330,11 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 		default:
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			s, ok := status.FromError(err)
-			retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
-			if retryLater {
+			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
 				time.Sleep(time.Second)
+				continue
+			}
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				continue
 			}
 			// Report error and wait more
@@ -331,15 +343,15 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 			continue
 		}
 		if err := f.receivePeer(sentryClient); err != nil {
-			s, ok := status.FromError(err)
-			retryLater := (ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled)
-			if retryLater {
+			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
 				time.Sleep(time.Second)
+				continue
+			}
+			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				continue
 			}
 
 			log.Warn("[txpool.recvPeers]", "err", err)
-			return
 		}
 	}
 }
@@ -404,7 +416,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 
 		var unwindTxs, minedTxs TxSlots
 		if req.Direction == remote.Direction_FORWARD {
-			minedTxs.Growth(len(req.Txs))
+			minedTxs.Resize(uint(len(req.Txs)))
 			for i := range req.Txs {
 				minedTxs.txs[i] = &TxSlot{}
 				if _, err := f.stateChangesParseCtx.ParseTransaction(req.Txs[i], 0, minedTxs.txs[i], minedTxs.senders.At(i)); err != nil {
@@ -414,7 +426,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 			}
 		}
 		if req.Direction == remote.Direction_UNWIND {
-			unwindTxs.Growth(len(req.Txs))
+			unwindTxs.Resize(uint(len(req.Txs)))
 			for i := range req.Txs {
 				unwindTxs.txs[i] = &TxSlot{}
 				if _, err := f.stateChangesParseCtx.ParseTransaction(req.Txs[i], 0, unwindTxs.txs[i], unwindTxs.senders.At(i)); err != nil {
