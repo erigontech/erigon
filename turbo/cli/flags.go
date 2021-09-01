@@ -152,14 +152,8 @@ var (
 		Value: "",
 	}
 
-	BadBlockFlag = cli.IntFlag{
+	BadBlockFlag = cli.StringFlag{
 		Name:  "bad.block",
-		Usage: "Marks block with given number bad and forces initial reorg before normal staged sync",
-		Value: 0,
-	}
-
-	BadHashFlag = cli.StringFlag{
-		Name:  "bad.hash",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
 		Value: "",
 	}
@@ -215,13 +209,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 		cfg.SyncLoopThrottle = syncLoopThrottle
 	}
-	cfg.BadBlock = uint64(ctx.GlobalInt(BadBlockFlag.Name))
 
-	bytes, err := hexutil.Decode(BadHashFlag.Value)
+	bytes, err := hexutil.Decode(BadBlockFlag.Value)
 	if err != nil {
-		log.Warn("Error decoding %v: %v", BadHashFlag.Value, err)
+		log.Warn("Error decoding hash %v: %v", BadBlockFlag.Value, err)
 	}
-	cfg.BadHash = common.BytesToHash(bytes)
+	cfg.BadBlockHash = common.BytesToHash(bytes)
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {

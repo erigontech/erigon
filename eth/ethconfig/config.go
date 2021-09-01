@@ -137,10 +137,9 @@ type Config struct {
 
 	P2PEnabled bool
 
-	Prune     prune.Mode
-	BatchSize datasize.ByteSize // Batch size for execution stage
-	BadBlock  uint64            // Block marked as bad (for forced reorg)
-	BadHash   common.Hash       // hash of the block marked as bad
+	Prune        prune.Mode
+	BatchSize    datasize.ByteSize // Batch size for execution stage
+	BadBlockHash common.Hash       // hash of the block marked as bad
 
 	Snapshot Snapshot
 

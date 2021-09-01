@@ -447,32 +447,21 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if err != nil {
 		return nil, err
 	}
-	if config.BadBlock != 0 {
-		var badHash common.Hash
+
+	emptyBadHash := config.BadBlockHash == common.Hash{}
+	if !emptyBadHash {
+		var badBlockHeader *types.Header
 		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			var hErr error
-			badHash, hErr = rawdb.ReadCanonicalHash(tx, config.BadBlock)
+			header, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
+			badBlockHeader = header
 			return hErr
 		}); err != nil {
 			return nil, err
 		}
-		backend.stagedSync.UnwindTo(config.BadBlock-1, badHash)
-	}
 
-	emptyBadHash := config.BadHash == common.Hash{}
-	if !emptyBadHash {
-		var badBlock *types.Block
-		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			block, rErr := rawdb.ReadBlockByHash(tx, config.BadHash)
-			badBlock = block
-			return rErr
-		}); err != nil {
-			return nil, err
-		}
-
-		if badBlock != nil {
-			unwindPoint := badBlock.NumberU64() - 1
-			backend.stagedSync.UnwindTo(unwindPoint, config.BadHash)
+		if badBlockHeader != nil {
+			unwindPoint := badBlockHeader.Number.Uint64() - 1
+			backend.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
 		}
 	}
 
