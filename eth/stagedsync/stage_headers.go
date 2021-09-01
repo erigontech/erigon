@@ -89,6 +89,7 @@ func HeadersForward(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	if hash == (common.Hash{}) {
+		fmt.Printf("Fixing after unwind\n")
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx); err != nil {
 			return err
@@ -118,6 +119,7 @@ func HeadersForward(
 	var peer []byte
 	stopped := false
 	prevProgress := headerProgress
+	noProgressCount := 0 // How many time the progress was printed without actual progress
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
@@ -160,6 +162,9 @@ func HeadersForward(
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
+		if s.BlockNumber > 0 && noProgressCount >= 5 {
+			break
+		}
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			if !initialCycle {
 				// if this is not an initial cycle, we need to react quickly when new headers are coming in
@@ -179,6 +184,11 @@ func HeadersForward(
 			stopped = true
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
+			if prevProgress == progress {
+				noProgressCount++
+			} else {
+				noProgressCount = 0 // Reset, there was progress
+			}
 			logProgressHeaders(logPrefix, prevProgress, progress)
 			prevProgress = progress
 		case <-timer.C:
@@ -240,7 +250,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (err error) {
+func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -284,41 +294,43 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (e
 		}
 	}
 	if badBlock {
-		// Find header with biggest TD
-		tdCursor, cErr := tx.Cursor(kv.HeaderTD)
-		if cErr != nil {
-			return cErr
-		}
-		defer tdCursor.Close()
-		var k, v []byte
-		k, v, err = tdCursor.Last()
-		if err != nil {
-			return err
-		}
 		var maxTd big.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
-		for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
-			if len(k) != 40 {
-				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
+		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
+			// Find header with biggest TD
+			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
+			if cErr != nil {
+				return cErr
 			}
-			var hash common.Hash
-			copy(hash[:], k[8:])
-			if cfg.hd.IsBadHeader(hash) {
-				continue
-			}
-			var td big.Int
-			if err = rlp.DecodeBytes(v, &td); err != nil {
+			defer tdCursor.Close()
+			var k, v []byte
+			k, v, err = tdCursor.Last()
+			if err != nil {
 				return err
 			}
-			if td.Cmp(&maxTd) > 0 {
-				maxTd.Set(&td)
-				copy(maxHash[:], k[8:])
-				maxNum = binary.BigEndian.Uint64(k[:8])
+			for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
+				if len(k) != 40 {
+					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
+				}
+				var hash common.Hash
+				copy(hash[:], k[8:])
+				if cfg.hd.IsBadHeader(hash) {
+					continue
+				}
+				var td big.Int
+				if err = rlp.DecodeBytes(v, &td); err != nil {
+					return err
+				}
+				if td.Cmp(&maxTd) > 0 {
+					maxTd.Set(&td)
+					copy(maxHash[:], k[8:])
+					maxNum = binary.BigEndian.Uint64(k[:8])
+				}
 			}
-		}
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
 		}
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint
