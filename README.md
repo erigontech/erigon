@@ -53,10 +53,10 @@ Usage
 ### Getting Started
 
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
-> cd erigon
-> make erigon
-> ./build/bin/erigon
+git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+cd erigon
+make erigon
+./build/bin/erigon
 ```
 
 ### Testnets
@@ -65,10 +65,10 @@ If you would like to give Erigon a try, but do not have spare 2Tb on your driver
 of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
-> cd erigon
-> make erigon
-> ./build/bin/erigon --datadir goerli --chain goerli
+git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+cd erigon
+make erigon
+./build/bin/erigon --datadir goerli --chain goerli
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
@@ -209,11 +209,11 @@ This is only possible if RPC daemon runs on the same computer as Erigon. This mo
 database of Erigon, which has better performance than accessing via TPC socket (see "For remote DB" section below).
 Provide both `--datadir` and `--private.api.addr` options:
 
-```
-> make erigon
-> ./build/bin/erigon --private.api.addr=localhost:9090
-> make rpcdaemon
-> ./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+```sh
+make erigon
+./build/bin/erigon --private.api.addr=localhost:9090
+make rpcdaemon
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
 ```
 
 #### **For remote DB**
@@ -221,11 +221,11 @@ Provide both `--datadir` and `--private.api.addr` options:
 This works regardless of whether RPC daemon is on the same computer with Erigon, or on a different one. They use TPC
 socket connection to pass data between them. To use this mode, run Erigon in one terminal window
 
-```
-> make erigon
-> ./build/bin/erigon --private.api.addr=localhost:9090
-> make rpcdaemon
-> ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+```sh
+make erigon
+./build/bin/erigon --private.api.addr=localhost:9090
+make rpcdaemon
+./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
 ```
 
 **gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
@@ -240,9 +240,9 @@ command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 Next command starts: Erigon on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
 
-```
+```sh
 make docker-compose
-or
+# or
 XDG_DATA_HOME=/preferred/data/folder make docker-compose
 ```
 
