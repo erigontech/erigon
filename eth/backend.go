@@ -459,6 +459,23 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		backend.stagedSync.UnwindTo(config.BadBlock-1, badHash)
 	}
 
+	emptyBadHash := config.BadHash == common.Hash{}
+	if !emptyBadHash {
+		var badBlock *types.Block
+		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
+			block, rErr := rawdb.ReadBlockByHash(tx, config.BadHash)
+			badBlock = block
+			return rErr
+		}); err != nil {
+			return nil, err
+		}
+
+		if badBlock != nil {
+			unwindPoint := badBlock.NumberU64() - 1
+			backend.stagedSync.UnwindTo(unwindPoint, config.BadHash)
+		}
+	}
+
 	go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 
 	go func() {

@@ -8,7 +8,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node"
@@ -155,6 +157,12 @@ var (
 		Usage: "Marks block with given number bad and forces initial reorg before normal staged sync",
 		Value: 0,
 	}
+
+	BadHashFlag = cli.StringFlag{
+		Name:  "bad.hash",
+		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
+		Value: "",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -208,6 +216,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		cfg.SyncLoopThrottle = syncLoopThrottle
 	}
 	cfg.BadBlock = uint64(ctx.GlobalInt(BadBlockFlag.Name))
+
+	bytes, err := hexutil.Decode(BadHashFlag.Value)
+	if err != nil {
+		log.Warn("Error decoding %v: %v", BadHashFlag.Value, err)
+	}
+	cfg.BadHash = common.BytesToHash(bytes)
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
