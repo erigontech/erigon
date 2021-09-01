@@ -21,6 +21,7 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
+
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -112,8 +113,6 @@ func makeP2PServer(
 		urls = params.GoerliBootnodes
 	case params.RinkebyGenesisHash:
 		urls = params.RinkebyBootnodes
-	case params.CalaverasGenesisHash:
-		urls = params.CalaverasBootnodes
 	case params.SokolGenesisHash:
 		urls = params.SokolBootnodes
 	}

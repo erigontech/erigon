@@ -86,19 +86,18 @@ var rootCmd = &cobra.Command{
 		}
 
 		newTxs := make(chan txpool.Hashes, 1024)
-		senders := txpool.NewSendersCache()
-		txPool, err := txpool.New(newTxs, senders, txPoolDB, txpool.DefaultConfig)
+		txPool, err := txpool.New(newTxs, txPoolDB, txpool.DefaultConfig)
 		if err != nil {
 			return err
 		}
 
-		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, senders, kvClient, coreDB, txPoolDB)
+		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, kvClient, coreDB, txPoolDB)
 		fetcher.ConnectCore()
 		fetcher.ConnectSentries()
 
 		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
 
-		txpool.BroadcastLoop(cmd.Context(), txPoolDB, coreDB, txPool, senders, newTxs, send)
+		txpool.BroadcastLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send)
 		return nil
 	},
 }
