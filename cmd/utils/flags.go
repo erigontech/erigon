@@ -922,7 +922,7 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	if ctx.GlobalIsSet(TxPoolV2Flag.Name) {
-		cfg.Disable = ctx.GlobalBool(TxPoolLocalsFlag.Name)
+		cfg.Disable = true
 	}
 	if ctx.GlobalIsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.GlobalString(TxPoolLocalsFlag.Name), ",")
