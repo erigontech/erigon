@@ -9,7 +9,7 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer *TxPoolServer, miningServer *MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -59,8 +59,12 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	}
 	grpcServer = grpc.NewServer(opts...)
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
-	txpool.RegisterTxpoolServer(grpcServer, txPoolServer)
-	txpool.RegisterMiningServer(grpcServer, miningServer)
+	if txPoolServer != nil {
+		txpool_proto.RegisterTxpoolServer(grpcServer, txPoolServer)
+	}
+	if miningServer != nil {
+		txpool_proto.RegisterMiningServer(grpcServer, miningServer)
+	}
 	remote.RegisterKVServer(grpcServer, kv)
 
 	//if metrics.Enabled {
