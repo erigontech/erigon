@@ -210,11 +210,14 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		cfg.SyncLoopThrottle = syncLoopThrottle
 	}
 
-	bytes, err := hexutil.Decode(BadBlockFlag.Value)
-	if err != nil {
-		log.Warn("Error decoding hash %v: %v", BadBlockFlag.Value, err)
+	if ctx.GlobalString(BadBlockFlag.Name) != "" {
+		bytes, err := hexutil.Decode(ctx.GlobalString(BadBlockFlag.Name))
+		if err != nil {
+			log.Warn("Error decoding", "hash", BadBlockFlag.Value, "error", err)
+		} else {
+			cfg.BadBlockHash = common.BytesToHash(bytes)
+		}
 	}
-	cfg.BadBlockHash = common.BytesToHash(bytes)
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
