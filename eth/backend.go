@@ -367,23 +367,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	config.BodyDownloadTimeoutSeconds = 30
 
-	backend.stagedSync, err = stages2.NewStagedSync(
-		backend.downloadCtx,
-		backend.logger,
-		backend.chainKV,
-		stack.Config().P2P,
-		*config,
-		backend.downloadServer,
-		tmpdir,
-		backend.txPool,
-		backend.txPoolP2PServer,
-
-		torrentClient, mg, backend.notifications.Accumulator,
-	)
-	if err != nil {
-		return nil, err
-	}
-
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
 		var badBlockHeader *types.Header
@@ -459,6 +442,23 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err := backend.StartMining(context.Background(), backend.chainKV, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 			return nil, err
 		}
+	}
+
+	backend.stagedSync, err = stages2.NewStagedSync(
+		backend.downloadCtx,
+		backend.logger,
+		backend.chainKV,
+		stack.Config().P2P,
+		*config,
+		backend.downloadServer,
+		tmpdir,
+		backend.txPool,
+		backend.txPoolP2PServer,
+
+		torrentClient, mg, backend.notifications.Accumulator,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
