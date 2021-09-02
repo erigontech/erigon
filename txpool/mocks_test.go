@@ -22,6 +22,9 @@ var _ Pool = &PoolMock{}
 // 			AddNewGoodPeerFunc: func(peerID PeerID)  {
 // 				panic("mock out the AddNewGoodPeer method")
 // 			},
+// 			AddRemoteTxsFunc: func(ctx context.Context, newTxs TxSlots)  {
+// 				panic("mock out the AddRemoteTxs method")
+// 			},
 // 			GetRlpFunc: func(tx kv.Tx, hash []byte) ([]byte, error) {
 // 				panic("mock out the GetRlp method")
 // 			},
@@ -30,9 +33,6 @@ var _ Pool = &PoolMock{}
 // 			},
 // 			OnNewBlockFunc: func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
 // 				panic("mock out the OnNewBlock method")
-// 			},
-// 			OnNewTxsFunc: func(ctx context.Context, newTxs TxSlots)  {
-// 				panic("mock out the OnNewRemoteTxs method")
 // 			},
 // 			StartedFunc: func() bool {
 // 				panic("mock out the Started method")
@@ -47,6 +47,9 @@ type PoolMock struct {
 	// AddNewGoodPeerFunc mocks the AddNewGoodPeer method.
 	AddNewGoodPeerFunc func(peerID PeerID)
 
+	// AddRemoteTxsFunc mocks the AddRemoteTxs method.
+	AddRemoteTxsFunc func(ctx context.Context, newTxs TxSlots)
+
 	// GetRlpFunc mocks the GetRlp method.
 	GetRlpFunc func(tx kv.Tx, hash []byte) ([]byte, error)
 
@@ -55,9 +58,6 @@ type PoolMock struct {
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
 	OnNewBlockFunc func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error
-
-	// OnNewTxsFunc mocks the OnNewRemoteTxs method.
-	OnNewTxsFunc func(ctx context.Context, newTxs TxSlots)
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
@@ -68,6 +68,13 @@ type PoolMock struct {
 		AddNewGoodPeer []struct {
 			// PeerID is the peerID argument value.
 			PeerID PeerID
+		}
+		// AddRemoteTxs holds details about calls to the AddRemoteTxs method.
+		AddRemoteTxs []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// NewTxs is the newTxs argument value.
+			NewTxs TxSlots
 		}
 		// GetRlp holds details about calls to the GetRlp method.
 		GetRlp []struct {
@@ -98,22 +105,15 @@ type PoolMock struct {
 			// BlockHash is the blockHash argument value.
 			BlockHash [32]byte
 		}
-		// OnNewRemoteTxs holds details about calls to the OnNewRemoteTxs method.
-		OnNewTxs []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// NewTxs is the newTxs argument value.
-			NewTxs TxSlots
-		}
 		// Started holds details about calls to the Started method.
 		Started []struct {
 		}
 	}
 	lockAddNewGoodPeer sync.RWMutex
+	lockAddRemoteTxs   sync.RWMutex
 	lockGetRlp         sync.RWMutex
 	lockIdHashKnown    sync.RWMutex
 	lockOnNewBlock     sync.RWMutex
-	lockOnNewTxs       sync.RWMutex
 	lockStarted        sync.RWMutex
 }
 
@@ -145,6 +145,41 @@ func (mock *PoolMock) AddNewGoodPeerCalls() []struct {
 	mock.lockAddNewGoodPeer.RLock()
 	calls = mock.calls.AddNewGoodPeer
 	mock.lockAddNewGoodPeer.RUnlock()
+	return calls
+}
+
+// AddRemoteTxs calls AddRemoteTxsFunc.
+func (mock *PoolMock) AddRemoteTxs(ctx context.Context, newTxs TxSlots) {
+	callInfo := struct {
+		Ctx    context.Context
+		NewTxs TxSlots
+	}{
+		Ctx:    ctx,
+		NewTxs: newTxs,
+	}
+	mock.lockAddRemoteTxs.Lock()
+	mock.calls.AddRemoteTxs = append(mock.calls.AddRemoteTxs, callInfo)
+	mock.lockAddRemoteTxs.Unlock()
+	if mock.AddRemoteTxsFunc == nil {
+		return
+	}
+	mock.AddRemoteTxsFunc(ctx, newTxs)
+}
+
+// AddRemoteTxsCalls gets all the calls that were made to AddRemoteTxs.
+// Check the length with:
+//     len(mockedPool.AddRemoteTxsCalls())
+func (mock *PoolMock) AddRemoteTxsCalls() []struct {
+	Ctx    context.Context
+	NewTxs TxSlots
+} {
+	var calls []struct {
+		Ctx    context.Context
+		NewTxs TxSlots
+	}
+	mock.lockAddRemoteTxs.RLock()
+	calls = mock.calls.AddRemoteTxs
+	mock.lockAddRemoteTxs.RUnlock()
 	return calls
 }
 
@@ -277,41 +312,6 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 	mock.lockOnNewBlock.RLock()
 	calls = mock.calls.OnNewBlock
 	mock.lockOnNewBlock.RUnlock()
-	return calls
-}
-
-// OnNewRemoteTxs calls OnNewTxsFunc.
-func (mock *PoolMock) OnNewRemoteTxs(ctx context.Context, newTxs TxSlots) {
-	callInfo := struct {
-		Ctx    context.Context
-		NewTxs TxSlots
-	}{
-		Ctx:    ctx,
-		NewTxs: newTxs,
-	}
-	mock.lockOnNewTxs.Lock()
-	mock.calls.OnNewTxs = append(mock.calls.OnNewTxs, callInfo)
-	mock.lockOnNewTxs.Unlock()
-	if mock.OnNewTxsFunc == nil {
-		return
-	}
-	mock.OnNewTxsFunc(ctx, newTxs)
-}
-
-// OnNewTxsCalls gets all the calls that were made to OnNewRemoteTxs.
-// Check the length with:
-//     len(mockedPool.OnNewTxsCalls())
-func (mock *PoolMock) OnNewTxsCalls() []struct {
-	Ctx    context.Context
-	NewTxs TxSlots
-} {
-	var calls []struct {
-		Ctx    context.Context
-		NewTxs TxSlots
-	}
-	mock.lockOnNewTxs.RLock()
-	calls = mock.calls.OnNewTxs
-	mock.lockOnNewTxs.RUnlock()
 	return calls
 }
 

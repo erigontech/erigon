@@ -33,6 +33,7 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/simplelru"
 	"github.com/holiman/uint256"
+	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -72,7 +73,7 @@ type Pool interface {
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	OnNewRemoteTxs(ctx context.Context, newTxs TxSlots)
+	AddRemoteTxs(ctx context.Context, newTxs TxSlots)
 	OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, baseFee, blockHeight uint64, blockHash [32]byte) error
 
 	AddNewGoodPeer(peerID PeerID)
@@ -94,6 +95,19 @@ const (
 	EnoughBalance        = 0b00100
 	EnoughFeeCapBlock    = 0b00010
 	IsLocal              = 0b00001
+)
+
+type DiscardReason uint8
+
+const (
+	//TODO: all below codes are not fixed yet. Need add them to discardLocked func. Need save discard reasons to LRU or DB.
+	Success       DiscardReason = 1
+	AlreadyKnown  DiscardReason = 2
+	UnderPriced   DiscardReason = 3
+	FeeTooLow     DiscardReason = 4
+	OversizedData DiscardReason = 5
+	InvalidSender DiscardReason = 6
+	NegativeValue DiscardReason = 7
 )
 
 // metaTx holds transaction and some metadata
@@ -489,11 +503,13 @@ type TxPool struct {
 	// track isLocal flag of already mined transactions. used at unwind.
 	localsHistory *simplelru.LRU
 	db            kv.RwDB
+	coreDB        kv.RoDB
 
 	// fields for transaction propagation
 	recentlyConnectedPeers *recentlyConnectedPeers
 	newTxs                 chan Hashes
 	deletedTxs             []*metaTx
+	discardReasons         []DiscardReason
 	senders                *sendersBatch
 	txNonce2Tx             *ByNonce // senderID => (sorted map of tx nonce => *metaTx)
 
@@ -508,7 +524,7 @@ type TxPool struct {
 	cfg Config
 }
 
-func New(newTxs chan Hashes, db kv.RwDB, cfg Config) (*TxPool, error) {
+func New(newTxs chan Hashes, db kv.RwDB, coreDB kv.RoDB, cfg Config) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU(1024, nil)
 	if err != nil {
 		return nil, err
@@ -525,6 +541,7 @@ func New(newTxs chan Hashes, db kv.RwDB, cfg Config) (*TxPool, error) {
 		newTxs:                  newTxs,
 		senders:                 newSendersCache(),
 		db:                      db,
+		coreDB:                  coreDB,
 		cfg:                     cfg,
 		senderID:                1,
 		unprocessedRemoteTxs:    &TxSlots{},
@@ -608,6 +625,9 @@ func (p *TxPool) AppendRemoteHashes(buf []byte) []byte {
 		}
 		buf = append(buf, hash...)
 	}
+	for hash := range p.unprocessedRemoteByHash {
+		buf = append(buf, hash...)
+	}
 	return buf
 }
 func (p *TxPool) AppendAllHashes(buf []byte) []byte {
@@ -654,11 +674,16 @@ func (p *TxPool) Best(n uint16, txs *TxSlots, tx kv.Tx) error {
 		txs.txs[i] = best[i].Tx
 		txs.isLocal[i] = best[i].subPool&IsLocal > 0
 
+		found := false
 		for addr, senderID := range p.senders.senderIDs { // TODO: do we need inverted index here?
 			if best[i].Tx.senderID == senderID {
 				copy(txs.senders.At(i), addr)
+				found = true
 				break
 			}
+		}
+		if found {
+			continue
 		}
 
 		binary.BigEndian.PutUint64(encID, best[i].Tx.senderID)
@@ -673,7 +698,63 @@ func (p *TxPool) Best(n uint16, txs *TxSlots, tx kv.Tx) error {
 	}
 	return nil
 }
-func (p *TxPool) OnNewRemoteTxs(_ context.Context, newTxs TxSlots) {
+
+func (p *TxPool) CountContent() (int, int, int) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
+}
+
+//Deprecated need switch to streaming-like
+func (p *TxPool) DeprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+
+	encID := make([]byte, 8)
+	p.txNonce2Tx.tree.Ascend(func(i btree.Item) bool {
+		mt := i.(*sortByNonce).metaTx
+		slot := mt.Tx
+		slotRlp := slot.rlp
+		if slot.rlp == nil {
+			v, err := tx.GetOne(kv.PoolTransaction, slot.idHash[:])
+			if err != nil {
+				log.Error("get tx from db", "err", err)
+				return false
+			}
+			if v == nil {
+				log.Error("tx not found in db")
+				return false
+			}
+			slotRlp = v[8:]
+		}
+
+		var sender []byte
+		found := false
+		for addr, senderID := range p.senders.senderIDs { // TODO: do we need inverted index here?
+			if slot.senderID == senderID {
+				sender = []byte(addr)
+				found = true
+				break
+			}
+		}
+		if !found {
+			binary.BigEndian.PutUint64(encID, slot.senderID)
+			v, err := tx.GetOne(kv.PoolSenderIDToAdress, encID)
+			if err != nil {
+				log.Error("get sender from db", "err", err)
+				return false
+			}
+			if v == nil {
+				log.Error("sender not found in db")
+				return false
+			}
+		}
+		f(slotRlp, sender, mt.currentSubPool)
+		return true
+	})
+	return nil
+}
+func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs TxSlots) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for i := range newTxs.txs {
@@ -684,8 +765,59 @@ func (p *TxPool) OnNewRemoteTxs(_ context.Context, newTxs TxSlots) {
 		p.unprocessedRemoteTxs.Append(newTxs.txs[i], newTxs.senders.At(i), newTxs.isLocal[i])
 	}
 }
+func (p *TxPool) AddLocals(ctx context.Context, newTxs TxSlots, tx kv.Tx) ([]DiscardReason, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	discardReasonsIndex := len(p.discardReasons)
 
-func (p *TxPool) processRemoteTxs(ctx context.Context, coreDB kv.RoDB) error {
+	for i := range newTxs.isLocal {
+		newTxs.isLocal[i] = true
+	}
+
+	cacheMisses, err := p.senders.onNewTxs(tx, newTxs)
+	if err != nil {
+		return nil, err
+	}
+	if len(cacheMisses) > 0 {
+		if err := p.coreDB.View(ctx, func(tx kv.Tx) error { return p.senders.loadFromCore(tx, cacheMisses) }); err != nil {
+			return nil, err
+		}
+	}
+	if err := newTxs.Valid(); err != nil {
+		return nil, err
+	}
+
+	protocolBaseFee, currentBaseFee := p.protocolBaseFee.Load(), p.currentBaseFee.Load()
+	if protocolBaseFee == 0 || currentBaseFee == 0 {
+		return nil, fmt.Errorf("non-zero base fee: %d,%d", protocolBaseFee, currentBaseFee)
+	}
+	if err := onNewTxs(tx, p.senders, newTxs, protocolBaseFee, currentBaseFee, p.pending, p.baseFee, p.queued, p.txNonce2Tx, p.byHash, p.discardLocked); err != nil {
+		return nil, err
+	}
+
+	// notify about all non-dropped txs
+	notifyNewTxs := make(Hashes, 0, 32*len(newTxs.txs))
+	for i := range newTxs.txs {
+		_, ok := p.byHash[string(newTxs.txs[i].idHash[:])]
+		if !ok {
+			continue
+		}
+		notifyNewTxs = append(notifyNewTxs, newTxs.txs[i].idHash[:]...)
+	}
+	if len(notifyNewTxs) > 0 {
+		select {
+		case p.newTxs <- notifyNewTxs:
+		default:
+		}
+	}
+	return p.copyDiscardReasons(discardReasonsIndex), nil
+}
+func (p *TxPool) copyDiscardReasons(from int) []DiscardReason {
+	cpy := make([]DiscardReason, len(p.discardReasons)-from)
+	copy(cpy, p.discardReasons[from:])
+	return cpy
+}
+func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	p.lock.RLock()
 	l := len(p.unprocessedRemoteTxs.txs)
 	p.lock.RUnlock()
@@ -709,7 +841,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context, coreDB kv.RoDB) error {
 		return err
 	}
 	if len(cacheMisses) > 0 {
-		if err := coreDB.View(ctx, func(tx kv.Tx) error { return p.senders.loadFromCore(tx, cacheMisses) }); err != nil {
+		if err := p.coreDB.View(ctx, func(tx kv.Tx) error { return p.senders.loadFromCore(tx, cacheMisses) }); err != nil {
 			return err
 		}
 	}
@@ -768,7 +900,7 @@ func onNewTxs(tx kv.Tx, senders *sendersBatch, newTxs TxSlots, protocolBaseFee, 
 	queued.EnforceInvariants()
 
 	promote(pending, baseFee, queued, discard)
-	pending.EnforceInvariants()
+	pending.EnforceInvariants() //TODO: find way to enforce invariants once. promote - now expect invariants - but can it work without them?
 
 	return nil
 }
@@ -1353,14 +1485,14 @@ func (p *WorstQueue) Pop() interface{} {
 	return item
 }
 
-// BroadcastLoop - does:
+// MainLoop - does:
 // send pending byHash to p2p:
 //      - new byHash
 //      - all pooled byHash to recently connected peers
 //      - all local pooled byHash to random peers periodically
 // promote/demote transactions
 // reorgs
-func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs chan Hashes, send *Send) {
+func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs chan Hashes, send *Send, newTxSlotsStreams *NewSlotsStreams) {
 	//db.Update(ctx, func(tx kv.RwTx) error { return tx.ClearBucket(kv.PooledSender) })
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		return coreDB.View(ctx, func(coreTx kv.Tx) error {
@@ -1401,7 +1533,7 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, n
 				log.Error("log stats", "err", err)
 			}
 		case <-processRemoteTxsEvery.C:
-			if err := p.processRemoteTxs(ctx, coreDB); err != nil {
+			if err := p.processRemoteTxs(ctx); err != nil {
 				log.Error("process batch remote txs", "err", err)
 			}
 		case <-commitEvery.C:
@@ -1429,6 +1561,21 @@ func BroadcastLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, n
 
 			send.BroadcastLocalPooledTxs(localTxHashes)
 			send.BroadcastRemotePooledTxs(remoteTxHashes)
+
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				slotsRlp := make([][]byte, 0, h.Len())
+				for i := 0; i < h.Len(); i++ {
+					slotRlp, err := p.GetRlp(tx, h.At(i))
+					if err != nil {
+						return err
+					}
+					slotsRlp = append(slotsRlp, slotRlp)
+				}
+				newTxSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
+				return nil
+			}); err != nil {
+				log.Error("send new slots by grpc", "err", err)
+			}
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := p.recentlyConnectedPeers.GetAndClean()
 			if len(newPeers) == 0 {
@@ -1568,6 +1715,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (evicted uint64, err error) {
 	// DB will stay consitant but some in-memory structures may be alread cleaned, and retry will not work
 	// failed write transaction must not create side-effects
 	p.deletedTxs = p.deletedTxs[:0]
+	p.discardReasons = p.discardReasons[:0]
 	return evicted, nil
 }
 

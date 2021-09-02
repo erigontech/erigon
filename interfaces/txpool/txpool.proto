@@ -35,6 +35,7 @@ message AllReply {
   enum Type {
     PENDING = 0; // All currently processable transactions
     QUEUED = 1;  // Queued but non-processable transactions
+    BASE_FEE = 2;  // BaseFee not enough baseFee non-processable transactions
   }
   message Tx {
     Type type = 1;
@@ -48,6 +49,7 @@ message StatusRequest {}
 message StatusReply {
   uint32 pendingCount = 1;
   uint32 queuedCount = 2;
+  uint32 baseFeeCount = 3;
 }
 
 service Txpool {

@@ -23,7 +23,7 @@ import (
 // golang.org/s/draft-fuzzing-design
 //gotip doc testing
 //gotip doc testing.F
-//gotip doc testing.F.OnNewRemoteTxs
+//gotip doc testing.F.AddRemoteTxs
 //gotip doc testing.F.Fuzz
 
 // gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
@@ -532,8 +532,8 @@ func FuzzOnNewBlocks12(f *testing.F) {
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
-		pool.OnNewRemoteTxs(context.Background(), p2pReceived)
-		err = pool.processRemoteTxs(context.Background(), nil)
+		pool.AddRemoteTxs(context.Background(), p2pReceived)
+		err = pool.processRemoteTxs(context.Background())
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
