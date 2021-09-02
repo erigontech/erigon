@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
