@@ -25,6 +25,7 @@ import (
 var (
 	sentryAddr     []string // Address of the sentry <host>:<port>
 	privateApiAddr string
+	txpoolApiAddr  string
 	datadir        string // Path to td working dir
 
 	TLSCertfile string
@@ -35,7 +36,8 @@ var (
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
-	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
+	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
+	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")
 	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
@@ -67,6 +69,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 
+		log.Info("TxPool started", "db", path.Join(datadir, "txpool"))
 		txPoolDB, err := mdbx.NewMDBX(log.New()).Path(path.Join(datadir, "txpool")).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).Open()
 		if err != nil {
 			return err
@@ -85,19 +88,25 @@ var rootCmd = &cobra.Command{
 		}
 
 		newTxs := make(chan txpool.Hashes, 1024)
-		senders := txpool.NewSendersCache()
-		txPool, err := txpool.New(newTxs, senders, txPoolDB)
+		txPool, err := txpool.New(newTxs, txPoolDB, coreDB, txpool.DefaultConfig)
 		if err != nil {
 			return err
 		}
 
-		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, senders, kvClient, coreDB, txPoolDB)
+		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, kvClient, coreDB, txPoolDB)
 		fetcher.ConnectCore()
 		fetcher.ConnectSentries()
 
 		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
+		txpoolGrpcServer := txpool.NewGrpcServer(cmd.Context(), txPool, txPoolDB)
+		grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, nil, txpoolApiAddr, nil)
+		if err != nil {
+			return err
+		}
 
-		txpool.BroadcastLoop(cmd.Context(), txPoolDB, coreDB, txPool, senders, newTxs, send, txpool.DefaultTimings)
+		txpool.MainLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams)
+
+		grpcServer.GracefulStop()
 		return nil
 	},
 }

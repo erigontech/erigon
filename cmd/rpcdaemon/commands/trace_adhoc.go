@@ -195,10 +195,10 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			gasPrice = new(uint256.Int)
 			if gasFeeCap.BitLen() > 0 || gasTipCap.BitLen() > 0 {
 				gasPrice = math2.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
-			}
-			// Still zero
-			if gasPrice.IsZero() {
+			} else {
+				// This means gasFeeCap == 0, gasTipCap == 0
 				gasPrice.Set(baseFee)
+				gasFeeCap, gasTipCap = gasPrice, gasPrice
 			}
 		}
 	}

@@ -584,8 +584,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.CalaverasChainName:
-			urls = params.CalaverasBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
 		default:
@@ -626,8 +624,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.CalaverasChainName:
-			urls = params.CalaverasBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
 		default:
@@ -862,8 +858,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.CalaverasChainName:
-		return filepath.Join(datadir, "calaveras")
 	case params.SokolChainName:
 		return filepath.Join(datadir, "sokol")
 	default:
@@ -1224,11 +1218,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
 		}
 		cfg.Genesis = core.DefaultErigonGenesisBlock()
-	case params.CalaverasChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 123 // https://gist.github.com/holiman/c5697b041b3dc18c50a5cdd382cbdd16
-		}
-		cfg.Genesis = core.DefaultCalaverasGenesisBlock()
 	case params.SokolChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 77
@@ -1305,8 +1294,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultGoerliGenesisBlock()
 	case params.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
-	case params.CalaverasChainName:
-		genesis = core.DefaultCalaverasGenesisBlock()
 	case params.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
 	case params.DevChainName:

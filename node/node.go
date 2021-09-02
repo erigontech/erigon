@@ -511,7 +511,7 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 	oldDbPath := filepath.Join(config.DataDir, "erigon", name)
 	dbPath := filepath.Join(config.DataDir, name)
 	if _, err := os.Stat(oldDbPath); err == nil {
-		log.Error("Old data directory found", "path", oldDbPath, "please move to new path", dbPath)
+		log.Error("Old directory location found", "path", oldDbPath, "please move to new path", dbPath)
 		return nil, fmt.Errorf("safety error, see log message")
 	}
 

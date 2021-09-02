@@ -192,6 +192,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 	for !s.IsDone() {
+		var badBlockUnwind bool
 		if s.unwindPoint != nil {
 			for j := 0; j < len(s.unwindOrder); j++ {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
@@ -203,6 +204,9 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			}
 			s.prevUnwindPoint = s.unwindPoint
 			s.unwindPoint = nil
+			if s.badBlock != (common.Hash{}) {
+				badBlockUnwind = true
+			}
 			s.badBlock = common.Hash{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
@@ -226,7 +230,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db, tx, firstCycle); err != nil {
+		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
 			return err
 		}
 
@@ -302,14 +306,14 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 	return nil
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool) (err error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool) (err error) {
 	start := time.Now()
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
 	}
 
-	if err = stage.Forward(firstCycle, stageState, s, tx); err != nil {
+	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx); err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
@@ -348,7 +352,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 	took := time.Since(t)
 	if took > 60*time.Second {
 		logPrefix := s.LogPrefix()
-		log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", t)
+		log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: time.Since(t)})
 	return nil
