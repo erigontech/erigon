@@ -120,6 +120,12 @@ func (db *RemoteKV) Close() {
 }
 
 func (db *RemoteKV) BeginRo(ctx context.Context) (kv.Tx, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	streamCtx, streamCancelFn := context.WithCancel(ctx) // We create child context for the stream so we can cancel it to prevent leak
 	stream, err := db.remoteKV.Tx(streamCtx)
 	if err != nil {

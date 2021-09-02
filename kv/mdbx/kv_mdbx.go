@@ -333,10 +333,16 @@ func (db *MdbxKV) Close() {
 	}
 }
 
-func (db *MdbxKV) BeginRo(_ context.Context) (txn kv.Tx, err error) {
+func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
 	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	defer func() {
 		if err == nil {
 			db.wg.Add(1)
