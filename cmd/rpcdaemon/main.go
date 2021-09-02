@@ -17,6 +17,7 @@ func main() {
 	cmd, cfg := cli.RootCommand()
 	rootCtx, rootCancel := utils.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		defer rootCancel()
 		logger := log.New()
 		db, backend, txPool, mining, err := cli.RemoteServices(*cfg, logger, rootCancel)
 		if err != nil {
