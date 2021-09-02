@@ -137,6 +137,12 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 					<-boundedConcurrency
 				}()
 
+				select {
+				case <-cp.ctx.Done():
+					return
+				default:
+				}
+
 				buf := bytes.NewBuffer(nil)
 				stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
