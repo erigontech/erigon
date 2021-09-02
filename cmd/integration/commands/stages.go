@@ -940,6 +940,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
+	cfg.TxPool.Disable = true
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}

@@ -261,7 +261,7 @@ func NewStagedSync(
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageTxPoolCfg(db, txPool, func() {
+			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
 				for i := range txPoolServer.Sentries {
 					go func(i int) {
 						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
