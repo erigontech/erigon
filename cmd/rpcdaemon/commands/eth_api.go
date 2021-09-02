@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -124,6 +125,7 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *type
 	api._genesisLock.RUnlock()
 
 	if cc != nil {
+		fmt.Printf("get existing:%v\n",cc)
 		return cc, genesisBlock, nil
 	}
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
@@ -136,6 +138,7 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *type
 	}
 	if cc != nil && genesisBlock != nil {
 		api._genesisLock.Lock()
+		fmt.Printf("set new:%v\n",cc)
 		api._genesis = genesisBlock
 		api._chainConfig = cc
 		api._genesisLock.Unlock()
