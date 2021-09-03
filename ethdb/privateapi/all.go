@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, rateLimit uint32, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto.MiningServer, addr string, rateLimit uint32, creds credentials.TransportCredentials) (*grpc.Server, error) {
 	log.Info("Starting private RPC server", "on", addr)
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
