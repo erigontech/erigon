@@ -109,58 +109,60 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				}
 			}
 		}()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
+		if mining != nil {
+			go func() {
+				for {
 					select {
 					case <-ctx.Done():
 						return
 					default:
 					}
-					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+						}
+						if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+							time.Sleep(time.Second)
+							continue
+						}
+						if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+							time.Sleep(time.Second)
+							continue
+						}
+						log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
 						time.Sleep(time.Second)
-						continue
 					}
-					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-						time.Sleep(time.Second)
-						continue
-					}
-					log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
-					time.Sleep(time.Second)
 				}
-			}
-		}()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
+			}()
+			go func() {
+				for {
 					select {
 					case <-ctx.Done():
 						return
 					default:
 					}
-					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+						}
+						if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+							time.Sleep(time.Second)
+							continue
+						}
+						if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+							time.Sleep(time.Second)
+							continue
+						}
+						log.Warn("rpc filters: error subscribing to pending logs", "err", err)
 						time.Sleep(time.Second)
-						continue
 					}
-					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-						time.Sleep(time.Second)
-						continue
-					}
-					log.Warn("rpc filters: error subscribing to pending logs", "err", err)
-					time.Sleep(time.Second)
 				}
-			}
-		}()
+			}()
+		}
 	}
 
 	return ff
