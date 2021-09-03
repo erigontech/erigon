@@ -44,10 +44,14 @@ import (
 )
 
 var (
-	onNewTxsTimer     = metrics.NewSummary("pool_new_txs")
-	onNewBlockTimer   = metrics.NewSummary("pool_new_block")
-	cacheHitCounter   = metrics.NewCounter("pool_cache_hit")
-	cacheTotalCounter = metrics.NewCounter("pool_cache_total")
+	processBatchTxsTimer  = metrics.NewSummary(`pool_process_remote_txs`)
+	addRemoteTxsTimer     = metrics.NewSummary(`pool_add_remote_txs`)
+	newBlockTimer         = metrics.NewSummary(`pool_new_block`)
+	writeToDbTimer        = metrics.NewSummary(`pool_write_to_db`)
+	cacheTotalCounter     = metrics.GetOrCreateCounter(`pool_cache_total`)
+	cacheHitCounter       = metrics.GetOrCreateCounter(`pool_cache_total{result="hit"}`)
+	writeToDbBytesCounter = metrics.GetOrCreateCounter(`pool_write_to_db_bytes`)
+	sendersEvictedCounter = metrics.GetOrCreateCounter(`pool_senders_evicted`)
 )
 
 const ASSERT = false
@@ -65,7 +69,7 @@ var DefaultConfig = Config{
 	processRemoteTxsEvery:   100 * time.Millisecond,
 	commitEvery:             15 * time.Second,
 	logEvery:                30 * time.Second,
-	evictSendersAfterRounds: 10,
+	evictSendersAfterRounds: 20,
 }
 
 // Pool is interface for the transaction pool
@@ -218,12 +222,12 @@ func (sc *sendersBatch) id(addr string, tx kv.Tx) (uint64, bool, error) {
 	return id, true, nil
 }
 func (sc *sendersBatch) info(id uint64, tx kv.Tx, expectMiss bool) (*senderInfo, error) {
-	cacheTotalCounter.Inc()
 	info, ok := sc.senderInfo[id]
 	if ok {
 		cacheHitCounter.Inc()
 		return info, nil
 	}
+	cacheTotalCounter.Inc()
 	encID := make([]byte, 8)
 	binary.BigEndian.PutUint64(encID, id)
 	v, err := tx.GetOne(kv.PoolSender, encID)
@@ -758,6 +762,7 @@ func (p *TxPool) DeprecatedForEach(_ context.Context, f func(rlp, sender []byte,
 	return nil
 }
 func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs TxSlots) {
+	defer addRemoteTxsTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for i := range newTxs.txs {
@@ -828,7 +833,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 		return nil
 	}
 
-	defer onNewTxsTimer.UpdateDuration(time.Now())
+	defer processBatchTxsTimer.UpdateDuration(time.Now())
 	//t := time.Now()
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -917,7 +922,7 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, uint64) {
 }
 
 func (p *TxPool) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs, minedTxs TxSlots, baseFee, blockHeight uint64, blockHash [32]byte) error {
-	defer onNewBlockTimer.UpdateDuration(time.Now())
+	defer newBlockTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -1553,6 +1558,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					log.Error("flush is local history", "err", err)
 					continue
 				}
+				writeToDbBytesCounter.Set(written)
+				sendersEvictedCounter.Set(evicted)
 				log.Info("flush", "written_kb", written/1024, "evicted", evicted, "in", time.Since(t))
 			}
 		case h := <-newTxs: //TODO: maybe send TxSlots object instead of Hashes?
@@ -1650,6 +1657,7 @@ func copyBytes(b []byte) (copiedBytes []byte) {
 }
 
 func (p *TxPool) flush(db kv.RwDB) (evicted, written uint64, err error) {
+	defer writeToDbTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	//it's important that write db tx is done inside lock, to make last writes visible for all read operations
