@@ -109,7 +109,9 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				}
 			}
 		}()
+		fmt.Printf("aa:%#v,%t\n",mining,mining==nil)
 		if mining != nil {
+			fmt.Printf("aa1:%#v,%t\n",mining,mining==nil)
 			go func() {
 				for {
 					select {

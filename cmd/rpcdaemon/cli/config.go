@@ -216,7 +216,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		} else {
 			mining = services.NewMiningService(txpoolConn)
 		}
-		fmt.Printf("sdf:%#v,%t\n", mining, mining==nil)
 		txPool = services.NewTxPoolService(txpoolConn)
 		if db == nil {
 			db = remoteKv
