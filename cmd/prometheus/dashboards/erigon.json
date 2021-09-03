@@ -22,7 +22,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1630647530135,
+  "iteration": 1630649706745,
   "links": [],
   "panels": [
     {
@@ -2636,7 +2636,7 @@
           "expr": "sum(delta(pool_cache_total{result=\"hit\",instance=~\"$instance\"}[1m]))/sum(delta(pool_cache_total{instance=~\"$instance\"}[1m])) ",
           "hide": false,
           "interval": "",
-          "legendFormat": "hit rate: {{ instance }}",
+          "legendFormat": "hit rate: {{ instance }} ",
           "refId": "A"
         }
       ],
@@ -2691,7 +2691,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "decbytes"
         },
         "overrides": []
       },
@@ -4927,5 +4928,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 25
+  "version": 27
 }
