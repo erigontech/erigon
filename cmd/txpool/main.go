@@ -96,7 +96,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		newTxs := make(chan txpool.Hashes, 1024)
-		txPool, err := txpool.New(newTxs, txPoolDB, coreDB, txpool.DefaultConfig)
+		txPool, err := txpool.New(newTxs, coreDB, txpool.DefaultConfig)
 		if err != nil {
 			return err
 		}
