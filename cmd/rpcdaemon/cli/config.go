@@ -208,7 +208,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		remoteEth := services.NewRemoteBackend(conn)
 		txpoolConn := conn
 		if cfg.TxPoolV2 {
-			txpoolConn, err = grpcutil.Connect(creds, cfg.PrivateApiAddr)
+			txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 			if err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 			}
