@@ -53,10 +53,10 @@ Usage
 ### Getting Started
 
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
-> cd erigon
-> make erigon
-> ./build/bin/erigon
+git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+cd erigon
+make erigon
+./build/bin/erigon
 ```
 
 ### Testnets
@@ -65,10 +65,10 @@ If you would like to give Erigon a try, but do not have spare 2Tb on your driver
 of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 
 ```sh
-> git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
-> cd erigon
-> make erigon
-> ./build/bin/erigon --datadir goerli --chain goerli
+git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+cd erigon
+make erigon
+./build/bin/erigon --datadir goerli --chain goerli
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
@@ -133,15 +133,17 @@ Windows users may run erigon in 3 possible ways:
 
 ### Beacon Chain
 
-Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2 
-rely on availability of receipts - don't prune them: don't add 
-character `r` to `--prune` flag or set large `--prune.r.older=2_000_000`.
+Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
+rely on availability of receipts - don't prune them: don't add character `r` to `--prune` flag or set
+large `--prune.r.older=2_000_000`.
 
 You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
 
-If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default).
+If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default)
+.
 
-Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`, where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
+Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
+where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
 
@@ -209,11 +211,11 @@ This is only possible if RPC daemon runs on the same computer as Erigon. This mo
 database of Erigon, which has better performance than accessing via TPC socket (see "For remote DB" section below).
 Provide both `--datadir` and `--private.api.addr` options:
 
-```
-> make erigon
-> ./build/bin/erigon --private.api.addr=localhost:9090
-> make rpcdaemon
-> ./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+```sh
+make erigon
+./build/bin/erigon --private.api.addr=localhost:9090
+make rpcdaemon
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
 ```
 
 #### **For remote DB**
@@ -221,11 +223,11 @@ Provide both `--datadir` and `--private.api.addr` options:
 This works regardless of whether RPC daemon is on the same computer with Erigon, or on a different one. They use TPC
 socket connection to pass data between them. To use this mode, run Erigon in one terminal window
 
-```
-> make erigon
-> ./build/bin/erigon --private.api.addr=localhost:9090
-> make rpcdaemon
-> ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+```sh
+make erigon
+./build/bin/erigon --private.api.addr=localhost:9090
+make rpcdaemon
+./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
 ```
 
 **gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
@@ -240,9 +242,9 @@ command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 Next command starts: Erigon on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
 
-```
+```sh
 make docker-compose
-or
+# or
 XDG_DATA_HOME=/preferred/data/folder make docker-compose
 ```
 
@@ -274,15 +276,18 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 ### Default Ports and Protocols / Firewalls?
 
 #### `erigon` ports
+
 |  Port |  Protocol |      Purpose     |  Expose |
 |:-----:|:---------:|:----------------:|:-------:|
 | 30303 | TCP & UDP |  eth/66 peering  |  Public |
 | 30304 | TCP & UDP |  eth/65 peering  |  Public |
 |  9090 |    TCP    | gRPC Connections | Private |
 
-Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
+Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
+internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 
 #### `rpcdaemon` ports
+
 |  Port |  Protocol |      Purpose      |  Expose |
 |:-----:|:---------:|:-----------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets | Private |
@@ -290,22 +295,26 @@ Typically 30303 and 30304 are exposed to the internet to allow incoming peering 
 Typically 8545 is exposed only interally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
 
 #### `sentry` ports
+
 |  Port |  Protocol |      Purpose     |  Expose |
 |:-----:|:---------:|:----------------:|:-------:|
 | 30303 | TCP & UDP |      Peering     |  Public |
 |  9091 |    TCP    | gRPC Connections | Private |
 
-Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port 9091 is for internal gRCP connections (e.g erigon -> sentry)
+Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port
+9091 is for internal gRCP connections (e.g erigon -> sentry)
 
 #### Other ports
+
 | Port | Protocol | Purpose |  Expose |
 |:----:|:--------:|:-------:|:-------:|
 | 6060 |    TCP   |  pprof  | Private |
 | 6060 |    TCP   | metrics | Private |
 
-Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
+you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
 
-Also, ports 9092 and 9093 are reserved for future use of the consensus engine and shapshot downloader for gRPC (work in progress).
+Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
 Getting in touch
 ================

@@ -18,7 +18,7 @@ func main() {
 	rootCtx, rootCancel := utils.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		db, backend, txPool, mining, err := cli.RemoteServices(*cfg, logger, rootCancel)
+		db, backend, txPool, mining, err := cli.RemoteServices(cmd.Context(), *cfg, logger, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "error", err)
 			return nil

@@ -7,13 +7,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
@@ -25,6 +25,7 @@ import (
 var (
 	sentryAddr     []string // Address of the sentry <host>:<port>
 	privateApiAddr string
+	txpoolApiAddr  string
 	datadir        string // Path to td working dir
 
 	TLSCertfile string
@@ -35,7 +36,8 @@ var (
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
-	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
+	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
+	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")
 	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
@@ -56,7 +58,11 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		coreConn, err := cli.ConnectCore(TLSCertfile, TLSKeyFile, TLSCACert, privateApiAddr)
+		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
+		if err != nil {
+			return fmt.Errorf("could not connect to remoteKv: %w", err)
+		}
+		coreConn, err := grpcutil.Connect(creds, privateApiAddr)
 		if err != nil {
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
@@ -76,7 +82,11 @@ var rootCmd = &cobra.Command{
 		sentryClients := make([]txpool.SentryClient, len(sentryAddr))
 		sentryClientsCasted := make([]proto_sentry.SentryClient, len(sentryAddr))
 		for i := range sentryAddr {
-			sentryConn, err := cli.ConnectCore(TLSCertfile, TLSKeyFile, TLSCACert, sentryAddr[i])
+			creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
+			if err != nil {
+				return fmt.Errorf("could not connect to sentry: %w", err)
+			}
+			sentryConn, err := grpcutil.Connect(creds, sentryAddr[i])
 			if err != nil {
 				return fmt.Errorf("could not connect to sentry: %w", err)
 			}
@@ -86,19 +96,33 @@ var rootCmd = &cobra.Command{
 		}
 
 		newTxs := make(chan txpool.Hashes, 1024)
-		senders := txpool.NewSendersCache()
-		txPool, err := txpool.New(newTxs, senders, txPoolDB, txpool.DefaultConfig)
+		txPool, err := txpool.New(newTxs, txPoolDB, coreDB, txpool.DefaultConfig)
 		if err != nil {
 			return err
 		}
 
-		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, senders, kvClient, coreDB, txPoolDB)
+		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, kvClient, coreDB, txPoolDB)
 		fetcher.ConnectCore()
 		fetcher.ConnectSentries()
 
 		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
+		txpoolGrpcServer := txpool.NewGrpcServer(cmd.Context(), txPool, txPoolDB)
+		/*
+			var ethashApi *ethash.API
+			if casted, ok := backend.engine.(*ethash.Ethash); ok {
+				ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+			}
+			miningGrpcServer := privateapi.NewMiningServer(cmd.Context(), &rpcdaemontest.IsMiningMock{}, ethashApi)
+		*/
 
-		txpool.BroadcastLoop(cmd.Context(), txPoolDB, coreDB, txPool, senders, newTxs, send)
+		grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, nil, txpoolApiAddr, nil)
+		if err != nil {
+			return err
+		}
+
+		txpool.MainLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams)
+
+		grpcServer.GracefulStop()
 		return nil
 	},
 }

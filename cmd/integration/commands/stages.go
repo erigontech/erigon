@@ -871,9 +871,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
-	case params.CalaverasChainName:
-		chainConfig = params.CalaverasChainConfig
-		genesis = core.DefaultCalaverasGenesisBlock()
 	case params.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
@@ -943,6 +940,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
+	cfg.TxPool.Disable = true
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}

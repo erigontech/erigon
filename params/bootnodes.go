@@ -70,12 +70,6 @@ var GoerliBootnodes = []string{
 // ErigonBootnodes are the enode URLs of the P2P bootstrap nodes running on the ErigonNodes devnet
 var ErigonBootnodes = []string{}
 
-var CalaverasBootnodes = []string{
-	"enode://9e1096aa59862a6f164994cb5cb16f5124d6c992cdbf4535ff7dea43ea1512afe5448dca9df1b7ab0726129603f1a3336b631e4d7a1a44c94daddd03241587f9@3.9.20.133:30303",
-	"enode://8e6788508278e514268307f27528ffabd6c86e755b0abd5ef170502b6444b35231dd0c7183e902c6a566c650104fdcfa58c6de28b54533f3dc243af444a60f51@quilt.link:30308",
-	"enode://14bed0619ef778342cb1ed18702004cb29f4324b7d411fc3d20adc8fe2d15c7bb30c663bd8767eaa32eaadcebc227a24e21c006028e12b9c38b25ea5e3147316@217.182.200.86:30303",
-}
-
 var SokolBootnodes = []string{
 	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
 	"enode://e08adce358fc26dfbe1f24ee578dceaa29575ca44a39d9041203131db5135aceba6241840a9b57b1540eeaf7b4eff1aead28a74641be43342c35af454abb31b3@199.247.18.10:30313",
