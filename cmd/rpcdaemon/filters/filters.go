@@ -83,7 +83,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		}
 	}()
 
-	if reflect.ValueOf(txPool).IsNil() { //https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
+	if txPool != nil {
 		go func() {
 			for {
 				select {
