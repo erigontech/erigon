@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 	"time"
 
@@ -82,7 +83,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		}
 	}()
 
-	if txPool != nil {
+	if reflect.ValueOf(txPool).IsNil() { //https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
 		go func() {
 			for {
 				select {
@@ -109,9 +110,9 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				}
 			}
 		}()
-		fmt.Printf("aa:%#v,%t\n",mining,mining==nil)
-		if mining != nil {
-			fmt.Printf("aa1:%#v,%t\n",mining,mining==nil)
+		fmt.Printf("aa:%#v,%t\n", mining, mining == nil)
+		if reflect.ValueOf(mining).IsNil() { //https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
+			fmt.Printf("aa1:%#v,%t\n", mining, mining == nil)
 			go func() {
 				for {
 					select {
