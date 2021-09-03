@@ -193,7 +193,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	if cfg.PrivateApiAddr != "" {
 		creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 		if err != nil {
-			fmt.Printf("files: %s,%s,%s\n",cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 			return nil, nil, nil, nil, fmt.Errorf("open tls cert: %w", err)
 		}
 		conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
