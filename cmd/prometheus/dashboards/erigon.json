@@ -2415,7 +2415,7 @@
           "exemplar": true,
           "expr": "pool_process_remote_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_process_remote_txs: {{ instance }}",
           "refId": "A"
         },
         {
@@ -2423,7 +2423,7 @@
           "expr": "pool_add_remote_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_add_remote_txs: {{ instance }}",
           "refId": "B"
         },
         {
@@ -2431,7 +2431,7 @@
           "expr": "pool_new_block{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_new_block: {{ instance }}",
           "refId": "C"
         },
         {
@@ -2439,7 +2439,7 @@
           "expr": "pool_write_to_db{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_write_to_db: {{ instance }}",
           "refId": "D"
         }
       ],
@@ -2496,7 +2496,7 @@
               }
             ]
           },
-          "unit": "none"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -2554,7 +2554,7 @@
           "refId": "D"
         }
       ],
-      "title": "Counters ",
+      "title": "RPS",
       "transformations": [],
       "type": "timeseries"
     },
@@ -4898,7 +4898,7 @@
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
@@ -4928,5 +4928,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 27
+  "version": 28
 }
