@@ -13,6 +13,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -55,6 +56,8 @@ type Flags struct {
 	RpcAllowListFilePath string
 	RpcBatchConcurrency  uint
 	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolV2             bool
+	TxPoolApiAddr        string
 }
 
 var rootCmd = &cobra.Command{
@@ -66,7 +69,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
 	cfg := &Flags{}
-	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface")
+	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
@@ -92,6 +95,8 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 50, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
+	rootCmd.PersistentFlags().BoolVar(&cfg.TxPoolV2, "txpool.v2", false, "experimental external txpool")
+	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9094", "txpool api network address, for example: 127.0.0.1:9094")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -166,7 +171,7 @@ func checkDbCompatibility(db kv.RoDB) error {
 	return nil
 }
 
-func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
+func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
@@ -186,9 +191,13 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 	if cfg.PrivateApiAddr != "" {
-		conn, err := ConnectCore(cfg.TLSCertfile, cfg.TLSKeyFile, cfg.TLSCACert, cfg.PrivateApiAddr)
+		creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+			return nil, nil, nil, nil, err
+		}
+		conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 		}
 
 		kvClient := remote.NewKVClient(conn)
@@ -197,8 +206,15 @@ func RemoteServices(cfg Flags, logger log.Logger, rootCancel context.CancelFunc)
 			return nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 		remoteEth := services.NewRemoteBackend(conn)
-		mining = services.NewMiningService(conn)
-		txPool = services.NewTxPoolService(conn)
+		txpoolConn := conn
+		if cfg.TxPoolV2 {
+			txpoolConn, err = grpcutil.Connect(creds, cfg.PrivateApiAddr)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
+			}
+		}
+		mining = services.NewMiningService(txpoolConn)
+		txPool = services.NewTxPoolService(txpoolConn)
 		if db == nil {
 			db = remoteKv
 		}

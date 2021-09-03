@@ -280,13 +280,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	}
 	if stack.Config().PrivateApiAddr != "" {
-		var creds *credentials.TransportCredentials
+		var creds credentials.TransportCredentials
 		if stack.Config().TLSConnection {
-			tlsCreds, err := grpcutil.TLS(stack.Config().TLSCACert, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
+			creds, err = grpcutil.TLS(stack.Config().TLSCACert, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
 			if err != nil {
 				return nil, err
 			}
-			creds = &tlsCreds
 		}
 		backend.privateAPI, err = privateapi.StartGrpc(
 			kvRPC,

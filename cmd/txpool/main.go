@@ -99,6 +99,14 @@ var rootCmd = &cobra.Command{
 
 		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
 		txpoolGrpcServer := txpool.NewGrpcServer(cmd.Context(), txPool, txPoolDB)
+		/*
+			var ethashApi *ethash.API
+			if casted, ok := backend.engine.(*ethash.Ethash); ok {
+				ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
+			}
+			miningGrpcServer := privateapi.NewMiningServer(cmd.Context(), &rpcdaemontest.IsMiningMock{}, ethashApi)
+		*/
+
 		grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, nil, txpoolApiAddr, nil)
 		if err != nil {
 			return err
