@@ -2,16 +2,12 @@ package cli
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"path"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -27,10 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/keepalive"
 )
 
 type Flags struct {
@@ -237,66 +229,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}()
 	}
 	return db, eth, txPool, mining, err
-}
-
-func ConnectCore(certFile, keyFile, caCert string, dialAddress string) (*grpc.ClientConn, error) {
-	var dialOpts []grpc.DialOption
-
-	backoffCfg := backoff.DefaultConfig
-	backoffCfg.BaseDelay = 500 * time.Millisecond
-	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(15 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
-	if certFile == "" {
-		dialOpts = append(dialOpts, grpc.WithInsecure())
-	} else {
-		var creds credentials.TransportCredentials
-		var err error
-		if caCert == "" {
-			creds, err = credentials.NewClientTLSFromFile(certFile, "")
-
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			// load peer cert/key, ca cert
-			peerCert, err := tls.LoadX509KeyPair(certFile, keyFile)
-			if err != nil {
-				log.Error("load peer cert/key error:%v", err)
-				return nil, err
-			}
-			caCert, err := ioutil.ReadFile(caCert)
-			if err != nil {
-				log.Error("read ca cert file error:%v", err)
-				return nil, err
-			}
-			caCertPool := x509.NewCertPool()
-			caCertPool.AppendCertsFromPEM(caCert)
-			creds = credentials.NewTLS(&tls.Config{
-				Certificates: []tls.Certificate{peerCert},
-				ClientCAs:    caCertPool,
-				ClientAuth:   tls.RequireAndVerifyClientCert,
-				//nolint:gosec
-				InsecureSkipVerify: true, // This is to make it work when Common Name does not match - remove when procedure is updated for common name
-			})
-		}
-
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
-	}
-
-	//if opts.inMemConn != nil {
-	//	dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
-	//		return opts.inMemConn.Dial()
-	//	}))
-	//}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	return grpc.DialContext(ctx, dialAddress, dialOpts...)
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {

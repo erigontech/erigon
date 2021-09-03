@@ -7,13 +7,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
@@ -58,7 +58,11 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		coreConn, err := cli.ConnectCore(TLSCertfile, TLSKeyFile, TLSCACert, privateApiAddr)
+		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
+		if err != nil {
+			return fmt.Errorf("could not connect to remoteKv: %w", err)
+		}
+		coreConn, err := grpcutil.Connect(creds, privateApiAddr)
 		if err != nil {
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
@@ -78,7 +82,11 @@ var rootCmd = &cobra.Command{
 		sentryClients := make([]txpool.SentryClient, len(sentryAddr))
 		sentryClientsCasted := make([]proto_sentry.SentryClient, len(sentryAddr))
 		for i := range sentryAddr {
-			sentryConn, err := cli.ConnectCore(TLSCertfile, TLSKeyFile, TLSCACert, sentryAddr[i])
+			creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
+			if err != nil {
+				return fmt.Errorf("could not connect to sentry: %w", err)
+			}
+			sentryConn, err := grpcutil.Connect(creds, sentryAddr[i])
 			if err != nil {
 				return fmt.Errorf("could not connect to sentry: %w", err)
 			}
