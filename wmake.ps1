@@ -207,7 +207,7 @@ function Test-GO-Installed {
 # -----------------------------------------------------------------------------
 function Test-Git-Installed {
 
-    $Private:item   = Get-Uninstall-Item "^Git\ "
+    $Private:item   = Get-Uninstall-Item "^Git version [0-9\.]{1,}|^Git$"
     $Private:result = $false
 
     if ($Private:item) {
