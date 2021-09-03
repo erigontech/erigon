@@ -2526,7 +2526,7 @@
           "expr": "rate(pool_process_remote_txs_count{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_process_remote_txs_count: {{ instance }}",
           "refId": "A"
         },
         {
@@ -2534,7 +2534,7 @@
           "expr": "rate(pool_add_remote_txs_count{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_add_remote_txs_count: {{ instance }}",
           "refId": "B"
         },
         {
@@ -2542,7 +2542,7 @@
           "expr": "rate(pool_new_block_count{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_new_block_count: {{ instance }}",
           "refId": "C"
         },
         {
@@ -2550,7 +2550,7 @@
           "expr": "rate(pool_write_to_db_count{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "pool_write_to_db_count: {{ instance }}",
           "refId": "D"
         }
       ],
@@ -2636,7 +2636,7 @@
           "expr": "sum(delta(pool_cache_total{result=\"hit\",instance=~\"$instance\"}[1m]))/sum(delta(pool_cache_total{instance=~\"$instance\"}[1m])) ",
           "hide": false,
           "interval": "",
-          "legendFormat": "hit rate",
+          "legendFormat": "hit rate: {{ instance }}",
           "refId": "A"
         }
       ],
@@ -2721,7 +2721,7 @@
           "expr": "rate(pool_write_to_db_bytes{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "interval": "",
-          "legendFormat": "hit rate",
+          "legendFormat": "pool_write_to_db_bytes: {{ instance }}",
           "refId": "A"
         }
       ],
@@ -2806,7 +2806,7 @@
           "expr": "rate(pool_senders_evicted{instance=~\"$instance\"}[$rate_interval])",
           "hide": false,
           "interval": "",
-          "legendFormat": "hit rate",
+          "legendFormat": "pool_senders_evicted: {{ instance }}",
           "refId": "A"
         }
       ],
@@ -4822,7 +4822,7 @@
         "auto_count": 30,
         "auto_min": "10s",
         "current": {
-          "selected": true,
+          "selected": false,
           "text": "1m",
           "value": "1m"
         },
@@ -4897,7 +4897,7 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-5m",
     "to": "now"
   },
   "timepicker": {
@@ -4927,5 +4927,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 23
+  "version": 25
 }
