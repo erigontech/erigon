@@ -17,10 +17,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
 type SendersCfg struct {
@@ -31,8 +31,8 @@ type SendersCfg struct {
 	numOfGoroutines int
 	readChLen       int
 	tmpdir          string
-	prune			prune.Mode
-	chainConfig *params.ChainConfig
+	prune           prune.Mode
+	chainConfig     *params.ChainConfig
 }
 
 func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode) SendersCfg {
@@ -48,7 +48,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 		readChLen:       4,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
-		prune:			 prune,
+		prune:           prune,
 	}
 }
 
