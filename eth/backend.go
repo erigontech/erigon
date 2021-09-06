@@ -121,6 +121,7 @@ type Ethereum struct {
 
 	txPool2DB               kv.RwDB
 	txPool2                 *txpool2.TxPool
+	newTxs2                 chan txpool2.Hashes
 	txPool2Fetch            *txpool2.Fetch
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       *txpool2.GrpcServer
@@ -365,9 +366,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
 
 		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
-		newTxs := make(chan txpool2.Hashes, 1024)
-		defer close(newTxs)
-		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(ctx, cfg, newTxs, backend.chainDB, backend.sentries, stateDiffClient)
+		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
+		//defer close(newTxs)
+		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(ctx, cfg, backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient)
 		if err != nil {
 			return nil, err
 		}
@@ -436,9 +437,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	if config.TxPool.V2 {
-		newTxs := make(chan txpool2.Hashes, 1024)
-		//defer close(newTxs)
-		go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, newTxs, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams, func() {
+		go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams, func() {
 			select {
 			case backend.notifyMiningAboutNewTxs <- struct{}{}:
 			default:

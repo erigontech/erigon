@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/stretchr/testify/require"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -122,6 +123,17 @@ func TestTransactionEncode(t *testing.T) {
 	if !bytes.Equal(txb, should) {
 		t.Errorf("encoded RLP mismatch, got %x", txb)
 	}
+}
+
+func TestTransactionEncode2(t *testing.T) {
+	//txb, err := rlp.EncodeToBytes(rightvrsTx)
+	//if err != nil {
+	//	t.Fatalf("encode error: %v", err)
+	//}
+	buf := common.FromHex("f8b5b8b302f8b001038459682f0085198b4f3e1882b6c79445db714f24f5a313569c41683047f1d49e78ba0780b844a22cb4650000000000000000000000005d8c9c8c769ffdb7cbb14f308acf3a036be6adf80000000000000000000000000000000000000000000000000000000000000001c001a0bbedc30a9cb5958bb0ded679ad1eb040cc093d101e8c92c4eb5d287bc9f45076a011a98d3fb6dbf9d4c7e5e1dee4685f707dfca72f1e4c7788b2c9aa031bf4cc88")
+	tx, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(buf), 0))
+	require.NoError(t, err)
+	fmt.Printf(" %#v\n", tx)
 }
 
 func TestEIP2718TransactionSigHash(t *testing.T) {
