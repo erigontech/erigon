@@ -111,7 +111,15 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	blockNum := executionAt + 1
 	if cfg.txPool2 != nil {
 		txSlots := txpool.TxsRlp{}
-		if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error { return cfg.txPool2.Best(200, &txSlots, tx) }); err != nil {
+		if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+			if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
+				return err
+			}
+			for i := 0; i < len(txSlots.Txs); i++ {
+				txSlots.Txs[i] = common.CopyBytes(txSlots.Txs[i]) // because we need this data outside of tx
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 		// txpool v2 - doesn't prioritise local txs over remote
