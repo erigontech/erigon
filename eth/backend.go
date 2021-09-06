@@ -119,11 +119,12 @@ type Ethereum struct {
 	waitForStageLoopStop chan struct{}
 	waitForMiningStop    chan struct{}
 
-	txPool2DB         kv.RwDB
-	txPool2           *txpool2.TxPool
-	txPool2Fetch      *txpool2.Fetch
-	txPool2Send       *txpool2.Send
-	txPool2GrpcServer *txpool2.GrpcServer
+	txPool2DB               kv.RwDB
+	txPool2                 *txpool2.TxPool
+	txPool2Fetch            *txpool2.Fetch
+	txPool2Send             *txpool2.Send
+	txPool2GrpcServer       *txpool2.GrpcServer
+	notifyMiningAboutNewTxs chan struct{}
 }
 
 // New creates a new Ethereum object (including the
@@ -387,6 +388,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		txPoolRPC = privateapi.NewTxPoolServer(ctx, backend.txPool)
 	}
 
+	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
 	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})
 	backend.pendingBlocks = make(chan *types.Block, 1)
@@ -437,9 +439,29 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.TxPool.V2 {
 		newTxs := make(chan txpool2.Hashes, 1024)
 		//defer close(newTxs)
-		go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, newTxs, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams)
+		go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, newTxs, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams, func() {
+			select {
+			case backend.notifyMiningAboutNewTxs <- struct{}{}:
+			default:
+			}
+		})
 	} else {
 		go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
+		go func() {
+			newTransactions := make(chan core.NewTxsEvent, 128)
+			sub := backend.txPool.SubscribeNewTxsEvent(newTransactions)
+			defer sub.Unsubscribe()
+			defer close(newTransactions)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-newTransactions:
+					backend.notifyMiningAboutNewTxs <- struct{}{}
+				default:
+				}
+			}
+		}()
 	}
 	go func() {
 		defer debug.LogPanic()
@@ -596,10 +618,6 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 	go func() {
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
-		newTransactions := make(chan core.NewTxsEvent, 128)
-		sub := s.txPool.SubscribeNewTxsEvent(newTransactions)
-		defer sub.Unsubscribe()
-		defer close(newTransactions)
 
 		var works bool
 		var hasWork bool
@@ -607,7 +625,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 
 		for {
 			select {
-			case <-newTransactions:
+			case <-s.notifyMiningAboutNewTxs:
 				hasWork = true
 			case err := <-errc:
 				works = false
@@ -618,8 +636,6 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 				if err != nil {
 					log.Warn("mining", "err", err)
 				}
-			case <-sub.Err():
-				return
 			case <-quitCh:
 				return
 			}
@@ -636,7 +652,6 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 
 func (s *Ethereum) IsMining() bool { return s.config.Miner.Enabled }
 
-func (s *Ethereum) TxPool() *core.TxPool        { return s.txPool }
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
 func (s *Ethereum) NetPeerCount() (uint64, error) {
