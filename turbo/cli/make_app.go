@@ -75,21 +75,19 @@ func initGenesis(ctx *cli.Context) error {
 	}
 
 	// Open and initialise both full and light databases
-	stack := MakeConfigNodeDefault()
+	stack := MakeConfigNodeDefault(ctx)
 	defer stack.Close()
 
-	for _, name := range []string{"chaindata", "lightchaindata"} {
-		chaindb, err := node.OpenDatabase(stack.Config(), log.New(ctx), kv.ChainDB)
-		if err != nil {
-			utils.Fatalf("Failed to open database: %v", err)
-		}
-		_, hash, err := core.CommitGenesisBlock(chaindb, genesis)
-		if err != nil {
-			utils.Fatalf("Failed to write genesis block: %v", err)
-		}
-		chaindb.Close()
-		log.Info("Successfully wrote genesis state", "database", name, "hash", hash.Hash())
+	chaindb, err := node.OpenDatabase(stack.Config(), log.New(ctx), kv.ChainDB)
+	if err != nil {
+		utils.Fatalf("Failed to open database: %v", err)
 	}
+	_, hash, err := core.CommitGenesisBlock(chaindb, genesis)
+	if err != nil {
+		utils.Fatalf("Failed to write genesis block: %v", err)
+	}
+	chaindb.Close()
+	log.Info("Successfully wrote genesis state", "hash", hash.Hash())
 	return nil
 }
 
@@ -104,7 +102,7 @@ func MigrateFlags(action func(ctx *cli.Context) error) func(*cli.Context) error 
 	}
 }
 
-func NewNodeConfig() *node.Config {
+func NewNodeConfig(ctx *cli.Context) *node.Config {
 	nodeConfig := node.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
@@ -114,11 +112,14 @@ func NewNodeConfig() *node.Config {
 	}
 	nodeConfig.IPCPath = "erigon.ipc" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
+	if ctx.GlobalIsSet(utils.DataDirFlag.Name) {
+		nodeConfig.DataDir = ctx.GlobalString(utils.DataDirFlag.Name)
+	}
 	return &nodeConfig
 }
 
-func MakeConfigNodeDefault() *node.Node {
-	return makeConfigNode(NewNodeConfig())
+func MakeConfigNodeDefault(ctx *cli.Context) *node.Node {
+	return makeConfigNode(NewNodeConfig(ctx))
 }
 
 func makeConfigNode(config *node.Config) *node.Node {
