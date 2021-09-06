@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
 func TestSenders(t *testing.T) {
@@ -107,7 +108,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, "")
+	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{})
 	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx)
 	assert.NoError(t, err)
 
