@@ -114,7 +114,8 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		txpool.MainLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams)
+		notifyMiner := func() {}
+		txpool.MainLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
 
 		grpcServer.GracefulStop()
 		return nil

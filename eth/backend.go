@@ -400,7 +400,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.downloadCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool, backend.txPool2, backend.txPool2DB, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir),
@@ -433,7 +433,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-
 	}
 
 	if config.TxPool.V2 {
@@ -457,8 +456,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				case <-ctx.Done():
 					return
 				case <-newTransactions:
-					backend.notifyMiningAboutNewTxs <- struct{}{}
-				default:
+					select {
+					case backend.notifyMiningAboutNewTxs <- struct{}{}:
+					default:
+					}
 				}
 			}
 		}()
