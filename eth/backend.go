@@ -438,12 +438,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	if config.TxPool.V2 {
-		go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams, func() {
-			select {
-			case backend.notifyMiningAboutNewTxs <- struct{}{}:
-			default:
-			}
-		})
 	} else {
 		go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 		go func() {
@@ -499,8 +493,28 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		backend.downloadServer,
 		tmpdir,
 		backend.txPool,
-		backend.txPoolP2PServer,
-		backend.txPool2Fetch,
+		func() {
+			if backend.config.TxPool.V2 {
+				backend.txPool2Fetch.ConnectCore()
+				backend.txPool2Fetch.ConnectSentries()
+				go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams, func() {
+					select {
+					case backend.notifyMiningAboutNewTxs <- struct{}{}:
+					default:
+					}
+				})
+			} else {
+				for i := range backend.txPoolP2PServer.Sentries {
+					go func(i int) {
+						txpool.RecvTxMessageLoop(ctx, backend.txPoolP2PServer.Sentries[i], backend.txPoolP2PServer.HandleInboundMessage, nil)
+					}(i)
+					go func(i int) {
+						txpool.RecvPeersLoop(ctx, backend.txPoolP2PServer.Sentries[i], backend.txPoolP2PServer.RecentPeers, nil)
+					}(i)
+				}
+				backend.txPoolP2PServer.TxFetcher.Start()
+			}
+		},
 
 		torrentClient, mg, backend.notifications.Accumulator,
 	)
