@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -202,7 +203,7 @@ func NewStagedSync(
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
-	txPoolStartFunc func(),
+	txPoolServer *txpool.P2PServer,
 
 	client *snapshotsync.Client,
 	snapshotMigrator *snapshotsync.SnapshotMigrator,
@@ -260,7 +261,20 @@ func NewStagedSync(
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, txPoolStartFunc),
+			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
+				if cfg.TxPool.V2 {
+				} else {
+					for i := range txPoolServer.Sentries {
+						go func(i int) {
+							txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
+						}(i)
+						go func(i int) {
+							txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
+						}(i)
+					}
+					txPoolServer.TxFetcher.Start()
+				}
+			}),
 			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger),
 			false, /* test */
 		),

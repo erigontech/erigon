@@ -949,7 +949,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		downloadServer,
 		tmpdir,
 		txPool,
-		func() {},
+		txPoolP2PServer,
 		nil, nil, nil,
 	)
 	if err != nil {
