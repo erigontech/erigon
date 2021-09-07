@@ -35,9 +35,9 @@ func TestSenders(t *testing.T) {
 		changed := roaring64.New()
 
 		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
-		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderInfo[1] = newSender(1, *uint256.NewInt(1))
 		senders.senderIDs[fmt.Sprintf("%020x", 2)] = 2
-		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderInfo[2] = newSender(1, *uint256.NewInt(1))
 
 		changed.AddMany([]uint64{1, 2})
 		evicted, err := senders.flush(tx, byNonce, changed, 1)
@@ -55,9 +55,9 @@ func TestSenders(t *testing.T) {
 		_, tx := memdb.NewTestPoolTx(t)
 		byNonce := &ByNonce{btree.New(16)}
 
-		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderInfo[1] = newSender(1, *uint256.NewInt(1))
 		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
-		senders.senderInfo[2] = newSenderInfo(1, *uint256.NewInt(1))
+		senders.senderInfo[2] = newSender(1, *uint256.NewInt(1))
 		senders.senderIDs[fmt.Sprintf("%020x", 2)] = 2
 
 		changed := roaring64.New()
@@ -66,7 +66,7 @@ func TestSenders(t *testing.T) {
 		require.NoError(err)
 		require.Zero(evicted)
 
-		senders.senderInfo[1] = newSenderInfo(1, *uint256.NewInt(1)) // means used in current round, but still has 0 transactions
+		senders.senderInfo[1] = newSender(1, *uint256.NewInt(1)) // means used in current round, but still has 0 transactions
 		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
 		changed.Clear()
 		changed.AddMany([]uint64{1})

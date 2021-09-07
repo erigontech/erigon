@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -41,20 +42,24 @@ import (
 // Sentry should have a logic not to overwrite statusData with messages from tx pool
 type Fetch struct {
 	ctx                  context.Context       // Context used for cancellation and closing of the fetcher
-	sentryClients        []sentry.SentryClient // sentry clients that will be used for accessing the network
+	sentryClients        []direct.SentryClient // sentry clients that will be used for accessing the network
 	pool                 Pool                  // Transaction pool implementation
 	coreDB               kv.RoDB
 	db                   kv.RwDB
 	wg                   *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
-	stateChangesClient   remote.KVClient
+	stateChangesClient   StateChangesClient
 	stateChangesParseCtx *TxParseContext
 	pooledTxsParseCtx    *TxParseContext
+}
+
+type StateChangesClient interface {
+	StateChanges(ctx context.Context, in *remote.StateChangeRequest, opts ...grpc.CallOption) (remote.KV_StateChangesClient, error)
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
-func NewFetch(ctx context.Context, sentryClients []sentry.SentryClient, pool Pool, stateChangesClient remote.KVClient, coreDB kv.RoDB, db kv.RwDB) *Fetch {
+func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB) *Fetch {
 	return &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
@@ -180,7 +185,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				continue
 			}
-			log.Warn("Handling incoming message", "err", err)
+			log.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -222,14 +227,17 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
 			var messageId sentry.MessageId
-			if req.Id == sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66 {
+			switch req.Id {
+			case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
 				if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
 					return err
 				}
 				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
-			} else {
+			case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65:
 				encodedRequest = EncodeHashes(unknownHashes, nil)
 				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_65
+			default:
+				return fmt.Errorf("unexpected message: %s", req.Id.String())
 			}
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
 				Data:   &sentry.OutboundMessageData{Id: messageId, Data: encodedRequest},
@@ -241,11 +249,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66, sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
 		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
-		messageId := sentry.MessageId_POOLED_TRANSACTIONS_66
-		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_65 {
-			messageId = sentry.MessageId_POOLED_TRANSACTIONS_65
-		}
-		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
+		var messageId sentry.MessageId
+		switch req.Id {
+		case sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
+			messageId = sentry.MessageId_POOLED_TRANSACTIONS_66
 			requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 			if err != nil {
 				return err
@@ -264,7 +271,8 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 
 			encodedRequest = EncodePooledTransactions66(txs, requestID, nil)
-		} else {
+		case sentry.MessageId_GET_POOLED_TRANSACTIONS_65:
+			messageId = sentry.MessageId_POOLED_TRANSACTIONS_65
 			hashes, _, err := ParseGetPooledTransactions65(req.Data, 0, nil)
 			if err != nil {
 				return err
@@ -281,7 +289,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 				txs = append(txs, txn)
 			}
 			encodedRequest = EncodePooledTransactions65(txs, nil)
+		default:
+			return fmt.Errorf("unexpected message: %s", req.Id.String())
 		}
+
 		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
 			Data:   &sentry.OutboundMessageData{Id: messageId, Data: encodedRequest},
 			PeerId: req.PeerId,
@@ -294,15 +305,17 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			known, _ := f.pool.IdHashKnown(tx, hash)
 			return known
 		})
-
-		if req.Id == sentry.MessageId_GET_POOLED_TRANSACTIONS_66 {
-			if _, err := ParsePooledTransactions65(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
-				return err
-			}
-		} else {
+		switch req.Id {
+		case sentry.MessageId_POOLED_TRANSACTIONS_65:
 			if _, _, err := ParsePooledTransactions66(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
 				return err
 			}
+		case sentry.MessageId_POOLED_TRANSACTIONS_66:
+			if _, err := ParsePooledTransactions65(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unexpected message: %s", req.Id.String())
 		}
 		if len(txs.txs) == 0 {
 			return nil
@@ -396,7 +409,7 @@ func (f *Fetch) handleNewPeer(req *sentry.PeersReply) error {
 	return nil
 }
 
-func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) error {
+func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stream, err := client.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
@@ -432,7 +445,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 				}
 			}
 		}
-		diff := map[string]senderInfo{}
+		diff := map[string]sender{}
 		for _, change := range req.Changes {
 			nonce, balance, err := DecodeSender(change.Data)
 			if err != nil {
@@ -440,9 +453,11 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client remote.KVClient) 
 				continue
 			}
 			addr := gointerfaces.ConvertH160toAddress(change.Address)
-			diff[string(addr[:])] = senderInfo{nonce: nonce, balance: balance}
+			diff[string(addr[:])] = sender{nonce: nonce, balance: balance}
 		}
-		if err := f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight, gointerfaces.ConvertH256ToHash(req.BlockHash)); err != nil {
+		if err := f.db.View(ctx, func(tx kv.Tx) error {
+			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight, gointerfaces.ConvertH256ToHash(req.BlockHash))
+		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}
 		if f.wg != nil {

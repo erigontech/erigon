@@ -130,9 +130,9 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
 	}
 
-	//if dataPos+dataLen != len(payload) {
-	//	return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
-	//}
+	if dataLen == 0 {
+		return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
+	}
 	p = dataPos
 
 	var txType int
@@ -451,6 +451,29 @@ func (s *TxSlots) Append(slot *TxSlot, sender []byte, isLocal bool) {
 	s.txs[n] = slot
 	s.isLocal[n] = isLocal
 	copy(s.senders.At(n), sender)
+}
+
+type TxsRlp struct {
+	Txs     [][]byte
+	Senders Addresses
+	IsLocal []bool
+}
+
+// Resize internal arrays to len=targetSize, shrinks if need. It rely on `append` algorithm to realloc
+func (s *TxsRlp) Resize(targetSize uint) {
+	for uint(len(s.Txs)) < targetSize {
+		s.Txs = append(s.Txs, nil)
+	}
+	for uint(s.Senders.Len()) < targetSize {
+		s.Senders = append(s.Senders, addressesGrowth...)
+	}
+	for uint(len(s.IsLocal)) < targetSize {
+		s.IsLocal = append(s.IsLocal, false)
+	}
+	//todo: set nil to overflow txs
+	s.Txs = s.Txs[:targetSize]
+	s.Senders = s.Senders[:20*targetSize]
+	s.IsLocal = s.IsLocal[:targetSize]
 }
 
 var addressesGrowth = make([]byte, 20)

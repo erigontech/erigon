@@ -19,14 +19,13 @@ package direct
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"google.golang.org/protobuf/types/known/emptypb"
-
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
@@ -153,16 +152,12 @@ func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentry.PeerCount
 type SentryClientDirect struct {
 	protocol uint
 	server   sentry.SentryServer
-	logger   *log.Logger
 }
 
 func NewSentryClientDirect(protocol uint, sentryServer sentry.SentryServer) *SentryClientDirect {
-	return &SentryClientDirect{protocol: protocol, server: sentryServer, logger: log.Default()}
+	return &SentryClientDirect{protocol: protocol, server: sentryServer}
 }
 
-func (c *SentryClientDirect) SetLogger(logger *log.Logger) {
-	c.logger = logger
-}
 func (c *SentryClientDirect) Protocol() uint    { return c.protocol }
 func (c *SentryClientDirect) Ready() bool       { return true }
 func (c *SentryClientDirect) MarkDisconnected() {}
@@ -267,7 +262,7 @@ func (c *SentryClientDirect) Messages(ctx context.Context, in *sentry.MessagesRe
 	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
 	go func() {
 		if err := c.server.Messages(in, streamServer); err != nil {
-			c.logger.Printf("Messages returned: %v\n", err)
+			log.Warn("Messages returned", "err", err)
 		}
 		close(messageCh)
 	}()
@@ -279,7 +274,7 @@ func (c *SentryClientDirect) Peers(ctx context.Context, in *sentry.PeersRequest,
 	streamServer := &SentryReceivePeersServerDirect{ch: messageCh, ctx: ctx}
 	go func() {
 		if err := c.server.Peers(in, streamServer); err != nil {
-			c.logger.Printf("Peers returned: %v\n", err)
+			log.Warn("Peers returned", "err", err)
 		}
 		close(messageCh)
 	}()

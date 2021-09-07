@@ -27,7 +27,7 @@ type NewPooledTransactionHashesPacket [][32]byte
 
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
-func ParseHashesCount(payload Hashes, pos int) (count int, dataPos int, err error) {
+func ParseHashesCount(payload []byte, pos int) (count int, dataPos int, err error) {
 	dataPos, dataLen, err := rlp.List(payload, pos)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: hashes len: %w", rlp.ParseHashErrorPrefix, err)
@@ -114,11 +114,6 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 }
 
 func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hashes []byte, newPos int, err error) {
-	pos, _, err = rlp.List(payload, pos)
-	if err != nil {
-		return hashes, 0, err
-	}
-
 	var hashesCount int
 	hashesCount, pos, err = ParseHashesCount(payload, pos)
 	if err != nil {
@@ -199,23 +194,23 @@ func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txS
 }
 
 func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txSlots *TxSlots) (requestID uint64, newPos int, err error) {
-	pos, _, err = rlp.List(payload, pos)
+	p, _, err := rlp.List(payload, pos)
 	if err != nil {
 		return requestID, 0, err
 	}
-	pos, requestID, err = rlp.U64(payload, pos)
+	p, requestID, err = rlp.U64(payload, p)
 	if err != nil {
 		return requestID, 0, err
 	}
-	pos, _, err = rlp.List(payload, pos)
+	p, _, err = rlp.List(payload, p)
 	if err != nil {
 		return requestID, 0, err
 	}
 
-	for i := 0; pos < len(payload); i++ {
+	for i := 0; p < len(payload); i++ {
 		txSlots.Resize(uint(i + 1))
 		txSlots.txs[i] = &TxSlot{}
-		pos, err = ctx.ParseTransaction(payload, pos, txSlots.txs[i], txSlots.senders.At(i))
+		p, err = ctx.ParseTransaction(payload, p, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {
 				txSlots.Resize(uint(i))
@@ -225,5 +220,5 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txS
 			return requestID, 0, err
 		}
 	}
-	return requestID, pos, nil
+	return requestID, p, nil
 }

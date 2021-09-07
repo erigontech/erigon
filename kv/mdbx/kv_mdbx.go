@@ -292,6 +292,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		} else if staleReaders > 0 {
 			db.log.Info("[db] cleared reader slots from dead processes", "amount", staleReaders)
 		}
+
 	}
 	return db, nil
 }

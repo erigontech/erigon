@@ -31,7 +31,7 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
 // 				panic("mock out the IdHashKnown method")
 // 			},
-// 			OnNewBlockFunc: func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
+// 			OnNewBlockFunc: func(tx kv.Tx, stateChanges map[string]sender, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
 // 			StartedFunc: func() bool {
@@ -57,7 +57,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error
+	OnNewBlockFunc func(tx kv.Tx, stateChanges map[string]sender, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
@@ -92,8 +92,10 @@ type PoolMock struct {
 		}
 		// OnNewBlock holds details about calls to the OnNewBlock method.
 		OnNewBlock []struct {
+			// Tx is the tx argument value.
+			Tx kv.Tx
 			// StateChanges is the stateChanges argument value.
-			StateChanges map[string]senderInfo
+			StateChanges map[string]sender
 			// UnwindTxs is the unwindTxs argument value.
 			UnwindTxs TxSlots
 			// MinedTxs is the minedTxs argument value.
@@ -262,15 +264,17 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
+func (mock *PoolMock) OnNewBlock(tx kv.Tx, stateChanges map[string]sender, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
 	callInfo := struct {
-		StateChanges map[string]senderInfo
+		Tx           kv.Tx
+		StateChanges map[string]sender
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
 		BaseFee      uint64
 		BlockHeight  uint64
 		BlockHash    [32]byte
 	}{
+		Tx:           tx,
 		StateChanges: stateChanges,
 		UnwindTxs:    unwindTxs,
 		MinedTxs:     minedTxs,
@@ -287,14 +291,15 @@ func (mock *PoolMock) OnNewBlock(stateChanges map[string]senderInfo, unwindTxs T
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(stateChanges, unwindTxs, minedTxs, baseFee, blockHeight, blockHash)
+	return mock.OnNewBlockFunc(tx, stateChanges, unwindTxs, minedTxs, baseFee, blockHeight, blockHash)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
 // Check the length with:
 //     len(mockedPool.OnNewBlockCalls())
 func (mock *PoolMock) OnNewBlockCalls() []struct {
-	StateChanges map[string]senderInfo
+	Tx           kv.Tx
+	StateChanges map[string]sender
 	UnwindTxs    TxSlots
 	MinedTxs     TxSlots
 	BaseFee      uint64
@@ -302,7 +307,8 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 	BlockHash    [32]byte
 } {
 	var calls []struct {
-		StateChanges map[string]senderInfo
+		Tx           kv.Tx
+		StateChanges map[string]sender
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
 		BaseFee      uint64
