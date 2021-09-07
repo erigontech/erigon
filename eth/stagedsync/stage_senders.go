@@ -357,7 +357,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-	if cfg.prune.History.Enabled() {
+	if cfg.prune.TxIndex.Enabled() {
 		c, err := tx.RwCursor(kv.Senders)
 		if err != nil {
 			return fmt.Errorf("failed to create cursor for pruning %w", err)
