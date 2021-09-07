@@ -25,6 +25,9 @@ import (
 // BeInt parses Big Endian representation of an integer from given payload at given position
 func BeInt(payload []byte, pos, length int) (int, error) {
 	var r int
+	if pos+length >= len(payload) {
+		return 0, fmt.Errorf("unexpected end of payload")
+	}
 	if length > 0 && payload[pos] == 0 {
 		return 0, fmt.Errorf("integer encoding for RLP must not have leading zeros: %x", payload[pos:pos+length])
 	}
@@ -37,6 +40,9 @@ func BeInt(payload []byte, pos, length int) (int, error) {
 // Prefix parses RLP Prefix from given payload at given position. It returns the offset and length of the RLP element
 // as well as the indication of whether it is a list of string
 func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err error) {
+	if pos < 0 {
+		return 0, 0, false, fmt.Errorf("negative position not allowed")
+	}
 	if pos >= len(payload) {
 		return 0, 0, false, fmt.Errorf("unexpected end of payload")
 	}
@@ -71,6 +77,8 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 	if err == nil {
 		if dataPos+dataLen > len(payload) {
 			err = fmt.Errorf("unexpected end of payload")
+		} else if dataPos+dataLen < 0 {
+			err = fmt.Errorf("found too big len")
 		}
 	}
 	return
