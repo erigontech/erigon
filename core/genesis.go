@@ -601,6 +601,9 @@ func DefaultSokolGenesisBlock() *Genesis {
 	}
 }
 
+var DevnetSignPrivateKey, _ = crypto.HexToECDSA("289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032")
+var DevnetEtherbase = crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey) //	970e8128ab834e8eac17ab8e3812f010678cf791
+
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 	// Override the default period to the user requested one

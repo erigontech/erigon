@@ -774,21 +774,17 @@ func SplitAndTrim(input string) (ret []string) {
 // setEtherbase retrieves the etherbase from the directly specified
 // command line flags.
 func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
-	if ctx.GlobalIsSet(MinerSigningKeyFlag.Name) {
-		sigkey := ctx.GlobalString(MinerSigningKeyFlag.Name)
-		if sigkey != "" {
-			var err error
-			cfg.Miner.SigKey, err = crypto.HexToECDSA(sigkey)
-			if err != nil {
-				Fatalf("Failed to parse ECDSA private key: %v", err)
-			}
-			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
-		}
-	} else if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
-		etherbase := ctx.GlobalString(MinerEtherbaseFlag.Name)
+	var etherbase string
+	if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
+		etherbase = ctx.GlobalString(MinerEtherbaseFlag.Name)
 		if etherbase != "" {
 			cfg.Miner.Etherbase = common.HexToAddress(etherbase)
 		}
+	}
+
+	if etherbase == "" && ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+		cfg.Miner.SigKey = core.DevnetSignPrivateKey
+		cfg.Miner.Etherbase = core.DevnetEtherbase
 	}
 }
 
