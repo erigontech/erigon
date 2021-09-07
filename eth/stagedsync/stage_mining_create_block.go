@@ -104,6 +104,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1)
 
 	blockNum := executionAt + 1
 	signer := types.MakeSigner(&cfg.chainConfig, blockNum)
@@ -285,7 +286,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
 	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
-	fmt.Printf("aa: %t, %t,%t\n", current == nil, cfg.miner.MiningBlock == nil, current.Header == nil)
 	return nil
 }
 
