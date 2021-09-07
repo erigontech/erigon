@@ -454,10 +454,10 @@ func (db *DB) expirer() {
 	defer tick.Stop()
 	for {
 		select {
-		case <-tick.C:
-			db.expireNodes()
 		case <-db.quit:
 			return
+		case <-tick.C:
+			db.expireNodes()
 		}
 	}
 }
@@ -465,6 +465,8 @@ func (db *DB) expirer() {
 // expireNodes iterates over the database and deletes all nodes that have not
 // been seen (i.e. received a pong from) for some time.
 func (db *DB) expireNodes() {
+	db.kvCacheLock.Lock()
+	defer db.kvCacheLock.Unlock()
 	var (
 		threshold    = time.Now().Add(-dbNodeExpiration).Unix()
 		youngestPong int64
@@ -770,9 +772,9 @@ func (db *DB) Close() {
 		return
 	}
 	close(db.quit)
-	db.quit = nil
 	db.kvCacheLock.Lock()
 	defer db.kvCacheLock.Unlock()
+	db.quit = nil
 	db.commitCache(true /* logit */)
 	db.kv.Close()
 }
