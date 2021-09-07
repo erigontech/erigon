@@ -115,9 +115,13 @@ func NewNodeConfig() *node.Config {
 	} else {
 		nodeConfig.Version = params.Version
 	}
-	nodeConfig.IPCPath = "" // force-disable IPC endpoint
+	nodeConfig.IPCPath = "erigon.ipc" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
 	return &nodeConfig
+}
+
+func MakeConfigNodeDefault() *node.Node {
+	return makeConfigNode(NewNodeConfig())
 }
 
 func makeConfigNode(config *node.Config) *node.Node {
