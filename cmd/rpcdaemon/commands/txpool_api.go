@@ -107,6 +107,7 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, 
 	}
 	return map[string]hexutil.Uint{
 		"pending": hexutil.Uint(reply.PendingCount),
+		"baseFee":  hexutil.Uint(reply.BaseFeeCount),
 		"queued":  hexutil.Uint(reply.QueuedCount),
 	}, nil
 }
