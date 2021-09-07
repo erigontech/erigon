@@ -36,6 +36,7 @@ func StageMiningFinishCfg(
 
 func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit <-chan struct{}) error {
 	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] start", logPrefix))
 	current := cfg.miningState.MiningBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
