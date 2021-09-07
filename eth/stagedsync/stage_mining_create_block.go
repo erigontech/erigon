@@ -107,7 +107,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
-
+	log.Info(fmt.Sprintf("[%s] mining start", logPrefix), "block", executionAt)
 	blockNum := executionAt + 1
 	if cfg.txPool2 != nil {
 		txSlots := txpool.TxsRlp{}
