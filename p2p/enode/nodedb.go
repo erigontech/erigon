@@ -402,8 +402,8 @@ func (db *DB) DeleteNode(id ID) {
 }
 
 func deleteRange(db *DB, prefix []byte) {
-	db.kvCacheLock.Lock()
-	defer db.kvCacheLock.Unlock()
+	db.kvCacheLock.RLock()
+	defer db.kvCacheLock.RUnlock()
 	// First delete relevant entries from the cache
 	db.kvCache.AscendGreaterOrEqual(&DbItem{key: prefix}, func(i btree.Item) bool {
 		di := i.(*DbItem)
