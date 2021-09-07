@@ -1153,6 +1153,9 @@ func (c *StorageTrieCursor) _seek(seek, withinPrefix []byte) (bool, error) {
 			return false, nil
 		}
 	}
+	if len(v) < 50 {
+		fmt.Printf("sv: %x,%x\n", k, v)
+	}
 	c._unmarshal(k, v)
 	if c.lvl > 0 { // root record, firstly storing root hash
 		c._nextSiblingInMem()
