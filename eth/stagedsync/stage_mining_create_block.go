@@ -316,8 +316,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	current.Header = header
 	current.Uncles = makeUncles(env.uncles)
-
-	fmt.Printf("aa: %t, %t,%t\n", current == nil, cfg.miner.MiningBlock == nil, current.Header == nil)
 	return nil
 }
 
