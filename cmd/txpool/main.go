@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -91,6 +92,8 @@ var rootCmd = &cobra.Command{
 
 		cfg := txpool.DefaultConfig
 		cfg.DBDir = path.Join(datadir, "txpool")
+		cfg.LogEvery = 5 * time.Minute
+		cfg.CommitEvery = 5 * time.Minute
 
 		newTxs := make(chan txpool.Hashes, 1024)
 		defer close(newTxs)
