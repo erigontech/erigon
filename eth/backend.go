@@ -372,8 +372,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		backend.txPool2Fetch.ConnectCore()
-		backend.txPool2Fetch.ConnectSentries()
 	} else {
 		backend.txPoolP2PServer, err = txpool.NewP2PServer(backend.downloadCtx, backend.sentries, backend.txPool)
 		if err != nil {
@@ -499,6 +497,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		tmpdir,
 		backend.txPool,
 		backend.txPoolP2PServer,
+		backend.txPool2Fetch,
 
 		torrentClient, mg, backend.notifications.Accumulator,
 	)

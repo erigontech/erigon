@@ -9,6 +9,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -204,6 +205,7 @@ func NewStagedSync(
 	tmpdir string,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
+	txPool2Fetch *txpool2.Fetch,
 
 	client *snapshotsync.Client,
 	snapshotMigrator *snapshotsync.SnapshotMigrator,
@@ -262,15 +264,20 @@ func NewStagedSync(
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
-				for i := range txPoolServer.Sentries {
-					go func(i int) {
-						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
-					}(i)
-					go func(i int) {
-						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
-					}(i)
+				if cfg.TxPool.V2 {
+					txPool2Fetch.ConnectCore()
+					txPool2Fetch.ConnectSentries()
+				} else {
+					for i := range txPoolServer.Sentries {
+						go func(i int) {
+							txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
+						}(i)
+						go func(i int) {
+							txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
+						}(i)
+					}
+					txPoolServer.TxFetcher.Start()
 				}
-				txPoolServer.TxFetcher.Start()
 			}),
 			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger),
 			false, /* test */
