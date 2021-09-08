@@ -347,8 +347,12 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 }
 
 func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+	if !cfg.prune.TxIndex.Enabled() {
+		return nil
+	}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -357,24 +361,32 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-	if cfg.prune.TxIndex.Enabled() {
-		c, err := tx.RwCursor(kv.Senders)
-		if err != nil {
-			return fmt.Errorf("failed to create cursor for pruning %w", err)
-		}
-		defer c.Close()
 
-		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-			if err != nil {
-				return err
-			}
-			blockNum := binary.BigEndian.Uint64(k)
-			if blockNum >= to {
-				break
-			}
-			if err = c.DeleteCurrent(); err != nil {
-				return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
-			}
+	c, err := tx.RwCursor(kv.Senders)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", s.LogPrefix()), "table", kv.Senders, "block", blockNum)
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+
+		if blockNum >= to {
+			break
+		}
+		if err = c.DeleteCurrent(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
 	}
 	if !useExternalTx {
