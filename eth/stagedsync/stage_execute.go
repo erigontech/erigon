@@ -221,7 +221,6 @@ func newStateReaderWriter(
 }
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
-	fmt.Printf("SpawnExecuteBlocksStage\n")
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
