@@ -601,8 +601,11 @@ func DefaultSokolGenesisBlock() *Genesis {
 	}
 }
 
-var DevnetSignPrivateKey, _ = crypto.HexToECDSA("289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032")
-var DevnetEtherbase = common.HexToAddress("970e8128ab834e8eac17ab8e3812f010678cf791") // crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
+// Pre-calculated version of:
+//    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
+//    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
+var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
+var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
