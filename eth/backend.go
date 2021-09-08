@@ -643,7 +643,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		}
 	}
 
-	if s.chainConfig.ChainID.Uint64() == 1337 {
+	if s.chainConfig.ChainID.Uint64() > 10 {
 		go func() {
 			skipCycleEvery := time.NewTicker(2 * time.Second)
 			defer skipCycleEvery.Stop()
