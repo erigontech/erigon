@@ -119,6 +119,7 @@ func HeadersForward(
 	stopped := false
 	prevProgress := headerProgress
 	noProgressCount := 0 // How many time the progress was printed without actual progress
+Loop:
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
@@ -194,6 +195,8 @@ func HeadersForward(
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:
 			log.Debug("headerLoop woken up by the incoming request")
+		case <-cfg.hd.SkipCycleHack:
+			break Loop
 		}
 		timer.Stop()
 	}
