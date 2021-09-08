@@ -266,7 +266,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				nil, nil,
 				"",
 			),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
