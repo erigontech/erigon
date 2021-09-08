@@ -63,7 +63,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	cfg.miningState.PendingResultCh <- block
 
 	log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
-		"number", block.NumberU64(),
+		"blocn_num", block.NumberU64(),
 		"transactions", block.Transactions().Len(),
 		"gas_used", block.GasUsed(),
 		"gas_limit", block.GasLimit(),
