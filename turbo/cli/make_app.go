@@ -110,7 +110,7 @@ func NewNodeConfig(ctx *cli.Context) *node.Config {
 	} else {
 		nodeConfig.Version = params.Version
 	}
-	nodeConfig.IPCPath = "erigon.ipc" // force-disable IPC endpoint
+	nodeConfig.IPCPath = "" // force-disable IPC endpoint
 	nodeConfig.Name = "erigon"
 	if ctx.GlobalIsSet(utils.DataDirFlag.Name) {
 		nodeConfig.DataDir = ctx.GlobalString(utils.DataDirFlag.Name)

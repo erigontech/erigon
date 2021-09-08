@@ -217,7 +217,7 @@ func NewHeaderDownload(
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
-		SkipCycleHack:      make(chan struct{}, 1),
+		SkipCycleHack:      make(chan struct{}),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)

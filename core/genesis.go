@@ -278,7 +278,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
 	if height == nil {
-		//return newcfg, stored, stateDB, fmt.Errorf("missing block number for head header hash")
+		return newcfg, storedBlock, fmt.Errorf("missing block number for head header hash")
 	} else {
 		compatErr := storedcfg.CheckCompatible(newcfg, *height)
 		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {

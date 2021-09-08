@@ -648,7 +648,10 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			skipCycleEvery := time.NewTicker(2 * time.Second)
 			defer skipCycleEvery.Stop()
 			for range skipCycleEvery.C {
-				s.downloadServer.Hd.SkipCycleHack <- struct{}{}
+				select {
+				case s.downloadServer.Hd.SkipCycleHack <- struct{}{}:
+				default:
+				}
 			}
 		}()
 	}
