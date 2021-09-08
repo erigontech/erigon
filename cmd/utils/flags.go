@@ -232,8 +232,8 @@ var (
 		Usage: "Public address for block mining rewards",
 		Value: "0",
 	}
-	MinerSigningKeyFlag = cli.StringFlag{
-		Name:  "miner.sigkey",
+	MinerSigningKeyFileFlag = cli.StringFlag{
+		Name:  "miner.sigfile",
 		Usage: "Private key to sign blocks with",
 		Value: "",
 	}
@@ -774,21 +774,17 @@ func SplitAndTrim(input string) (ret []string) {
 // setEtherbase retrieves the etherbase from the directly specified
 // command line flags.
 func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
-	if ctx.GlobalIsSet(MinerSigningKeyFlag.Name) {
-		sigkey := ctx.GlobalString(MinerSigningKeyFlag.Name)
-		if sigkey != "" {
-			var err error
-			cfg.Miner.SigKey, err = crypto.HexToECDSA(sigkey)
-			if err != nil {
-				Fatalf("Failed to parse ECDSA private key: %v", err)
-			}
-			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
-		}
-	} else if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
-		etherbase := ctx.GlobalString(MinerEtherbaseFlag.Name)
+	var etherbase string
+	if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
+		etherbase = ctx.GlobalString(MinerEtherbaseFlag.Name)
 		if etherbase != "" {
 			cfg.Miner.Etherbase = common.HexToAddress(etherbase)
 		}
+	}
+
+	if etherbase == "" && ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+		cfg.Miner.SigKey = core.DevnetSignPrivateKey
+		cfg.Miner.Etherbase = core.DevnetEtherbase
 	}
 }
 
@@ -995,7 +991,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
 	if err != nil {
@@ -1062,7 +1058,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		cfg.Enabled = true
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1153,7 +1149,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	CheckExclusive(ctx, MinerSigningKeyFlag, MinerEtherbaseFlag)
+	CheckExclusive(ctx, MinerSigningKeyFileFlag, MinerEtherbaseFlag)
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)

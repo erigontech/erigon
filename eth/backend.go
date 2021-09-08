@@ -582,7 +582,6 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 	if !cfg.Enabled {
 		return nil
 	}
-
 	s.txPool.SetGasPrice(gasPrice)
 
 	// Configure the local mining address

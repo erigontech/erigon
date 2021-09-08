@@ -412,7 +412,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir)
+	pm, err := prune.Get(tx)
+	if err != nil {
+		return err
+	}
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx)
