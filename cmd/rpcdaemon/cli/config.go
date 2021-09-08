@@ -204,10 +204,8 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			if err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 			}
-			//TODO: add mining API support
-		} else {
-			mining = services.NewMiningService(txpoolConn)
 		}
+		mining = services.NewMiningService(txpoolConn)
 		txPool = services.NewTxPoolService(txpoolConn)
 		if db == nil {
 			db = remoteKv

@@ -184,6 +184,20 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
+	// Check if we have an already initialized chain and fall back to
+	// that if so. Otherwise we need to generate a new genesis spec.
+	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
+		h, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			panic(err)
+		}
+		if h != (common.Hash{}) {
+			config.Genesis = nil // fallback to db content
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
@@ -597,7 +611,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 		}
 
 		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(message, cfg.SigKey)
+			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
 	}
 
@@ -615,6 +629,16 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 				return err
 			}
 		}
+	}
+
+	if s.chainConfig.ChainID.Uint64() == 1337 {
+		go func() {
+			skipCycleEvery := time.NewTicker(2 * time.Second)
+			defer skipCycleEvery.Stop()
+			for range skipCycleEvery.C {
+				s.downloadServer.Hd.SkipCycleHack <- struct{}{}
+			}
+		}()
 	}
 
 	go func() {
