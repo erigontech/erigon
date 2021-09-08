@@ -25,7 +25,7 @@ var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type txPool interface {
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocals(ctx context.Context, newTxs TxSlots, tx kv.Tx) ([]DiscardReason, error)
+	AddLocals(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
 	DeprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
@@ -123,7 +123,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	}
 
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
-	discardReasons, err := s.txPool.AddLocals(ctx, slots, tx)
+	discardReasons, err := s.txPool.AddLocals(ctx, slots)
 	if err != nil {
 		return nil, err
 	}

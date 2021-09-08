@@ -185,7 +185,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				continue
 			}
-			log.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
+			log.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err, "rlp", fmt.Sprintf("%x", req.Data))
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -307,11 +307,11 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		})
 		switch req.Id {
 		case sentry.MessageId_POOLED_TRANSACTIONS_65:
-			if _, _, err := ParsePooledTransactions66(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
+			if _, err := ParsePooledTransactions65(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
 				return err
 			}
 		case sentry.MessageId_POOLED_TRANSACTIONS_66:
-			if _, err := ParsePooledTransactions65(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
+			if _, _, err := ParsePooledTransactions66(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
 				return err
 			}
 		default:
@@ -456,7 +456,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 			diff[string(addr[:])] = sender{nonce: nonce, balance: balance}
 		}
 		if err := f.db.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(tx, diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight, gointerfaces.ConvertH256ToHash(req.BlockHash))
+			return f.pool.OnNewBlock(diff, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight, gointerfaces.ConvertH256ToHash(req.BlockHash))
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}

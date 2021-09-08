@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
@@ -31,7 +30,6 @@ func TestSenders(t *testing.T) {
 	t.Run("evict_all_on_next_round", func(t *testing.T) {
 		senders, require := newSendersCache(), require.New(t)
 		_, tx := memdb.NewTestPoolTx(t)
-		byNonce := &ByNonce{btree.New(16)}
 		changed := roaring64.New()
 
 		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
@@ -40,20 +38,16 @@ func TestSenders(t *testing.T) {
 		senders.senderInfo[2] = newSender(1, *uint256.NewInt(1))
 
 		changed.AddMany([]uint64{1, 2})
-		evicted, err := senders.flush(tx, byNonce, changed, 1)
+		err := senders.flush(tx)
 		require.NoError(err)
-		require.Zero(evicted)
 
 		changed.Clear()
-		evicted, err = senders.flush(tx, byNonce, changed, 1)
+		err = senders.flush(tx)
 		require.NoError(err)
-
-		require.Equal(2, int(evicted))
 	})
 	t.Run("evict_even_if_used_in_current_round_but_no_txs", func(t *testing.T) {
 		senders, require := newSendersCache(), require.New(t)
 		_, tx := memdb.NewTestPoolTx(t)
-		byNonce := &ByNonce{btree.New(16)}
 
 		senders.senderInfo[1] = newSender(1, *uint256.NewInt(1))
 		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
@@ -62,17 +56,15 @@ func TestSenders(t *testing.T) {
 
 		changed := roaring64.New()
 		changed.AddMany([]uint64{1, 2})
-		evicted, err := senders.flush(tx, byNonce, changed, 1)
+		err := senders.flush(tx)
 		require.NoError(err)
-		require.Zero(evicted)
 
 		senders.senderInfo[1] = newSender(1, *uint256.NewInt(1)) // means used in current round, but still has 0 transactions
 		senders.senderIDs[fmt.Sprintf("%020x", 1)] = 1
 		changed.Clear()
 		changed.AddMany([]uint64{1})
-		evicted, err = senders.flush(tx, byNonce, changed, 1)
+		err = senders.flush(tx)
 		require.NoError(err)
-		require.Equal(2, int(evicted))
 	})
 
 }

@@ -20,7 +20,7 @@ import (
 //	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 //}
 
-func FuzzParseTx1(f *testing.F) {
+func FuzzParseTx(f *testing.F) {
 	f.Add([]byte{1}, 0)
 	f.Fuzz(func(t *testing.T, in []byte, pos int) {
 		t.Parallel()

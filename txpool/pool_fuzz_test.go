@@ -295,7 +295,7 @@ func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
 	return p1, p2, p3, p4
 }
 
-func FuzzOnNewBlocks12(f *testing.F) {
+func FuzzOnNewBlocks(f *testing.F) {
 	var u64 = [1 * 4]byte{1}
 	var senderAddr = [1 + 1 + 1]byte{1}
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], 12)
@@ -494,13 +494,7 @@ func FuzzOnNewBlocks12(f *testing.F) {
 			}
 			prevTotal = pending.Len() + baseFee.Len() + queued.Len()
 		}
-		checkDB := func(tx kv.Tx) {
-			c1, _ := tx.Cursor(kv.PoolSenderID)
-			c2, _ := tx.Cursor(kv.PoolSenderIDToAdress)
-			count1, _ := c1.Count()
-			count2, _ := c2.Count()
-			assert.Equal(count1, count2)
-		}
+		//TODO: check that id=>addr and addr=>id mappings have same len
 		//fmt.Printf("-------\n")
 
 		tx, err := db.BeginRw(context.Background())
@@ -510,48 +504,47 @@ func FuzzOnNewBlocks12(f *testing.F) {
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(tx, map[string]sender{}, txs1, TxSlots{}, currentBaseFee, 1, [32]byte{})
+		err = pool.OnNewBlock(map[string]sender{}, txs1, TxSlots{}, currentBaseFee, 1, [32]byte{})
 		assert.NoError(err)
 		check(txs1, TxSlots{}, "fork1")
 		checkNotify(txs1, TxSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txs2, txs3
-		err = pool.OnNewBlock(tx, map[string]sender{}, TxSlots{}, txs2, currentBaseFee, 1, [32]byte{})
+		err = pool.OnNewBlock(map[string]sender{}, TxSlots{}, txs2, currentBaseFee, 1, [32]byte{})
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(tx, map[string]sender{}, txs2, TxSlots{}, currentBaseFee, 2, [32]byte{})
+		err = pool.OnNewBlock(map[string]sender{}, txs2, TxSlots{}, currentBaseFee, 2, [32]byte{})
 		assert.NoError(err)
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
 
-		err = pool.OnNewBlock(tx, map[string]sender{}, TxSlots{}, txs3, currentBaseFee, 2, [32]byte{})
+		err = pool.OnNewBlock(map[string]sender{}, TxSlots{}, txs3, currentBaseFee, 2, [32]byte{})
 		assert.NoError(err)
 		check(TxSlots{}, txs3, "fork2 mined")
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
 		pool.AddRemoteTxs(context.Background(), p2pReceived)
-		err = pool.processRemoteTxs(context.Background(), tx)
+		err = pool.processRemoteTxs(context.Background())
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
 
-		senderIdsBeforeFlush := len(pool.senders.senderIDs)
-		senderInfoBeforeFlush := len(pool.senders.senderInfo)
+		//senderIdsBeforeFlush := len(pool.senders.senderIDs)
+		//senderInfoBeforeFlush := len(pool.senders.senderInfo)
 
-		_, err = pool.flushLocked(tx) // we don't test eviction here, because dedicated test exists
+		err = pool.flushLocked(tx) // we don't test eviction here, because dedicated test exists
 		require.NoError(err)
 		check(p2pReceived, TxSlots{}, "after_flush")
-		checkDB(tx)
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
 		p2, err := New(ch, nil, DefaultConfig)
 		assert.NoError(err)
+		p2.senders = pool.senders // senders are not persisted
 		err = p2.fromDB(context.Background(), tx, nil)
 		require.NoError(err)
-		checkDB(tx)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.Tx.rlp)
 		}
@@ -559,15 +552,13 @@ func FuzzOnNewBlocks12(f *testing.F) {
 
 		check(txs2, TxSlots{}, "fromDB")
 		//checkNotify(txs2, TxSlots{}, "fromDB")
-		assert.Equal(pool.senders.senderID, p2.senders.senderID)
-		assert.Equal(pool.senders.blockHeight.Load(), p2.senders.blockHeight.Load())
+		//assert.Equal(pool.senders.senderID, p2.senders.senderID)
+		//assert.Equal(pool.senders.blockHeight.Load(), p2.senders.blockHeight.Load())
 
-		idsCountAfterFlush, idsCountInDbAfterFlush, err := p2.senders.idsCount(tx)
-		assert.NoError(err)
-		assert.LessOrEqual(senderIdsBeforeFlush, idsCountAfterFlush+idsCountInDbAfterFlush)
-		infoCountAfterFlush, infoCountInDbAfterFlush, err := p2.senders.infoCount(tx)
-		assert.NoError(err)
-		assert.LessOrEqual(senderInfoBeforeFlush, infoCountAfterFlush+infoCountInDbAfterFlush)
+		//idsCountAfterFlush := p2.senders.idsCount()
+		//assert.LessOrEqual(senderIdsBeforeFlush, idsCountAfterFlush)
+		//infoCountAfterFlush := p2.senders.infoCount()
+		//assert.LessOrEqual(senderInfoBeforeFlush, infoCountAfterFlush)
 
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
