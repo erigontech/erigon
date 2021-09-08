@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
@@ -58,6 +58,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 		if err != nil {
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
@@ -74,13 +75,8 @@ var rootCmd = &cobra.Command{
 		}
 
 		log.Info("TxPool started", "db", path.Join(datadir, "txpool"))
-		txPoolDB, err := mdbx.NewMDBX(log.New()).Path(path.Join(datadir, "txpool")).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).Open()
-		if err != nil {
-			return err
-		}
 
-		sentryClients := make([]txpool.SentryClient, len(sentryAddr))
-		sentryClientsCasted := make([]proto_sentry.SentryClient, len(sentryAddr))
+		sentryClients := make([]direct.SentryClient, len(sentryAddr))
 		for i := range sentryAddr {
 			creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 			if err != nil {
@@ -92,21 +88,22 @@ var rootCmd = &cobra.Command{
 			}
 
 			sentryClients[i] = direct.NewSentryClientRemote(proto_sentry.NewSentryClient(sentryConn))
-			sentryClientsCasted[i] = proto_sentry.SentryClient(sentryClients[i])
 		}
 
+		cfg := txpool.DefaultConfig
+		cfg.DBDir = path.Join(datadir, "txpool")
+		cfg.LogEvery = 5 * time.Minute
+		cfg.CommitEvery = 5 * time.Minute
+
 		newTxs := make(chan txpool.Hashes, 1024)
-		txPool, err := txpool.New(newTxs, txPoolDB, coreDB, txpool.DefaultConfig)
+		defer close(newTxs)
+		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg, newTxs, coreDB, sentryClients, kvClient)
 		if err != nil {
 			return err
 		}
+		fetch.ConnectCore()
+		fetch.ConnectSentries()
 
-		fetcher := txpool.NewFetch(cmd.Context(), sentryClientsCasted, txPool, kvClient, coreDB, txPoolDB)
-		fetcher.ConnectCore()
-		fetcher.ConnectSentries()
-
-		send := txpool.NewSend(cmd.Context(), sentryClients, txPool)
-		txpoolGrpcServer := txpool.NewGrpcServer(cmd.Context(), txPool, txPoolDB)
 		/*
 			var ethashApi *ethash.API
 			if casted, ok := backend.engine.(*ethash.Ethash); ok {
@@ -120,7 +117,8 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		txpool.MainLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams)
+		notifyMiner := func() {}
+		txpool.MainLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
 
 		grpcServer.GracefulStop()
 		return nil
