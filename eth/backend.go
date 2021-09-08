@@ -174,6 +174,20 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
+	// Check if we have an already initialized chain and fall back to
+	// that if so. Otherwise we need to generate a new genesis spec.
+	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
+		h, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			panic(err)
+		}
+		if h != (common.Hash{}) {
+			config.Genesis = nil // fallback to db content
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
