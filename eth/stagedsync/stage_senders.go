@@ -350,6 +350,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	if !cfg.prune.TxIndex.Enabled() {
 		return nil
 	}
+	fmt.Printf("PruneSendersStage\n")
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
@@ -373,6 +374,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			return err
 		}
 		blockNum := binary.BigEndian.Uint64(k)
+		fmt.Printf("PruneSendersStage: %d\n",blockNum)
 
 		select {
 		case <-logEvery.C:
@@ -385,6 +387,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		if blockNum >= to {
 			break
 		}
+		fmt.Printf("PruneSendersStage aaa: %d\n",blockNum)
 		if err = c.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
