@@ -123,7 +123,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		}); err != nil {
 			return err
 		}
-		// txpool v2 - doesn't prioritise local txs over remote
 		txs, err := types.UnmarshalTransactionsFromBinary(txSlots.Txs)
 		if err != nil {
 			return fmt.Errorf("decode rlp of pending txs: %w", err)
@@ -134,6 +133,8 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			txs[i].SetSender(sender)
 		}
 		current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
+		// txpool v2 - doesn't prioritise local txs over remote
+		current.LocalTxs = types.NewTransactionsFixedOrder(nil)
 	} else {
 		pendingTxs, err := cfg.txPool.Pending()
 		if err != nil {

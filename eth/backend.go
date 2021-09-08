@@ -592,7 +592,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -615,8 +615,8 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 		})
 	}
 
-	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() {
-		tx, err := kv.BeginRo(context.Background())
+	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !s.config.TxPool.Disable {
+		tx, err := db.BeginRo(context.Background())
 		if err != nil {
 			return err
 		}
@@ -625,8 +625,20 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 		hh := rawdb.ReadCurrentHeader(tx)
 		tx.Rollback()
 		if hh != nil {
-			if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-				return err
+			if s.config.TxPool.V2 {
+				if err := s.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+					var baseFee uint64
+					if hh.BaseFee != nil {
+						baseFee = hh.BaseFee.Uint64()
+					}
+					return s.txPool2.OnNewBlock(tx, nil, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee, hh.Number.Uint64(), hh.Hash())
+				}); err != nil {
+					return err
+				}
+			} else {
+				if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -668,7 +680,7 @@ func (s *Ethereum) StartMining(ctx context.Context, kv kv.RwDB, mining *stagedsy
 
 			if !works && hasWork {
 				works = true
-				go func() { errc <- stages2.MiningStep(ctx, kv, mining) }()
+				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
 			}
 		}
 	}()
