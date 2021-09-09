@@ -317,6 +317,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 						*chainConfig,
 						engine,
 						txPool,
+						nil, nil,
 						tmpDir),
 					quit)
 				if err != nil {

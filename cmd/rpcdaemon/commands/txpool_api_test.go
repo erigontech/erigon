@@ -83,7 +83,7 @@ func TestTxPoolContent(t *testing.T) {
 
 	status, err := api.Status(ctx)
 	require.NoError(err)
-	require.Len(status, 2)
+	require.Len(status, 3)
 	require.Equal(status["pending"], hexutil.Uint(1))
 	require.Equal(status["queued"], hexutil.Uint(0))
 }

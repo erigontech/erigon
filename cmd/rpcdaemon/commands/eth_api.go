@@ -97,10 +97,10 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	filters         *filters.Filters
-	_chainConfig    *params.ChainConfig
-	_genesis        *types.Block
-	_genesisSetOnce sync.Once
+	filters      *filters.Filters
+	_chainConfig *params.ChainConfig
+	_genesis     *types.Block
+	_genesisLock sync.RWMutex
 }
 
 func NewBaseApi(f *filters.Filters) *BaseAPI {
@@ -119,23 +119,26 @@ func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 }
 
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {
-	if api._chainConfig != nil {
-		return api._chainConfig, api._genesis, nil
-	}
+	api._genesisLock.RLock()
+	cc, genesisBlock := api._chainConfig, api._genesis
+	api._genesisLock.RUnlock()
 
+	if cc != nil {
+		return cc, genesisBlock, nil
+	}
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	cc, err := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
 	if cc != nil && genesisBlock != nil {
-		api._genesisSetOnce.Do(func() {
-			api._genesis = genesisBlock
-			api._chainConfig = cc
-		})
+		api._genesisLock.Lock()
+		api._genesis = genesisBlock
+		api._chainConfig = cc
+		api._genesisLock.Unlock()
 	}
 	return cc, genesisBlock, nil
 }

@@ -236,7 +236,7 @@ func NewStagedSync(
 				cfg.BatchSize,
 			),
 			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -261,16 +261,19 @@ func NewStagedSync(
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageTxPoolCfg(db, txPool, func() {
-				for i := range txPoolServer.Sentries {
-					go func(i int) {
-						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
-					}(i)
-					go func(i int) {
-						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
-					}(i)
+			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
+				if cfg.TxPool.V2 {
+				} else {
+					for i := range txPoolServer.Sentries {
+						go func(i int) {
+							txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
+						}(i)
+						go func(i int) {
+							txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
+						}(i)
+					}
+					txPoolServer.TxFetcher.Start()
 				}
-				txPoolServer.TxFetcher.Start()
 			}),
 			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger),
 			false, /* test */

@@ -371,3 +371,8 @@ func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
 	}
 	bd.prefetchedBlocks.Add(block)
 }
+
+func (bd *BodyDownload) AddMinedBlock(block *types.Block) error {
+	bd.AddToPrefetch(block)
+	return nil
+}

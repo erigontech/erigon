@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -9,6 +10,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -52,6 +54,8 @@ type MiningCreateBlockCfg struct {
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
 	txPool      *core.TxPool
+	txPool2     *txpool.TxPool
+	txPool2DB   kv.RoDB
 	tmpdir      string
 }
 
@@ -61,6 +65,8 @@ func StageMiningCreateBlockCfg(
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
 	txPool *core.TxPool,
+	txPool2 *txpool.TxPool,
+	txPool2DB kv.RoDB,
 	tmpdir string,
 ) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
@@ -69,6 +75,8 @@ func StageMiningCreateBlockCfg(
 		chainConfig: chainConfig,
 		engine:      engine,
 		txPool:      txPool,
+		txPool2:     txPool2,
+		txPool2DB:   txPool2DB,
 		tmpdir:      tmpdir,
 	}
 }
@@ -76,14 +84,9 @@ func StageMiningCreateBlockCfg(
 // SpawnMiningCreateBlockStage
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) error {
-	txPoolLocals := cfg.txPool.Locals()
-	pendingTxs, err := cfg.txPool.Pending()
-	if err != nil {
-		return err
-	}
-
+func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) (err error) {
 	current := cfg.miner.MiningBlock
+	txPoolLocals := cfg.txPool.Locals()
 	coinbase := cfg.miner.MiningConfig.Etherbase
 
 	const (
@@ -104,10 +107,65 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1)
 
 	blockNum := executionAt + 1
-	signer := types.MakeSigner(&cfg.chainConfig, blockNum)
+	if cfg.txPool2 != nil {
+		txSlots := txpool.TxsRlp{}
+		if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+			if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
+				return err
+			}
+			for i := 0; i < len(txSlots.Txs); i++ {
+				txSlots.Txs[i] = common.CopyBytes(txSlots.Txs[i]) // because we need this data outside of tx
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		txs, err := types.UnmarshalTransactionsFromBinary(txSlots.Txs)
+		if err != nil {
+			return fmt.Errorf("decode rlp of pending txs: %w", err)
+		}
+		var sender common.Address
+		for i := range txs {
+			copy(sender[:], txSlots.Senders.At(i))
+			txs[i].SetSender(sender)
+		}
+		current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
+		// txpool v2 - doesn't prioritise local txs over remote
+		current.LocalTxs = types.NewTransactionsFixedOrder(nil)
+	} else {
+		pendingTxs, err := cfg.txPool.Pending()
+		if err != nil {
+			return err
+		}
+		// Split the pending transactions into locals and remotes
+		localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
+		signer := types.MakeSigner(&cfg.chainConfig, blockNum)
+		for _, txs := range pendingTxs {
+			if len(txs) == 0 {
+				continue
+			}
+			from, _ := txs[0].Sender(*signer)
+			isLocal := false
+			for _, local := range txPoolLocals {
+				if local == from {
+					isLocal = true
+					break
+				}
+			}
 
+			if isLocal {
+				localTxs = append(localTxs, txs)
+			} else {
+				remoteTxs = append(remoteTxs, txs)
+			}
+		}
+
+		current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
+		current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
+	}
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
@@ -260,32 +318,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	current.Header = header
 	current.Uncles = makeUncles(env.uncles)
-
-	// Split the pending transactions into locals and remotes
-	localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
-	for _, txs := range pendingTxs {
-		if len(txs) == 0 {
-			continue
-		}
-		from, _ := txs[0].Sender(*signer)
-		isLocal := false
-		for _, local := range txPoolLocals {
-			if local == from {
-				isLocal = true
-				break
-			}
-		}
-
-		if isLocal {
-			localTxs = append(localTxs, txs)
-		} else {
-			remoteTxs = append(remoteTxs, txs)
-		}
-	}
-
-	current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
-	current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
-	fmt.Printf("aa: %t, %t,%t\n", current == nil, cfg.miner.MiningBlock == nil, current.Header == nil)
 	return nil
 }
 
