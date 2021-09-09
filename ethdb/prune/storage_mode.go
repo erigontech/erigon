@@ -22,7 +22,8 @@ type Experiments struct {
 	TEVM bool
 }
 
-func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces uint64, experiments []string) (Mode, error) {
+func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
+	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
 	if flags == "default" || flags == "disabled" {
 		return DefaultMode, nil
