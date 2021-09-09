@@ -491,6 +491,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
+				if err := backend.downloadServer.Hd.AddMinedBlock(b); err != nil {
+					log.Error("add mined block to header downloader", "err", err)
+				}
+				if err := backend.downloadServer.Bd.AddMinedBlock(b); err != nil {
+					log.Error("add mined block to body downloader", "err", err)
+				}
 
 			case b := <-backend.pendingBlocks:
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
