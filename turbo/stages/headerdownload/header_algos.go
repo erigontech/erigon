@@ -963,6 +963,22 @@ func (hd *HeaderDownload) Fetching() bool {
 	return hd.fetching
 }
 
+func (hd *HeaderDownload) AddMinedBlock(block *types.Block) error {
+	buf := bytes.NewBuffer(nil)
+	if err := block.Header().EncodeRLP(buf); err != nil {
+		return err
+	}
+	segments, _, err := hd.SingleHeaderAsSegment(buf.Bytes(), block.Header())
+	if err != nil {
+		return err
+	}
+
+	for _, segment := range segments {
+		_, _ = hd.ProcessSegment(segment, false /* newBlock */, "miner")
+	}
+	return nil
+}
+
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
 	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
 
