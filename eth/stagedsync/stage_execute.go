@@ -612,7 +612,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = pruneReceipts(tx, kv.Receipts, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
@@ -633,8 +633,10 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	return nil
 }
 
-func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursor(kv.Receipts)
+func pruneReceipts(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursor(table)
+	fmt.Println(kv.Receipts)
+
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -651,7 +653,7 @@ func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.
 		}
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Receipts, "block", blockNum)
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
 		case <-ctx.Done():
 			return common.ErrStopped
 		default:
