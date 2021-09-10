@@ -356,23 +356,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	config.BodyDownloadTimeoutSeconds = 30
 
-	emptyBadHash := config.BadBlockHash == common.Hash{}
-	if !emptyBadHash {
-		var badBlockHeader *types.Header
-		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			header, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
-			badBlockHeader = header
-			return hErr
-		}); err != nil {
-			return nil, err
-		}
-
-		if badBlockHeader != nil {
-			unwindPoint := badBlockHeader.Number.Uint64() - 1
-			backend.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
-		}
-	}
-
 	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
 	if config.TxPool.V2 {
@@ -527,6 +510,23 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	emptyBadHash := config.BadBlockHash == common.Hash{}
+	if !emptyBadHash {
+		var badBlockHeader *types.Header
+		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
+			header, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
+			badBlockHeader = header
+			return hErr
+		}); err != nil {
+			return nil, err
+		}
+
+		if badBlockHeader != nil {
+			unwindPoint := badBlockHeader.Number.Uint64() - 1
+			backend.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
+		}
 	}
 
 	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
