@@ -637,7 +637,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					if hh.BaseFee != nil {
 						baseFee = hh.BaseFee.Uint64()
 					}
-					return s.txPool2.OnNewBlock(nil, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee, hh.Number.Uint64(), hh.Hash())
+					return s.txPool2.OnNewBlock(context.Background(), nil, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee, hh.Number.Uint64(), hh.Hash())
 				}); err != nil {
 					return err
 				}
