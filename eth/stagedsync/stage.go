@@ -1,9 +1,15 @@
 package stagedsync
 
 import (
+	"context"
+	"encoding/binary"
+	"fmt"
+	"time"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
@@ -94,4 +100,65 @@ type PruneState struct {
 func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" }
 func (s *PruneState) Done(db kv.Putter) error {
 	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
+}
+
+func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursor(table)
+
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= pruneTo {
+			break
+		}
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		if err = c.DeleteCurrent(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+		}
+	}
+	return nil
+}
+
+
+func PruneTableMultiCursor(tx kv.RwTx, table string, logPrefix string,  pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+	c, err := tx.RwCursorDupSort(table)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor for pruning %w", err)
+	}
+	defer c.Close()
+
+	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
+		if err != nil {
+			return fmt.Errorf("failed to move %s cleanup cursor: %w", table, err)
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum >= pruneTo {
+			break
+		}
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
+		case <-ctx.Done():
+			return common.ErrStopped
+		default:
+		}
+		if err = c.DeleteCurrentDuplicates(); err != nil {
+			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
+		}
+	}
+	return nil
 }
