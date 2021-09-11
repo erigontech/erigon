@@ -362,8 +362,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.TxPool.V2 {
 		cfg := txpool2.DefaultConfig
 		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.LogEvery = 15*time.Second//5 * time.Minute
-		cfg.CommitEvery = 15*time.Second//5 * time.Minute
+		cfg.LogEvery = 15 * time.Second    //5 * time.Minute
+		cfg.CommitEvery = 15 * time.Second //5 * time.Minute
 
 		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
