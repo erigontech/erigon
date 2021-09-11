@@ -317,11 +317,11 @@ Loop:
 					defer tx.Rollback()
 				}
 				batch = olddb.NewBatch(tx, quit)
-				defer batch.Rollback()
 				return nil
 			}(); funcErr != nil {
 				return funcErr
 			}
+			defer batch.Rollback()
 		}
 		gas += block.GasUsed()
 
