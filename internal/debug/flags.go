@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/pprof"
 	"syscall"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
@@ -171,10 +172,18 @@ func SetupCobra(cmd *cobra.Command) error {
 	}
 
 	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<-c
-		Exit()
+		term := make(chan os.Signal, 1)
+		signal.Notify(term, syscall.SIGINT, syscall.SIGTERM)
+		usr1 := make(chan os.Signal, 1)
+		signal.Notify(usr1, syscall.SIGUSR1)
+		for {
+			select {
+			case <-term:
+				Exit()
+			case <-usr1:
+				pprof.Lookup("goroutine").WriteTo(os.Stdout, 2)
+			}
+		}
 	}()
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
