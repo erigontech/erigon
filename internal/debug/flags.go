@@ -176,8 +176,6 @@ func SetupCobra(cmd *cobra.Command) error {
 		signal.Notify(term, syscall.SIGINT, syscall.SIGTERM)
 		usr1 := make(chan os.Signal, 1)
 		signal.Notify(usr1, syscall.SIGUSR1)
-		usr2 := make(chan os.Signal, 1)
-		signal.Notify(usr2, syscall.SIGUSR2)
 		for {
 			select {
 			case <-term:
