@@ -185,7 +185,7 @@ func SetupCobra(cmd *cobra.Command) error {
 			case <-usr1:
 				pprof.Lookup("goroutine").WriteTo(os.Stdout, 2)
 			case <-usr2:
-				pprof.Lookup("mutex").WriteTo(os.Stdout, 2)
+				pprof.Lookup("heap").WriteTo(os.Stdout, 2)
 			}
 		}
 	}()
