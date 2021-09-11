@@ -172,16 +172,21 @@ func SetupCobra(cmd *cobra.Command) error {
 	}
 
 	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<-c
-		Exit()
-	}()
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGUSR1)
-		for range c {
-			pprof.Lookup("goroutine").WriteTo(os.Stdout, 1)
+		term := make(chan os.Signal, 1)
+		signal.Notify(term, syscall.SIGINT, syscall.SIGTERM)
+		usr1 := make(chan os.Signal, 1)
+		signal.Notify(usr1, syscall.SIGUSR1)
+		usr2 := make(chan os.Signal, 1)
+		signal.Notify(usr2, syscall.SIGUSR2)
+		for {
+			select {
+			case <-term:
+				Exit()
+			case <-usr1:
+				pprof.Lookup("goroutines").WriteTo(os.Stdout, 1)
+			case <-usr2:
+				pprof.Lookup("mutex").WriteTo(os.Stdout, 1)
+			}
 		}
 	}()
 	pprof, err := flags.GetBool(pprofFlag.Name)
