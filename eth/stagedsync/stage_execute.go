@@ -353,8 +353,6 @@ Loop:
 	return stoppedErr
 }
 
-
-
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
@@ -576,7 +574,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
-		if err = PruneTableMultiCursor(tx, kv.AccountChangeSet, logPrefix,  cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTableMultiCursor(tx, kv.AccountChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 		if err = PruneTableMultiCursor(tx, kv.StorageChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
@@ -588,7 +586,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if err = PruneTable(tx, kv.Receipts, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
-		if err = PruneTable(tx, kv.Log, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress),logEvery, ctx); err != nil{
+		if err = PruneTable(tx, kv.Log, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
@@ -608,4 +606,3 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 	return nil
 }
-
