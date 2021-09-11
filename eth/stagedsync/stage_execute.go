@@ -300,17 +300,17 @@ Loop:
 		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if updateProgress {
 			if funcErr := func() error {
-				if err = batch.Commit(); err != nil {
+				if err := batch.Commit(); err != nil {
 					return err
 				}
 				if !useExternalTx {
-					if err = s.Update(tx, stageProgress); err != nil {
+					if err := s.Update(tx, stageProgress); err != nil {
 						return err
 					}
-					if err = tx.Commit(); err != nil {
+					if err := tx.Commit(); err != nil {
 						return err
 					}
-					tx, err = cfg.db.BeginRw(context.Background())
+					tx, err := cfg.db.BeginRw(context.Background())
 					if err != nil {
 						return err
 					}
