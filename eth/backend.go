@@ -438,12 +438,15 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.TxPool.V2 {
 		backend.txPool2Fetch.ConnectCore()
 		backend.txPool2Fetch.ConnectSentries()
-		go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams, func() {
-			select {
-			case backend.notifyMiningAboutNewTxs <- struct{}{}:
-			default:
-			}
-		})
+		go txpool2.MainLoop(backend.downloadCtx,
+			backend.txPool2DB, backend.chainDB,
+			backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams,
+			func() {
+				select {
+				case backend.notifyMiningAboutNewTxs <- struct{}{}:
+				default:
+				}
+			})
 	} else {
 		go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
 		go func() {
