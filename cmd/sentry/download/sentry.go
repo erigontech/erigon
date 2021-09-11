@@ -65,6 +65,17 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 	pi.deadlines = append(pi.deadlines, deadline)
 }
 
+func (pi *PeerInfo) Height() uint64 {
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.height
+}
+func (pi *PeerInfo) SetHeight(h uint64) {
+	pi.lock.Lock()
+	pi.height = h
+	pi.lock.Unlock()
+}
+
 // ClearDeadlines goes through the deadlines of
 // given peers and removes the ones that have passed
 // Optionally, it also clears one extra deadline - this is used when response is received
@@ -613,10 +624,8 @@ func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.Pe
 	if peerInfo == nil {
 		return &empty.Empty{}, nil
 	}
-	peerInfo.lock.Lock()
-	defer peerInfo.lock.Unlock()
-	if req.MinBlock > peerInfo.height {
-		peerInfo.height = req.MinBlock
+	if req.MinBlock > peerInfo.Height() {
+		peerInfo.SetHeight(req.MinBlock)
 	}
 	return &empty.Empty{}, nil
 }
@@ -634,7 +643,7 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 		if peerInfo == nil {
 			return true
 		}
-		if peerInfo.height >= minBlock {
+		if peerInfo.Height() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 			if deadlines < maxPermitsPerPeer {
