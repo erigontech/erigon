@@ -280,15 +280,12 @@ Loop:
 			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 			break
 		}
-
 		lastLogTx += uint64(block.Transactions().Len())
 
 		var contractHasTEVM func(contractHash common.Hash) (bool, error)
-
 		if cfg.vmConfig.EnableTEMV {
 			contractHasTEVM = ethdb.GetHasTEVM(tx)
 		}
-
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
@@ -326,11 +323,9 @@ Loop:
 				}(); funcErr != nil {
 					return funcErr
 				}
-
 			}
 		}
-
-		gas = gas + block.GasUsed()
+		gas += block.GasUsed()
 
 		select {
 		default:
