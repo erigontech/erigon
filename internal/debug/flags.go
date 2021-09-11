@@ -21,9 +21,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
@@ -172,12 +170,7 @@ func SetupCobra(cmd *cobra.Command) error {
 		}
 	}
 
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<-c
-		Exit()
-	}()
+	go ListenSignals(nil)
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
 		return err
