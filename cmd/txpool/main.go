@@ -98,7 +98,8 @@ var rootCmd = &cobra.Command{
 
 		newTxs := make(chan txpool.Hashes, 1024)
 		defer close(newTxs)
-		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg, kvcache.New(), newTxs, coreDB, sentryClients, kvClient)
+		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
+			kvcache.New(kvcache.DefaultCoherentCacheConfig), newTxs, coreDB, sentryClients, kvClient)
 		if err != nil {
 			return err
 		}
