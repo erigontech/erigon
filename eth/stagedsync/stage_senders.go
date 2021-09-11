@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -97,7 +98,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -194,7 +195,7 @@ Loop:
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -312,14 +313,14 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		// prevent sending to close channel
-		if err := common.Stopped(quit); err != nil {
+		if err := libcommon.Stopped(quit); err != nil {
 			job.err = err
-		} else if err = common.Stopped(ctx.Done()); err != nil {
+		} else if err = libcommon.Stopped(ctx.Done()); err != nil {
 			job.err = err
 		}
 		out <- job
 
-		if errors.Is(job.err, common.ErrStopped) {
+		if errors.Is(job.err, libcommon.ErrStopped) {
 			return
 		}
 	}
@@ -378,7 +379,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s]", s.LogPrefix()), "table", kv.Senders, "block", blockNum)
 		case <-ctx.Done():
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		default:
 		}
 

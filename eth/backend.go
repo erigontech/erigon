@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -677,7 +678,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			case err := <-errc:
 				works = false
 				hasWork = false
-				if errors.Is(err, common.ErrStopped) {
+				if errors.Is(err, libcommon.ErrStopped) {
 					return
 				}
 				if err != nil {

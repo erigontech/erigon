@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/RoaringBitmap/roaring"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -136,7 +137,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = common.Stopped(ctx.Done()); err != nil {
+		if err = libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, err
 		}
 
