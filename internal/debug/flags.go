@@ -26,6 +26,7 @@ import (
 	"syscall"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/log/v3"
@@ -114,6 +115,7 @@ func init() {
 }
 
 func SetupCobra(cmd *cobra.Command) error {
+	raiseFdLimit()
 	flags := cmd.Flags()
 	lvl, err := flags.GetInt(verbosityFlag.Name)
 	if err != nil {
@@ -214,6 +216,7 @@ func SetupCobra(cmd *cobra.Command) error {
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
+	raiseFdLimit()
 	//var ostream log.Handler
 	//output := io.Writer(os.Stderr)
 	if ctx.GlobalBool(logjsonFlag.Name) {
@@ -296,4 +299,16 @@ func StartPProf(address string, withMetrics bool) {
 func Exit() {
 	_ = Handler.StopCPUProfile()
 	_ = Handler.StopGoTrace()
+}
+
+// raiseFdLimit raises out the number of allowed file handles per process
+func raiseFdLimit() {
+	limit, err := fdlimit.Maximum()
+	if err != nil {
+		log.Error("Failed to retrieve file descriptor allowance", "error", err)
+		return
+	}
+	if _, err = fdlimit.Raise(uint64(limit)); err != nil {
+		log.Error("Failed to raise file descriptor allowance", "error", err)
+	}
 }
