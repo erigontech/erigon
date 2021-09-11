@@ -400,12 +400,6 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 	expectedRootHash := syncHeadHeader.Root
 	//fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
 
-	// if cache != nil {
-	// 	if err = cacheWarmUpIfNeed(tx, cache); err != nil {
-	// 		return err
-	// 	}
-	// }
-
 	logPrefix := s.LogPrefix()
 	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cfg, expectedRootHash, quit); err != nil {
 		return err
