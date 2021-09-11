@@ -170,12 +170,13 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
+	notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer)
+
 	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, db)
 	if err != nil {
 		return err
 	}
 
-	notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer)
 	return nil
 }
 
