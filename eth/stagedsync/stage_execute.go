@@ -207,7 +207,7 @@ func newStateReaderWriter(
 		if block.BaseFee() != nil {
 			blockBaseFee = block.BaseFee().Uint64()
 		}
-		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, blockBaseFee, false)
+		accumulator.StartChange(block.NumberU64(), block.Hash(), block.NumberU64()-1, block.ParentHash(), txs, blockBaseFee, false)
 	} else {
 		accumulator = nil
 	}
@@ -458,7 +458,12 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		if targetHeader.BaseFee != nil {
 			protocolBaseFee = targetHeader.BaseFee.Uint64()
 		}
-		accumulator.StartChange(u.UnwindPoint, hash, txs, protocolBaseFee, true /* unwind */)
+		prevHash, err := rawdb.ReadCanonicalHash(tx, s.BlockNumber)
+		if err != nil {
+			return fmt.Errorf("read canonical hash of unwind point: %w", err)
+		}
+
+		accumulator.StartChange(u.UnwindPoint, hash, s.BlockNumber, prevHash, txs, protocolBaseFee, true /* unwind */)
 	}
 
 	changes := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
