@@ -18,8 +18,6 @@ func ListenSignals(stack io.Closer) {
 	_debug.GetSigC(&sigc)
 	defer signal.Stop(sigc)
 
-	usr1 := make(chan os.Signal, 1)
-	signal.Notify(usr1, windows.SIGUSR1)
 	<-sigc
 	log.Info("Got interrupt, shutting down...")
 	if stack != nil {
