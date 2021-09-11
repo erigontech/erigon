@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -367,7 +368,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
 		//defer close(newTxs)
-		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(ctx, cfg, backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient)
+		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(ctx, cfg, kvcache.New(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient)
 		if err != nil {
 			return nil, err
 		}
