@@ -302,26 +302,32 @@ Loop:
 
 		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if updateProgress {
-			if err = batch.Commit(); err != nil {
-				return err
+			if updateProgress {
+				if funcErr := func() error {
+					if err = batch.Commit(); err != nil {
+						return err
+					}
+					if !useExternalTx {
+						if err = s.Update(tx, stageProgress); err != nil {
+							return err
+						}
+						if err = tx.Commit(); err != nil {
+							return err
+						}
+						tx, err = cfg.db.BeginRw(context.Background())
+						if err != nil {
+							return err
+						}
+						defer tx.Rollback()
+					}
+					batch = olddb.NewBatch(tx, quit)
+					defer batch.Rollback()
+					return nil
+				}(); funcErr != nil {
+					return funcErr
+				}
+
 			}
-			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return err
-				}
-				if err = tx.Commit(); err != nil {
-					return err
-				}
-				tx, err = cfg.db.BeginRw(context.Background())
-				if err != nil {
-					return err
-				}
-				// TODO: This creates stacked up deferrals
-				defer tx.Rollback()
-			}
-			batch = olddb.NewBatch(tx, quit)
-			// TODO: This creates stacked up deferrals
-			defer batch.Rollback()
 		}
 
 		gas = gas + block.GasUsed()
