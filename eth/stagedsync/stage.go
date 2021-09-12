@@ -133,7 +133,7 @@ func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logE
 	return nil
 }
 
-func PruneTableMultiCursor(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
 	c, err := tx.RwCursorDupSort(table)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
