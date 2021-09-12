@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestPromoteHashedStateClearState(t *testing.T) {
@@ -94,7 +94,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 		cancelFuncExec bool
 		errExp         error
 	}{
-		{"cancel", true, common.ErrStopped},
+		{"cancel", true, libcommon.ErrStopped},
 		{"no cancel", false, nil},
 	}
 
@@ -124,7 +124,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 		cancelFuncExec bool
 		errExp         error
 	}{
-		{"cancel", true, common.ErrStopped},
+		{"cancel", true, libcommon.ErrStopped},
 		{"no cancel", false, nil},
 	}
 
@@ -157,7 +157,7 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 		cancelFuncExec bool
 		errExp         error
 	}{
-		{"cancel", true, common.ErrStopped},
+		{"cancel", true, libcommon.ErrStopped},
 		{"no cancel", false, nil},
 	}
 

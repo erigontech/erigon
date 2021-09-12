@@ -25,6 +25,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -351,7 +352,7 @@ func (pool *TxPool) loop() {
 
 		// System shutdown.
 		case <-pool.stopCh:
-			common.SafeClose(pool.reorgShutdownCh)
+			libcommon.SafeClose(pool.reorgShutdownCh)
 			return
 
 		// Handle stats reporting ticks

@@ -3,6 +3,7 @@ package shards
 import (
 	"context"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
@@ -31,7 +32,7 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
 		return
 	}
 	for i := range a.changes {
-		if err := common.Stopped(ctx.Done()); err != nil {
+		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return
 		}
 		c.SendStateChanges(&a.changes[i])
@@ -55,7 +56,7 @@ func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs
 	if txs != nil {
 		a.latestChange.Txs = make([][]byte, len(txs))
 		for i := range txs {
-			a.latestChange.Txs[i] = common.CopyBytes(txs[i])
+			a.latestChange.Txs[i] = libcommon.Copy(txs[i])
 		}
 	}
 	a.latestChange.ProtocolBaseFee = protocolBaseFee
