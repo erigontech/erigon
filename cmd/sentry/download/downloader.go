@@ -723,7 +723,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 			Data: b,
 		},
 	}
-	fmt.Printf("getBlockHeaders66: %s\n", fmt.Sprintf("%x", gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	fmt.Printf("getBlockHeaders66: %s\n",  gointerfaces.ConvertH512ToBytes(inreq.PeerId))
 
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
