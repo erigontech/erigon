@@ -282,6 +282,7 @@ func runPeer(
 		if peerInfo.Removed() {
 			return fmt.Errorf("peer removed")
 		}
+		fmt.Printf("connected: %s\n",peerInfo.peer.Fullname())
 		msg, err := rw.ReadMsg()
 		if err != nil {
 			return fmt.Errorf("reading message: %v", err)
