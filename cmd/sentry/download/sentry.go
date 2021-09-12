@@ -13,6 +13,7 @@ import (
 	"path"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,14 +68,10 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 }
 
 func (pi *PeerInfo) Height() uint64 {
-	pi.lock.RLock()
-	defer pi.lock.RUnlock()
-	return pi.height
+	return atomic.LoadUint64(&pi.height)
 }
 func (pi *PeerInfo) SetHeight(h uint64) {
-	pi.lock.Lock()
-	pi.height = h
-	pi.lock.Unlock()
+	atomic.StoreUint64(&pi.height, h)
 }
 
 // ClearDeadlines goes through the deadlines of
