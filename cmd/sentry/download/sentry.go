@@ -270,6 +270,9 @@ func runPeer(
 			log.Debug("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
 		}
 	}()
+	if strings.Contains(peerInfo.peer.Fullname(), "alex") {
+		fmt.Printf("connected: %s\n", peerInfo.peer.Fullname())
+	}
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
@@ -282,9 +285,6 @@ func runPeer(
 		}
 		if peerInfo.Removed() {
 			return fmt.Errorf("peer removed")
-		}
-		if strings.Contains(peerInfo.peer.Fullname(), "alex") {
-			fmt.Printf("connected: %s\n", peerInfo.peer.Fullname())
 		}
 		msg, err := rw.ReadMsg()
 		if err != nil {
