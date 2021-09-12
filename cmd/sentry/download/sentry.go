@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -282,7 +283,9 @@ func runPeer(
 		if peerInfo.Removed() {
 			return fmt.Errorf("peer removed")
 		}
-		fmt.Printf("connected: %s\n",peerInfo.peer.Fullname())
+		if strings.Contains(peerInfo.peer.Fullname(), "alex") {
+			fmt.Printf("connected: %s\n", peerInfo.peer.Fullname())
+		}
 		msg, err := rw.ReadMsg()
 		if err != nil {
 			return fmt.Errorf("reading message: %v", err)
@@ -290,6 +293,9 @@ func runPeer(
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
 			return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
+		}
+		if strings.Contains(peerInfo.peer.Fullname(), "alex") {
+			fmt.Printf("msg: %d\n", msg.Code)
 		}
 		givePermit := false
 		switch msg.Code {
