@@ -230,19 +230,31 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		}
 		defer tx.Rollback()
 	}
-
-	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
-	if errStart != nil {
-		return errStart
+	prevStageProgress, err := stages.GetStageProgress(tx, stages.Senders)
+	if err != nil {
+		return err
 	}
 	nextStageProgress, err := stages.GetStageProgress(tx, stages.HashState)
 	if err != nil {
 		return err
 	}
 	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+	var (
+		batch ethdb.DbWithPendingMutations = olddb.NewBatch(tx, quit)
 
-	logPrefix := s.LogPrefix()
-	var to = prevStageProgress
+		stageProgress = s.BlockNumber
+		to            = prevStageProgress
+		gas           uint64
+
+		stoppedErr error
+	)
+	var (
+		logTx, lastLogTx = uint64(0), uint64(0)
+		logTime          = time.Now()
+		logPrefix        = s.LogPrefix()
+		logBlock         = stageProgress
+		logEvery         = time.NewTicker(logInterval)
+	)
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
@@ -252,106 +264,219 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-
-	var batch ethdb.DbWithPendingMutations
-	batch = olddb.NewBatch(tx, quit)
 	defer batch.Rollback()
-
-	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	stageProgress := s.BlockNumber
-	logBlock := stageProgress
-	logTx, lastLogTx := uint64(0), uint64(0)
-	logTime := time.Now()
-	var gas uint64
-
-	var stoppedErr error
-Loop:
+	//Loop: //nolint
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
-		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
-			break
-		}
-		var err error
-		var block *types.Block
-		if block, err = readBlock(blockNum, tx); err != nil {
-			return err
-		}
-		if block == nil {
-			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
-			break
-		}
+		if err := func() error {
+			if stoppedErr = common.Stopped(quit); stoppedErr != nil {
+				return stoppedErr
+			}
+			var (
+				err   error
+				block *types.Block
 
-		lastLogTx += uint64(block.Transactions().Len())
-
-		var contractHasTEVM func(contractHash common.Hash) (bool, error)
-
-		if cfg.vmConfig.EnableTEMV {
-			contractHasTEVM = ethdb.GetHasTEVM(tx)
-		}
-
-		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
-		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
-		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
-		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
-			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
-			u.UnwindTo(blockNum-1, block.Hash())
-			break Loop
-		}
-		stageProgress = blockNum
-
-		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
-		if updateProgress {
-			if err = batch.Commit(); err != nil {
+				contractHasTEVM func(contractHash common.Hash) (bool, error)
+			)
+			if block, err = readBlock(blockNum, tx); err != nil {
 				return err
 			}
-			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return err
-				}
-				if err = tx.Commit(); err != nil {
-					return err
-				}
-				tx, err = cfg.db.BeginRw(context.Background())
-				if err != nil {
-					return err
-				}
-				// TODO: This creates stacked up deferrals
-				defer tx.Rollback()
+			if block == nil {
+				return fmt.Errorf("[%s] Empty block blocknum %d", logPrefix, blockNum)
 			}
-			batch = olddb.NewBatch(tx, quit)
-			// TODO: This creates stacked up deferrals
-			defer batch.Rollback()
-		}
 
-		gas = gas + block.GasUsed()
-
-		select {
-		default:
-		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
-			gas = 0
-			tx.CollectMetrics()
-			syncMetrics[stages.Execution].Set(blockNum)
+			lastLogTx += uint64(block.Transactions().Len())
+			if cfg.vmConfig.EnableTEMV {
+				contractHasTEVM = ethdb.GetHasTEVM(tx)
+			}
+			// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+			writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
+			writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
+			writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
+			if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
+				log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
+				u.UnwindTo(blockNum-1, block.Hash())
+				return err
+			}
+			stageProgress = blockNum
+			if batch.BatchSize() >= int(cfg.batchSize) {
+				if err = batch.Commit(); err != nil {
+					return err
+				}
+				if !useExternalTx {
+					if err = s.Update(tx, stageProgress); err != nil {
+						return err
+					}
+					if err = tx.Commit(); err != nil {
+						return err
+					}
+					tx, err = cfg.db.BeginRw(context.Background())
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
+				}
+				batch = olddb.NewBatch(tx, quit)
+				defer batch.Rollback()
+			}
+			gas += block.GasUsed()
+			select {
+			default:
+			case <-logEvery.C:
+				logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
+				gas = 0
+				tx.CollectMetrics()
+				syncMetrics[stages.Execution].Set(blockNum)
+			}
+			return nil
+		}(); err != nil {
+			return err
 		}
 	}
-
 	if err = s.Update(batch, stageProgress); err != nil {
 		return err
 	}
 	if err = batch.Commit(); err != nil {
 		return fmt.Errorf("batch commit: %v", err)
 	}
-
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}
-
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	return stoppedErr
 }
+
+//func SpawnExecuteBlocksStage2(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+//	quit := ctx.Done()
+//	useExternalTx := tx != nil
+//	if !useExternalTx {
+//		tx, err = cfg.db.BeginRw(context.Background())
+//		if err != nil {
+//			return err
+//		}
+//		defer tx.Rollback()
+//	}
+//
+//	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Senders)
+//	if errStart != nil {
+//		return errStart
+//	}
+//	nextStageProgress, err := stages.GetStageProgress(tx, stages.HashState)
+//	if err != nil {
+//		return err
+//	}
+//	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+//
+//	logPrefix := s.LogPrefix()
+//	var to = prevStageProgress
+//	if toBlock > 0 {
+//		to = min(prevStageProgress, toBlock)
+//	}
+//	if to <= s.BlockNumber {
+//		return nil
+//	}
+//	if to > s.BlockNumber+16 {
+//		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+//	}
+//
+//	var batch ethdb.DbWithPendingMutations
+//	batch = olddb.NewBatch(tx, quit)
+//	defer batch.Rollback()
+//
+//	logEvery := time.NewTicker(logInterval)
+//	defer logEvery.Stop()
+//	stageProgress := s.BlockNumber
+//	logBlock := stageProgress
+//	logTx, lastLogTx := uint64(0), uint64(0)
+//	logTime := time.Now()
+//	var gas uint64
+//
+//	var stoppedErr error
+//Loop:
+//	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
+//		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
+//			break
+//		}
+//		var err error
+//		var block *types.Block
+//		if block, err = readBlock(blockNum, tx); err != nil {
+//			return err
+//		}
+//		if block == nil {
+//			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
+//			break
+//		}
+//		lastLogTx += uint64(block.Transactions().Len())
+//
+//		var contractHasTEVM func(contractHash common.Hash) (bool, error)
+//		if cfg.vmConfig.EnableTEMV {
+//			contractHasTEVM = ethdb.GetHasTEVM(tx)
+//		}
+//		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
+//		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
+//		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
+//		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
+//		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
+//			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
+//			u.UnwindTo(blockNum-1, block.Hash())
+//			break Loop
+//		}
+//		stageProgress = blockNum
+//
+//		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
+//		if updateProgress {
+//			if err = batch.Commit(); err != nil {
+//				return err
+//			}
+//			if !useExternalTx {
+//				if err = s.Update(tx, stageProgress); err != nil {
+//					return err
+//				}
+//				if err = tx.Commit(); err != nil {
+//					return err
+//				}
+//				tx, err = cfg.db.BeginRw(context.Background())
+//				if err != nil {
+//					return err
+//				}
+//				// TODO: This creates stacked up deferrals
+//				defer tx.Rollback()
+//			}
+//			batch = olddb.NewBatch(tx, quit)
+//			// TODO: This creates stacked up deferrals
+//			defer batch.Rollback()
+//		}
+//
+//		gas = gas + block.GasUsed()
+//
+//		select {
+//		default:
+//		case <-logEvery.C:
+//			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
+//			gas = 0
+//			tx.CollectMetrics()
+//			syncMetrics[stages.Execution].Set(blockNum)
+//		}
+//	}
+//
+//	if err = s.Update(batch, stageProgress); err != nil {
+//		return err
+//	}
+//	if err = batch.Commit(); err != nil {
+//		return fmt.Errorf("batch commit: %v", err)
+//	}
+//
+//	if !useExternalTx {
+//		if err = tx.Commit(); err != nil {
+//			return err
+//		}
+//	}
+//
+//	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
+//	return stoppedErr
+//}
 
 func pruneChangeSets(tx kv.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
 	c, err := tx.RwCursorDupSort(table)
