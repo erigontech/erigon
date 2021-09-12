@@ -271,7 +271,7 @@ func runPeer(
 		}
 	}()
 	if strings.Contains(peerInfo.peer.Fullname(), "alex") {
-		fmt.Printf("connected: %s\n", peerInfo.peer.Fullname())
+		fmt.Printf("connected: %s, %s\n", peerInfo.peer.Fullname(), peerInfo.peer.ID())
 	}
 	for {
 		if !peerPrinted {
@@ -294,7 +294,7 @@ func runPeer(
 			msg.Discard()
 			return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 		}
-		if strings.Contains(peerInfo.peer.Fullname(), "alex") && msg.Code!=8 && msg.Code!=2{
+		if strings.Contains(peerInfo.peer.Fullname(), "alex") && msg.Code != 8 && msg.Code != 2 && msg.Code != 6 {
 			fmt.Printf("msg: %d\n", msg.Code)
 		}
 		givePermit := false
