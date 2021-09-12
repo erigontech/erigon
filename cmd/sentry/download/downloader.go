@@ -693,6 +693,7 @@ func (cs *ControlServerImpl) receipts65(ctx context.Context, inreq *proto_sentry
 }
 
 func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+	defer func(t time.Time) { fmt.Printf("downloader.go:922: %s %s\n", time.Since(t), inreq.Id.String()) }(time.Now())
 	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockHeaders66: %v, data: %x", err, inreq.Data)
@@ -722,6 +723,8 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 			Data: b,
 		},
 	}
+	fmt.Printf("getBlockHeaders66: %s\n",outreq.PeerId.String())
+
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
 		if !isPeerNotFoundErr(err) {
@@ -919,7 +922,6 @@ func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sen
 }
 
 func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	defer func(t time.Time) { fmt.Printf("downloader.go:922: %s %s\n", time.Since(t), inreq.Id.String()) }(time.Now())
 	switch inreq.Id {
 	// ========= eth 65 ==========
 	case proto_sentry.MessageId_GET_BLOCK_HEADERS_65:
