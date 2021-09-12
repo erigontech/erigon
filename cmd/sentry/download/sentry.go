@@ -294,7 +294,7 @@ func runPeer(
 			msg.Discard()
 			return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
 		}
-		if strings.Contains(peerInfo.peer.Fullname(), "alex") && msg.Code >= 6 && msg.Code != 2 {
+		if strings.Contains(peerInfo.peer.Fullname(), "alex") && msg.Code < 6 && msg.Code != 2 {
 			fmt.Printf("msg: %d\n", msg.Code)
 		}
 		givePermit := false
