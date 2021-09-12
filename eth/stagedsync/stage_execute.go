@@ -266,7 +266,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	}
 	defer batch.Rollback()
 	defer logEvery.Stop()
-	//Loop: //nolint
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if err := func() error {
 			if stoppedErr = common.Stopped(quit); stoppedErr != nil {
