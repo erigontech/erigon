@@ -727,6 +727,9 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		ss.GoodPeers.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
 	}
+	if strings.Contains(peerInfo.peer.Fullname(), "alex") && msgcode < 6 && msgcode != 2 {
+		log.Warn("send by id, done", "msg id", msgcode, "data.len", len(inreq.Data.Data), "name", peerInfo.peer.Fullname())
+	}
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
 }
 
