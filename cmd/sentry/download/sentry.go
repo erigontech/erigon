@@ -713,6 +713,10 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
 
+	if strings.Contains(peerInfo.peer.Fullname(), "alex") && msgcode < 6 && msgcode != 2 {
+		fmt.Printf("send by id: %d, data.len %d, peer id %s, %s\n", msgcode, len(inreq.Data.Data), peerInfo.peer.ID(), peerInfo.peer.Fullname())
+	}
+
 	if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
 		if x, ok := ss.GoodPeers.Load(peerID); ok {
 			peerInfo := x.(*PeerInfo)
