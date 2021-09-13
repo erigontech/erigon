@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 )
 
 const (
@@ -249,7 +250,7 @@ type TxPool struct {
 	reorgDoneCh     chan chan struct{}
 	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
-	isStarted       bool
+	isStarted       atomic.Bool
 	initFns         []func() error
 	stopFns         []func() error
 	stopCh          chan struct{}
@@ -323,7 +324,7 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 	pool.wg.Add(1)
 	go pool.loop()
 
-	pool.isStarted = true
+	pool.isStarted.Store(true)
 
 	log.Info("transaction pool started")
 	return nil
@@ -432,7 +433,7 @@ func (pool *TxPool) Stop() {
 		pool.journal.close()
 	}
 
-	pool.isStarted = false
+	pool.isStarted.Store(false)
 
 	log.Info("Transaction pool stopped")
 }
@@ -1467,7 +1468,7 @@ func (pool *TxPool) IsStarted() bool {
 		return false
 	}
 
-	return pool.isStarted
+	return pool.isStarted.Load()
 }
 
 func (pool *TxPool) AddInit(fns ...func() error) {
