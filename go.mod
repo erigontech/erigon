@@ -15,10 +15,12 @@ require (
 	github.com/ledgerwatch/log/v3 v3.3.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/matryer/moq v0.2.3
+	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/stretchr/testify v1.7.0
 	github.com/torquem-ch/mdbx-go v0.16.0
 	github.com/ugorji/go/codec v1.1.13
 	go.uber.org/atomic v1.9.0
+	golang.org/dl v0.0.0-20210909185531-e2a88a019121 // indirect
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	google.golang.org/grpc v1.39.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
