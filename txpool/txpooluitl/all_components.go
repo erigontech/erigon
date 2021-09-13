@@ -5,17 +5,18 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func AllComponents(ctx context.Context, cfg txpool.Config, newTxs chan txpool.Hashes, coreDB kv.RoDB, sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
+func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, newTxs chan txpool.Hashes, coreDB kv.RoDB, sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
 	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).Open()
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	txPool, err := txpool.New(newTxs, coreDB, cfg)
+	txPool, err := txpool.New(newTxs, coreDB, cfg, cache)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

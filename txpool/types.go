@@ -478,6 +478,44 @@ func (s *TxsRlp) Resize(targetSize uint) {
 
 var addressesGrowth = make([]byte, 20)
 
+func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
+	var structLength uint = 1 // 1 byte for fieldset
+	if !balance.IsZero() {
+		structLength += uint(balance.ByteLen()) + 1
+	}
+	if nonce > 0 {
+		structLength += uint((bits.Len64(nonce)+7)/8) + 1
+	}
+	return structLength
+}
+
+func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
+	var fieldSet = 0 // start with first bit set to 0
+	var pos = 1
+	if nonce > 0 {
+		fieldSet = 1
+		nonceBytes := (bits.Len64(nonce) + 7) / 8
+		buffer[pos] = byte(nonceBytes)
+		var nonce = nonce
+		for i := nonceBytes; i > 0; i-- {
+			buffer[pos+i] = byte(nonce)
+			nonce >>= 8
+		}
+		pos += nonceBytes + 1
+	}
+
+	// Encoding balance
+	if !balance.IsZero() {
+		fieldSet |= 2
+		balanceBytes := balance.ByteLen()
+		buffer[pos] = byte(balanceBytes)
+		pos++
+		balance.WriteToSlice(buffer[pos : pos+balanceBytes])
+		pos += balanceBytes //nolint
+	}
+
+	buffer[0] = byte(fieldSet)
+}
 func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 	if len(enc) == 0 {
 		return

@@ -5,6 +5,7 @@ package txpool
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"sync"
 )
@@ -31,7 +32,7 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
 // 				panic("mock out the IdHashKnown method")
 // 			},
-// 			OnNewBlockFunc: func(stateChanges map[string]sender, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
+// 			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChange, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
 // 			StartedFunc: func() bool {
@@ -57,7 +58,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(stateChanges map[string]sender, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error
+	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChange, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
@@ -92,8 +93,10 @@ type PoolMock struct {
 		}
 		// OnNewBlock holds details about calls to the OnNewBlock method.
 		OnNewBlock []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 			// StateChanges is the stateChanges argument value.
-			StateChanges map[string]sender
+			StateChanges *remote.StateChange
 			// UnwindTxs is the unwindTxs argument value.
 			UnwindTxs TxSlots
 			// MinedTxs is the minedTxs argument value.
@@ -262,15 +265,17 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(stateChanges map[string]sender, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
+func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChange, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64, blockHeight uint64, blockHash [32]byte) error {
 	callInfo := struct {
-		StateChanges map[string]sender
+		Ctx          context.Context
+		StateChanges *remote.StateChange
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
 		BaseFee      uint64
 		BlockHeight  uint64
 		BlockHash    [32]byte
 	}{
+		Ctx:          ctx,
 		StateChanges: stateChanges,
 		UnwindTxs:    unwindTxs,
 		MinedTxs:     minedTxs,
@@ -287,14 +292,15 @@ func (mock *PoolMock) OnNewBlock(stateChanges map[string]sender, unwindTxs TxSlo
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(stateChanges, unwindTxs, minedTxs, baseFee, blockHeight, blockHash)
+	return mock.OnNewBlockFunc(ctx, stateChanges, unwindTxs, minedTxs, baseFee, blockHeight, blockHash)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
 // Check the length with:
 //     len(mockedPool.OnNewBlockCalls())
 func (mock *PoolMock) OnNewBlockCalls() []struct {
-	StateChanges map[string]sender
+	Ctx          context.Context
+	StateChanges *remote.StateChange
 	UnwindTxs    TxSlots
 	MinedTxs     TxSlots
 	BaseFee      uint64
@@ -302,7 +308,8 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 	BlockHash    [32]byte
 } {
 	var calls []struct {
-		StateChanges map[string]sender
+		Ctx          context.Context
+		StateChanges *remote.StateChange
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
 		BaseFee      uint64

@@ -10,8 +10,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
@@ -303,6 +307,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], 123)
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, senderAddr []byte, currentBaseFee1 uint8) {
 		//t.Parallel()
+		ctx := context.Background()
 
 		currentBaseFee := uint64(currentBaseFee1%16 + 1)
 		if currentBaseFee == 0 {
@@ -327,13 +332,16 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
 		t.Cleanup(db.Close)
+		coreDB := memdb.NewTestDB(t)
 
 		cfg := DefaultConfig
 		cfg.EvictSendersAfterRounds = 1
-		pool, err := New(ch, nil, cfg)
+		pool, err := New(ch, coreDB, cfg, kvcache.NewDummy())
 		assert.NoError(err)
-		pool.senders.senderInfo = senders
 		pool.senders.senderIDs = senderIDs
+		for addr, id := range senderIDs {
+			pool.senders.senderID2Addr[id] = addr
+		}
 		pool.senders.senderID = uint64(len(senderIDs))
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
@@ -497,37 +505,51 @@ func FuzzOnNewBlocks(f *testing.F) {
 		//TODO: check that id=>addr and addr=>id mappings have same len
 		//fmt.Printf("-------\n")
 
-		tx, err := db.BeginRw(context.Background())
+		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
 
+		h1, h22 := gointerfaces.ConvertHashToH256([32]byte{1}), gointerfaces.ConvertHashToH256([32]byte{22})
+
+		change := &remote.StateChange{BlockHeight: 1, BlockHash: h1}
+		for id, sender := range senders {
+			var addr [20]byte
+			copy(addr[:], pool.senders.senderID2Addr[id])
+			v := make([]byte, EncodeSenderLengthForStorage(sender.nonce, sender.balance))
+			EncodeSender(sender.nonce, sender.balance, v)
+			change.Changes = append(change.Changes, &remote.AccountChange{
+				Action:  remote.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(addr),
+				Data:    v,
+			})
+		}
 		// go to first fork
 		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(map[string]sender{}, txs1, TxSlots{}, currentBaseFee, 1, [32]byte{})
+		err = pool.OnNewBlock(ctx, change, txs1, TxSlots{}, currentBaseFee, 1, [32]byte{})
 		assert.NoError(err)
 		check(txs1, TxSlots{}, "fork1")
 		checkNotify(txs1, TxSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txs2, txs3
-		err = pool.OnNewBlock(map[string]sender{}, TxSlots{}, txs2, currentBaseFee, 1, [32]byte{})
+		err = pool.OnNewBlock(ctx, &remote.StateChange{BlockHeight: 2, BlockHash: h1}, TxSlots{}, txs2, currentBaseFee, 1, [32]byte{})
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(map[string]sender{}, txs2, TxSlots{}, currentBaseFee, 2, [32]byte{})
+		err = pool.OnNewBlock(ctx, &remote.StateChange{BlockHeight: 1, BlockHash: h1, Direction: remote.Direction_UNWIND}, txs2, TxSlots{}, currentBaseFee, 2, [32]byte{})
 		assert.NoError(err)
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
 
-		err = pool.OnNewBlock(map[string]sender{}, TxSlots{}, txs3, currentBaseFee, 2, [32]byte{})
+		err = pool.OnNewBlock(ctx, &remote.StateChange{BlockHeight: 2, BlockHash: h22}, TxSlots{}, txs3, currentBaseFee, 2, [32]byte{})
 		assert.NoError(err)
 		check(TxSlots{}, txs3, "fork2 mined")
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
-		pool.AddRemoteTxs(context.Background(), p2pReceived)
-		err = pool.processRemoteTxs(context.Background())
+		pool.AddRemoteTxs(ctx, p2pReceived)
+		err = pool.processRemoteTxs(ctx)
 		assert.NoError(err)
 		check(p2pReceived, TxSlots{}, "p2pmsg1")
 		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
@@ -540,10 +562,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxSlots{}, "after_flush")
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
-		p2, err := New(ch, nil, DefaultConfig)
+		p2, err := New(ch, coreDB, DefaultConfig, kvcache.NewDummy())
 		assert.NoError(err)
 		p2.senders = pool.senders // senders are not persisted
-		err = p2.fromDB(context.Background(), tx, nil)
+		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })
 		require.NoError(err)
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.Tx.rlp)
