@@ -366,11 +366,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.LogEvery = 15 * time.Second    //5 * time.Minute
 		cfg.CommitEvery = 15 * time.Second //5 * time.Minute
 
+		cacheConfig := kvcache.DefaultCoherentCacheConfig
+		cacheConfig.MetricsLabel = "txpool"
+
 		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, cfg, kvcache.New(kvcache.DefaultCoherentCacheConfig), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
+			ctx, cfg, kvcache.New(cacheConfig), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
 		)
 		if err != nil {
 			return nil, err

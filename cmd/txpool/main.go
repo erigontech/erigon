@@ -96,10 +96,13 @@ var rootCmd = &cobra.Command{
 		cfg.LogEvery = 5 * time.Minute
 		cfg.CommitEvery = 5 * time.Minute
 
+		cacheConfig :=kvcache.DefaultCoherentCacheConfig
+		cacheConfig.MetricsLabel = "txpool"
+
 		newTxs := make(chan txpool.Hashes, 1024)
 		defer close(newTxs)
 		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
-			kvcache.New(kvcache.DefaultCoherentCacheConfig), newTxs, coreDB, sentryClients, kvClient)
+			kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)
 		if err != nil {
 			return err
 		}
