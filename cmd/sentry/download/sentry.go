@@ -171,7 +171,9 @@ func handShake(
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
 	var readStatus = func() error {
-		forkFilter := forkid.NewFilterFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock)
+		forks := make([]uint64, len(status.ForkData.Forks)) // copy because forkid.NewFilterFromForks will write into this slice
+		copy(forks, status.ForkData.Forks)
+		forkFilter := forkid.NewFilterFromForks(forks, genesisHash, status.MaxBlock)
 		networkID := status.NetworkId
 		// Read handshake message
 		msg, err1 := rw.ReadMsg()
@@ -523,12 +525,12 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	}
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
+	sentryServer.discoveryDNS = discoveryDNS
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer)
 	if err != nil {
 		return err
 	}
-	sentryServer.discoveryDNS = discoveryDNS
 
 	<-ctx.Done()
 	grpcServer.GracefulStop()
