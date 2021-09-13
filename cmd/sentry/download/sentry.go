@@ -13,6 +13,7 @@ import (
 	"path"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -63,6 +65,13 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 	pi.lock.Lock()
 	defer pi.lock.Unlock()
 	pi.deadlines = append(pi.deadlines, deadline)
+}
+
+func (pi *PeerInfo) Height() uint64 {
+	return atomic.LoadUint64(&pi.height)
+}
+func (pi *PeerInfo) SetHeight(h uint64) {
+	atomic.StoreUint64(&pi.height, h)
 }
 
 // ClearDeadlines goes through the deadlines of
@@ -265,7 +274,7 @@ func runPeer(
 				peerPrinted = true
 			}
 		}
-		if err := common.Stopped(ctx.Done()); err != nil {
+		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return err
 		}
 		if peerInfo.Removed() {
@@ -613,10 +622,8 @@ func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.Pe
 	if peerInfo == nil {
 		return &empty.Empty{}, nil
 	}
-	peerInfo.lock.Lock()
-	defer peerInfo.lock.Unlock()
-	if req.MinBlock > peerInfo.height {
-		peerInfo.height = req.MinBlock
+	if req.MinBlock > peerInfo.Height() {
+		peerInfo.SetHeight(req.MinBlock)
 	}
 	return &empty.Empty{}, nil
 }
@@ -634,7 +641,7 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 		if peerInfo == nil {
 			return true
 		}
-		if peerInfo.height >= minBlock {
+		if peerInfo.Height() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
 			if deadlines < maxPermitsPerPeer {

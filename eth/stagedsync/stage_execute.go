@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -268,7 +269,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	var stoppedErr error
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
-		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
+		if stoppedErr = libcommon.Stopped(quit); stoppedErr != nil {
 			break
 		}
 		var err error
@@ -351,35 +352,6 @@ Loop:
 
 	log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	return stoppedErr
-}
-
-func pruneChangeSets(tx kv.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursorDupSort(table)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
-		if err != nil {
-			return fmt.Errorf("failed to move %s cleanup cursor: %w", table, err)
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
-		}
-	}
-	return nil
 }
 
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
@@ -608,21 +580,24 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
-		if err = pruneChangeSets(tx, logPrefix, kv.AccountChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTableDupSort(tx, kv.AccountChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
-		if err = pruneChangeSets(tx, logPrefix, kv.StorageChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTableDupSort(tx, kv.StorageChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTable(tx, kv.Receipts, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+			return err
+		}
+		if err = PruneTable(tx, kv.Log, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTracesSet(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTableDupSort(tx, kv.CallTraceSet, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
@@ -633,91 +608,6 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursor(kv.Receipts)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-		if err != nil {
-			return err
-		}
-
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Receipts, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrent(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
-		}
-	}
-
-	c, err = tx.RwCursor(kv.Log)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrent(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
-		}
-	}
-	return nil
-}
-
-func pruneCallTracesSet(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
 	}
 	return nil

@@ -9,9 +9,9 @@ import (
 	"os/signal"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -41,7 +41,7 @@ func ValidateTxLookups(chaindata string) error {
 	// Validation Process
 	blockBytes := big.NewInt(0)
 	for !interrupt {
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)

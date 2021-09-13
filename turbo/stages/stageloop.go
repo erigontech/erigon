@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
@@ -52,7 +53,7 @@ func StageLoop(
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
 		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
-			if errors.Is(err, common.ErrStopped) {
+			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
 
