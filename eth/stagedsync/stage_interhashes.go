@@ -8,11 +8,11 @@ import (
 	"os"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -399,12 +399,6 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
 	//fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
-
-	// if cache != nil {
-	// 	if err = cacheWarmUpIfNeed(tx, cache); err != nil {
-	// 		return err
-	// 	}
-	// }
 
 	logPrefix := s.LogPrefix()
 	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cfg, expectedRootHash, quit); err != nil {

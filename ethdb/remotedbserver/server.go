@@ -240,9 +240,11 @@ func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV
 }
 
 func (s *KvServer) SendStateChanges(sc *remote.StateChange) {
+	log.Info("SendStateChanges start")
 	if err := s.stateChangeStreams.Broadcast(sc); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "error", err)
 	}
+	log.Info("SendStateChanges end")
 }
 
 type StateChangeStreams struct {

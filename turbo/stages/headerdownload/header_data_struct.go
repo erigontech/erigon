@@ -252,7 +252,7 @@ func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
 }
 
-// HeaderInserter incapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
+// HeaderInserter encapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
 	localTd          *big.Int
