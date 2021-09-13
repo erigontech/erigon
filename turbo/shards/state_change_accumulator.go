@@ -41,11 +41,13 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
 }
 
 // StartChange begins accumulation of changes for a new block
-func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs [][]byte, protocolBaseFee uint64, unwind bool) {
+func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, prevBlockHeight uint64, prevBlockHash common.Hash, txs [][]byte, protocolBaseFee uint64, unwind bool) {
 	a.changes = append(a.changes, remote.StateChange{})
 	a.latestChange = &a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight
 	a.latestChange.BlockHash = gointerfaces.ConvertHashToH256(blockHash)
+	a.latestChange.PrevBlockHeight = prevBlockHeight
+	a.latestChange.PrevBlockHash = gointerfaces.ConvertHashToH256(prevBlockHash)
 	if unwind {
 		a.latestChange.Direction = remote.Direction_UNWIND
 	} else {
