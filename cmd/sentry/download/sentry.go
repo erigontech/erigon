@@ -523,12 +523,12 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	}
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
+	sentryServer.discoveryDNS = discoveryDNS
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer)
 	if err != nil {
 		return err
 	}
-	sentryServer.discoveryDNS = discoveryDNS
 
 	<-ctx.Done()
 	grpcServer.GracefulStop()
