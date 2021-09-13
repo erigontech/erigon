@@ -171,7 +171,9 @@ func handShake(
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
 	var readStatus = func() error {
-		forkFilter := forkid.NewFilterFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock)
+		forks := make([]uint64, len(status.ForkData.Forks)) // copy because forkid.NewFilterFromForks will write into this slice
+		copy(forks, status.ForkData.Forks)
+		forkFilter := forkid.NewFilterFromForks(forks, genesisHash, status.MaxBlock)
 		networkID := status.NetworkId
 		// Read handshake message
 		msg, err1 := rw.ReadMsg()
