@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -446,7 +445,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 			}
 		}
 		if err := f.db.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, req.ProtocolBaseFee, req.BlockHeight, gointerfaces.ConvertH256ToHash(req.BlockHash))
+			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, req.ProtocolBaseFee)
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}
