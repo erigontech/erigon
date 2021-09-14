@@ -382,15 +382,14 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
-	log.Error("recved new tx", "amount", len(reply.RplTxs))
 
 	txs := make([]types.Transaction, len(reply.RplTxs))
-	for i, rplTx := range reply.RplTxs {
+	for i, rlpTx := range reply.RplTxs {
 		var decodeErr error
-		txs[i], decodeErr = types.UnmarshalTransactionFromBinary(rplTx)
+		txs[i], decodeErr = types.UnmarshalTransactionFromBinary(rlpTx)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr)
+			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", fmt.Sprintf("%x", rlpTx))
 			break
 		}
 	}
