@@ -526,6 +526,45 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	return nil
 }
 
+func (a *Account) DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
+	a.Reset()
+
+	if len(enc) == 0 {
+		return 0, nil
+	}
+
+	var fieldSet = enc[0]
+	var pos = 1
+
+	//looks for the position incarnation is at
+	if fieldSet&1 > 0 {
+		decodeLength := int(enc[pos])
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&2 > 0 {
+		decodeLength := int(enc[pos])
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&4 > 0 {
+		decodeLength := int(enc[pos])
+
+		//checks if the ending position is correct if not returns 0
+		if len(enc) < pos+decodeLength+1 {
+			return 0, fmt.Errorf(
+				"malformed CBOR for Account.Incarnation: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		incarnation := bytesToUint64(enc[pos+1 : pos+decodeLength+1])
+		return incarnation, nil
+	}
+
+	return 0, nil
+
+}
+
 func (a *Account) SelfCopy() *Account {
 	newAcc := NewAccount()
 	newAcc.Copy(a)

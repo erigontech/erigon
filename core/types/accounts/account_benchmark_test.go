@@ -297,6 +297,77 @@ func BenchmarkDecodingAccount(b *testing.B) {
 	}
 }
 
+func BenchmarkDecodingIncarnation(b *testing.B) {
+	accountCases := []struct {
+		name string
+		acc  *Account
+	}{
+		{
+			name: "EmptyAccount",
+			acc: &Account{
+				Nonce:    0,
+				Balance:  *new(uint256.Int),
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+			},
+		},
+
+		{
+			name: "AccountEncodeWithCode",
+			acc: &Account{
+				Nonce:    2,
+				Balance:  *new(uint256.Int).SetUint64(1000),
+				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+			},
+		},
+
+		{
+			name: "AccountEncodeWithCodeWithStorageSizeHack",
+			acc: &Account{
+				Nonce:    2,
+				Balance:  *new(uint256.Int).SetUint64(1000),
+				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+			},
+		},
+	}
+	var decodedIncarnations []uint64
+	b.ResetTimer()
+	for _, test := range accountCases {
+		test := test
+		encodedAccount := make([]byte, test.acc.EncodingLengthForStorage())
+		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				test.acc.Nonce = uint64(i)
+				test.acc.Balance.SetUint64(uint64(i))
+
+				test.acc.EncodeForStorage(encodedAccount)
+
+				b.StartTimer()
+
+				var decodedAccount Account
+				if _, err := decodedAccount.DecodeIncarnationFromStorage(encodedAccount); err != nil {
+					b.Fatal("can't decode the incarnation", err, encodedAccount)
+				}
+
+				decodedIncarnation, _ := decodedAccount.DecodeIncarnationFromStorage(encodedAccount)
+
+				b.StopTimer()
+				decodedIncarnations = append(decodedIncarnations, decodedIncarnation)
+				b.StartTimer()
+			}
+		})
+	}
+
+	b.StopTimer()
+	for _, incarnation := range decodedIncarnations {
+		fmt.Fprint(ioutil.Discard, incarnation)
+	}
+
+}
+
 func BenchmarkRLPEncodingAccount(b *testing.B) {
 	accountCases := []struct {
 		name string
