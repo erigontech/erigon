@@ -2,9 +2,6 @@ module github.com/ledgerwatch/erigon
 
 go 1.16
 
-replace (
-	github.com/ledgerwatch/erigon-lib => ./../erigon-lib
-)
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.6.0
@@ -41,7 +38,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/ledgerwatch/erigon-lib v0.0.0-20210914021127-1abe630cb7e5
+	github.com/ledgerwatch/erigon-lib v0.0.0-20210914143654-ecd20b316053
 	github.com/ledgerwatch/log/v3 v3.3.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
