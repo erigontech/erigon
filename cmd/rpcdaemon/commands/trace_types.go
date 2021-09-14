@@ -44,8 +44,8 @@ type ParityTrace struct {
 	Result              interface{}  `json:"result"`
 	Subtraces           int          `json:"subtraces"`
 	TraceAddress        []int        `json:"traceAddress"`
-	TransactionHash     *common.Hash `json:"transactionHash"`
-	TransactionPosition *uint64      `json:"transactionPosition"`
+	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
+	TransactionPosition *uint64      `json:"transactionPosition,omitempty"`
 	Type                string       `json:"type"`
 }
 

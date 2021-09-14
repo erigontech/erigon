@@ -14,30 +14,38 @@ our daemon will only contain one method: `myNamespace_getBlockNumberByHash` whic
     import (
         "context"
 
+        "github.com/ledgerwatch/erigon-lib/kv"
         "github.com/ledgerwatch/erigon/common"
         "github.com/ledgerwatch/erigon/core/rawdb"
-        "github.com/ledgerwatch/erigon/ethdb"
     )
 
-    // API - implementation of ExampleApi
     type API struct {
-        kv ethdb.RwKV
-        db ethdb.Getter
+        db kv.RoDB
     }
 
     type ExampleAPI interface {
         GetBlockNumberByHash(ctx context.Context, hash common.Hash) (uint64, error)
     }
 
-    func NewAPI(kv ethdb.RwKV, db ethdb.Getter) *API {
-        return &API{kv: kv, db: db}
+    func NewAPI(db kv.RoDB) *API {
+        return &API{db}
     }
 
     func (api *API) GetBlockNumberByHash(ctx context.Context, hash common.Hash) (uint64, error) {
-        return rawdb.ReadBlockByHash(api.db, hash).NumberU64(), nil
+        tx, err := api.db.BeginRo(ctx)
+        if err != nil {
+            return 0, err
+        }
+        defer tx.Rollback()
+
+        block, err := rawdb.ReadBlockByHash(tx, hash)
+        if err != nil {
+            return 0, err
+        }
+        return block.NumberU64(), nil
     }
 
-The type `Api` is the type that is going to contain the methods for our custom daemon. This type has two members: `kv` and `db` which are objects used to interact with the Erigon node remotely. they behave like normal db objects and can be used alongside with the rawdb package.
+The type `Api` is the type that is going to contain the methods for our custom daemon. This type has one member: `db` object used to interact with the Erigon node remotely. Member `db` behave like normal db object and can be used alongside with the rawdb package.
 
 In our example we are making an rpcdaemon call that by receiving a certain block hash, it give the block number associated as an output. this is all done in `GetBlockNumberByHash`.
 
@@ -48,42 +56,42 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
     package main
 
     import (
-        "context"
         "os"
 
+        "github.com/ledgerwatch/erigon-lib/kv"
         "github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-        "github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
         "github.com/ledgerwatch/erigon/cmd/utils"
-        "github.com/ledgerwatch/erigon/common"
-        "github.com/ledgerwatch/erigon/ethdb"
-        "github.com/ledgerwatch/erigon/log"
         "github.com/ledgerwatch/erigon/rpc"
+        "github.com/ledgerwatch/log/v3"
         "github.com/spf13/cobra"
     )
 
     func main() {
         cmd, cfg := cli.RootCommand()
+        rootCtx, rootCancel := utils.RootContext()
         cmd.RunE = func(cmd *cobra.Command, args []string) error {
-            db, backend, err := cli.OpenDB(*cfg)
+            logger := log.New()
+            db, _, _, _, err := cli.RemoteServices(*cfg, logger, rootCancel)
             if err != nil {
-                log.Error("Could not connect to remoteDb", "error", err)
+                log.Error("Could not connect to DB", "error", err)
                 return nil
             }
+            defer db.Close()
 
-            apiList := APIList(db, backend, cfg)
-            return cli.StartRpcServer(cmd.Context(), *cfg, apiList)
+            if err := cli.StartRpcServer(cmd.Context(), *cfg, APIList(db)); err != nil {
+                log.Error(err.Error())
+                return nil
+            }
+            return nil
         }
-
-        if err := cmd.ExecuteContext(utils.RootContext()); err != nil {
+        if err := cmd.ExecuteContext(rootCtx); err != nil {
             log.Error(err.Error())
             os.Exit(1)
         }
     }
 
-    func APIList(kv ethdb.RwKV, eth ethdb.Backend, cfg *cli.Flags) []rpc.API {
-        dbReader := ethdb.NewObjectDatabase(kv)
-        api := NewAPI(kv, dbReader)
-
+    func APIList(db kv.RoDB) []rpc.API {
+        api := NewAPI(db)
         customAPIList := []rpc.API{
             {
                 Namespace: "myNamespace",
@@ -92,21 +100,19 @@ Now we are going to make our `main.go` where we are going to serve the api we ma
                 Version:   "1.0",
             },
         }
-
-        // Add default Erigon api's
-        return commands.APIList(kv, eth, *cfg, customAPIList)
+        return customAPIList
     }
 
-In the main we are just running our rpcdaemon as we defined it in `APIList`, in fact in `APIList` we are configuring our custom rpcdaemon to serve the ExampleAPI's mathods on namespace `myNamespace` meaning that in order to call GetBlockNumberByHash via json rpc we have to call method `myNamespace_getBlockNumberByHash`.
+In the main we are just running our rpcdaemon as we defined it in `APIList`, in fact in `APIList` we are configuring our custom rpcdaemon to serve the ExampleAPI's methods on namespace `myNamespace` meaning that in order to call GetBlockNumberByHash via json rpc we have to call method `myNamespace_getBlockNumberByHash`.
 
 Let's now try it:
 
 .. code-block:: sh
 
     $ go build
-    $ ./hello-tg-daemon --http.api=myNamespace # the flag enables our namespace.
+    $ ./hello-erigon-daemon --http.api=myNamespace # the flag enables our namespace.
 
-**Note: Remember to run Erigon with --private.api.addr=localhost:9090**
+**Note: Remember to run it with --private.api.addr=localhost:9090 and/or --datadir <path-to-erigon-data>**
 
 now it should be all set and we can test it with:
 

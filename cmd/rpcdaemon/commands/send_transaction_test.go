@@ -57,7 +57,7 @@ func TestSendRawTransaction(t *testing.T) {
 
 		initialCycle := true
 		highestSeenHeader := chain.TopBlock.NumberU64()
-		if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 			t.Fatal(err)
 		}
 	}

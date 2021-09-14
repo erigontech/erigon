@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -32,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -213,8 +213,8 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
-	checkTEVM := func(common.Hash) (bool, error) { return false, nil }
-	context := core.NewEVMBlockContext(block.Header(), nil, nil, &t.json.Env.Coinbase, checkTEVM)
+	contractHasTEVM := func(common.Hash) (bool, error) { return false, nil }
+	context := core.NewEVMBlockContext(block.Header(), nil, nil, &t.json.Env.Coinbase, contractHasTEVM)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)

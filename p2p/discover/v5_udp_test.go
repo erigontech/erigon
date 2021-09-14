@@ -31,11 +31,11 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/internal/testlog"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
@@ -86,8 +86,8 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 
 	// Prefix logs with node ID.
 	lprefix := fmt.Sprintf("(%s)", ln.ID().TerminalString())
-	lfmt := log.TerminalFormat(false)
-	cfg.Log = testlog.Logger(t, log.LvlTrace)
+	lfmt := log.TerminalFormat()
+	cfg.Log = testlog.Logger(t, log.LvlInfo)
 	cfg.Log.SetHandler(log.FuncHandler(func(r *log.Record) error {
 		t.Logf("%s %s", lprefix, lfmt.Format(r))
 		return nil
@@ -727,7 +727,7 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln.Set(enr.UDP(30303))
 	test.udp, err = ListenV5(test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
-		Log:          testlog.Logger(t, log.LvlTrace),
+		Log:          testlog.Logger(t, log.LvlInfo),
 		ValidSchemes: enode.ValidSchemesForTesting,
 	})
 	if err != nil {

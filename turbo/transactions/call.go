@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -14,17 +15,16 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters, contractHasTEVM func(hash common.Hash) (bool, error)) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -112,7 +112,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 	if err != nil {
 		return nil, err
 	}
-	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
+	blockCtx, txCtx := GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
 
@@ -136,7 +136,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 	return result, nil
 }
 
-func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx) (vm.BlockContext, vm.TxContext) {
+func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool, tx kv.Tx, contractHasTEVM func(address common.Hash) (bool, error)) (vm.BlockContext, vm.TxContext) {
 	var baseFee uint256.Int
 	if header.Eip1559 {
 		overflow := baseFee.SetFromBig(header.BaseFee)
@@ -145,16 +145,16 @@ func GetEvmContext(msg core.Message, header *types.Header, requireCanonical bool
 		}
 	}
 	return vm.BlockContext{
-			CanTransfer: core.CanTransfer,
-			Transfer:    core.Transfer,
-			GetHash:     getHashGetter(requireCanonical, tx),
-			CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
-			Coinbase:    header.Coinbase,
-			BlockNumber: header.Number.Uint64(),
-			Time:        header.Time,
-			Difficulty:  new(big.Int).Set(header.Difficulty),
-			GasLimit:    header.GasLimit,
-			BaseFee:     &baseFee,
+			CanTransfer:     core.CanTransfer,
+			Transfer:        core.Transfer,
+			GetHash:         getHashGetter(requireCanonical, tx),
+			ContractHasTEVM: contractHasTEVM,
+			Coinbase:        header.Coinbase,
+			BlockNumber:     header.Number.Uint64(),
+			Time:            header.Time,
+			Difficulty:      new(big.Int).Set(header.Difficulty),
+			GasLimit:        header.GasLimit,
+			BaseFee:         &baseFee,
 		},
 		vm.TxContext{
 			Origin:   msg.From(),

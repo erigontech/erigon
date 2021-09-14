@@ -49,7 +49,7 @@ func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint25
 	if gasFeeCap.Lt(baseFee) {
 		return uint256.NewInt(0)
 	}
-	effectiveFee := gasFeeCap.Sub(gasFeeCap, baseFee)
+	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
 	if tx.GetTip().Lt(effectiveFee) {
 		return tx.GetTip()
 	} else {
@@ -469,9 +469,11 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, 
 		accessList: tx.AccessList,
 		checkNonce: true,
 	}
-	overflow := msg.gasPrice.SetFromBig(baseFee)
-	if overflow {
-		return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
 	if msg.gasPrice.Gt(tx.FeeCap) {

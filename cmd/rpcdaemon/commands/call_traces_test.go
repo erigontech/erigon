@@ -51,8 +51,8 @@ func TestCallTraceOneByOne(t *testing.T) {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	var buf bytes.Buffer
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+	stream := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(stream)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -65,7 +65,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, buf.Bytes()))
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 }
 
 func TestCallTraceUnwind(t *testing.T) {

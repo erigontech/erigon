@@ -6,14 +6,15 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/spf13/cobra"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -55,7 +56,7 @@ func BodySnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath s
 	if err := snKV.Update(ctx, func(sntx kv.RwTx) error {
 		for i := uint64(1); i <= toBlock; i++ {
 			if common.IsCanceled(ctx) {
-				return common.ErrStopped
+				return libcommon.ErrStopped
 			}
 
 			hash, err = rawdb.ReadCanonicalHash(tx, i)

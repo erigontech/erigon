@@ -23,11 +23,11 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
@@ -96,11 +96,11 @@ func TestBodyStorage(t *testing.T) {
 	_ = rlp.Encode(hasher, body)
 	hash := common.BytesToHash(hasher.Sum(nil))
 
-	if entry := ReadBody(tx, hash, 0); entry != nil {
+	if entry := ReadBodyWithTransactions(tx, hash, 0); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	require.NoError(WriteBody(tx, hash, 0, body))
-	if entry := ReadBody(tx, hash, 0); entry == nil {
+	if entry := ReadBodyWithTransactions(tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
@@ -117,7 +117,7 @@ func TestBodyStorage(t *testing.T) {
 	}
 	// Delete the body and verify the execution
 	DeleteBody(tx, hash, 0)
-	if entry := ReadBody(tx, hash, 0); entry != nil {
+	if entry := ReadBodyWithTransactions(tx, hash, 0); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }
@@ -139,7 +139,7 @@ func TestBlockStorage(t *testing.T) {
 	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
-	if entry := ReadBody(tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadBodyWithTransactions(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the block in the database
@@ -157,7 +157,7 @@ func TestBlockStorage(t *testing.T) {
 	} else if entry.Hash() != block.Header().Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if entry := ReadBody(tx, block.Hash(), block.NumberU64()); entry == nil {
+	if entry := ReadBodyWithTransactions(tx, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(block.Transactions()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
@@ -172,7 +172,7 @@ func TestBlockStorage(t *testing.T) {
 	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted header returned: %v", entry)
 	}
-	if entry := ReadBody(tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry := ReadBodyWithTransactions(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }

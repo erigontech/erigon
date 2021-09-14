@@ -1,12 +1,13 @@
 ## Fuzzers
 
-To run a fuzzer locally, you need [go-fuzz](https://github.com/dvyukov/go-fuzz) installed. 
+To run a fuzzer locally, you need [go-fuzz](https://github.com/dvyukov/go-fuzz) installed.
 
 First build a fuzzing-binary out of the selected package:
 
 ```
 (cd ./rlp && CGO_ENABLED=0 go-fuzz-build .)
 ```
+
 That command should generate a `rlp-fuzz.zip` in the `rlp/` directory. If you are already in that directory, you can do
 
 ```
@@ -24,22 +25,26 @@ That command should generate a `rlp-fuzz.zip` in the `rlp/` directory. If you ar
 2019/11/26 13:37:24 workers: 6, corpus: 3 (33s ago), crashers: 0, restarts: 1/9967, execs: 219294 (6645/sec), cover: 1054, uptime: 33s
 
 ```
-Otherwise: 
+
+Otherwise:
+
 ```
 go-fuzz -bin ./rlp/rlp-fuzz.zip
 ```
 
 ### Notes
 
-Once a 'crasher' is found, the fuzzer tries to avoid reporting the same vector twice, so stores the fault in the `suppressions` folder. Thus, if you 
-e.g. make changes to fix a bug, you should _remove_ all data from the `suppressions`-folder, to verify that the issue is indeed resolved. 
+Once a 'crasher' is found, the fuzzer tries to avoid reporting the same vector twice, so stores the fault in
+the `suppressions` folder. Thus, if you e.g. make changes to fix a bug, you should _remove_ all data from
+the `suppressions`-folder, to verify that the issue is indeed resolved.
 
-Also, if you have only one and the same exit-point for multiple different types of test, the suppression can make the fuzzer hide different types of errors. So make
-sure that each type of failure is unique (for an example, see the rlp fuzzer, where a counter `i` is used to differentiate between failures: 
+Also, if you have only one and the same exit-point for multiple different types of test, the suppression can make the
+fuzzer hide different types of errors. So make sure that each type of failure is unique (for an example, see the rlp
+fuzzer, where a counter `i` is used to differentiate between failures:
 
 ```golang
-		if !bytes.Equal(input, output) {
-			panic(fmt.Sprintf("case %d: encode-decode is not equal, \ninput : %x\noutput: %x", i, input, output))
-		}
+        if !bytes.Equal(input, output) {
+panic(fmt.Sprintf("case %d: encode-decode is not equal, \ninput : %x\noutput: %x", i, input, output))
+}
 ```
 

@@ -2,7 +2,6 @@ package stages_test
 
 import (
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -12,10 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +24,7 @@ func TestEmptyStageSync(t *testing.T) {
 
 func TestHeaderStep(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *core.BlockGen) {
@@ -58,7 +57,7 @@ func TestHeaderStep(t *testing.T) {
 
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -66,7 +65,7 @@ func TestHeaderStep(t *testing.T) {
 func TestMineBlockWith1Tx(t *testing.T) {
 	t.Skip("revive me")
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	require, m := require.New(t), stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
@@ -99,7 +98,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 
 		initialCycle := true
 		highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-		if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+		if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -132,7 +131,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 
 func TestReorg(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
@@ -170,7 +169,7 @@ func TestReorg(t *testing.T) {
 
 	initialCycle := true
 	highestSeenHeader := uint64(chain.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,7 +223,7 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,7 +267,7 @@ func TestReorg(t *testing.T) {
 
 	// This is unwind step
 	highestSeenHeader = uint64(long1.TopBlock.NumberU64())
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -306,14 +305,14 @@ func TestReorg(t *testing.T) {
 
 	highestSeenHeader = uint64(short2.TopBlock.NumberU64())
 	initialCycle = false
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestAnchorReplace(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
@@ -405,14 +404,14 @@ func TestAnchorReplace(t *testing.T) {
 
 	highestSeenHeader := uint64(long.TopBlock.NumberU64())
 	initialCycle := true
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestAnchorReplace2(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	m := stages.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -512,7 +511,7 @@ func TestAnchorReplace2(t *testing.T) {
 
 	highestSeenHeader := uint64(long.TopBlock.NumberU64())
 	initialCycle := true
-	if err := stages.StageLoopStep(m.Ctx, m.Log, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
+	if err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -2,11 +2,13 @@ package snapshotsync
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"os"
+	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/log"
+
+
 )
 
 func CreateStateSnapshot(ctx context.Context, snapshotPath string, logger log.Logger) (kv.RwDB, error) {

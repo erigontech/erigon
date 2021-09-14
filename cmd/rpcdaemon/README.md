@@ -107,6 +107,8 @@ Some methods, if not found historical data in DB, can fallback to old blocks re-
 
 ### RPC Implementation Status
 
+Label "remote" means: `--private.api.addr` flag is required.
+
 The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                      |
@@ -114,15 +116,17 @@ The following table shows the current implementation status of Erigon's RPC daem
 | web3_clientVersion                         | Yes     |                                            |
 | web3_sha3                                  | Yes     |                                            |
 |                                            |         |                                            |
-| net_listening                              | HC      | (remote only hard coded returns true)      |
+| net_listening                              | HC      | (`remote` hard coded returns true)         |
 | net_peerCount                              | Limited | internal sentries only                     |
-| net_version                                | Yes     | remote only                                |
+| net_version                                | Yes     | `remote`.                                  |
 |                                            |         |                                            |
 | eth_blockNumber                            | Yes     |                                            |
 | eth_chainID                                | Yes     |                                            |
 | eth_protocolVersion                        | Yes     |                                            |
 | eth_syncing                                | Yes     |                                            |
 | eth_gasPrice                               | Yes     |                                            |
+| eth_maxPriorityFeePerGas                   | Yes     |                                            |
+| eth_feeHistory                             | Yes     |                                            |
 |                                            |         |                                            |
 | eth_getBlockByHash                         | Yes     |                                            |
 | eth_getBlockByNumber                       | Yes     |                                            |
@@ -158,7 +162,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getLogs                                | Yes     |                                            |
 |                                            |         |                                            |
 | eth_accounts                               | No      | deprecated                                 |
-| eth_sendRawTransaction                     | Yes     | remote only                                |
+| eth_sendRawTransaction                     | Yes     | `remote`.                                  |
 | eth_sendTransaction                        | -       | not yet implemented                        |
 | eth_sign                                   | No      | deprecated                                 |
 | eth_signTransaction                        | -       | not yet implemented                        |
@@ -195,7 +199,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | trace_get                                  | Yes     |                                            |
 | trace_transaction                          | Yes     |                                            |
 |                                            |         |                                            |
-| txpool_content                             | Yes     | remote only                                |
+| txpool_content                             | Yes     | `remote`                                   |
+| txpool_status                              | Yes     | `remote`                                   |
 |                                            |         |                                            |
 | eth_getCompilers                           | No      | deprecated                                 |
 | eth_compileLLL                             | No      | deprecated                                 |

@@ -9,16 +9,18 @@ import (
 	"sync"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
 
@@ -30,11 +32,11 @@ type SendersCfg struct {
 	numOfGoroutines int
 	readChLen       int
 	tmpdir          string
-
-	chainConfig *params.ChainConfig
+	prune           prune.Mode
+	chainConfig     *params.ChainConfig
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -47,6 +49,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string) Se
 		readChLen:       4,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
+		prune:           prune,
 	}
 }
 
@@ -95,7 +98,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -109,7 +112,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Preload headedrs", logPrefix), "block_number", binary.BigEndian.Uint64(k))
+			log.Info(fmt.Sprintf("[%s] Preload headers", logPrefix), "block_number", binary.BigEndian.Uint64(k))
 		}
 	}
 	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
@@ -192,7 +195,7 @@ Loop:
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -206,7 +209,7 @@ Loop:
 			// non-canonical case
 			continue
 		}
-		body := rawdb.ReadBody(tx, blockHash, blockNumber)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
 
 		select {
 		case recoveryErr := <-errCh:
@@ -310,14 +313,14 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 		}
 
 		// prevent sending to close channel
-		if err := common.Stopped(quit); err != nil {
+		if err := libcommon.Stopped(quit); err != nil {
 			job.err = err
-		} else if err = common.Stopped(ctx.Done()); err != nil {
+		} else if err = libcommon.Stopped(ctx.Done()); err != nil {
 			job.err = err
 		}
 		out <- job
 
-		if errors.Is(job.err, common.ErrStopped) {
+		if errors.Is(job.err, libcommon.ErrStopped) {
 			return
 		}
 	}
@@ -345,6 +348,12 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 }
 
 func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+	if !cfg.prune.TxIndex.Enabled() {
+		return nil
+	}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -352,6 +361,10 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
+		return err
 	}
 
 	if !useExternalTx {

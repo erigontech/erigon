@@ -21,20 +21,20 @@ package p2p
 import (
 	"net"
 
-	"github.com/ledgerwatch/erigon/metrics"
+	"github.com/VictoriaMetrics/metrics"
 )
 
 const (
-	ingressMeterName = "p2p/ingress"
-	egressMeterName  = "p2p/egress"
+	ingressMeterName = "p2p_ingress"
+	egressMeterName  = "p2p_egress"
 )
 
 var (
-	ingressConnectMeter = metrics.NewRegisteredMeter("p2p/serves", nil)
-	ingressTrafficMeter = metrics.NewRegisteredMeter(ingressMeterName, nil)
-	egressConnectMeter  = metrics.NewRegisteredMeter("p2p/dials", nil)
-	egressTrafficMeter  = metrics.NewRegisteredMeter(egressMeterName, nil)
-	activePeerGauge     = metrics.NewRegisteredGauge("p2p/peers", nil)
+	ingressConnectMeter = metrics.GetOrCreateCounter("p2p_serves")
+	ingressTrafficMeter = metrics.GetOrCreateCounter(ingressMeterName)
+	egressConnectMeter  = metrics.GetOrCreateCounter("p2p_dials")
+	egressTrafficMeter  = metrics.GetOrCreateCounter(egressMeterName)
+	activePeerGauge     = metrics.GetOrCreateCounter("p2p_peers")
 )
 
 // meteredConn is a wrapper around a net.Conn that meters both the
@@ -47,17 +47,13 @@ type meteredConn struct {
 // connection meter and also increases the metered peer count. If the metrics
 // system is disabled, function returns the original connection.
 func newMeteredConn(conn net.Conn, ingress bool, addr *net.TCPAddr) net.Conn {
-	// Short circuit if metrics are disabled
-	if !metrics.Enabled {
-		return conn
-	}
 	// Bump the connection counters and wrap the connection
 	if ingress {
-		ingressConnectMeter.Mark(1)
+		ingressConnectMeter.Inc()
 	} else {
-		egressConnectMeter.Mark(1)
+		egressConnectMeter.Inc()
 	}
-	activePeerGauge.Inc(1)
+	activePeerGauge.Inc()
 	return &meteredConn{Conn: conn}
 }
 
@@ -65,7 +61,7 @@ func newMeteredConn(conn net.Conn, ingress bool, addr *net.TCPAddr) net.Conn {
 // and the peer ingress traffic meters along the way.
 func (c *meteredConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
-	ingressTrafficMeter.Mark(int64(n))
+	ingressTrafficMeter.Add(n)
 	return n, err
 }
 
@@ -73,7 +69,7 @@ func (c *meteredConn) Read(b []byte) (n int, err error) {
 // and the peer egress traffic meters along the way.
 func (c *meteredConn) Write(b []byte) (n int, err error) {
 	n, err = c.Conn.Write(b)
-	egressTrafficMeter.Mark(int64(n))
+	egressTrafficMeter.Add(n)
 	return n, err
 }
 
@@ -82,7 +78,7 @@ func (c *meteredConn) Write(b []byte) (n int, err error) {
 func (c *meteredConn) Close() error {
 	err := c.Conn.Close()
 	if err == nil {
-		activePeerGauge.Dec(1)
+		activePeerGauge.Dec()
 	}
 	return err
 }

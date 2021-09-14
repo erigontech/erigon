@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -57,7 +57,7 @@ var rootCmd = &cobra.Command{
 			genesis = genesisFromFile(genesisPath)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "erigon", "chaindata")
+			chaindata = path.Join(datadir, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

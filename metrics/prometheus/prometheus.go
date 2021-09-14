@@ -22,8 +22,8 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Handler returns an HTTP handler which dump metrics in Prometheus format.

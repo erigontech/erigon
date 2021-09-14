@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -1279,3 +1280,19 @@ func (b *Block) Hash() common.Hash {
 }
 
 type Blocks []*Block
+
+func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uint32, err error) {
+	pos, _, err := rlp2.List(payload, 0)
+	if err != nil {
+		return baseTxId, txAmount, err
+	}
+	pos, baseTxId, err = rlp2.U64(payload, pos)
+	if err != nil {
+		return baseTxId, txAmount, err
+	}
+	_, txAmount, err = rlp2.U32(payload, pos)
+	if err != nil {
+		return baseTxId, txAmount, err
+	}
+	return
+}

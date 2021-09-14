@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -190,7 +190,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				if err := snap.store(c.db); err != nil {
 					return nil, err
 				}
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+				log.Info("[Clique] Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 				break
 			}
 		}

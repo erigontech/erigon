@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -20,12 +23,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const callTimeout = 5 * time.Minute
@@ -60,10 +63,11 @@ type TraceCallParam struct {
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
-	Output    hexutil.Bytes                        `json:"output"`
-	StateDiff map[common.Address]*StateDiffAccount `json:"stateDiff"`
-	Trace     []*ParityTrace                       `json:"trace"`
-	VmTrace   *TraceCallVmTrace                    `json:"vmTrace"`
+	Output          hexutil.Bytes                        `json:"output"`
+	StateDiff       map[common.Address]*StateDiffAccount `json:"stateDiff"`
+	Trace           []*ParityTrace                       `json:"trace"`
+	VmTrace         *VmTrace                             `json:"vmTrace"`
+	TransactionHash *common.Hash                         `json:"transactionHash,omitempty"`
 }
 
 // StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
@@ -94,8 +98,37 @@ type StateDiffStorage struct {
 	To   common.Hash `json:"to"`
 }
 
-// TraceCallVmTrace is the part of `trace_call` response that is under "vmTrace" tag
-type TraceCallVmTrace struct {
+// VmTrace is the part of `trace_call` response that is under "vmTrace" tag
+type VmTrace struct {
+	Code hexutil.Bytes `json:"code"`
+	Ops  []*VmTraceOp  `json:"ops"`
+}
+
+// VmTraceOp is one element of the vmTrace ops trace
+type VmTraceOp struct {
+	Cost int        `json:"cost"`
+	Ex   *VmTraceEx `json:"ex"`
+	Pc   int        `json:"pc"`
+	Sub  *VmTrace   `json:"sub"`
+	Op   string     `json:"op,omitempty"`
+	Idx  string     `json:"idx,omitempty"`
+}
+
+type VmTraceEx struct {
+	Mem   *VmTraceMem   `json:"mem"`
+	Push  []string      `json:"push"`
+	Store *VmTraceStore `json:"store"`
+	Used  int           `json:"used"`
+}
+
+type VmTraceMem struct {
+	Data string `json:"data"`
+	Off  int    `json:"off"`
+}
+
+type VmTraceStore struct {
+	Key string `json:"key"`
+	Val string `json:"val"`
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -163,6 +196,10 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			gasPrice = new(uint256.Int)
 			if gasFeeCap.BitLen() > 0 || gasTipCap.BitLen() > 0 {
 				gasPrice = math2.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
+			} else {
+				// This means gasFeeCap == 0, gasTipCap == 0
+				gasPrice.Set(baseFee)
+				gasFeeCap, gasTipCap = gasPrice, gasPrice
 			}
 		}
 	}
@@ -187,16 +224,53 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 
 // OpenEthereum-style tracer
 type OeTracer struct {
-	r          *TraceCallResult
-	traceAddr  []int
-	traceStack []*ParityTrace
-	lastTop    *ParityTrace
-	precompile bool // Whether the last CaptureStart was called with `precompile = true`
-	compat     bool // Bug for bug compatibility mode
+	r            *TraceCallResult
+	traceAddr    []int
+	traceStack   []*ParityTrace
+	precompile   bool // Whether the last CaptureStart was called with `precompile = true`
+	compat       bool // Bug for bug compatibility mode
+	lastVmOp     *VmTraceOp
+	lastOp       vm.OpCode
+	lastMemOff   uint64
+	lastMemLen   uint64
+	memOffStack  []uint64
+	memLenStack  []uint64
+	lastOffStack *VmTraceOp
+	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
+	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 }
 
-func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
-	if precompile {
+func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
+	if ot.r.VmTrace != nil {
+		var vmTrace *VmTrace
+		if depth > 0 {
+			var vmT *VmTrace
+			if len(ot.vmOpStack) > 0 {
+				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
+			} else {
+				vmT = ot.r.VmTrace
+			}
+			if !ot.compat {
+				ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
+			}
+		}
+		if ot.lastVmOp != nil {
+			vmTrace = &VmTrace{Ops: []*VmTraceOp{}}
+			ot.lastVmOp.Sub = vmTrace
+			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
+		} else {
+			vmTrace = ot.r.VmTrace
+		}
+		if create {
+			vmTrace.Code = common.CopyBytes(input)
+			if ot.lastVmOp != nil {
+				ot.lastVmOp.Cost += int(gas)
+			}
+		} else {
+			vmTrace.Code = code
+		}
+	}
+	if precompile && depth > 0 {
 		ot.precompile = true
 		return nil
 	}
@@ -265,7 +339,22 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 	return nil
 }
 
-func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
+	if ot.r.VmTrace != nil {
+		if len(ot.vmOpStack) > 0 {
+			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
+			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+		}
+		if !ot.compat && depth > 0 {
+			ot.idx = ot.idx[:len(ot.idx)-1]
+		}
+		if depth > 0 {
+			ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
+			ot.memOffStack = ot.memOffStack[:len(ot.memOffStack)-1]
+			ot.lastMemLen = ot.memLenStack[len(ot.memLenStack)-1]
+			ot.memLenStack = ot.memLenStack[:len(ot.memLenStack)-1]
+		}
+	}
 	if ot.precompile {
 		ot.precompile = false
 		return nil
@@ -273,9 +362,8 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	if depth == 0 {
 		ot.r.Output = common.CopyBytes(output)
 	}
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	ot.lastTop = topTrace
 	ignoreError := false
+	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.compat {
 		ignoreError = depth == 0 && topTrace.Type == CREATE
 	}
@@ -312,10 +400,10 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 		switch topTrace.Type {
 		case CALL:
 			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
 		case CREATE:
 			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(gasUsed)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -326,6 +414,109 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 }
 
 func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
+	if ot.r.VmTrace != nil {
+		var vmTrace *VmTrace
+		if len(ot.vmOpStack) > 0 {
+			vmTrace = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
+		} else {
+			vmTrace = ot.r.VmTrace
+		}
+		if ot.lastVmOp != nil && ot.lastVmOp.Ex != nil {
+			// Set the "push" of the last operation
+			var showStack int
+			switch {
+			case ot.lastOp >= vm.PUSH1 && ot.lastOp <= vm.PUSH32:
+				showStack = 1
+			case ot.lastOp >= vm.SWAP1 && ot.lastOp <= vm.SWAP16:
+				showStack = int(ot.lastOp-vm.SWAP1) + 2
+			case ot.lastOp >= vm.DUP1 && ot.lastOp <= vm.DUP16:
+				showStack = int(ot.lastOp-vm.DUP1) + 2
+			}
+			switch ot.lastOp {
+			case vm.CALLDATALOAD, vm.SLOAD, vm.MLOAD, vm.CALLDATASIZE, vm.LT, vm.GT, vm.DIV, vm.SDIV, vm.SAR, vm.AND, vm.EQ, vm.CALLVALUE, vm.ISZERO,
+				vm.ADD, vm.EXP, vm.CALLER, vm.SHA3, vm.SUB, vm.ADDRESS, vm.GAS, vm.MUL, vm.RETURNDATASIZE, vm.NOT, vm.SHR, vm.SHL,
+				vm.EXTCODESIZE, vm.SLT, vm.OR, vm.NUMBER, vm.PC, vm.TIMESTAMP, vm.BALANCE, vm.SELFBALANCE, vm.MULMOD, vm.ADDMOD, vm.BASEFEE,
+				vm.BLOCKHASH, vm.BYTE, vm.XOR, vm.ORIGIN, vm.CODESIZE, vm.MOD, vm.SIGNEXTEND, vm.GASLIMIT, vm.DIFFICULTY, vm.SGT, vm.GASPRICE,
+				vm.MSIZE, vm.EXTCODEHASH:
+				showStack = 1
+			}
+			for i := showStack - 1; i >= 0; i-- {
+				ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
+			}
+			// Set the "mem" of the last operation
+			var setMem bool
+			switch ot.lastOp {
+			case vm.MSTORE, vm.MSTORE8, vm.MLOAD, vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
+				setMem = true
+			}
+			if setMem && ot.lastMemLen > 0 {
+				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				if len(cpy) == 0 {
+					cpy = make([]byte, ot.lastMemLen)
+				}
+				ot.lastVmOp.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
+			}
+		}
+		if ot.lastOffStack != nil {
+			ot.lastOffStack.Ex.Used = int(gas)
+			ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+			if ot.lastMemLen > 0 && memory != nil {
+				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				if len(cpy) == 0 {
+					cpy = make([]byte, ot.lastMemLen)
+				}
+				ot.lastOffStack.Ex.Mem = &VmTraceMem{Data: fmt.Sprintf("0x%0x", cpy), Off: int(ot.lastMemOff)}
+			}
+			ot.lastOffStack = nil
+		}
+		if ot.lastOp == vm.STOP && op == vm.STOP && len(ot.vmOpStack) == 0 {
+			// Looks like OE is "optimising away" the second STOP
+			return nil
+		}
+		ot.lastVmOp = &VmTraceOp{Ex: &VmTraceEx{}}
+		vmTrace.Ops = append(vmTrace.Ops, ot.lastVmOp)
+		if !ot.compat {
+			var sb strings.Builder
+			for _, idx := range ot.idx {
+				sb.WriteString(idx)
+			}
+			ot.lastVmOp.Idx = fmt.Sprintf("%s%d", sb.String(), len(vmTrace.Ops)-1)
+		}
+		ot.lastOp = op
+		ot.lastVmOp.Cost = int(cost)
+		ot.lastVmOp.Pc = int(pc)
+		ot.lastVmOp.Ex.Push = []string{}
+		ot.lastVmOp.Ex.Used = int(gas) - int(cost)
+		if !ot.compat {
+			ot.lastVmOp.Op = op.String()
+		}
+		switch op {
+		case vm.MSTORE, vm.MLOAD:
+			ot.lastMemOff = st.Back(0).Uint64()
+			ot.lastMemLen = 32
+		case vm.MSTORE8:
+			ot.lastMemOff = st.Back(0).Uint64()
+			ot.lastMemLen = 1
+		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
+			ot.lastMemOff = st.Back(0).Uint64()
+			ot.lastMemLen = st.Back(2).Uint64()
+		case vm.STATICCALL, vm.DELEGATECALL:
+			ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64())
+			ot.memLenStack = append(ot.memLenStack, st.Back(5).Uint64())
+		case vm.CALL, vm.CALLCODE:
+			ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
+			ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
+		case vm.CREATE, vm.CREATE2:
+			// Effectively disable memory output
+			ot.memOffStack = append(ot.memOffStack, 0)
+			ot.memLenStack = append(ot.memLenStack, 0)
+		case vm.SSTORE:
+			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
+		}
+		if ot.lastVmOp.Ex.Used < 0 {
+			ot.lastVmOp.Ex = nil
+		}
+	}
 	return nil
 }
 
@@ -538,7 +729,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -622,13 +813,9 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber))
 	if err != nil {
 		return nil, err
-	}
-
-	if traceTypeVmTrace {
-		return nil, fmt.Errorf("vmTrace not implemented yet")
 	}
 
 	result := make([]*TraceCallResult, len(traces))
@@ -637,6 +824,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		tr.Output = trace.Output
 		if traceTypeTrace {
 			tr.Trace = trace.Trace
+		} else {
+			tr.Trace = []*ParityTrace{}
 		}
 		if traceTypeStateDiff {
 			tr.StateDiff = trace.StateDiff
@@ -645,12 +834,8 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 			tr.VmTrace = trace.VmTrace
 		}
 		result[i] = tr
-		for _, pt := range tr.Trace {
-			txpos := uint64(i)
-			txhash := block.Transactions()[i].Hash()
-			pt.TransactionHash = &txhash
-			pt.TransactionPosition = &txpos
-		}
+		txhash := block.Transactions()[i].Hash()
+		tr.TransactionHash = &txhash
 	}
 
 	return result, nil
@@ -717,9 +902,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
 		}
 	}
+	if traceTypeVmTrace {
+		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
+	}
 	var ot OeTracer
 	ot.compat = api.compatibility
-	if traceTypeTrace {
+	if traceTypeTrace || traceTypeVmTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
 	}
@@ -738,7 +926,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, ethdb.GetHasTEVM(tx))
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
@@ -769,9 +957,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
 		initialIbs := state.New(stateReader)
 		sd.CompareStates(initialIbs, ibs)
-	}
-	if traceTypeVmTrace {
-		return nil, fmt.Errorf("vmTrace not implemented yet")
 	}
 
 	// If the timer caused an abort, return an appropriate error message
@@ -905,8 +1090,13 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	defer cancel()
 	results := []*TraceCallResult{}
 
+	useParent := false
+	if header == nil {
+		header = parentHeader
+		useParent = true
+	}
 	for txIndex, msg := range msgs {
-		if err := common.Stopped(ctx.Done()); err != nil {
+		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, err
 		}
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
@@ -925,24 +1115,23 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			}
 		}
 		vmConfig := vm.Config{}
-		if txIndexNeeded == -1 || txIndex == txIndexNeeded {
+		if (traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded)) || traceTypeVmTrace {
 			var ot OeTracer
 			ot.compat = api.compatibility
-			if traceTypeTrace {
-				ot.r = traceResult
+			ot.r = traceResult
+			ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
+			if traceTypeTrace && (txIndexNeeded == -1 || txIndex == txIndexNeeded) {
 				ot.traceAddr = []int{}
+			}
+			if traceTypeVmTrace {
+				traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 			}
 			vmConfig.Debug = true
 			vmConfig.Tracer = &ot
 		}
 
 		// Get a new instance of the EVM.
-		useParent := false
-		if header == nil {
-			header = parentHeader
-			useParent = true
-		}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, ethdb.GetHasTEVM(dbtx))
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true
@@ -990,9 +1179,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				return nil, err
 			}
 		}
-
-		if traceTypeVmTrace {
-			return nil, fmt.Errorf("vmTrace not implemented yet")
+		if !traceTypeTrace {
+			traceResult.Trace = []*ParityTrace{}
 		}
 		results = append(results, traceResult)
 	}

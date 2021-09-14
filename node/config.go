@@ -25,15 +25,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -271,18 +271,7 @@ func (c *Config) ResolvePath(path string) string {
 	if c.DataDir == "" {
 		return ""
 	}
-	return filepath.Join(c.instanceDir(), path)
-}
-
-func (c *Config) instanceDir() string {
-	if c.DataDir == "" {
-		return ""
-	}
-	if c.name() == "turbo-geth" {
-		// backwards compatibility
-		return filepath.Join(c.DataDir, "tg")
-	}
-	return filepath.Join(c.DataDir, c.name())
+	return filepath.Join(c.DataDir, path)
 }
 
 // NodeKey retrieves the currently configured private key of the node, checking
@@ -311,7 +300,7 @@ func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
 	}
-	instanceDir := c.instanceDir()
+	instanceDir := c.DataDir
 	if err := os.MkdirAll(instanceDir, 0700); err != nil {
 		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
 		return key, nil

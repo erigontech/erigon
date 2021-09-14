@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/bencode"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 )
 

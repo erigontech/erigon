@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 // SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
@@ -42,7 +42,7 @@ var (
 	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
 	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
-	TxPool              SyncStage = "TxPoolDB"            // Starts Backend
+	TxPool              SyncStage = "TxPool"              // Starts Backend
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"

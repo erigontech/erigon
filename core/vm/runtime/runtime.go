@@ -22,7 +22,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -51,8 +52,8 @@ type Config struct {
 	State     *state.IntraBlockState
 	r         state.StateReader
 	w         state.StateWriter
+	kv        kv.Has
 	GetHashFn func(n uint64) common.Hash
-	CheckTEVM func(common.Hash) (bool, error)
 }
 
 // sets defaults on the config
@@ -100,9 +101,6 @@ func setDefaults(cfg *Config) {
 			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
-	if cfg.CheckTEVM == nil {
-		cfg.CheckTEVM = func(common.Hash) (bool, error) { return false, nil }
-	}
 }
 
 // Execute executes the code using the input as call data during the execution.
@@ -121,6 +119,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -159,6 +158,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 func Walk(c kv.Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
@@ -32,16 +32,16 @@ func Walk(c kv.Cursor, startkey []byte, fixedbits int, walker func(k, v []byte) 
 }
 
 // todo: return TEVM code and use it
-func GetCheckTEVM(db kv.Getter) func(contractHash common.Hash) (bool, error) {
-	checked := map[common.Hash]struct{}{}
+func GetHasTEVM(db kv.Has) func(contractHash common.Hash) (bool, error) {
+	contractsWithTEVM := map[common.Hash]struct{}{}
 	var ok bool
 
 	return func(contractHash common.Hash) (bool, error) {
 		if contractHash == (common.Hash{}) {
-			return true, nil
+			return false, nil
 		}
 
-		if _, ok = checked[contractHash]; ok {
+		if _, ok = contractsWithTEVM[contractHash]; ok {
 			return true, nil
 		}
 
@@ -51,11 +51,15 @@ func GetCheckTEVM(db kv.Getter) func(contractHash common.Hash) (bool, error) {
 				contractHash.String(), err)
 		}
 
-		if !ok {
-			checked[contractHash] = struct{}{}
+		if errors.Is(err, ErrKeyNotFound) {
+			return false, nil
 		}
 
-		return ok, nil
+		if ok {
+			contractsWithTEVM[contractHash] = struct{}{}
+		}
+
+		return true, nil
 	}
 }
 

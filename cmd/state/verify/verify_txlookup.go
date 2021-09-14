@@ -9,11 +9,11 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func ValidateTxLookups(chaindata string) error {
@@ -41,14 +41,14 @@ func ValidateTxLookups(chaindata string) error {
 	// Validation Process
 	blockBytes := big.NewInt(0)
 	for !interrupt {
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return err
 		}
-		body := rawdb.ReadBody(tx, blockHash, blockNum)
+		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNum)
 
 		if body == nil {
 			log.Error("Empty body", "blocknum", blockNum)

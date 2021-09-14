@@ -25,11 +25,13 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestState(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win, need generally improve speed of this tests
 	}

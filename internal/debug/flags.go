@@ -18,20 +18,16 @@ package debug
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
-	"time"
 
-	"github.com/ledgerwatch/erigon/log"
+	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon/common/fdlimit"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
@@ -98,20 +94,6 @@ var (
 		Name:  "trace",
 		Usage: "Write execution trace to the given file",
 	}
-	// (Deprecated April 2020)
-	legacyMemprofilerateFlag = cli.IntFlag{
-		Name:  "memprofilerate",
-		Usage: "Turn on memory profiling with the given rate (deprecated, use --pprof.memprofilerate)",
-		Value: runtime.MemProfileRate,
-	}
-	legacyBlockprofilerateFlag = cli.IntFlag{
-		Name:  "blockprofilerate",
-		Usage: "Turn on block profiling with the given rate (deprecated, use --pprof.blockprofilerate)",
-	}
-	legacyCpuprofileFlag = cli.StringFlag{
-		Name:  "cpuprofile",
-		Usage: "Write CPU profile to the given file (deprecated, use --pprof.cpuprofile)",
-	}
 )
 
 // Flags holds all command-line flags required for debugging.
@@ -121,41 +103,41 @@ var Flags = []cli.Flag{
 	blockprofilerateFlag, cpuprofileFlag, traceFlag,
 }
 
-var DeprecatedFlags = []cli.Flag{
-	legacyMemprofilerateFlag,
-	legacyBlockprofilerateFlag, legacyCpuprofileFlag,
-}
-
-var glogger *log.GlogHandler
+//var glogger *log.GlogHandler
 
 func init() {
-	glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	glogger.Verbosity(log.LvlInfo)
-	log.Root().SetHandler(glogger)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	//glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
+	//glogger.Verbosity(log.LvlInfo)
+	//log.Root().SetHandler(glogger)
 }
 
 func SetupCobra(cmd *cobra.Command) error {
+	raiseFdLimit()
 	flags := cmd.Flags()
-
-	dbg, err := flags.GetBool(debugFlag.Name)
-	if err != nil {
-		return err
-	}
 	lvl, err := flags.GetInt(verbosityFlag.Name)
 	if err != nil {
 		return err
 	}
-	vmodule, err := flags.GetString(vmoduleFlag.Name)
-	if err != nil {
-		return err
-	}
-	backtrace, err := flags.GetString(backtraceAtFlag.Name)
-	if err != nil {
-		return err
-	}
 
-	_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
-	log.PrintOrigins(dbg)
+	/*
+		dbg, err := flags.GetBool(debugFlag.Name)
+		if err != nil {
+			return err
+		}
+		vmodule, err := flags.GetString(vmoduleFlag.Name)
+		if err != nil {
+			return err
+		}
+		backtrace, err := flags.GetString(backtraceAtFlag.Name)
+		if err != nil {
+			return err
+		}
+
+		_, glogger = log.SetupDefaultTerminalLogger(log.Lvl(lvl), vmodule, backtrace)
+		log.PrintOrigins(dbg)
+	*/
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lvl), log.StderrHandler))
 
 	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
 	if err != nil {
@@ -188,12 +170,7 @@ func SetupCobra(cmd *cobra.Command) error {
 		}
 	}
 
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-		<-c
-		Exit()
-	}()
+	go ListenSignals(nil)
 	pprof, err := flags.GetBool(pprofFlag.Name)
 	if err != nil {
 		return err
@@ -216,10 +193,6 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
-	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(10 * time.Second) // Start system runtime metrics collection
-	}
-
 	if metrics.Enabled && metricsAddr != "" {
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		exp.Setup(address)
@@ -236,37 +209,31 @@ func SetupCobra(cmd *cobra.Command) error {
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
-	var ostream log.Handler
-	output := io.Writer(os.Stderr)
+	raiseFdLimit()
+	//var ostream log.Handler
+	//output := io.Writer(os.Stderr)
 	if ctx.GlobalBool(logjsonFlag.Name) {
-		ostream = log.StreamHandler(output, log.JSONFormat())
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.GlobalInt(verbosityFlag.Name)), log.StreamHandler(os.Stderr, log.JsonFormat())))
+		//ostream = log.StreamHandler(output, log.JsonFormat())
 	} else {
-		usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-		if usecolor {
-			output = colorable.NewColorableStderr()
-		}
-		ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.GlobalInt(verbosityFlag.Name)), log.StderrHandler))
 	}
-	glogger.SetHandler(ostream)
-	// logging
-	log.PrintOrigins(ctx.GlobalBool(debugFlag.Name))
-	_, glogger = log.SetupDefaultTerminalLogger(
-		log.Lvl(ctx.GlobalInt(verbosityFlag.Name)),
-		ctx.GlobalString(vmoduleFlag.Name),
-		ctx.GlobalString(backtraceAtFlag.Name),
-	)
+	//log.Root().SetHandler(ostream)
+
+	/*
+		glogger.SetHandler(ostream)
+		// logging
+		log.PrintOrigins(ctx.GlobalBool(debugFlag.Name))
+		_, glogger = log.SetupDefaultTerminalLogger(
+			log.Lvl(ctx.GlobalInt(verbosityFlag.Name)),
+			ctx.GlobalString(vmoduleFlag.Name),
+			ctx.GlobalString(backtraceAtFlag.Name),
+		)
+	*/
 
 	// profiling, tracing
-	if ctx.GlobalIsSet(legacyMemprofilerateFlag.Name) {
-		runtime.MemProfileRate = ctx.GlobalInt(legacyMemprofilerateFlag.Name)
-		log.Warn("The flag --memprofilerate is deprecated and will be removed in the future, please use --pprof.memprofilerate")
-	}
 	runtime.MemProfileRate = ctx.GlobalInt(memprofilerateFlag.Name)
 
-	if ctx.GlobalIsSet(legacyBlockprofilerateFlag.Name) {
-		Handler.SetBlockProfileRate(ctx.GlobalInt(legacyBlockprofilerateFlag.Name))
-		log.Warn("The flag --blockprofilerate is deprecated and will be removed in the future, please use --pprof.blockprofilerate")
-	}
 	Handler.SetBlockProfileRate(ctx.GlobalInt(blockprofilerateFlag.Name))
 
 	if traceFile := ctx.GlobalString(traceFlag.Name); traceFile != "" {
@@ -280,17 +247,6 @@ func Setup(ctx *cli.Context) error {
 			return err
 		}
 	}
-	if cpuFile := ctx.GlobalString(legacyCpuprofileFlag.Name); cpuFile != "" {
-		log.Warn("The flag --cpuprofile is deprecated and will be removed in the future, please use --pprof.cpuprofile")
-		if err := Handler.StartCPUProfile(cpuFile); err != nil {
-			return err
-		}
-	}
-
-	if metrics.Enabled {
-		go metrics.CollectProcessMetrics(10 * time.Second) // Start system runtime metrics collection
-	}
-
 	pprofEnabled := ctx.GlobalBool(pprofFlag.Name)
 	metricsAddr := ctx.GlobalString(metricsAddrFlag.Name)
 
@@ -317,7 +273,9 @@ func StartPProf(address string, withMetrics bool) {
 	// Hook go-metrics into expvar on any /debug/metrics request, load all vars
 	// from the registry into expvar, and execute regular expvar handler.
 	if withMetrics {
-		exp.Exp(metrics.DefaultRegistry, http.NewServeMux())
+		http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, req *http.Request) {
+			metrics2.WritePrometheus(w, true)
+		})
 	}
 	cpuMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/profile?seconds=20")
 	heapMsg := fmt.Sprintf("go tool pprof -lines -http=: http://%s/%s", address, "debug/pprof/heap")
@@ -334,4 +292,16 @@ func StartPProf(address string, withMetrics bool) {
 func Exit() {
 	_ = Handler.StopCPUProfile()
 	_ = Handler.StopGoTrace()
+}
+
+// raiseFdLimit raises out the number of allowed file handles per process
+func raiseFdLimit() {
+	limit, err := fdlimit.Maximum()
+	if err != nil {
+		log.Error("Failed to retrieve file descriptor allowance", "error", err)
+		return
+	}
+	if _, err = fdlimit.Raise(uint64(limit)); err != nil {
+		log.Error("Failed to raise file descriptor allowance", "error", err)
+	}
 }

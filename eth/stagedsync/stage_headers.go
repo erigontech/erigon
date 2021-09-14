@@ -9,20 +9,18 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
-
-var stageHeadersGauge = metrics.NewRegisteredGauge("stage/headers", nil)
 
 type HeadersCfg struct {
 	db                kv.RwDB
@@ -32,6 +30,7 @@ type HeadersCfg struct {
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
+	noP2PDiscovery    bool
 }
 
 func StageHeadersCfg(
@@ -42,6 +41,7 @@ func StageHeadersCfg(
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
+	noP2PDiscovery bool,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -51,6 +51,7 @@ func StageHeadersCfg(
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
 		batchSize:         batchSize,
+		noP2PDiscovery:    noP2PDiscovery,
 	}
 }
 
@@ -101,6 +102,11 @@ func HeadersForward(
 		return nil
 	}
 
+	// Allow other stages to run 1 cycle if no network available
+	if initialCycle && cfg.noP2PDiscovery {
+		return nil
+	}
+
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
 
 	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
@@ -113,6 +119,8 @@ func HeadersForward(
 	var peer []byte
 	stopped := false
 	prevProgress := headerProgress
+	noProgressCount := 0 // How many time the progress was printed without actual progress
+Loop:
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
@@ -155,6 +163,9 @@ func HeadersForward(
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
+		if s.BlockNumber > 0 && noProgressCount >= 5 {
+			break
+		}
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			if !initialCycle {
 				// if this is not an initial cycle, we need to react quickly when new headers are coming in
@@ -174,12 +185,19 @@ func HeadersForward(
 			stopped = true
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
+			if prevProgress == progress {
+				noProgressCount++
+			} else {
+				noProgressCount = 0 // Reset, there was progress
+			}
 			logProgressHeaders(logPrefix, prevProgress, progress)
 			prevProgress = progress
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:
 			log.Debug("headerLoop woken up by the incoming request")
+		case <-cfg.hd.SkipCycleHack:
+			break Loop
 		}
 		timer.Stop()
 	}
@@ -196,11 +214,10 @@ func HeadersForward(
 		}
 	}
 	if stopped {
-		return common.ErrStopped
+		return libcommon.ErrStopped
 	}
 	// We do not print the followin line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
-	stageHeadersGauge.Update(int64(cfg.hd.Progress()))
 	return nil
 }
 
@@ -224,7 +241,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 		select {
 		case <-logEvery.C:
-			log.Info("fix canonical", "ancestor", ancestorHeight, "hash", ancestorHash)
+			log.Info("write canonical markers", "ancestor", ancestorHeight, "hash", ancestorHash)
 		default:
 		}
 		ancestorHash = ancestor.ParentHash
@@ -236,7 +253,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (err error) {
+func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -280,41 +297,43 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (e
 		}
 	}
 	if badBlock {
-		// Find header with biggest TD
-		tdCursor, cErr := tx.Cursor(kv.HeaderTD)
-		if cErr != nil {
-			return cErr
-		}
-		defer tdCursor.Close()
-		var k, v []byte
-		k, v, err = tdCursor.Last()
-		if err != nil {
-			return err
-		}
 		var maxTd big.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
-		for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
-			if len(k) != 40 {
-				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
+		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
+			// Find header with biggest TD
+			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
+			if cErr != nil {
+				return cErr
 			}
-			var hash common.Hash
-			copy(hash[:], k[8:])
-			if cfg.hd.IsBadHeader(hash) {
-				continue
-			}
-			var td big.Int
-			if err = rlp.DecodeBytes(v, &td); err != nil {
+			defer tdCursor.Close()
+			var k, v []byte
+			k, v, err = tdCursor.Last()
+			if err != nil {
 				return err
 			}
-			if td.Cmp(&maxTd) > 0 {
-				maxTd.Set(&td)
-				copy(maxHash[:], k[8:])
-				maxNum = binary.BigEndian.Uint64(k[:8])
+			for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
+				if len(k) != 40 {
+					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
+				}
+				var hash common.Hash
+				copy(hash[:], k[8:])
+				if cfg.hd.IsBadHeader(hash) {
+					continue
+				}
+				var td big.Int
+				if err = rlp.DecodeBytes(v, &td); err != nil {
+					return err
+				}
+				if td.Cmp(&maxTd) > 0 {
+					maxTd.Set(&td)
+					copy(maxHash[:], k[8:])
+					maxNum = binary.BigEndian.Uint64(k[:8])
+				}
 			}
-		}
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
 		}
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint

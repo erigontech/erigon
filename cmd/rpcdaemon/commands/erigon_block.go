@@ -27,9 +27,14 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	header := rawdb.ReadHeaderByNumber(tx, uint64(blockNumber.Int64()))
+	blockNum, err := getBlockNumber(blockNumber, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	header := rawdb.ReadHeaderByNumber(tx, blockNum)
 	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", blockNumber.Int64())
+		return nil, fmt.Errorf("block header not found: %d", blockNum)
 	}
 
 	return header, nil

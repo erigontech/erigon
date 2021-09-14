@@ -23,10 +23,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -96,9 +96,9 @@ func TestEIP2200(t *testing.T) {
 
 			_ = s.CommitBlock(params.AllEthashProtocolChanges.Rules(0), state.NewPlainStateWriter(tx, tx, 0))
 			vmctx := BlockContext{
-				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
-				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
-				CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
+				CanTransfer:     func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
+				Transfer:        func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
+				ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 			}
 			vmenv := NewEVM(vmctx, TxContext{}, s, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
 

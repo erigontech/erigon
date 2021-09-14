@@ -6,13 +6,13 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -60,7 +60,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	if err != nil {
 		return nil, err
 	}
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNum))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNum))
 	if err != nil {
 		return nil, err
 	}
@@ -265,10 +265,22 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		stream.WriteNil()
 		return err
 	}
+
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	stream.WriteArrayStart()
 	first := true
 	// Execute all transactions in picked blocks
+
+	count := uint64(^uint(0)) // this just makes it easier to use below
+	if req.Count != nil {
+		count = *req.Count
+	}
+	after := uint64(0) // this just makes it easier to use below
+	if req.After != nil {
+		after = *req.After
+	}
+	nSeen := uint64(0)
+	nExported := uint64(0)
 
 	it := allBlocks.Iterator()
 	for it.HasNext() {
@@ -293,7 +305,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
 		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, txs, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b))
+		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b))
 		if tErr != nil {
 			stream.WriteNil()
 			return tErr
@@ -305,6 +317,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			// Check if transaction concerns any of the addresses we wanted
 			for _, pt := range trace.Trace {
 				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+					nSeen++
 					pt.BlockHash = &blockHash
 					pt.BlockNumber = &blockNumber
 					pt.TransactionHash = &txHash
@@ -314,17 +327,21 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						stream.WriteNil()
 						return err
 					}
-					if first {
-						first = false
-					} else {
-						stream.WriteMore()
+					if nSeen > after && nExported < count {
+						if first {
+							first = false
+						} else {
+							stream.WriteMore()
+						}
+						stream.Write(b)
+						nExported++
 					}
-					stream.Write(b)
 				}
 			}
 		}
 		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
+			nSeen++
 			var tr ParityTrace
 			var rewardAction = &RewardTraceAction{}
 			rewardAction.Author = block.Coinbase()
@@ -342,16 +359,20 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				stream.WriteNil()
 				return err
 			}
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
+			if nSeen > after && nExported < count {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.Write(b)
+				nExported++
 			}
-			stream.Write(b)
 		}
 		for i, uncle := range block.Uncles() {
 			if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 				if i < len(uncleRewards) {
+					nSeen++
 					var tr ParityTrace
 					rewardAction := &RewardTraceAction{}
 					rewardAction.Author = uncle.Coinbase
@@ -369,12 +390,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						stream.WriteNil()
 						return err
 					}
-					if first {
-						first = false
-					} else {
-						stream.WriteMore()
+					if nSeen > after && nExported < count {
+						if first {
+							first = false
+						} else {
+							stream.WriteMore()
+						}
+						stream.Write(b)
+						nExported++
 					}
-					stream.Write(b)
 				}
 			}
 		}
@@ -415,14 +439,14 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	return false
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, traceTypes []string, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer) ([]*TraceCallResult, error) {
 	callParams := make([]TraceCallParam, 0, len(txs))
 	msgs := make([]types.Message, len(txs))
 	for i, tx := range txs {
 		hash := tx.Hash()
 		callParams = append(callParams, TraceCallParam{
 			txHash:     &hash,
-			traceTypes: []string{TraceTypeTrace, TraceTypeStateDiff},
+			traceTypes: traceTypes,
 		})
 		var err error
 		if msgs[i], err = tx.AsMessage(*signer, header.BaseFee); err != nil {

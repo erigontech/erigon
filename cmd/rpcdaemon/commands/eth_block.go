@@ -14,11 +14,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -91,7 +92,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx)
+	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, ethdb.GetHasTEVM(tx))
 	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)
@@ -284,7 +285,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if num == nil {
 		return nil, nil
 	}
-	body, _, txAmount := rawdb.ReadBodyWithoutTransactions(tx, blockHash, *num)
+	body, _, txAmount := rawdb.ReadBody(tx, blockHash, *num)
 	if body == nil {
 		return nil, nil
 	}

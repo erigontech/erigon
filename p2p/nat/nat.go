@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 
 	natpmp "github.com/jackpal/go-nat-pmp"
 )

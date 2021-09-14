@@ -20,11 +20,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestVM(t *testing.T) {
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	t.Parallel()
 	vmt := new(testMatcher)
 	vmt.slow("^vmPerformance")

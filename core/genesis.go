@@ -29,6 +29,8 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -36,12 +38,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
@@ -278,7 +278,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
 	if height == nil {
-		//return newcfg, stored, stateDB, fmt.Errorf("missing block number for head header hash")
+		//return newcfg, storedBlock, fmt.Errorf("missing block number for head header hash")
 	} else {
 		compatErr := storedcfg.CheckCompatible(newcfg, *height)
 		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
@@ -305,8 +305,6 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.GoerliChainConfig
 	case ghash == params.ErigonGenesisHash:
 		return params.ErigonChainConfig
-	case ghash == params.CalaverasGenesisHash:
-		return params.CalaverasChainConfig
 	case ghash == params.SokolGenesisHash:
 		return params.SokolChainConfig
 	default:
@@ -582,18 +580,6 @@ func DefaultErigonGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultCalaverasGenesisBlock() *Genesis {
-	// Full genesis: https://github.com/ethereum/eth1.0-specs/blob/master/network-upgrades/client-integration-testnets/aleut.md
-	return &Genesis{
-		Config:     params.CalaverasChainConfig,
-		Timestamp:  0x60b3877f,
-		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000005211cea3870c7ba7c6c44b185e62eecdb864cd8c560228ce57d31efbf64c200b2c200aacec78cf17a7148e784fe95a7a750335f8b9572ee28d72e7650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   0x47b760,
-		Difficulty: big.NewInt(1),
-		Alloc:      readPrealloc("allocs/calaveras.json"),
-	}
-}
-
 func DefaultSokolGenesisBlock() *Genesis {
 	/*
 		header rlp: f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -614,6 +600,12 @@ func DefaultSokolGenesisBlock() *Genesis {
 		Alloc:      readPrealloc("allocs/sokol.json"),
 	}
 }
+
+// Pre-calculated version of:
+//    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
+//    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
+var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
+var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {

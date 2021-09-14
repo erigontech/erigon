@@ -3,15 +3,16 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/log"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
+	"github.com/ledgerwatch/log/v3"
+
 )
 
 func TestSnapshotGeneration(t *testing.T) {
