@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -173,7 +174,7 @@ func addTransactionsToMiningBlock(current *MiningBlock, chainConfig params.Chain
 	}
 
 	for {
-		if err := common.Stopped(quit); err != nil {
+		if err := libcommon.Stopped(quit); err != nil {
 			return nil, err
 		}
 

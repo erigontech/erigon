@@ -766,11 +766,15 @@ func (db *DB) commitCache(logit bool) {
 
 // close flushes and closes the database files.
 func (db *DB) Close() {
+	select {
+	case <-db.quit:
+		return // means closed already
+	default:
+	}
 	if db.quit == nil {
 		return
 	}
 	close(db.quit)
-	db.quit = nil
 	db.kvCacheLock.Lock()
 	defer db.kvCacheLock.Unlock()
 	db.commitCache(true /* logit */)

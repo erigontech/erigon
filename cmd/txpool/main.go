@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
@@ -95,9 +96,13 @@ var rootCmd = &cobra.Command{
 		cfg.LogEvery = 5 * time.Minute
 		cfg.CommitEvery = 5 * time.Minute
 
+		cacheConfig := kvcache.DefaultCoherentCacheConfig
+		cacheConfig.MetricsLabel = "txpool"
+
 		newTxs := make(chan txpool.Hashes, 1024)
 		defer close(newTxs)
-		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg, newTxs, coreDB, sentryClients, kvClient)
+		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
+			kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)
 		if err != nil {
 			return err
 		}

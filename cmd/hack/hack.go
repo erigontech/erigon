@@ -1689,7 +1689,7 @@ func readCallTraces(chaindata string, block uint64) error {
 	if err2 != nil {
 		return err2
 	}
-	var acc common.Address = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
+	var acc = common.HexToAddress("0x511bc4556d823ae99630ae8de28b9b80df90ea2e")
 	for k, v, err = idxCursor.Seek(acc[:]); k != nil && err == nil && bytes.HasPrefix(k, acc[:]); k, v, err = idxCursor.Next() {
 		bm := roaring64.New()
 		_, err = bm.ReadFrom(bytes.NewReader(v))
@@ -1994,9 +1994,9 @@ func scanTxs(chaindata string) error {
 }
 
 func scanReceipts3(chaindata string, block uint64) error {
-	dbdb := mdbx.MustOpen(chaindata)
-	defer dbdb.Close()
-	tx, err := dbdb.BeginRw(context.Background())
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -2255,6 +2255,27 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	return receipts, nil
 }
 
+func devTx(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	b, err := rawdb.ReadBlockByNumber(tx, 0)
+	tool.Check(err)
+	cc, err := rawdb.ReadChainConfig(tx, b.Hash())
+	tool.Check(err)
+	txn := types.NewTransaction(1, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
+	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
+	tool.Check(err)
+	buf := bytes.NewBuffer(nil)
+	err = signedTx.MarshalBinary(buf)
+	tool.Check(err)
+	fmt.Printf("%x\n", buf.Bytes())
+	return nil
+}
 func main() {
 	flag.Parse()
 
@@ -2414,6 +2435,9 @@ func main() {
 
 	case "scanReceipts3":
 		err = scanReceipts3(*chaindata, uint64(*block))
+
+	case "devTx":
+		err = devTx(*chaindata)
 	}
 
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -123,7 +124,7 @@ func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logE
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
 		case <-ctx.Done():
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		default:
 		}
 		if err = c.DeleteCurrent(); err != nil {
@@ -133,7 +134,7 @@ func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logE
 	return nil
 }
 
-func PruneTableMultiCursor(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+func PruneTableDupSort(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
 	c, err := tx.RwCursorDupSort(table)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
@@ -152,7 +153,7 @@ func PruneTableMultiCursor(tx kv.RwTx, table string, logPrefix string, pruneTo u
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
 		case <-ctx.Done():
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		default:
 		}
 		if err = c.DeleteCurrentDuplicates(); err != nil {
