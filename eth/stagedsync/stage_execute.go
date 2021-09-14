@@ -29,9 +29,9 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	)
+	"github.com/ledgerwatch/log/v3"
+)
 
 const (
 	logInterval = 30 * time.Second

@@ -4,11 +4,8 @@ import (
 	"context"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"os"
 	"github.com/ledgerwatch/log/v3"
-
-
-
+	"os"
 )
 
 func CreateStateSnapshot(ctx context.Context, snapshotPath string, logger log.Logger) (kv.RwDB, error) {

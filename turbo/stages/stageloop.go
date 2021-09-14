@@ -53,7 +53,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil,snapshotEpochBlock); err != nil {
+		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil, snapshotEpochBlock); err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}

@@ -10,9 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/stretchr/testify/assert"
 	"github.com/ledgerwatch/log/v3"
-
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSnapshotGeneration(t *testing.T) {
