@@ -681,7 +681,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		ss.GoodPeers.Delete(peerID)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
 	}
-	peerInfo.AddDeadline(time.Now().Add(60 * time.Second))
+	peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
 }
 

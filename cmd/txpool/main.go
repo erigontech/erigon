@@ -96,7 +96,7 @@ var rootCmd = &cobra.Command{
 		cfg := txpool.DefaultConfig
 		cfg.DBDir = path.Join(datadir, "txpool")
 		cfg.LogEvery = 30 * time.Second
-		cfg.CommitEvery = 1 * time.Minute
+		cfg.CommitEvery = 30 * time.Second
 
 		cacheConfig := kvcache.DefaultCoherentCacheConfig
 		cacheConfig.MetricsLabel = "txpool"
