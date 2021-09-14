@@ -382,6 +382,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
+	log.Error("recved new tx", "amount", len(reply.RplTxs))
 
 	txs := make([]types.Transaction, len(reply.RplTxs))
 	for i, rplTx := range reply.RplTxs {
