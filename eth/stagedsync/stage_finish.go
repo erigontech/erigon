@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -29,7 +30,7 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, sn
 	}
 }
 
-func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -67,11 +68,19 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if err != nil {
 		return err
 	}
+
+	if initialCycle {
+		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
+			return err
+		}
+	}
+
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
