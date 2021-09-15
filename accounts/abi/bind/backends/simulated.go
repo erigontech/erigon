@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
@@ -42,13 +43,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -66,9 +66,9 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	m         *stages.MockSentry
-	getHeader func(hash common.Hash, number uint64) *types.Header
-	checkTEVM func(common.Hash) (bool, error)
+	m               *stages.MockSentry
+	getHeader       func(hash common.Hash, number uint64) *types.Header
+	contractHasTEVM func(common.Hash) (bool, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -105,7 +105,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return h
 		},
 	}
-	backend.checkTEVM = ethdb.GetCheckTEVM(olddb.NewObjectDatabase(m.DB))
+	backend.contractHasTEVM = ethdb.GetHasTEVM(olddb.NewObjectDatabase(m.DB))
 	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
 	backend.emptyPendingBlock()
 	return backend
@@ -654,7 +654,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.m.Engine, nil, b.checkTEVM)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.m.Engine, nil, b.contractHasTEVM)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
@@ -687,7 +687,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}, b.checkTEVM); err != nil {
+		&b.pendingHeader.GasUsed, vm.Config{}, b.contractHasTEVM); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))

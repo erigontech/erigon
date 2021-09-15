@@ -1,8 +1,8 @@
 package commands
 
 import (
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 )
 

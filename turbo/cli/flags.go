@@ -6,14 +6,16 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
 )
@@ -37,7 +39,7 @@ var (
 	BlockDownloaderWindowFlag = cli.IntFlag{
 		Name:  "blockDownloaderWindow",
 		Usage: "Outstanding limit of block bodies being downloaded",
-		Value: 65536,
+		Value: 32768,
 	}
 
 	PrivateApiAddr = cli.StringFlag{
@@ -49,7 +51,7 @@ var (
 	PrivateApiRateLimit = cli.IntFlag{
 		Name:  "private.api.ratelimit",
 		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
-		Value: 500,
+		Value: kv.ReadersLimit - 128,
 	}
 
 	MaxPeersFlag = cli.IntFlag{
@@ -155,10 +157,10 @@ var (
 		Value: "",
 	}
 
-	BadBlockFlag = cli.IntFlag{
+	BadBlockFlag = cli.StringFlag{
 		Name:  "bad.block",
-		Usage: "Marks block with given number bad and forces initial reorg before normal staged sync",
-		Value: 0,
+		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
+		Value: "",
 	}
 )
 
@@ -214,7 +216,15 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 		cfg.SyncLoopThrottle = syncLoopThrottle
 	}
-	cfg.BadBlock = uint64(ctx.GlobalInt(BadBlockFlag.Name))
+
+	if ctx.GlobalString(BadBlockFlag.Name) != "" {
+		bytes, err := hexutil.Decode(ctx.GlobalString(BadBlockFlag.Name))
+		if err != nil {
+			log.Warn("Error decoding block hash", "hash", ctx.GlobalString(BadBlockFlag.Name), "error", err)
+		} else {
+			cfg.BadBlockHash = common.BytesToHash(bytes)
+		}
+	}
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {

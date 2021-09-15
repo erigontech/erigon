@@ -2,10 +2,10 @@ package stagedsync
 
 import (
 	"context"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/log"
 )
 
 func DefaultStages(ctx context.Context,
@@ -34,11 +34,14 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.Headers,
 			Description: "Download headers",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				if badBlockUnwind {
+					return nil
+				}
 				return HeadersForward(s, u, ctx, tx, headers, firstCycle, test)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return HeadersUnwind(u, s, tx, headers)
+				return HeadersUnwind(u, s, tx, headers, test)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return HeadersPrune(p, tx, headers, ctx)
@@ -47,7 +50,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -62,7 +65,7 @@ func DefaultStages(ctx context.Context,
 			Description:         "Create headers snapshot",
 			Disabled:            !snapshotHeaders.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, firstCycle, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -75,7 +78,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return BodiesForward(s, u, ctx, tx, bodies, test)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -90,7 +93,7 @@ func DefaultStages(ctx context.Context,
 			Description:         "Create bodies snapshot",
 			Disabled:            !snapshotBodies.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, firstCycle, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -103,7 +106,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.Senders,
 			Description: "Recover senders from tx signatures",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -116,7 +119,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -131,7 +134,7 @@ func DefaultStages(ctx context.Context,
 			Description:         "Transpile marked EVM contracts to TEVM",
 			Disabled:            !sm.Experiments.TEVM,
 			DisabledDescription: "Enable by adding `tevm` to --experiments",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnTranspileStage(s, tx, 0, trans, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -146,7 +149,7 @@ func DefaultStages(ctx context.Context,
 			Description:         "Create state snapshot",
 			Disabled:            !snapshotState.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, ctx, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -159,7 +162,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnHashStateStage(s, tx, hashState, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -172,7 +175,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx)
 				return err
 			},
@@ -187,7 +190,7 @@ func DefaultStages(ctx context.Context,
 			ID:                  stages.CallTraces,
 			Description:         "Generate call traces index",
 			DisabledDescription: "Work In Progress",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnCallTraces(s, tx, callTraces, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -200,7 +203,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.AccountHistoryIndex,
 			Description: "Generate account history index",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnAccountHistoryIndex(s, tx, history, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -213,7 +216,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.StorageHistoryIndex,
 			Description: "Generate storage history index",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnStorageHistoryIndex(s, tx, history, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -226,7 +229,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.LogIndex,
 			Description: "Generate receipt logs index",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnLogIndex(s, tx, logIndex, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -239,7 +242,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.TxLookup,
 			Description: "Generate tx lookup index",
-			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnTxLookup(s, tx, txLookup, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -252,7 +255,8 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.TxPool,
 			Description: "Update transaction pool",
-			Forward: func(firstCycle bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
+			Disabled:    txPool.config.Disable || txPool.config.V2,
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
 				return SpawnTxPool(s, tx, txPool, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
@@ -265,7 +269,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
-			Forward: func(firstCycle bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
 				return FinishForward(s, tx, finish)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {

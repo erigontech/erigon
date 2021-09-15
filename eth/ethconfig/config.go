@@ -38,26 +38,30 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
-	Blocks:      20,
-	Default:     big.NewInt(0),
-	Percentile:  60,
-	MaxPrice:    gasprice.DefaultMaxPrice,
-	IgnorePrice: gasprice.DefaultIgnorePrice,
+	Blocks:           20,
+	Default:          big.NewInt(0),
+	Percentile:       60,
+	MaxHeaderHistory: 0,
+	MaxBlockHistory:  0,
+	MaxPrice:         gasprice.DefaultMaxPrice,
+	IgnorePrice:      gasprice.DefaultIgnorePrice,
 }
 
 // LightClientGPO contains default gasprice oracle settings for light client.
 var LightClientGPO = gasprice.Config{
-	Blocks:      2,
-	Percentile:  60,
-	MaxPrice:    gasprice.DefaultMaxPrice,
-	IgnorePrice: gasprice.DefaultIgnorePrice,
+	Blocks:           2,
+	Percentile:       60,
+	MaxHeaderHistory: 300,
+	MaxBlockHistory:  5,
+	MaxPrice:         gasprice.DefaultMaxPrice,
+	IgnorePrice:      gasprice.DefaultIgnorePrice,
 }
 
 // Defaults contains default settings for use on the Ethereum main net.
@@ -134,9 +138,9 @@ type Config struct {
 
 	P2PEnabled bool
 
-	Prune     prune.Mode
-	BatchSize datasize.ByteSize // Batch size for execution stage
-	BadBlock  uint64            // Block marked as bad (for forced reorg)
+	Prune        prune.Mode
+	BatchSize    datasize.ByteSize // Batch size for execution stage
+	BadBlockHash common.Hash       // hash of the block marked as bad
 
 	Snapshot Snapshot
 

@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -31,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -115,7 +115,7 @@ func TestCall(t *testing.T) {
 		byte(vm.RETURN),
 	})
 
-	ret, _, err := Call(address, nil, &Config{State: state})
+	ret, _, err := Call(address, nil, &Config{State: state, kv: tx})
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}

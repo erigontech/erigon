@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (

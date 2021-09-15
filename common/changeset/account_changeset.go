@@ -5,9 +5,9 @@ import (
 	"encoding/binary"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 )
 
 type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error

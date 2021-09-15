@@ -28,11 +28,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -447,6 +447,7 @@ func TestRegisterHandler_Successful(t *testing.T) {
 
 	// check response
 	resp := doHTTPRequest(t, httpReq)
+	defer resp.Body.Close()
 	buf := make([]byte, 7)
 	_, err = io.ReadFull(resp.Body, buf)
 	if err != nil {
@@ -607,12 +608,14 @@ func (test rpcPrefixTest) check(t *testing.T, node *Node) {
 		if resp.StatusCode != 200 {
 			t.Errorf("Error: %s: bad status code %d, want 200", path, resp.StatusCode)
 		}
+		resp.Body.Close()
 	}
 	for _, path := range test.wantNoHTTP {
 		resp := rpcRequest(t, httpBase+path)
 		if resp.StatusCode != 404 {
 			t.Errorf("Error: %s: bad status code %d, want 404", path, resp.StatusCode)
 		}
+		resp.Body.Close()
 	}
 	for _, path := range test.wantWS {
 		err := wsRequest(t, wsBase+path, "")

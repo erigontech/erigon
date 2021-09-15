@@ -10,6 +10,8 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -17,8 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -132,7 +132,9 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		for k, v := range accHistoryStateStorage[i] {
-			res, err := GetAsOf(tx, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
+			c1, _ := tx.Cursor(kv.StorageHistory)
+			c2, _ := tx.CursorDupSort(kv.StorageChangeSet)
+			res, err := GetAsOf(tx, c1, c2, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
 			if err != nil {
 				t.Fatal(err)
 			}

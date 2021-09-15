@@ -24,8 +24,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
@@ -701,13 +701,10 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil
@@ -738,13 +735,10 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil
@@ -770,13 +764,10 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil
@@ -802,13 +793,10 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx)
 	}
 	stack.Push(&temp)
 	if err == nil || err == ErrExecutionReverted {
+		ret = common.CopyBytes(ret)
 		callContext.memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
-	if err != nil {
-		retSize.Clear()
-	} else {
-		retSize.SetOne()
-	}
+
 	callContext.contract.Gas += returnGas
 
 	return ret, nil

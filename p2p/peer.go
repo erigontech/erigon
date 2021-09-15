@@ -25,14 +25,15 @@ import (
 	"sync"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -329,9 +330,9 @@ func (p *Peer) handle(msg Msg) error {
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
 		if metrics.Enabled {
-			m := fmt.Sprintf("%s/%s/%d/%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
-			metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
-			metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
+			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
+			metrics2.GetOrCreateCounter(m).Set(uint64(msg.meterSize))
+			metrics2.GetOrCreateCounter(m + "_packets").Set(1)
 		}
 		select {
 		case proto.in <- msg:

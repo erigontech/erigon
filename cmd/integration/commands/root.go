@@ -3,12 +3,12 @@ package commands
 import (
 	"path"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	kv2 "github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -20,10 +20,10 @@ var rootCmd = &cobra.Command{
 			panic(err)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "erigon", "chaindata")
+			chaindata = path.Join(datadir, "chaindata")
 		}
 		if snapshotDir == "" {
-			snapshotDir = path.Join(datadir, "erigon", "snapshot")
+			snapshotDir = path.Join(datadir, "snapshot")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

@@ -21,12 +21,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Handler returns a log handler which logs to the unit test log of t.
 func Handler(t *testing.T, level log.Lvl) log.Handler {
-	return log.LvlFilterHandler(level, &handler{t, log.TerminalFormat(false)})
+	return log.LvlFilterHandler(level, &handler{t, log.TerminalFormat()})
 }
 
 type handler struct {
@@ -66,7 +66,7 @@ func Logger(t *testing.T, level log.Lvl) log.Logger {
 		t:  t,
 		l:  log.New(),
 		mu: new(sync.Mutex),
-		h:  &bufHandler{fmt: log.TerminalFormat(false)},
+		h:  &bufHandler{fmt: log.TerminalFormat()},
 	}
 	l.l.SetHandler(log.LvlFilterHandler(level, l.h))
 	return l

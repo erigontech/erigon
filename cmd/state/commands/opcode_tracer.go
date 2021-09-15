@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -23,10 +25,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -154,7 +155,7 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
@@ -184,7 +185,7 @@ func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.A
 	return nil
 }
 
-func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
 	// When a CaptureEnd is called, a Tx has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
@@ -549,7 +550,8 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		intraBlockState.SetTracer(ot)
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, nil /* checkTEVM */, block, vmConfig)
+		contractHasTEVM := ethdb.GetHasTEVM(historyTx)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, contractHasTEVM, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
@@ -664,7 +666,7 @@ func check(e error) {
 }
 
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
+	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
@@ -677,7 +679,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	rules := chainConfig.Rules(block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, checkTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
 		}

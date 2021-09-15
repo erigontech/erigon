@@ -4,10 +4,10 @@ import (
 	"encoding/binary"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -50,7 +50,7 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(address, value)
+		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 	return w.db.Put(kv.PlainState, address[:], value)
 }

@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -32,14 +33,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
-	blockExecutionTimer     = metrics.NewRegisteredTimer("chain/execution", nil)
-	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
+	blockExecutionTimer     = metrics2.GetOrCreateSummary("chain_execution_seconds")
+	blockReorgInvalidatedTx = metrics2.GetOrCreateCounter("chain_reorg_invalidTx")
 )
 
 const (
@@ -97,9 +97,9 @@ func ExecuteBlockEphemerally(
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	checkTEVM func(codeHash common.Hash) (bool, error),
+	contractHasTEVM func(codeHash common.Hash) (bool, error),
 ) (types.Receipts, error) {
-	defer blockExecutionTimer.UpdateSince(time.Now())
+	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
@@ -127,7 +127,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, checkTEVM)
+		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
 			if err1 != nil {

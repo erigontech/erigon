@@ -25,12 +25,12 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/simulations/pipes"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/gorilla/websocket"
 )

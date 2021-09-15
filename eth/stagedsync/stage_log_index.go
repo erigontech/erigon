@@ -11,15 +11,15 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -117,7 +117,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 			return err
 		}
 
-		if err := common.Stopped(quit); err != nil {
+		if err := libcommon.Stopped(quit); err != nil {
 			return err
 		}
 		blockNum := binary.BigEndian.Uint64(k[:8])
@@ -127,7 +127,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, cfg.bufLimit) {
 				if err := flushBitmaps(collectorTopics, topics); err != nil {
@@ -265,7 +265,7 @@ func unwindLogIndex(logPrefix string, db kv.RwTx, to uint64, cfg LogIndexCfg, qu
 			return err
 		}
 
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 		var logs types.Logs
@@ -357,9 +357,9 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem map[string]struct{}, pru
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.AccountsHistory, "block", blockNum)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.AccountsHistory, "block", blockNum)
 			case <-ctx.Done():
-				return common.ErrStopped
+				return libcommon.ErrStopped
 			default:
 			}
 			if err = c.DeleteCurrent(); err != nil {
@@ -426,9 +426,9 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Log, "block", blockNum)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.Log, "block", blockNum)
 			case <-ctx.Done():
-				return common.ErrStopped
+				return libcommon.ErrStopped
 			default:
 			}
 

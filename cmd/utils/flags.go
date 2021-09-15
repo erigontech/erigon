@@ -30,8 +30,8 @@ import (
 	"text/tabwriter"
 	"text/template"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -44,7 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/internal/flags"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -52,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -146,6 +146,14 @@ var (
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
 	// Transaction pool settings
+	TxPoolV2Flag = cli.BoolFlag{
+		Name:  "txpool.v2",
+		Usage: "experimental internal pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+	}
+	TxPoolDisableFlag = cli.BoolFlag{
+		Name:  "txpool.disable",
+		Usage: "experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+	}
 	TxPoolLocalsFlag = cli.StringFlag{
 		Name:  "txpool.locals",
 		Usage: "Comma separated accounts to treat as locals (no flush, priority inclusion)",
@@ -228,8 +236,8 @@ var (
 		Usage: "Public address for block mining rewards",
 		Value: "0",
 	}
-	MinerSigningKeyFlag = cli.StringFlag{
-		Name:  "miner.sigkey",
+	MinerSigningKeyFileFlag = cli.StringFlag{
+		Name:  "miner.sigfile",
 		Usage: "Private key to sign blocks with",
 		Value: "",
 	}
@@ -551,7 +559,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 		}
 		cfg.PrivateKey = key
 	default:
-		cfg.PrivateKey = nodeKey(path.Join(dataDir, "erigon", "nodekey"))
+		cfg.PrivateKey = nodeKey(path.Join(dataDir, "nodekey"))
 	}
 }
 
@@ -584,8 +592,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.CalaverasChainName:
-			urls = params.CalaverasBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
 		default:
@@ -626,8 +632,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.CalaverasChainName:
-			urls = params.CalaverasBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
 		default:
@@ -687,7 +691,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
-	serverKey := nodeKey(path.Join(datadir, "erigon", "nodekey"))
+	serverKey := nodeKey(path.Join(datadir, "nodekey"))
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
@@ -774,21 +778,17 @@ func SplitAndTrim(input string) (ret []string) {
 // setEtherbase retrieves the etherbase from the directly specified
 // command line flags.
 func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
-	if ctx.GlobalIsSet(MinerSigningKeyFlag.Name) {
-		sigkey := ctx.GlobalString(MinerSigningKeyFlag.Name)
-		if sigkey != "" {
-			var err error
-			cfg.Miner.SigKey, err = crypto.HexToECDSA(sigkey)
-			if err != nil {
-				Fatalf("Failed to parse ECDSA private key: %v", err)
-			}
-			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
-		}
-	} else if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
-		etherbase := ctx.GlobalString(MinerEtherbaseFlag.Name)
+	var etherbase string
+	if ctx.GlobalIsSet(MinerEtherbaseFlag.Name) {
+		etherbase = ctx.GlobalString(MinerEtherbaseFlag.Name)
 		if etherbase != "" {
 			cfg.Miner.Etherbase = common.HexToAddress(etherbase)
 		}
+	}
+
+	if etherbase == "" && ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+		cfg.Miner.SigKey = core.DevnetSignPrivateKey
+		cfg.Miner.Etherbase = core.DevnetEtherbase
 	}
 }
 
@@ -862,8 +862,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case params.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.CalaverasChainName:
-		return filepath.Join(datadir, "calaveras")
 	case params.SokolChainName:
 		return filepath.Join(datadir, "sokol")
 	default:
@@ -923,6 +921,12 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 }
 
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
+	if ctx.GlobalIsSet(TxPoolV2Flag.Name) {
+		cfg.V2 = true
+	}
+	if ctx.GlobalIsSet(TxPoolDisableFlag.Name) {
+		cfg.Disable = true
+	}
 	if ctx.GlobalIsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.GlobalString(TxPoolLocalsFlag.Name), ",")
 		for _, account := range locals {
@@ -969,7 +973,7 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
 	} else {
-		cfg.Ethash.DatasetDir = path.Join(datadir, "erigon", "ethash-dags")
+		cfg.Ethash.DatasetDir = path.Join(datadir, "ethash-dags")
 	}
 	if ctx.GlobalIsSet(EthashCachesInMemoryFlag.Name) {
 		cfg.Ethash.CachesInMem = ctx.GlobalInt(EthashCachesInMemoryFlag.Name)
@@ -993,7 +997,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	cfg.Notify, err = flags.GetStringArray(MinerNotifyFlag.Name)
 	if err != nil {
@@ -1060,7 +1064,7 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 		cfg.Enabled = true
 	}
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
-		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFlag.Name))
+		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1151,7 +1155,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	CheckExclusive(ctx, MinerSigningKeyFlag, MinerEtherbaseFlag)
+	CheckExclusive(ctx, MinerSigningKeyFileFlag, MinerEtherbaseFlag)
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
@@ -1224,11 +1228,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
 		}
 		cfg.Genesis = core.DefaultErigonGenesisBlock()
-	case params.CalaverasChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 123 // https://gist.github.com/holiman/c5697b041b3dc18c50a5cdd382cbdd16
-		}
-		cfg.Genesis = core.DefaultCalaverasGenesisBlock()
 	case params.SokolChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 77
@@ -1305,8 +1304,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultGoerliGenesisBlock()
 	case params.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
-	case params.CalaverasChainName:
-		genesis = core.DefaultCalaverasGenesisBlock()
 	case params.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
 	case params.DevChainName:

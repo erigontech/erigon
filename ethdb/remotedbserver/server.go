@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -24,11 +26,13 @@ var KvServiceAPIVersion = &types.VersionReply{Major: 3, Minor: 0, Patch: 0}
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv kv.RwDB
+	kv                 kv.RwDB
+	stateChangeStreams *StateChangeStreams
+	ctx                context.Context
 }
 
-func NewKvServer(kv kv.RwDB) *KvServer {
-	return &KvServer{kv: kv}
+func NewKvServer(ctx context.Context, kv kv.RwDB) *KvServer {
+	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx}
 }
 
 // Version returns the service-side interface version number
@@ -222,4 +226,91 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 	}
 
 	return nil
+}
+
+func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
+	clean := s.stateChangeStreams.Add(server)
+	defer clean()
+	select {
+	case <-s.ctx.Done():
+		return nil
+	case <-server.Context().Done():
+		return nil
+	}
+}
+
+func (s *KvServer) SendStateChanges(sc *remote.StateChange) {
+	log.Info("SendStateChanges start")
+	if err := s.stateChangeStreams.Broadcast(sc); err != nil {
+		log.Warn("Sending new peer notice to core P2P failed", "error", err)
+	}
+	log.Info("SendStateChanges end")
+}
+
+type StateChangeStreams struct {
+	mu      sync.RWMutex
+	id      uint
+	streams map[uint]remote.KV_StateChangesServer
+}
+
+func newStateChangeStreams() *StateChangeStreams {
+	return &StateChangeStreams{}
+}
+
+func (s *StateChangeStreams) Add(stream remote.KV_StateChangesServer) (remove func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.streams == nil {
+		s.streams = make(map[uint]remote.KV_StateChangesServer)
+	}
+	s.id++
+	id := s.id
+	s.streams[id] = stream
+	return func() { s.remove(id) }
+}
+
+func (s *StateChangeStreams) doBroadcast(reply *remote.StateChange) (ids []uint, errs []error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for id, stream := range s.streams {
+		err := stream.Send(reply)
+		if err != nil {
+			select {
+			case <-stream.Context().Done():
+				ids = append(ids, id)
+			default:
+			}
+			errs = append(errs, err)
+		}
+	}
+	return
+}
+
+func (s *StateChangeStreams) Broadcast(reply *remote.StateChange) (errs []error) {
+	var ids []uint
+	ids, errs = s.doBroadcast(reply)
+	if len(ids) > 0 {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+	for _, id := range ids {
+		delete(s.streams, id)
+	}
+	return errs
+}
+
+func (s *StateChangeStreams) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.streams)
+}
+
+func (s *StateChangeStreams) remove(id uint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.streams[id]
+	if !ok { // double-unsubscribe support
+		return
+	}
+	delete(s.streams, id)
 }

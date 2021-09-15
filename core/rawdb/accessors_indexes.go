@@ -19,10 +19,10 @@ package rawdb
 import (
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // TxLookupEntry is a positional metadata to help looking up the data content of
@@ -80,7 +80,7 @@ func ReadTransaction(db kv.Tx, hash common.Hash) (types.Transaction, common.Hash
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	body := ReadBody(db, blockHash, *blockNumber)
+	body := ReadBodyWithTransactions(db, blockHash, *blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0, nil

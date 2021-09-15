@@ -3,9 +3,12 @@ package rpctest
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // Compares response of Erigon with OpenEthereum
@@ -58,6 +61,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		return
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
 	prevBn := blockFrom
 	for bn := blockFrom + 100; bn < blockTo; bn += 100 {
 		// Checking modified accounts
@@ -74,7 +78,21 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
+			accounts := make([]common.Address, 0, len(accountSet))
 			for account := range accountSet {
+				accounts = append(accounts, account)
+			}
+			// Randomly select 100 accounts
+			selects := 100
+			if len(accounts) < 100 {
+				selects = len(accounts)
+			}
+			for i := 0; i < selects; i++ {
+				idx := i
+				if len(accounts) > 100 {
+					idx = int(rnd.Int31n(int32(len(accounts))))
+				}
+				account := accounts[idx]
 				reqGen.reqID++
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
 				errCtx := fmt.Sprintf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
@@ -85,6 +103,38 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 				reqGen.reqID++
 				request = reqGen.traceFilterTo(prevBn, bn, account)
 				errCtx = fmt.Sprintf("traceFilterTo fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
+					return
+				}
+			}
+			if len(accounts) > 1 {
+				from := accounts[0]
+				to := accounts[1]
+				reqGen.reqID++
+				request := reqGen.traceFilterUnion(prevBn, bn, from, to)
+				errCtx := fmt.Sprintf("traceFilterUnion fromBlock %d, toBlock %d, fromAddress %x, toAddress %x", prevBn, bn, from, to)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
+					return
+				}
+				reqGen.reqID++
+				request = reqGen.traceFilterAfter(prevBn, bn, 1)
+				errCtx = fmt.Sprintf("traceFilterAfter fromBlock %d, toBlock %d, after %x", prevBn, bn, 1)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
+					return
+				}
+				reqGen.reqID++
+				request = reqGen.traceFilterCount(prevBn, bn, 1)
+				errCtx = fmt.Sprintf("traceFilterCount fromBlock %d, toBlock %d, count %x", prevBn, bn, 1)
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					fmt.Println(err)
+					return
+				}
+				reqGen.reqID++
+				request = reqGen.traceFilterCountAfter(prevBn, bn, 1, 1)
+				errCtx = fmt.Sprintf("traceFilterCountAfter fromBlock %d, toBlock %d, count %x, after %x", prevBn, bn, 1, 1)
 				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
 					fmt.Println(err)
 					return

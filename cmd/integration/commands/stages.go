@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -21,14 +22,14 @@ import (
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -411,7 +412,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir)
+	pm, err := prune.Get(tx)
+	if err != nil {
+		return err
+	}
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx)
@@ -497,7 +502,10 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 	defer tx.Rollback()
 
 	if reset {
-		return stagedsync.ResetIH(tx)
+		if err := stagedsync.ResetIH(tx); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	execStage := stage(sync, tx, nil, stages.Execution)
 	s := stage(sync, tx, nil, stages.IntermediateHashes)
@@ -528,12 +536,12 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	} else {
-		if _, err := stagedsync.SpawnIntermediateHashesStage(s, nil /* Unwinder */, tx, cfg, ctx); err != nil {
+		if _, err := stagedsync.SpawnIntermediateHashesStage(s, sync /* Unwinder */, tx, cfg, ctx); err != nil {
 			return err
 		}
 	}
 	integrity.Trie(tx, integritySlow, ctx)
-	return nil
+	return tx.Commit()
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
@@ -867,9 +875,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
-	case params.CalaverasChainName:
-		chainConfig = params.CalaverasChainConfig
-		genesis = core.DefaultCalaverasGenesisBlock()
 	case params.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
@@ -879,7 +884,7 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	snapshotDir = path.Join(datadir, "erigon", "snapshot")
+	snapshotDir = path.Join(datadir, "snapshot")
 	logger := log.New()
 
 	var pm prune.Mode
@@ -887,6 +892,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if err = db.View(context.Background(), func(tx kv.Tx) error {
 		pm, err = prune.Get(tx)
 		if err != nil {
+			return err
+		}
+		if err = stagedsync.UpdateMetrics(tx); err != nil {
 			return err
 		}
 		return nil
@@ -936,11 +944,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
+	cfg.TxPool.Disable = true
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync2(context.Background(), logger, db, cfg,
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
 		downloadServer,
 		tmpdir,
 		txPool,
@@ -954,7 +963,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, txPool, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, txPool, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
 			stagedsync.StageTrieCfg(db, false, true, tmpdir),

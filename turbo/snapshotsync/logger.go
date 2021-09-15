@@ -2,7 +2,7 @@ package snapshotsync
 
 import (
 	lg "github.com/anacrolix/log"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {

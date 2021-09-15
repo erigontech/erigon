@@ -29,9 +29,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/internal/testlog"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // This test checks that dynamic dials are launched from discovery results.
@@ -422,7 +422,7 @@ func runDialTest(t *testing.T, config dialConfig, rounds []dialTestRound) {
 	config.clock = clock
 	config.dialer = dialer
 	config.resolver = resolver
-	config.log = testlog.Logger(t, log.LvlTrace)
+	config.log = testlog.Logger(t, log.LvlInfo)
 	config.rand = rand.New(rand.NewSource(0x1111))
 
 	// Set up the dialer. The setup function below runs on the dialTask

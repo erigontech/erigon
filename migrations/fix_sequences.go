@@ -3,7 +3,7 @@ package migrations
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 var oldSequences = map[string]string{

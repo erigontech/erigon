@@ -107,46 +107,46 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch kind {
-	case rlp.List:
+	if rlp.List == kind {
 		tx := &LegacyTx{}
 		if err = tx.DecodeRLP(s, size); err != nil {
 			return nil, err
 		}
 		return tx, nil
-	case rlp.String:
+	}
+	if rlp.String == kind {
 		s.NewList(size) // Hack - convert String (envelope) into List
-		var b []byte
-		if b, err = s.Bytes(); err != nil {
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return nil, err
+	}
+	if len(b) != 1 {
+		return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+	}
+	var tx Transaction
+	switch b[0] {
+	case AccessListTxType:
+		t := &AccessListTx{}
+		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		if len(b) != 1 {
-			return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+		tx = t
+	case DynamicFeeTxType:
+		t := &DynamicFeeTransaction{}
+		if err = t.DecodeRLP(s); err != nil {
+			return nil, err
 		}
-		var tx Transaction
-		switch b[0] {
-		case AccessListTxType:
-			t := &AccessListTx{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		case DynamicFeeTxType:
-			t := &DynamicFeeTransaction{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		default:
-			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
-		}
+		tx = t
+	default:
+		return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
+	}
+	if kind == rlp.String {
 		if err = s.ListEnd(); err != nil {
 			return nil, err
 		}
-		return tx, nil
-	default:
-		return nil, fmt.Errorf("unexpected RLP kind: %v", kind)
 	}
+	return tx, nil
 }
 
 func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {

@@ -34,7 +34,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Handler is the global debugging handler.
@@ -54,19 +54,21 @@ type HandlerT struct {
 // Verbosity sets the log verbosity ceiling. The verbosity of individual packages
 // and source files can be raised using Vmodule.
 func (*HandlerT) Verbosity(level int) {
-	glogger.Verbosity(log.Lvl(level))
+	//glogger.Verbosity(log.Lvl(level))
 }
 
 // Vmodule sets the log verbosity pattern. See package log for details on the
 // pattern syntax.
 func (*HandlerT) Vmodule(pattern string) error {
-	return glogger.Vmodule(pattern)
+	//return glogger.Vmodule(pattern)
+	return nil
 }
 
 // BacktraceAt sets the log backtrace location. See package log for details on
 // the pattern syntax.
 func (*HandlerT) BacktraceAt(location string) error {
-	return glogger.BacktraceAt(location)
+	//return glogger.BacktraceAt(location)
+	return nil
 }
 
 // MemStats returns detailed runtime memory statistics.

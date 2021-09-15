@@ -28,7 +28,7 @@ import (
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, checkTEVM func(contractHash common.Hash) (bool, error)) vm.BlockContext {
+func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, contractHasTEVM func(contractHash common.Hash) (bool, error)) vm.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
@@ -43,22 +43,22 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
-	if checkTEVM == nil {
-		checkTEVM = func(_ common.Hash) (bool, error) {
+	if contractHasTEVM == nil {
+		contractHasTEVM = func(_ common.Hash) (bool, error) {
 			return false, nil
 		}
 	}
 	return vm.BlockContext{
-		CanTransfer: CanTransfer,
-		Transfer:    Transfer,
-		GetHash:     GetHashFn(header, getHeader),
-		Coinbase:    beneficiary,
-		BlockNumber: header.Number.Uint64(),
-		Time:        header.Time,
-		Difficulty:  new(big.Int).Set(header.Difficulty),
-		BaseFee:     &baseFee,
-		GasLimit:    header.GasLimit,
-		CheckTEVM:   checkTEVM,
+		CanTransfer:     CanTransfer,
+		Transfer:        Transfer,
+		GetHash:         GetHashFn(header, getHeader),
+		Coinbase:        beneficiary,
+		BlockNumber:     header.Number.Uint64(),
+		Time:            header.Time,
+		Difficulty:      new(big.Int).Set(header.Difficulty),
+		BaseFee:         &baseFee,
+		GasLimit:        header.GasLimit,
+		ContractHasTEVM: contractHasTEVM,
 	}
 }
 

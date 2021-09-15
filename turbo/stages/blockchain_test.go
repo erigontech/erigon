@@ -23,12 +23,11 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/stretchr/testify/assert"
@@ -44,9 +43,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // So we can deterministically seed different blockchains
@@ -1075,7 +1074,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	// Generate the original common chain segment and the two competing forks
 
 	m, m2 := stages.Mock(t), stages.Mock(t)
@@ -1136,7 +1135,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //  - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	// Generate a canonical chain to act as the main dataset
 	m := stages.Mock(t)
 
@@ -1903,7 +1902,7 @@ func TestEIP1559Transition(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params.Ether))
 		gspec   = &core.Genesis{
-			Config: params.CalaverasChainConfig,
+			Config: params.GoerliChainConfig,
 			Alloc: core.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},

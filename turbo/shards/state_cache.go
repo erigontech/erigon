@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/metrics"
 )
 
 // LRU state cache consists of two structures - B-Tree and binary heap
@@ -19,12 +19,9 @@ import (
 
 // Metrics
 var (
-	AccRead       = metrics.NewRegisteredCounter("cache/acc_read/total", nil)
-	AccReadHit    = metrics.NewRegisteredCounter("cache/acc_read/hits", nil)
-	StRead        = metrics.NewRegisteredCounter("cache/st_read/total", nil)
-	StReadHit     = metrics.NewRegisteredCounter("cache/st_read/hits", nil)
-	WritesRead    = metrics.NewRegisteredCounter("cache/writes/total", nil)
-	WritesReadHit = metrics.NewRegisteredCounter("cache/writes/hits", nil)
+	AccRead    = metrics.GetOrCreateCounter(`cache_total{target="acc_read"}`)
+	StRead     = metrics.GetOrCreateCounter(`cache_total{target="st_read"}`)
+	WritesRead = metrics.GetOrCreateCounter(`cache_total{target="write"}`)
 )
 
 const (
@@ -408,12 +405,11 @@ func (sc *StateCache) Clone() *StateCache {
 }
 
 func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
-	WritesRead.Inc(1)
+	WritesRead.Inc()
 	item := sc.readWrites[id(key)].Get(key)
 	if item == nil {
 		return nil, false
 	}
-	WritesReadHit.Inc(1)
 	cacheItem := item.(CacheItem)
 	if cacheItem.HasFlag(DeletedFlag) || cacheItem.HasFlag(AbsentFlag) {
 		return nil, true
@@ -424,7 +420,7 @@ func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
 // GetAccount searches and account with given address, without modifying any structures
 // Second return value is true if such account is found
 func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
-	AccRead.Inc(1)
+	AccRead.Inc()
 	var key AccountItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
@@ -435,7 +431,6 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 	h.Sha.Read(key.addrHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
-			AccReadHit.Inc(1)
 			return &item.(*AccountItem).account, true
 		}
 		return nil, true
@@ -444,7 +439,7 @@ func (sc *StateCache) GetAccount(address []byte) (*accounts.Account, bool) {
 }
 
 func (sc *StateCache) HasAccountWithInPrefix(addrHashPrefix []byte) bool {
-	AccRead.Inc(1)
+	AccRead.Inc()
 	seek := &AccountSeek{seek: addrHashPrefix}
 	var found bool
 	sc.readWrites[id(seek)].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
@@ -478,7 +473,7 @@ func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 // GetStorage searches storage item with given address, incarnation, and location, without modifying any structures
 // Second return value is true if such item is found
 func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []byte) ([]byte, bool) {
-	StRead.Inc(1)
+	StRead.Inc()
 	var key StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
@@ -495,7 +490,6 @@ func (sc *StateCache) GetStorage(address []byte, incarnation uint64, location []
 	h.Sha.Read(key.locHash[:])
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
-			StReadHit.Inc(1)
 			return item.(*StorageItem).value.Bytes(), true
 		}
 		return nil, true
@@ -586,7 +580,6 @@ func (sc *StateCache) GetAccountByHashedAddress(addrHash common.Hash) (*accounts
 	key.addrHash.SetBytes(addrHash.Bytes())
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
-			StReadHit.Inc(1)
 			return &item.(*AccountItem).account, true
 		}
 		return nil, true
@@ -602,7 +595,6 @@ func (sc *StateCache) GetStorageByHashedAddress(addrHash common.Hash, incarnatio
 	}
 	if item, ok := sc.get(&key); ok {
 		if item != nil {
-			StReadHit.Inc(1)
 			return item.(*StorageItem).value.Bytes(), true
 		}
 		return nil, true

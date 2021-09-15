@@ -4,13 +4,14 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -107,18 +108,18 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, "")
+	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{})
 	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx)
 	assert.NoError(t, err)
 
 	{
-		found := rawdb.ReadBody(tx, common.HexToHash("01"), 1)
+		found := rawdb.ReadBodyWithTransactions(tx, common.HexToHash("01"), 1)
 		assert.NotNil(t, found)
 		assert.Equal(t, 2, len(found.Transactions))
-		found = rawdb.ReadBody(tx, common.HexToHash("02"), 2)
+		found = rawdb.ReadBodyWithTransactions(tx, common.HexToHash("02"), 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Transactions))
-		found = rawdb.ReadBody(tx, common.HexToHash("03"), 3)
+		found = rawdb.ReadBodyWithTransactions(tx, common.HexToHash("03"), 3)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Transactions))
 		assert.NotNil(t, 2, len(found.Uncles))

@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"path"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
 )
 
@@ -27,37 +27,13 @@ import (
 //		+ SyncStageProgress = []byte("SSP2")
 // - in the beginning of migration: check that old bucket exists, clear new bucket
 // - in the end:drop old bucket (not in defer!).
-//	Example:
-//	Up: func(db ethdb.Database, tmpdir string, OnLoadCommit etl.LoadCommitHandler) error {
-//		if exists, err := db.(ethdb.BucketsMigrator).BucketExists(dbutils.SyncStageProgressOld1); err != nil {
-//			return err
-//		} else if !exists {
-//			return OnLoadCommit(db, nil, true)
-//		}
-//
-//		if err := db.(ethdb.BucketsMigrator).ClearBuckets(dbutils.SyncStageProgress); err != nil {
-//			return err
-//		}
-//
-//		extractFunc := func(k []byte, v []byte, next etl.ExtractNextFunc) error {
-//			... // migration logic
-//		}
-//		if err := etl.Transform(...); err != nil {
-//			return err
-//		}
-//
-//		if err := db.(ethdb.BucketsMigrator).DropBuckets(dbutils.SyncStageProgressOld1); err != nil {  // clear old bucket
-//			return err
-//		}
-//	},
 // - if you need migrate multiple buckets - create separate migration for each bucket
-// - write test where apply migration twice
+// - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		headerPrefixToSeparateBuckets,
 		removeCliqueBucket,
 		dbSchemaVersion,
-		rebuilCallTraceIndex,
 		fixSequences,
 		storageMode,
 	},

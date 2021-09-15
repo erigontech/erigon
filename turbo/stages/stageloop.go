@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -17,18 +19,17 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
-	logger log.Logger,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
@@ -52,8 +53,8 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, logger, db, sync, height, notifications, initialCycle, updateHead, nil, 0); err != nil {
-			if errors.Is(err, common.ErrStopped) {
+		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil, snapshotEpochBlock); err != nil {
+			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
 
@@ -82,7 +83,6 @@ func StageLoop(
 
 func StageLoopStep(
 	ctx context.Context,
-	logger log.Logger,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	highestSeenHeader uint64,
@@ -180,6 +180,8 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
+	notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer)
+
 	err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, db)
 	if err != nil {
 		return err
@@ -203,10 +205,11 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
-func NewStagedSync2(
+func NewStagedSync(
 	ctx context.Context,
 	logger log.Logger,
 	db kv.RwDB,
+	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
@@ -229,6 +232,7 @@ func NewStagedSync2(
 				controlServer.PropagateNewBlockHashes,
 				controlServer.Penalize,
 				cfg.BatchSize,
+				p2pCfg.NoDiscovery,
 			),
 			stagedsync.StageBlockHashesCfg(db, tmpdir),
 			stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator, logger),
@@ -242,8 +246,8 @@ func NewStagedSync2(
 				*controlServer.ChainConfig,
 				cfg.BatchSize,
 			),
-			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir, logger),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
+			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -270,16 +274,19 @@ func NewStagedSync2(
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageTxPoolCfg(db, txPool, func() {
-				for i := range txPoolServer.Sentries {
-					go func(i int) {
-						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.HandleInboundMessage, nil)
-					}(i)
-					go func(i int) {
-						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], controlServer, txPoolServer.RecentPeers, nil)
-					}(i)
+			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
+				if cfg.TxPool.V2 {
+				} else {
+					for i := range txPoolServer.Sentries {
+						go func(i int) {
+							txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
+						}(i)
+						go func(i int) {
+							txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
+						}(i)
+					}
+					txPoolServer.TxFetcher.Start()
 				}
-				txPoolServer.TxFetcher.Start()
 			}),
 			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger),
 			false, /* test */

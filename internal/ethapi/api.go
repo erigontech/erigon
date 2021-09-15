@@ -17,11 +17,9 @@
 package ethapi
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -31,8 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 /*
@@ -386,7 +383,8 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		// A basefee is provided, necessitating 1559-type execution
 		if args.GasPrice != nil {
 			// User specified the legacy gas field, convert to 1559 gas typing
-			gasPrice, overflow := uint256.FromBig(args.GasPrice.ToInt())
+			gasPrice = new(uint256.Int)
+			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
 			if overflow {
 				return types.Message{}, fmt.Errorf("args.GasPrice higher than 2^256-1")
 			}
@@ -447,99 +445,6 @@ type Account struct {
 	Balance   **hexutil.Big                `json:"balance"`
 	State     *map[common.Hash]uint256.Int `json:"state"`
 	StateDiff *map[common.Hash]uint256.Int `json:"stateDiff"`
-}
-
-func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]Account, vmCfg vm.Config, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, error) {
-	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
-
-	state, header, err := b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-	if state == nil || err != nil {
-		return nil, err
-	}
-	// Override the fields of specified contracts before execution.
-	for addr, account := range overrides {
-		// Override account nonce.
-		if account.Nonce != nil {
-			state.SetNonce(addr, uint64(*account.Nonce))
-		}
-		// Override account(contract) code.
-		if account.Code != nil {
-			state.SetCode(addr, *account.Code)
-		}
-		// Override account balance.
-		if account.Balance != nil {
-			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
-			if overflow {
-				panic(fmt.Errorf("account.Balance higher than 2^256-1"))
-			}
-			state.SetBalance(addr, balance)
-		}
-		if account.State != nil && account.StateDiff != nil {
-			return nil, fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
-		}
-		// Replace entire state if caller requires.
-		if account.State != nil {
-			state.SetStorage(addr, *account.State)
-		}
-		// Apply state diff into specified accounts.
-		if account.StateDiff != nil {
-			for key, value := range *account.StateDiff {
-				key := key
-				state.SetState(addr, &key, value)
-			}
-		}
-	}
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
-
-	// Get a new instance of the EVM.
-	var baseFee *uint256.Int
-	if header != nil && header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
-		}
-	}
-	msg, err := args.ToMessage(globalGasCap, baseFee)
-	if err != nil {
-		return nil, err
-	}
-	evm, vmError, err := b.GetEVM(ctx, msg, state, header)
-	if err != nil {
-		return nil, err
-	}
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
-	go func() {
-		<-ctx.Done()
-		evm.Cancel()
-	}()
-
-	// Execute the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64)
-	result, err := core.ApplyMessage(evm, msg, gp, true, false)
-	if err := vmError(); err != nil {
-		return nil, err
-	}
-
-	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
-		return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
-	}
-	if err != nil {
-		return result, fmt.Errorf("err: %w (supplied gas %d)", err, msg.Gas())
-	}
-	return result, nil
 }
 
 func NewRevertError(result *core.ExecutionResult) *RevertError {

@@ -29,10 +29,10 @@ import (
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/internal/testlog"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type testTransport struct {
@@ -73,7 +73,7 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 		ListenAddr:  "127.0.0.1:0",
 		NoDiscovery: true,
 		PrivateKey:  newkey(),
-		Logger:      testlog.Logger(t, log.LvlTrace),
+		Logger:      testlog.Logger(t, log.LvlInfo),
 	}
 	server := &Server{
 		Config:      config,

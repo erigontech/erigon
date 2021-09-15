@@ -7,14 +7,15 @@ import (
 	"os"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/ethdb/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
-	"github.com/ledgerwatch/erigon/log"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func CreateHeadersSnapshot(ctx context.Context, readTX kv.Tx, toBlock uint64, snapshotPath string) error {
@@ -63,7 +64,7 @@ func GenerateHeadersSnapshot(ctx context.Context, db kv.Tx, sntx kv.RwTx, toBloc
 	tt := time.Now()
 	for i := uint64(0); i <= toBlock; i++ {
 		if common.IsCanceled(ctx) {
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		}
 		select {
 		case <-t.C:

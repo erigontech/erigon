@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/ledgerwatch/erigon/ethdb/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -152,33 +152,40 @@ func (m Mode) String() string {
 	if !m.Initialised {
 		return "default"
 	}
-	modeString := ""
+	long := ""
+	short := "--prune="
 	if m.History.Enabled() {
-		modeString += fmt.Sprintf("history=%d,", m.History)
-	} else {
-		modeString += "history=no,"
+		if m.History == params.FullImmutabilityThreshold {
+			short += "h"
+		} else {
+			long += fmt.Sprintf(" --prune.h.older=%d", m.History)
+		}
 	}
 	if m.Receipts.Enabled() {
-		modeString += fmt.Sprintf("receipt=%d,", m.Receipts)
-	} else {
-		modeString += "receipt=no,"
+		if m.Receipts == params.FullImmutabilityThreshold {
+			short += "r"
+		} else {
+			long += fmt.Sprintf(" --prune.r.older=%d", m.Receipts)
+		}
 	}
 	if m.TxIndex.Enabled() {
-		modeString += fmt.Sprintf("txindex=%d,", m.TxIndex)
-	} else {
-		modeString += "txindex=no,"
+		if m.TxIndex == params.FullImmutabilityThreshold {
+			short += "t"
+		} else {
+			long += fmt.Sprintf(" --prune.t.older=%d", m.TxIndex)
+		}
 	}
 	if m.CallTraces.Enabled() {
-		modeString += fmt.Sprintf("calltrace=%d,", m.CallTraces)
-	} else {
-		modeString += "calltrace=no,"
+		if m.CallTraces == params.FullImmutabilityThreshold {
+			short += "c"
+		} else {
+			long += fmt.Sprintf(" --prune.c.older=%d", m.CallTraces)
+		}
 	}
 	if m.Experiments.TEVM {
-		modeString += "experiments.tevm=enabled"
-	} else {
-		modeString += "experiments.tevm=disabled"
+		long += " --experiments.tevm=enabled"
 	}
-	return modeString
+	return short + long
 }
 
 func Override(db kv.RwTx, sm Mode) error {

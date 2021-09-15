@@ -28,6 +28,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb/memdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
@@ -152,14 +152,14 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		GasPrice: big.NewInt(1),
 	}
 	context := vm.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		Coinbase:    common.Address{},
-		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
-		BlockNumber: 8000000,
-		Time:        5,
-		Difficulty:  big.NewInt(0x30000),
-		GasLimit:    uint64(6000000),
+		CanTransfer:     core.CanTransfer,
+		Transfer:        core.Transfer,
+		Coinbase:        common.Address{},
+		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
+		BlockNumber:     8000000,
+		Time:            5,
+		Difficulty:      big.NewInt(0x30000),
+		GasLimit:        uint64(6000000),
 	}
 	alloc := core.GenesisAlloc{}
 
@@ -244,14 +244,14 @@ func TestCallTracer(t *testing.T) {
 				GasPrice: big.NewInt(int64(txn.GetPrice().Uint64())),
 			}
 			context := vm.BlockContext{
-				CanTransfer: core.CanTransfer,
-				Transfer:    core.Transfer,
-				Coinbase:    test.Context.Miner,
-				BlockNumber: uint64(test.Context.Number),
-				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
-				GasLimit:    uint64(test.Context.GasLimit),
-				CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
+				CanTransfer:     core.CanTransfer,
+				Transfer:        core.Transfer,
+				Coinbase:        test.Context.Miner,
+				BlockNumber:     uint64(test.Context.Number),
+				Time:            uint64(test.Context.Time),
+				Difficulty:      (*big.Int)(test.Context.Difficulty),
+				GasLimit:        uint64(test.Context.GasLimit),
+				ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 			}
 
 			_, tx := memdb.NewTestTx(t)

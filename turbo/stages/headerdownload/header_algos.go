@@ -14,16 +14,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -961,6 +961,22 @@ func (hd *HeaderDownload) Fetching() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.fetching
+}
+
+func (hd *HeaderDownload) AddMinedBlock(block *types.Block) error {
+	buf := bytes.NewBuffer(nil)
+	if err := block.Header().EncodeRLP(buf); err != nil {
+		return err
+	}
+	segments, _, err := hd.SingleHeaderAsSegment(buf.Bytes(), block.Header())
+	if err != nil {
+		return err
+	}
+
+	for _, segment := range segments {
+		_, _ = hd.ProcessSegment(segment, false /* newBlock */, "miner")
+	}
+	return nil
 }
 
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {

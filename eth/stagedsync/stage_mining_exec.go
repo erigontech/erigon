@@ -3,6 +3,8 @@ package stagedsync
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -13,9 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/kv"
-	"github.com/ledgerwatch/erigon/log"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type MiningExecCfg struct {
@@ -74,14 +75,14 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-	checkTEVM := ethdb.GetCheckTEVM(tx)
+	contractHasTEVM := ethdb.GetHasTEVM(tx)
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, localTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, localTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -93,7 +94,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, checkTEVM, cfg.engine, remoteTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, remoteTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -145,7 +146,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	return nil
 }
 
-func addTransactionsToMiningBlock(current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
@@ -156,7 +157,7 @@ func addTransactionsToMiningBlock(current *MiningBlock, chainConfig params.Chain
 
 	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
-		receipt, _, err := core.ApplyTransaction(&chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, checkTEVM)
+		receipt, _, err := core.ApplyTransaction(&chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, contractHasTEVM)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			return nil, err
@@ -173,7 +174,7 @@ func addTransactionsToMiningBlock(current *MiningBlock, chainConfig params.Chain
 	}
 
 	for {
-		if err := common.Stopped(quit); err != nil {
+		if err := libcommon.Stopped(quit); err != nil {
 			return nil, err
 		}
 
