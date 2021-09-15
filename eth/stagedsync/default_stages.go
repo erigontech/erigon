@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/log"
 )
 
 func DefaultStages(ctx context.Context,
@@ -28,6 +29,7 @@ func DefaultStages(ctx context.Context,
 	finish FinishCfg,
 	test bool,
 ) []*Stage {
+	log.Info("Snapshots", "headers", snapshotHeaders.enabled,"es", snapshotHeaders.epochSize,"bodies", snapshotBodies.enabled,"es", snapshotBodies.epochSize,"state", snapshotState.enabled,"es", snapshotState.epochSize,)
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -58,7 +60,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.CreateHeadersSnapshot,
 			Description:         "Create headers snapshot",
-			Disabled:            snapshotHeaders.enabled,
+			Disabled:            !snapshotHeaders.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, firstCycle, ctx)
@@ -86,7 +88,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.CreateBodiesSnapshot,
 			Description:         "Create bodies snapshot",
-			Disabled:            snapshotBodies.enabled,
+			Disabled:            !snapshotBodies.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, firstCycle, ctx)
@@ -142,7 +144,7 @@ func DefaultStages(ctx context.Context,
 		{
 			ID:                  stages.CreateStateSnapshot,
 			Description:         "Create state snapshot",
-			Disabled:            snapshotState.enabled,
+			Disabled:            !snapshotState.enabled,
 			DisabledDescription: "Enable by --snapshot.layout",
 			Forward: func(firstCycle bool, s *StageState, u Unwinder, tx kv.RwTx) error {
 				return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, ctx, firstCycle)

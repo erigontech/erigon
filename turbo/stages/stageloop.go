@@ -242,7 +242,7 @@ func NewStagedSync2(
 				*controlServer.ChainConfig,
 				cfg.BatchSize,
 			),
-			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
+			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir, logger),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
@@ -256,6 +256,7 @@ func NewStagedSync2(
 				cfg.StateStream,
 				tmpdir,
 				cfg.Snapshot.Enabled && cfg.Snapshot.Mode.State,
+				cfg.Snapshot.EpochSize,
 			),
 			stagedsync.StageTranspileCfg(
 				db,

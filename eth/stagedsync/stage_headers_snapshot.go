@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/params"
 	"sync/atomic"
 	"time"
 
@@ -31,12 +32,14 @@ func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *sn
 		client:           client,
 		snapshotMigrator: snapshotMigrator,
 		log:              logger,
+		epochSize: snapshot.EpochSize,
 	}
 }
 
 func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
-	if !initial || cfg.epochSize == 0 {
+	//but it migth be not initial flag in case of unwind
+	if tx!=nil || cfg.epochSize == 0 {
 		return nil
 	}
 
@@ -65,7 +68,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 	//Problem: we must inject this stage, because it's not possible to do compact mdbx after sync.
 	//So we have to move headers to snapshot right after headers stage.
 	//but we don't want to block not initial sync
-	if snapshotBlock <= currentSnapshotBlock {
+	if snapshotBlock <= currentSnapshotBlock && snapshotBlock+params.FullImmutabilityThreshold < to {
 		return nil
 	}
 
@@ -90,7 +93,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 	if err != nil {
 		return err
 	}
-	err = s.Update(tx, snapshotBlock)
+	err = s.Update(writeTX, snapshotBlock)
 	if err != nil {
 		return err
 	}
@@ -112,6 +115,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 	}
 
 	for {
+		log.Info("Final", "Snapshot", "headers")
 		ok, err := final()
 		if err != nil {
 			return err
@@ -119,7 +123,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 		if ok {
 			break
 		}
-		time.Sleep(time.Second)
+		time.Sleep(time.Second*10)
 	}
 	return nil
 }

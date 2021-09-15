@@ -72,6 +72,7 @@ func StageExecuteBlocksCfg(
 	stateStream bool,
 	tmpdir string,
 	stateSnapshotGeneration bool,
+	epochSize uint64,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:                      kv,
@@ -85,6 +86,7 @@ func StageExecuteBlocksCfg(
 		accumulator:             accumulator,
 		stateStream:             stateStream,
 		stateSnapshotGeneration: stateSnapshotGeneration,
+		snapshotEpochSize: epochSize,
 	}
 }
 
@@ -288,7 +290,9 @@ Loop:
 		if cfg.vmConfig.EnableTEMV {
 			checkTEVMCode = ethdb.GetCheckTEVM(tx)
 		}
-
+		if blockNum==5000000 {
+			fmt.Println(blockNum)
+		}
 		if snapshotsync.IsSnapshotBlock(blockNum, cfg.snapshotEpochSize) &&
 			prevStageProgress-blockNum < cfg.snapshotEpochSize &&
 			cfg.stateSnapshotGeneration {

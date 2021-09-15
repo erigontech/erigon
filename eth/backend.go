@@ -251,6 +251,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	// setting notifier to support streaming events to rpc daemon
 	var mg *snapshotsync.SnapshotMigrator
+	log.Error("config.Snapshot bes","cfg", config.Snapshot)
 	if config.Snapshot.Enabled {
 		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainKv)
 		if err != nil {

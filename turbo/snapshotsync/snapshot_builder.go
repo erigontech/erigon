@@ -4,14 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"sync/atomic"
-	"time"
-
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -20,7 +12,13 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/kv"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/log"
-	"github.com/ledgerwatch/erigon/params"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
 )
 
 func NewMigrator(snapshotDir string, currentSnapshotBlock uint64, currentSnapshotInfohash []byte) *SnapshotMigrator {
@@ -78,9 +76,11 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, logger log.Logger
 	case "headers":
 		initialStages = []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error{
 			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
+				log.Info("Create headers snapshot")
 				return CreateHeadersSnapshot(context.Background(), tx, toBlock, snapshotPath)
 			},
 			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
+				log.Info("Replace headers snapshot")
 				//replace snapshot
 				if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
@@ -97,9 +97,11 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, logger log.Logger
 	case "bodies":
 		initialStages = []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error{
 			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
+				log.Info("Create body snapshot")
 				return CreateBodySnapshot(tx, logger, toBlock, snapshotPath)
 			},
 			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
+				log.Info("Replace bodies snapshot")
 				//replace snapshot
 				if _, ok := db.(snapshotdb.SnapshotUpdater); !ok {
 					return errors.New("db don't implement snapshotUpdater interface")
@@ -118,6 +120,7 @@ func (sm *SnapshotMigrator) AsyncStages(migrateToBlock uint64, logger log.Logger
 	btStages := func(shapshotHashKey []byte) []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
 		return []func(db kv.RoDB, tx kv.Tx, toBlock uint64) error{
 			func(db kv.RoDB, tx kv.Tx, toBlock uint64) error {
+				log.Info("Stop seeding snapshot")
 				//todo headers infohash
 				var infohash []byte
 				var err error
@@ -274,10 +277,12 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX 
 		}
 
 		for i := range syncStages {
+			log.Info("Sync stage", "started",i)
 			innerErr := syncStages[i](dbi, rwTX, migrateToBlock)
 			if innerErr != nil {
 				return innerErr
 			}
+			log.Info("Sync stage", "ended",i)
 		}
 		atomic.StoreUint64(&sm.started, 3)
 
@@ -290,38 +295,79 @@ func (sm *SnapshotMigrator) Final(tx kv.Tx) error {
 		return nil
 	}
 
-	v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
-	if errors.Is(err, ethdb.ErrKeyNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	if len(v) != 8 {
-		log.Error("Incorrect length", "ln", len(v))
-		return nil
-	}
-
-	if sm.HeadersCurrentSnapshot < atomic.LoadUint64(&sm.HeadersNewSnapshot) && sm.HeadersCurrentSnapshot != 0 {
-		oldSnapshotPath := SnapshotName(sm.snapshotsDir, "headers", sm.HeadersCurrentSnapshot)
-		log.Info("Removing old snapshot", "path", oldSnapshotPath)
-		tt := time.Now()
-		err = os.RemoveAll(oldSnapshotPath)
+	log.Info("Final", "type", sm.snapshotType, "stage", atomic.LoadUint64(&sm.started),
+		"cb", atomic.LoadUint64(&sm.BodiesCurrentSnapshot), "nb", atomic.LoadUint64(&sm.BodiesNewSnapshot),
+		"ch", atomic.LoadUint64(&sm.HeadersCurrentSnapshot), "nh", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+	if sm.snapshotType == "headers" {
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil
+		}
 		if err != nil {
-			log.Error("Remove snapshot", "err", err)
 			return err
 		}
-		log.Info("Removed old snapshot", "path", oldSnapshotPath, "t", time.Since(tt))
+		log.Info("kv.CurrentHeadersSnapshotBlock", "v", v, "1", binary.BigEndian.Uint64(v), "2", atomic.LoadUint64(&sm.HeadersNewSnapshot))
+		if len(v) != 8 {
+			log.Error("Incorrect length", "ln", len(v))
+			return nil
+		}
+
+		if sm.HeadersCurrentSnapshot < atomic.LoadUint64(&sm.HeadersNewSnapshot) && sm.HeadersCurrentSnapshot != 0 {
+			oldSnapshotPath := SnapshotName(sm.snapshotsDir, "headers", sm.HeadersCurrentSnapshot)
+			log.Info("Removing old snapshot", "path", oldSnapshotPath)
+			tt := time.Now()
+			err = os.RemoveAll(oldSnapshotPath)
+			if err != nil {
+				log.Error("Remove snapshot", "err", err)
+				return err
+			}
+			log.Info("Removed old snapshot", "path", oldSnapshotPath, "t", time.Since(tt))
+		}
+
+		if binary.BigEndian.Uint64(v) == atomic.LoadUint64(&sm.HeadersNewSnapshot) {
+			atomic.StoreUint64(&sm.HeadersCurrentSnapshot, sm.HeadersNewSnapshot)
+			atomic.StoreUint64(&sm.started, 0)
+			atomic.StoreUint64(&sm.replaced, 0)
+			log.Info("CurrentHeadersSnapshotBlock commited", "block", binary.BigEndian.Uint64(v))
+			return nil
+		}
+	}else  if sm.snapshotType == "bodies" {
+		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentBodiesSnapshotBlock)
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		log.Info("kv.CurrentBodiesSnapshotBlock", "v", v, "1",binary.BigEndian.Uint64(v), "2", atomic.LoadUint64(&sm.BodiesNewSnapshot))
+		if len(v) != 8 {
+			log.Error("Incorrect length", "ln", len(v))
+			return nil
+		}
+
+		if sm.BodiesCurrentSnapshot < atomic.LoadUint64(&sm.BodiesNewSnapshot) && sm.BodiesCurrentSnapshot != 0 {
+			oldSnapshotPath := SnapshotName(sm.snapshotsDir, "headers", sm.BodiesCurrentSnapshot)
+			log.Info("Removing old snapshot", "path", oldSnapshotPath)
+			tt := time.Now()
+			err = os.RemoveAll(oldSnapshotPath)
+			if err != nil {
+				log.Error("Remove snapshot", "err", err)
+				return err
+			}
+			log.Info("Removed old snapshot", "path", oldSnapshotPath, "t", time.Since(tt))
+		}
+
+		if binary.BigEndian.Uint64(v) == atomic.LoadUint64(&sm.BodiesNewSnapshot) {
+			atomic.StoreUint64(&sm.BodiesCurrentSnapshot, sm.BodiesNewSnapshot)
+			atomic.StoreUint64(&sm.started, 0)
+			atomic.StoreUint64(&sm.replaced, 0)
+			log.Info("BodiesCurrentSnapshot commited", "block", binary.BigEndian.Uint64(v))
+			return nil
+		}
+
 	}
 
-	if binary.BigEndian.Uint64(v) == atomic.LoadUint64(&sm.HeadersNewSnapshot) {
-		atomic.StoreUint64(&sm.HeadersCurrentSnapshot, sm.HeadersNewSnapshot)
-		atomic.StoreUint64(&sm.started, 0)
-		atomic.StoreUint64(&sm.replaced, 0)
-		log.Info("CurrentHeadersSnapshotBlock commited", "block", binary.BigEndian.Uint64(v))
-		return nil
-	}
 	return nil
 }
 
@@ -370,7 +416,7 @@ func CurrentStateSnapshotBlock(block, epochSize uint64) uint64 {
 
 //CalculateEpoch - returns latest available snapshot block that possible to create.
 func CalculateEpoch(block, epochSize uint64) uint64 {
-	return block - (block+params.FullImmutabilityThreshold)%epochSize
+	return block - block%epochSize
 }
 
 func SnapshotName(baseDir, name string, blockNum uint64) string {

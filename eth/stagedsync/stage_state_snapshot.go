@@ -32,6 +32,7 @@ func StageSnapshotStateCfg(db kv.RwDB, snapshot ethconfig.Snapshot, tmpDir strin
 		snapshotMigrator: snapshotMigrator,
 		tmpDir:           tmpDir,
 		log:              logger,
+		epochSize: snapshot.EpochSize,
 	}
 }
 
@@ -78,7 +79,7 @@ func SpawnStateSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotSt
 
 	//get rid of block after epoch block
 	cfg.db.(*snapshotdb.SnapshotKV).SetTempDB(nil, nil)
-	mainDBTX, err := cfg.db.BeginRw(ctx)
+	mainDBTX, err := cfg.db.(*snapshotdb.SnapshotKV).BeginRw(ctx) //todo writedb
 	if err != nil {
 		return err
 	}

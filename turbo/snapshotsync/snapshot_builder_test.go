@@ -40,7 +40,6 @@ import (
 // Step 5. We need to check that the new snapshot contains headers from 0 to 20, the headers bucket in the main database is empty,
 // it started seeding a new snapshot and removed the old one.
 func TestSnapshotMigratorStageAsync(t *testing.T) {
-	t.Skip("often fails on CI")
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}

@@ -58,16 +58,31 @@ func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*Snaps
 }
 
 func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
-	var snapshotBlock uint64
-	var hasSnapshotBlock bool
+	var headerSnapshotBlock, bodiesSnapshotBlock, stateSnapshotBlock uint64
 	if err := chainDb.View(context.Background(), func(tx kv.Tx) error {
 		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentHeadersSnapshotBlock)
 		if err != nil {
 			return err
 		}
-		hasSnapshotBlock = len(v) == 8
-		if hasSnapshotBlock {
-			snapshotBlock = binary.BigEndian.Uint64(v)
+
+		if len(v) == 8 {
+			headerSnapshotBlock = binary.BigEndian.Uint64(v)
+		}
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentBodiesSnapshotBlock)
+		if err != nil {
+			return err
+		}
+
+		if len(v) == 8 {
+			bodiesSnapshotBlock = binary.BigEndian.Uint64(v)
+		}
+		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentStateSnapshotBlock)
+		if err != nil {
+			return err
+		}
+
+		if len(v) == 8 {
+			stateSnapshotBlock = binary.BigEndian.Uint64(v)
 		}
 		return nil
 	}); err != nil {
@@ -75,12 +90,27 @@ func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 	}
 
 	snKVOpts := snapshotdb.NewSnapshotKV().DB(chainDb)
-	if hasSnapshotBlock {
-		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", snapshotBlock))
+	if headerSnapshotBlock>0 {
+		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", headerSnapshotBlock))
 		if innerErr != nil {
 			return chainDb, innerErr
 		}
 		snKVOpts = snKVOpts.HeadersSnapshot(snKV)
+	}
+
+	if bodiesSnapshotBlock > 0  {
+		snKV, innerErr := OpenBodiesSnapshot(log.New(),SnapshotName(snapshotsDir, "bodies", bodiesSnapshotBlock))
+		if innerErr != nil {
+			return chainDb, innerErr
+		}
+		snKVOpts = snKVOpts.BodiesSnapshot(snKV)
+	}
+	if stateSnapshotBlock > 0  {
+		snKV, innerErr := OpenStateSnapshot(SnapshotName(snapshotsDir, "state", stateSnapshotBlock), log.New(),)
+		if innerErr != nil {
+			return chainDb, innerErr
+		}
+		snKVOpts = snKVOpts.StateSnapshot(snKV)
 	}
 	return snKVOpts.Open(), nil
 }

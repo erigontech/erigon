@@ -260,6 +260,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				ethconfig.Snapshot{Enabled: false},
 				nil, nil,
 				"",
+				log.New(),
 			),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir),
 			stagedsync.StageExecuteBlocksCfg(
@@ -274,6 +275,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				cfg.StateStream,
 				mock.tmpdir,
 				false,
+				0,
 			),
 			stagedsync.StageTranspileCfg(
 				mock.DB,
