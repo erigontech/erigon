@@ -33,11 +33,14 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -59,7 +62,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	remotedbserver2 "github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
@@ -207,7 +209,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	kvRPC := remotedbserver2.NewKvServer(ctx, chainKv)
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
 	backend := &Ethereum{
 		downloadCtx:          ctx,
 		downloadCancel:       ctxCancel,
@@ -649,7 +651,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					if hh.BaseFee != nil {
 						baseFee = hh.BaseFee.Uint64()
 					}
-					return s.txPool2.OnNewBlock(context.Background(), nil, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee, hh.Number.Uint64(), hh.Hash())
+					return s.txPool2.OnNewBlock(context.Background(), &remote.StateChange{
+						BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()),
+					}, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee)
 				}); err != nil {
 					return err
 				}
