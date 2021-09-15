@@ -68,14 +68,15 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	if err != nil {
 		return err
 	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+
+	if initialCycle {
+		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
 			return err
 		}
 	}
 
-	if initialCycle {
-		if err := tx.Put(kv.DatabaseInfo, []byte(params.VersionKeyFinished), []byte(params.Version)); err != nil {
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

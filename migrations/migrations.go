@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/params"
 	"path"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -205,15 +204,6 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		if err := tx.Put(kv.DatabaseInfo, kv.DBSchemaVersionKey, version[:]); err != nil {
 			return fmt.Errorf("writing DB schema version: %w", err)
-		}
-
-		if len(applied) != 0 {
-			return nil
-		}
-
-		// If database had no migrations before (just created), set Erigon version
-		if err := tx.Put(kv.DatabaseInfo, []byte(params.VersionKeyCreated), []byte(params.Version)); err != nil {
-			return fmt.Errorf("writing Erigon version: %w", err)
 		}
 		return nil
 	}); err != nil {

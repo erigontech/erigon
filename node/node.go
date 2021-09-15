@@ -17,8 +17,10 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/params"
 	"net"
 	"net/http"
 	"os"
@@ -549,6 +551,12 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
+		return params.SetErigonVersion(tx, params.VersionKeyCreated)
+	}); err != nil {
+		return nil, err
 	}
 
 	return db, nil
