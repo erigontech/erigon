@@ -288,9 +288,9 @@ type DBTX interface {
 	DBTX() kv.RwTx
 }
 
-func (s *snTX) DBTX() kv.RwTx {
-	return s.dbTX.(kv.RwTx)
-}
+func (s *snTX) DBTX() kv.RwTx { return s.dbTX.(kv.RwTx) }
+func (s *snTX) ID() uint64    { return s.dbTX.ID() }
+
 func (s *snTX) RwCursor(bucket string) (kv.RwCursor, error) {
 	if !IsSnapshotBucket(bucket) {
 		return s.dbTX.(kv.RwTx).RwCursor(bucket)
@@ -354,7 +354,6 @@ func (s *snTX) ExistsBucket(bucket string) (bool, error) {
 func (s *snTX) ClearBucket(bucket string) error {
 	return s.dbTX.(kv.BucketMigrator).ClearBucket(bucket)
 }
-func (s *snTX) ID() uint64 { return s.dbTX.ID() }
 
 func (s *snTX) ListBuckets() ([]string, error) {
 	return s.dbTX.(kv.BucketMigrator).ListBuckets()
