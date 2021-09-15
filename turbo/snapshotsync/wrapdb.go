@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
 var (
+
 	BucketConfigs = map[SnapshotType]kv.TableCfg{
 		SnapshotType_bodies: {
 			kv.BlockBody: kv.ChaindataTablesCfg[kv.BlockBody],
@@ -28,6 +29,10 @@ var (
 		},
 	}
 	StateSnapshotBuckets = []string{kv.PlainState, kv.PlainContractCode, kv.Code}
+
+	//to KV
+	CurrentStateSnapshotBlockKey  = []byte("CurrentStateSnapshotBlock")
+
 )
 
 func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*SnapshotsInfo) (kv.RwDB, error) {
@@ -35,7 +40,7 @@ func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*Snaps
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
 		cfg := BucketConfigs[k]
-		snapshotKV, err := kv2.NewMDBX(log.New()).Readonly().Path(v.Dbpath).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+		snapshotKV, err := mdbx.NewMDBX(log.New()).Readonly().Path(v.Dbpath).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 			return cfg
 		}).Open()
 
@@ -76,7 +81,7 @@ func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 		if len(v) == 8 {
 			bodiesSnapshotBlock = binary.BigEndian.Uint64(v)
 		}
-		v, err = tx.GetOne(kv.BittorrentInfo, kv.CurrentStateSnapshotBlock)
+		v, err = tx.GetOne(kv.BittorrentInfo, CurrentStateSnapshotBlockKey)
 		if err != nil {
 			return err
 		}

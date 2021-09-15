@@ -3,11 +3,11 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"

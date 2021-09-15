@@ -72,7 +72,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 		return nil
 	}
 
-	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.log, cfg.db, readTX, cfg.client, false)
+	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock,cfg.log, cfg.db, readTX, cfg.client, false)
 	if err != nil {
 		return err
 	}
