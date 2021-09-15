@@ -33,7 +33,9 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -649,7 +651,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					if hh.BaseFee != nil {
 						baseFee = hh.BaseFee.Uint64()
 					}
-					return s.txPool2.OnNewBlock(context.Background(), nil, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee, hh.Number.Uint64(), hh.Hash())
+					return s.txPool2.OnNewBlock(context.Background(), &remote.StateChange{
+						BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()),
+					}, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee)
 				}); err != nil {
 					return err
 				}
