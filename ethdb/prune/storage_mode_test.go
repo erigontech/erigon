@@ -12,12 +12,15 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	prune, err := Get(tx)
 	assert.NoError(t, err)
-	assert.Equal(t, Mode{true, math.MaxUint64, math.MaxUint64, math.MaxUint64, math.MaxUint64, Experiments{TEVM: false}}, prune)
+	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64),
+		Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{TEVM: false}}, prune)
 
-	err = SetIfNotExist(tx, Mode{true, 1, 2, 3, 4, Experiments{TEVM: false}})
+	err = SetIfNotExist(tx, Mode{true, Distance(1), Distance(2),
+		Before(3), Before(4), Experiments{TEVM: false}})
 	assert.NoError(t, err)
 
 	prune, err = Get(tx)
 	assert.NoError(t, err)
-	assert.Equal(t, Mode{true, 1, 2, 3, 4, Experiments{TEVM: false}}, prune)
+	assert.Equal(t, Mode{true, Distance(1), Distance(2),
+		Before(3), Before(4), Experiments{TEVM: false}}, prune)
 }
