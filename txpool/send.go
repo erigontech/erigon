@@ -193,7 +193,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 			pending = txs[:p2pTxPacketLimit]
 			txs = txs[p2pTxPacketLimit:]
 		} else {
-			pending = txs[:]
+			pending = txs
 			txs = txs[:0]
 		}
 

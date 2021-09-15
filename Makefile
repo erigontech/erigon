@@ -36,3 +36,10 @@ grpc:
 		txpool/txpool.proto txpool/mining.proto
 
 	PATH=$(GOBIN):$(PATH) go generate ./...
+
+lint:
+	@./build/bin/golangci-lint run --config ./.golangci.yml
+
+lintci-deps:
+	rm -f ./build/bin/golangci-lint
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.42.1

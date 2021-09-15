@@ -94,6 +94,7 @@ message StateChange {
   uint64 protocolBaseFee = 6; // enable by withTransactions=true
   uint64 prevBlockHeight = 7;
   types.H256 prevBlockHash = 8;
+  uint64 databaseViewID = 9; // mdbx's tx.ID() - id of write transaction in db - where this changes happened
 }
 
 message StateChangeRequest {

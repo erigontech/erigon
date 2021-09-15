@@ -17,7 +17,6 @@ package kvcache
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"testing"
@@ -30,31 +29,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func bigEndian(n uint64) []byte {
-	num := [8]byte{}
-	binary.BigEndian.PutUint64(num[:], n)
-	return num[:]
-}
-
 func TestAPI(t *testing.T) {
 	require := require.New(t)
 	c := New(DefaultCoherentCacheConfig)
 	k1, k2 := [20]byte{1}, [20]byte{2}
 	db := memdb.NewTestDB(t)
-	get := func(key [20]byte, expectBlockN uint64) (res [1]chan []byte) {
+	get := func(key [20]byte, expectTxnID uint64) (res [1]chan []byte) {
 		wg := sync.WaitGroup{}
 		for i := 0; i < len(res); i++ {
 			wg.Add(1)
 			res[i] = make(chan []byte)
 			go func(out chan []byte) {
 				require.NoError(db.View(context.Background(), func(tx kv.Tx) error {
-					encBlockNum, err := tx.GetOne(kv.SyncStageProgress, []byte("Finish"))
-					if err != nil {
-						return err
-					}
-					n := binary.BigEndian.Uint64(encBlockNum)
-					if expectBlockN != n {
-						panic(fmt.Sprintf("epxected: %d, got: %d", expectBlockN, n))
+					if expectTxnID != tx.ID() {
+						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ID()))
 					}
 					wg.Done()
 					cache, err := c.View(context.Background(), tx)
@@ -73,20 +61,21 @@ func TestAPI(t *testing.T) {
 		wg.Wait() // ensure that all goroutines started their transactions
 		return res
 	}
-	put := func(blockNum uint64, blockHash [32]byte, k, v []byte) {
+	put := func(k, v []byte) uint64 {
+		var txID uint64
 		require.NoError(db.Update(context.Background(), func(tx kv.RwTx) error {
-			_ = tx.Put(kv.SyncStageProgress, []byte("Finish"), bigEndian(blockNum))
-			_ = tx.Put(kv.HeaderCanonical, bigEndian(blockNum), blockHash[:])
 			_ = tx.Put(kv.PlainState, k, v)
+			txID = tx.ID()
 			return nil
 		}))
+		return txID
 	}
 	// block 1 - represents existing state (no notifications about this data will come to client)
-	put(1, [32]byte{}, k2[:], []byte{42})
+	txID1 := put(k2[:], []byte{42})
 
 	wg := sync.WaitGroup{}
 
-	res1, res2 := get(k1, 1), get(k2, 1) // will return immediately
+	res1, res2 := get(k1, txID1), get(k2, txID1) // will return immediately
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -99,12 +88,13 @@ func TestAPI(t *testing.T) {
 		fmt.Printf("done1: \n")
 	}()
 
-	put(2, [32]byte{}, k1[:], []byte{2})
-	fmt.Printf("-----1\n")
-	res3, res4 := get(k1, 2), get(k2, 2) // will see View of transaction 2
-	put(3, [32]byte{}, k1[:], []byte{3}) // even if core already on block 3
+	txID2 := put(k1[:], []byte{2})
+	fmt.Printf("-----1 %d, %d\n", txID1, txID2)
+	res3, res4 := get(k1, txID2), get(k2, txID2) // will see View of transaction 2
+	txID3 := put(k1[:], []byte{3})               // even if core already on block 3
 
 	c.OnNewBlock(&remote.StateChange{
+		DatabaseViewID:  txID2,
 		Direction:       remote.Direction_FORWARD,
 		PrevBlockHeight: 1,
 		PrevBlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
@@ -130,8 +120,9 @@ func TestAPI(t *testing.T) {
 	}()
 	fmt.Printf("-----2\n")
 
-	res5, res6 := get(k1, 3), get(k2, 3) // will see View of transaction 3, even if notification has not enough changes
+	res5, res6 := get(k1, txID3), get(k2, txID3) // will see View of transaction 3, even if notification has not enough changes
 	c.OnNewBlock(&remote.StateChange{
+		DatabaseViewID:  txID3,
 		Direction:       remote.Direction_FORWARD,
 		PrevBlockHeight: 2,
 		PrevBlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
@@ -144,7 +135,6 @@ func TestAPI(t *testing.T) {
 		}},
 	})
 
-	fmt.Printf("-----20\n")
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -158,8 +148,10 @@ func TestAPI(t *testing.T) {
 		fmt.Printf("done3: \n")
 	}()
 	fmt.Printf("-----3\n")
-	put(2, [32]byte{}, k1[:], []byte{2})
+	txID4 := put(k1[:], []byte{2})
+	_ = txID4
 	c.OnNewBlock(&remote.StateChange{
+		DatabaseViewID:  txID4,
 		Direction:       remote.Direction_UNWIND,
 		PrevBlockHeight: 3,
 		PrevBlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
@@ -172,8 +164,9 @@ func TestAPI(t *testing.T) {
 		}},
 	})
 	fmt.Printf("-----4\n")
-	put(3, [32]byte{2}, k1[:], []byte{4}) // reorg to new chain
+	txID5 := put(k1[:], []byte{4}) // reorg to new chain
 	c.OnNewBlock(&remote.StateChange{
+		DatabaseViewID:  txID5,
 		Direction:       remote.Direction_FORWARD,
 		PrevBlockHeight: 2,
 		PrevBlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
@@ -187,7 +180,7 @@ func TestAPI(t *testing.T) {
 	})
 	fmt.Printf("-----5\n")
 
-	res7, res8 := get(k1, 3), get(k2, 3) // will see View of transaction 3, even if notification has not enough changes
+	res7, res8 := get(k1, txID5), get(k2, txID5) // will see View of transaction 3, even if notification has not enough changes
 
 	wg.Add(1)
 	go func() {

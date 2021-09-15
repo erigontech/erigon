@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 )
 
@@ -73,17 +74,19 @@ type CacheView interface {
 // Pair.Value == nil - is a marker of absense key in db
 
 type Coherent struct {
-	hits, miss *metrics.Counter
-	evict      *metrics.Summary
-	roots      map[string]*CoherentView
-	rootsLock  sync.RWMutex
-	cfg        CoherentCacheConfig
+	hits, miss, timeout, keys *metrics.Counter
+	evict                     *metrics.Summary
+	roots                     map[uint64]*CoherentView
+	roots2id                  map[string]uint64
+	rootsLock                 sync.RWMutex
+	cfg                       CoherentCacheConfig
 }
 type CoherentView struct {
 	hits, miss      *metrics.Counter
 	cache           *btree.BTree
 	lock            sync.RWMutex
-	id              string
+	id              atomic.Uint64
+	blockNumAndHash string
 	ready           chan struct{} // close when ready
 	readyChanClosed atomic.Bool   // protecting `ready` field from double-close (on unwind). Consumers don't need check this field.
 }
@@ -92,7 +95,7 @@ var _ Cache = (*Coherent)(nil)         // compile-time interface check
 var _ CacheView = (*CoherentView)(nil) // compile-time interface check
 type Pair struct {
 	K, V []byte
-	t    uint64
+	t    uint64 //TODO: can be uint32 if remember first txID and use it as base zero. because it's monotonic.
 }
 
 func (p *Pair) Less(than btree.Item) bool { return bytes.Compare(p.K, than.(*Pair).K) < 0 }
@@ -112,59 +115,51 @@ var DefaultCoherentCacheConfig = CoherentCacheConfig{
 }
 
 func New(cfg CoherentCacheConfig) *Coherent {
-	return &Coherent{roots: map[string]*CoherentView{}, cfg: cfg,
-		miss:  metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		hits:  metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		evict: metrics.GetOrCreateSummary(fmt.Sprintf(`cache_evict{name="%s"}`, cfg.MetricsLabel)),
+	return &Coherent{roots: map[uint64]*CoherentView{}, roots2id: map[string]uint64{}, cfg: cfg,
+		miss:    metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
+		hits:    metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
+		timeout: metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
+		keys:    metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		evict:   metrics.GetOrCreateSummary(fmt.Sprintf(`cache_evict{name="%s"}`, cfg.MetricsLabel)),
 	}
 }
 
 // selectOrCreateRoot - used for usual getting root
-func (c *Coherent) selectOrCreateRoot(root string) *CoherentView {
+func (c *Coherent) selectOrCreateRoot(txID uint64) *CoherentView {
 	c.rootsLock.Lock()
 	defer c.rootsLock.Unlock()
-	r, ok := c.roots[root]
+	r, ok := c.roots[txID]
 	if ok {
 		return r
 	}
-	r = &CoherentView{id: root, ready: make(chan struct{}), hits: c.hits, miss: c.miss}
-	c.roots[root] = r
+	r = &CoherentView{ready: make(chan struct{}), hits: c.hits, miss: c.miss}
+	r.id.Store(txID)
+	c.roots[txID] = r
 	return r
 }
 
 // advanceRoot - used for advancing root onNewBlock
-func (c *Coherent) advanceRoot(root, prevRoot string, direction remote.Direction) (r *CoherentView, fastUnwind bool) {
+func (c *Coherent) advanceRoot(txID uint64, root, prevRoot string) (r *CoherentView) {
 	c.rootsLock.Lock()
 	defer c.rootsLock.Unlock()
-	r, rootExists := c.roots[root]
+	r, rootExists := c.roots[txID]
 	if !rootExists {
-		r = &CoherentView{id: root, ready: make(chan struct{}), hits: c.hits, miss: c.miss}
-		c.roots[root] = r
+		r = &CoherentView{blockNumAndHash: root, ready: make(chan struct{}), hits: c.hits, miss: c.miss}
+		r.id.Store(txID)
+		c.roots[txID] = r
 	}
 
 	//TODO: need check if c.latest hash is still canonical. If not - can't clone from it
-	switch direction {
-	case remote.Direction_FORWARD:
-		prevCacheRoot, prevRootExists := c.roots[prevRoot]
-		//log.Warn("[kvcache] forward", "to", fmt.Sprintf("%x", root), "prevRootExists", prevRootExists)
-		if prevRootExists {
-			//fmt.Printf("advance: clone %x to %x \n", prevRoot, root)
-			r.cache = prevCacheRoot.Clone()
-		} else {
-			//fmt.Printf("advance: new %x \n", root)
-			r.cache = btree.New(32)
-		}
-	case remote.Direction_UNWIND:
-		//log.Warn("[kvcache] unwind", "to", fmt.Sprintf("%x", root), "rootExists", rootExists)
-		if rootExists {
-			fastUnwind = true
-		} else {
-			r.cache = btree.New(32)
-		}
-	default:
-		panic("not implemented yet")
+	prevTxId, prevRootExists := c.roots2id[prevRoot]
+	if prevRootExists {
+		//fmt.Printf("advance: clone %d to %d \n", prevTxId, txID)
+		r.cache = c.roots[prevTxId].Clone()
+	} else {
+		//fmt.Printf("advance: new %d \n", txID)
+		r.cache = btree.New(32)
 	}
-	return r, fastUnwind
+	c.roots2id[root] = txID
+	return r
 }
 
 func (c *Coherent) OnNewBlock(sc *remote.StateChange) {
@@ -177,7 +172,7 @@ func (c *Coherent) OnNewBlock(sc *remote.StateChange) {
 	binary.BigEndian.PutUint64(root, sc.BlockHeight)
 	h := gointerfaces.ConvertH256ToHash(sc.BlockHash)
 	copy(root[8:], h[:])
-	r, _ := c.advanceRoot(string(root), string(prevRoot), sc.Direction)
+	r := c.advanceRoot(sc.DatabaseViewID, string(root), string(prevRoot))
 	r.lock.Lock()
 	for i := range sc.Changes {
 		switch sc.Changes[i].Action {
@@ -214,33 +209,21 @@ func (c *Coherent) OnNewBlock(sc *remote.StateChange) {
 }
 
 func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
-	//TODO: handle case when db has no records
-	encBlockNum, err := tx.GetOne(kv.SyncStageProgress, []byte("Finish"))
-	if err != nil {
-		return nil, err
-	}
-	blockHash, err := tx.GetOne(kv.HeaderCanonical, encBlockNum)
-	if err != nil {
-		return nil, err
-	}
-	root := make([]byte, 8+32)
-	copy(root, encBlockNum)
-	copy(root[8:], blockHash)
-
-	r := c.selectOrCreateRoot(string(root))
+	r := c.selectOrCreateRoot(tx.ID())
 	select { // fast non-blocking path
 	case <-r.ready:
-		//fmt.Printf("recv broadcast: %x\n", root)
+		//fmt.Printf("recv broadcast: %d,%d\n", r.id.Load(), tx.ID())
 		return r, nil
 	default:
 	}
 
 	select { // slow blocking path
 	case <-r.ready:
+		//fmt.Printf("recv broadcast 2: %d,%d\n", r.id.Load(), tx.ID())
 	case <-ctx.Done():
-		return nil, fmt.Errorf("kvcache rootNum=%x, %w", root, ctx.Err())
+		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ID(), ctx.Err())
 	case <-time.After(c.cfg.NewBlockWait): //TODO: switch to timer to save resources
-		//fmt.Printf("timeout! %x\n", root)
+		c.timeout.Inc()
 		r.lock.Lock()
 		if r.cache == nil {
 			r.cache = btree.New(32)
@@ -257,7 +240,7 @@ func (c *CoherentView) Get(k []byte, tx kv.Tx) ([]byte, error) {
 
 	if it != nil {
 		c.hits.Inc()
-		goatomic.StoreUint64(&it.(*Pair).t, binary.BigEndian.Uint64([]byte(c.id)))
+		goatomic.StoreUint64(&it.(*Pair).t, c.id.Load())
 		//fmt.Printf("from cache %x: %#x,%#v\n", c.id, k, it.(*Pair).V)
 		return it.(*Pair).V, nil
 	}
@@ -269,7 +252,7 @@ func (c *CoherentView) Get(k []byte, tx kv.Tx) ([]byte, error) {
 	}
 	//fmt.Printf("from db %x: %#x,%#v\n", c.id, k, v)
 
-	it = &Pair{K: k, V: common.Copy(v), t: binary.BigEndian.Uint64([]byte(c.id))}
+	it = &Pair{K: k, V: common.Copy(v), t: c.id.Load()}
 	c.lock.Lock()
 	c.cache.ReplaceOrInsert(it)
 	c.lock.Unlock()
@@ -305,12 +288,9 @@ func DebugStats(cache Cache) []Stat {
 	casted.rootsLock.RLock()
 	defer casted.rootsLock.RUnlock()
 	for root, r := range casted.roots {
-		h := [32]byte{}
-		copy(h[:], root[8:])
 		res = append(res, Stat{
-			BlockNum:  binary.BigEndian.Uint64([]byte(root[:8])),
-			BlockHash: h,
-			Lenght:    r.Len(),
+			BlockNum: root,
+			Lenght:   r.Len(),
 		})
 	}
 	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
@@ -324,7 +304,7 @@ func DebugAges(cache Cache) []Stat {
 	}
 	casted.rootsLock.RLock()
 	defer casted.rootsLock.RUnlock()
-	_, latestView := cache.(*Coherent).evictionInfo()
+	_, latestView := cache.(*Coherent).lastRoot()
 	latestView.lock.RLock()
 	defer latestView.lock.RUnlock()
 	counters := map[uint64]int{}
@@ -372,82 +352,85 @@ func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) 
 	return checked, err
 }
 
-func (c *Coherent) evictionInfo() (latestBlockNum uint64, view *CoherentView) {
+func (c *Coherent) lastRoot() (latestTxId uint64, view *CoherentView) {
 	c.rootsLock.RLock()
 	defer c.rootsLock.RUnlock()
-	var latestRoot string
-	for root := range c.roots { // max
-		blockNum := binary.BigEndian.Uint64([]byte(root))
-		if blockNum > latestBlockNum {
-			latestBlockNum = blockNum
-			latestRoot = root
+	for txID := range c.roots { // max
+		if txID > latestTxId {
+			latestTxId = txID
 		}
 	}
-	return latestBlockNum, c.roots[latestRoot]
+	return latestTxId, c.roots[latestTxId]
 }
 func (c *Coherent) evictRoots(to uint64) {
 	c.rootsLock.Lock()
 	defer c.rootsLock.Unlock()
-	var toDel []string
-	for root := range c.roots {
-		blockNum := binary.BigEndian.Uint64([]byte(root))
-		if blockNum > to {
+	var toDel []uint64
+	var toDelRoots []string
+	for txId := range c.roots {
+		if txId > to {
 			continue
 		}
-		toDel = append(toDel, root)
+		toDel = append(toDel, txId)
+		for root, id := range c.roots2id {
+			if txId == id {
+				toDelRoots = append(toDelRoots, root)
+			}
+		}
 	}
 
-	for _, root := range toDel {
-		delete(c.roots, root)
+	for _, txId := range toDel {
+		delete(c.roots, txId)
+	}
+	for _, root := range toDelRoots {
+		delete(c.roots2id, root)
 	}
 }
 func (c *Coherent) Evict() {
 	defer c.evict.UpdateDuration(time.Now())
-	latestBlockNum, preLatestRoot := c.evictionInfo()
+	latestBlockNum, lastView := c.lastRoot()
 	c.evictRoots(latestBlockNum - 10)
-	if preLatestRoot != nil {
-		preLatestRoot.evict(100, 200_000)
-	}
+	c.keys.Set(uint64(lastView.Len()))
+	//if lastView != nil {
+	//lastView.evictOld(100, 200_000)
+	//lastView.evictNew2Random(200_000)
+	//}
 }
 
-func (c *CoherentView) evict(dropOlder uint64, keysLimit int) {
+//nolint
+func (c *CoherentView) evictOld(dropOlder uint64, keysLimit int) {
+	if c.Len() < keysLimit {
+		return
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	var toDel []btree.Item
-	var fst, snd btree.Item
-	i := 0
-	if c.cache.Len() < keysLimit {
-		return
-	}
-
-	counters := map[uint64]int{}
-
 	c.cache.Ascend(func(it btree.Item) bool {
 		age := goatomic.LoadUint64(&it.(*Pair).t)
 		if age < dropOlder {
-			toDel = append(toDel, fst)
+			toDel = append(toDel, it)
 		}
 		return true
 	})
 	for _, it := range toDel {
 		c.cache.Delete(it)
 	}
-	fmt.Printf("drop too old: %d\n", len(toDel))
+	log.Info("evicted", "too_old_amount", len(toDel))
+}
 
+//nolint
+func (c *CoherentView) evictNew2Random(keysLimit int) {
+	if c.Len() < keysLimit {
+		return
+	}
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	i := 0
+	var toDel []btree.Item
+	var fst, snd btree.Item
 	firstPrime, secondPrime := 11, 13 // to choose 2-pseudo-random elements and evict worse one
 	c.cache.Ascend(func(it btree.Item) bool {
-		age := goatomic.LoadUint64(&it.(*Pair).t)
-		if age < dropOlder {
-			toDel = append(toDel, fst)
-			return true
-		}
-		_, ok := counters[age]
-		if !ok {
-			counters[age] = 0
-		}
-		counters[age]++
-		i++
 		if i%firstPrime == 0 {
 			fst = it
 		}
@@ -469,5 +452,5 @@ func (c *CoherentView) evict(dropOlder uint64, keysLimit int) {
 	for _, it := range toDel {
 		c.cache.Delete(it)
 	}
-	fmt.Printf("drop 2-random: %d\n", len(toDel))
+	log.Info("evicted", "2_random__amount", len(toDel))
 }

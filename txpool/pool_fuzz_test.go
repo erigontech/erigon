@@ -519,7 +519,12 @@ func FuzzOnNewBlocks(f *testing.F) {
 		// start blocks from 0, set empty hash - then kvcache will also work on this
 		h1, h22 := gointerfaces.ConvertHashToH256([32]byte{}), gointerfaces.ConvertHashToH256([32]byte{22})
 
-		change := &remote.StateChange{BlockHeight: 0, BlockHash: h1, PrevBlockHeight: 0, PrevBlockHash: h1}
+		var txID uint64
+		_ = coreDB.View(ctx, func(tx kv.Tx) error {
+			txID = tx.ID()
+			return nil
+		})
+		change := &remote.StateChange{DatabaseViewID: txID, BlockHeight: 0, BlockHash: h1, PrevBlockHeight: 0, PrevBlockHash: h1}
 		for id, sender := range senders {
 			var addr [20]byte
 			copy(addr[:], pool.senders.senderID2Addr[id])
@@ -540,17 +545,17 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(txs1, TxSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txs2, txs3
-		err = pool.OnNewBlock(ctx, &remote.StateChange{BlockHeight: 1, BlockHash: h1, PrevBlockHeight: 0, PrevBlockHash: h1}, TxSlots{}, txs2, currentBaseFee)
+		err = pool.OnNewBlock(ctx, &remote.StateChange{DatabaseViewID: txID, BlockHeight: 1, BlockHash: h1, PrevBlockHeight: 0, PrevBlockHash: h1}, TxSlots{}, txs2, currentBaseFee)
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		err = pool.OnNewBlock(ctx, &remote.StateChange{BlockHeight: 0, BlockHash: h1, Direction: remote.Direction_UNWIND, PrevBlockHeight: 1, PrevBlockHash: h1}, txs2, TxSlots{}, currentBaseFee)
+		err = pool.OnNewBlock(ctx, &remote.StateChange{DatabaseViewID: txID, BlockHeight: 0, BlockHash: h1, Direction: remote.Direction_UNWIND, PrevBlockHeight: 1, PrevBlockHash: h1}, txs2, TxSlots{}, currentBaseFee)
 		assert.NoError(err)
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
 
-		err = pool.OnNewBlock(ctx, &remote.StateChange{BlockHeight: 1, BlockHash: h22, PrevBlockHeight: 0, PrevBlockHash: h1}, TxSlots{}, txs3, currentBaseFee)
+		err = pool.OnNewBlock(ctx, &remote.StateChange{DatabaseViewID: txID, BlockHeight: 1, BlockHash: h22, PrevBlockHeight: 0, PrevBlockHash: h1}, TxSlots{}, txs3, currentBaseFee)
 		assert.NoError(err)
 		check(TxSlots{}, txs3, "fork2 mined")
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
