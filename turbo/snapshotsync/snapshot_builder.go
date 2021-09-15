@@ -278,12 +278,12 @@ func (sm *SnapshotMigrator) SyncStages(migrateToBlock uint64, dbi kv.RwDB, rwTX 
 		}
 
 		for i := range syncStages {
-			log.Info("Sync stage", "started",i)
+			log.Info("Sync stage", "started", i)
 			innerErr := syncStages[i](dbi, rwTX, migrateToBlock)
 			if innerErr != nil {
 				return innerErr
 			}
-			log.Info("Sync stage", "ended",i)
+			log.Info("Sync stage", "ended", i)
 		}
 		atomic.StoreUint64(&sm.started, 3)
 
@@ -332,7 +332,7 @@ func (sm *SnapshotMigrator) Final(tx kv.Tx) error {
 			log.Info("CurrentHeadersSnapshotBlock commited", "block", binary.BigEndian.Uint64(v))
 			return nil
 		}
-	}else  if sm.snapshotType == "bodies" {
+	} else if sm.snapshotType == "bodies" {
 		v, err := tx.GetOne(kv.BittorrentInfo, kv.CurrentBodiesSnapshotBlock)
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
 			return nil
@@ -341,7 +341,7 @@ func (sm *SnapshotMigrator) Final(tx kv.Tx) error {
 			return err
 		}
 
-		log.Info("kv.CurrentBodiesSnapshotBlock", "v", v, "1",binary.BigEndian.Uint64(v), "2", atomic.LoadUint64(&sm.BodiesNewSnapshot))
+		log.Info("kv.CurrentBodiesSnapshotBlock", "v", v, "1", binary.BigEndian.Uint64(v), "2", atomic.LoadUint64(&sm.BodiesNewSnapshot))
 		if len(v) != 8 {
 			log.Error("Incorrect length", "ln", len(v))
 			return nil

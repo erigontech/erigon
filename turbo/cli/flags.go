@@ -186,7 +186,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.Snapshot.Seeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
 	cfg.Snapshot.Enabled = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
 	cfg.Snapshot.EpochSize = ctx.GlobalUint64(SnapshotEpochSizeFlag.Name)
-	log.Error("config.Snapshot","cfg", cfg.Snapshot)
+	log.Error("config.Snapshot", "cfg", cfg.Snapshot)
 
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))

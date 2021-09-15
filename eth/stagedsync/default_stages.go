@@ -3,10 +3,10 @@ package stagedsync
 import (
 	"context"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func DefaultStages(ctx context.Context,
@@ -30,7 +30,7 @@ func DefaultStages(ctx context.Context,
 	finish FinishCfg,
 	test bool,
 ) []*Stage {
-	log.Info("Snapshots", "headers", snapshotHeaders.enabled,"es", snapshotHeaders.epochSize,"bodies", snapshotBodies.enabled,"es", snapshotBodies.epochSize,"state", snapshotState.enabled,"es", snapshotState.epochSize,)
+	log.Info("Snapshots", "headers", snapshotHeaders.enabled, "es", snapshotHeaders.epochSize, "bodies", snapshotBodies.enabled, "es", snapshotBodies.epochSize, "state", snapshotState.enabled, "es", snapshotState.epochSize)
 	return []*Stage{
 		{
 			ID:          stages.Headers,

@@ -13,7 +13,6 @@ import (
 )
 
 var (
-
 	BucketConfigs = map[SnapshotType]kv.TableCfg{
 		SnapshotType_bodies: {
 			kv.BlockBody: kv.ChaindataTablesCfg[kv.BlockBody],
@@ -31,8 +30,7 @@ var (
 	StateSnapshotBuckets = []string{kv.PlainState, kv.PlainContractCode, kv.Code}
 
 	//to KV
-	CurrentStateSnapshotBlockKey  = []byte("CurrentStateSnapshotBlock")
-
+	CurrentStateSnapshotBlockKey = []byte("CurrentStateSnapshotBlock")
 )
 
 func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*SnapshotsInfo) (kv.RwDB, error) {
@@ -95,7 +93,7 @@ func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 	}
 
 	snKVOpts := snapshotdb.NewSnapshotKV().DB(chainDb)
-	if headerSnapshotBlock>0 {
+	if headerSnapshotBlock > 0 {
 		snKV, innerErr := OpenHeadersSnapshot(SnapshotName(snapshotsDir, "headers", headerSnapshotBlock))
 		if innerErr != nil {
 			return chainDb, innerErr
@@ -103,15 +101,15 @@ func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 		snKVOpts = snKVOpts.HeadersSnapshot(snKV)
 	}
 
-	if bodiesSnapshotBlock > 0  {
-		snKV, innerErr := OpenBodiesSnapshot(log.New(),SnapshotName(snapshotsDir, "bodies", bodiesSnapshotBlock))
+	if bodiesSnapshotBlock > 0 {
+		snKV, innerErr := OpenBodiesSnapshot(log.New(), SnapshotName(snapshotsDir, "bodies", bodiesSnapshotBlock))
 		if innerErr != nil {
 			return chainDb, innerErr
 		}
 		snKVOpts = snKVOpts.BodiesSnapshot(snKV)
 	}
-	if stateSnapshotBlock > 0  {
-		snKV, innerErr := OpenStateSnapshot(SnapshotName(snapshotsDir, "state", stateSnapshotBlock), log.New(),)
+	if stateSnapshotBlock > 0 {
+		snKV, innerErr := OpenStateSnapshot(SnapshotName(snapshotsDir, "state", stateSnapshotBlock), log.New())
 		if innerErr != nil {
 			return chainDb, innerErr
 		}

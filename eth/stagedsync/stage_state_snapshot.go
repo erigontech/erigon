@@ -33,7 +33,7 @@ func StageSnapshotStateCfg(db kv.RwDB, snapshot ethconfig.Snapshot, tmpDir strin
 		snapshotMigrator: snapshotMigrator,
 		tmpDir:           tmpDir,
 		log:              logger,
-		epochSize: snapshot.EpochSize,
+		epochSize:        snapshot.EpochSize,
 	}
 }
 

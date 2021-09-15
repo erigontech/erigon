@@ -32,14 +32,14 @@ func StageSnapshotHeadersCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *sn
 		client:           client,
 		snapshotMigrator: snapshotMigrator,
 		log:              logger,
-		epochSize: snapshot.EpochSize,
+		epochSize:        snapshot.EpochSize,
 	}
 }
 
 func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotHeadersCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
 	//but it migth be not initial flag in case of unwind
-	if tx!=nil || cfg.epochSize == 0 {
+	if tx != nil || cfg.epochSize == 0 {
 		return nil
 	}
 
@@ -72,7 +72,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 		return nil
 	}
 
-	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock,cfg.log, cfg.db, readTX, cfg.client, false)
+	err = cfg.snapshotMigrator.AsyncStages(snapshotBlock, cfg.log, cfg.db, readTX, cfg.client, false)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func SpawnHeadersSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg Snapshot
 		if ok {
 			break
 		}
-		time.Sleep(time.Second*10)
+		time.Sleep(time.Second * 10)
 	}
 	return nil
 }

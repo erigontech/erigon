@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type SnapshotBodiesCfg struct {
@@ -21,7 +21,7 @@ type SnapshotBodiesCfg struct {
 	tmpDir           string
 	client           *snapshotsync.Client
 	snapshotMigrator *snapshotsync.SnapshotMigrator
-	log 			log.Logger
+	log              log.Logger
 }
 
 func StageSnapshotBodiesCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *snapshotsync.Client, snapshotMigrator *snapshotsync.SnapshotMigrator, tmpDir string, logger log.Logger) SnapshotBodiesCfg {
@@ -32,14 +32,14 @@ func StageSnapshotBodiesCfg(db kv.RwDB, snapshot ethconfig.Snapshot, client *sna
 		client:           client,
 		snapshotMigrator: snapshotMigrator,
 		tmpDir:           tmpDir,
-		log:			logger,
-		epochSize: snapshot.EpochSize,
+		log:              logger,
+		epochSize:        snapshot.EpochSize,
 	}
 }
 
 func SpawnBodiesSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotBodiesCfg, initial bool, ctx context.Context) error {
 	//generate snapshot only on initial mode
-	if tx!=nil || cfg.epochSize == 0 {
+	if tx != nil || cfg.epochSize == 0 {
 		return nil
 	}
 
@@ -123,7 +123,7 @@ func SpawnBodiesSnapshotGenerationStage(s *StageState, tx kv.RwTx, cfg SnapshotB
 		if ok {
 			break
 		}
-		time.Sleep(10* time.Second)
+		time.Sleep(10 * time.Second)
 	}
 	return nil
 }
