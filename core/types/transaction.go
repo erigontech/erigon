@@ -173,11 +173,12 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 	return result, nil
 }
 
-func UnmarshalTransactionsFromBinary(txs [][]byte) ([]Transaction, error) {
+func DecodeTransactions(txs [][]byte) ([]Transaction, error) {
 	result := make([]Transaction, len(txs))
 	var err error
 	for i := range txs {
-		result[i], err = UnmarshalTransactionFromBinary(txs[i])
+		s := rlp.NewStream(bytes.NewReader(txs[i]), uint64(len(txs[i])))
+		result[i], err = DecodeTransaction(s)
 		if err != nil {
 			return nil, err
 		}

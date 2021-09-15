@@ -354,6 +354,7 @@ func (s *snTX) ExistsBucket(bucket string) (bool, error) {
 func (s *snTX) ClearBucket(bucket string) error {
 	return s.dbTX.(kv.BucketMigrator).ClearBucket(bucket)
 }
+func (s *snTX) ID() uint64 { return s.dbTX.ID() }
 
 func (s *snTX) ListBuckets() ([]string, error) {
 	return s.dbTX.(kv.BucketMigrator).ListBuckets()
