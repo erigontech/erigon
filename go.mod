@@ -3,7 +3,6 @@ module github.com/ledgerwatch/erigon-lib
 go 1.16
 
 require (
-	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/metrics v1.17.3
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/go-stack/stack v1.8.0
@@ -15,12 +14,11 @@ require (
 	github.com/ledgerwatch/log/v3 v3.3.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/matryer/moq v0.2.3
-	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.7.0
-	github.com/torquem-ch/mdbx-go v0.16.0
+	github.com/torquem-ch/mdbx-go v0.18.1
 	github.com/ugorji/go/codec v1.1.13
 	go.uber.org/atomic v1.9.0
-	golang.org/dl v0.0.0-20210909185531-e2a88a019121 // indirect
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	google.golang.org/grpc v1.39.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0

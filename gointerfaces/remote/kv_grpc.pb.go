@@ -23,6 +23,10 @@ type KVClient interface {
 	// Version returns the service version number
 	Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error)
 	// Tx exposes read-only transactions for the key-value store
+	//
+	// When tx open, client must receive 1 message from server with txID
+	// When cursor open, client must receive 1 message from server with txID
+	// Then only client can initiate messages from server
 	Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error)
 	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
 }
@@ -114,6 +118,10 @@ type KVServer interface {
 	// Version returns the service version number
 	Version(context.Context, *emptypb.Empty) (*types.VersionReply, error)
 	// Tx exposes read-only transactions for the key-value store
+	//
+	// When tx open, client must receive 1 message from server with txID
+	// When cursor open, client must receive 1 message from server with txID
+	// Then only client can initiate messages from server
 	Tx(KV_TxServer) error
 	StateChanges(*StateChangeRequest, KV_StateChangesServer) error
 	mustEmbedUnimplementedKVServer()

@@ -161,7 +161,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-
+	ctx := context.Background()
 	logger := log.New()
 	f := func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
@@ -171,7 +171,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDb))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDb))
 		if err := grpcServer.Serve(conn); err != nil {
 			logger.Error("private RPC server fail", "err", err)
 		}
@@ -207,6 +207,7 @@ func TestRemoteKvVersion(t *testing.T) {
 }
 
 func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+	ctx := context.Background()
 	writeDBs = []kv.RwDB{
 		mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen(),
 		mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen(), // for remote db
@@ -216,7 +217,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 
 	grpcServer := grpc.NewServer()
 	f2 := func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(writeDBs[1]))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDBs[1]))
 		if err := grpcServer.Serve(conn); err != nil {
 			logger.Error("private RPC server fail", "err", err)
 		}

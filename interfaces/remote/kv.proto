@@ -13,6 +13,10 @@ service KV {
   rpc Version(google.protobuf.Empty) returns (types.VersionReply);
 
   // Tx exposes read-only transactions for the key-value store
+  //
+  // When tx open, client must receive 1 message from server with txID
+  // When cursor open, client must receive 1 message from server with txID
+  // Then only client can initiate messages from server
   rpc Tx(stream Cursor) returns (stream Pair);
 
   rpc StateChanges(StateChangeRequest) returns (stream StateChange);
@@ -50,7 +54,8 @@ message Cursor {
 message Pair {
   bytes k = 1;
   bytes v = 2;
-  uint32 cursorID = 3;
+  uint32 cursorID = 3; // send once after new cursor open
+  uint64 txID = 4;    // send once after tx open
 }
 
 enum Action {
