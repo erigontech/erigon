@@ -22,7 +22,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1630649706745,
+  "iteration": 1631701154074,
   "links": [],
   "panels": [
     {
@@ -1463,7 +1463,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -1498,7 +1498,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "go_cgo_calls_count",
+      "title": "cgo calls",
       "type": "timeseries"
     },
     {
@@ -2388,7 +2388,32 @@
           },
           "unit": "s"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "pool_new_block: turbogeth16c.weblogix.it:6060"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -2633,14 +2658,200 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(delta(pool_cache_total{result=\"hit\",instance=~\"$instance\"}[1m]))/sum(delta(pool_cache_total{instance=~\"$instance\"}[1m])) ",
+          "expr": "sum(delta(cache_total{result=\"hit\",name=\"txpool\",instance=~\"$instance\"}[1m]))/sum(delta(cache_total{name=\"txpool\",instance=~\"$instance\"}[1m])) ",
           "hide": false,
           "interval": "",
           "legendFormat": "hit rate: {{ instance }} ",
           "refId": "A"
         }
       ],
-      "title": "Cache",
+      "title": "Cache hit-rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 7,
+        "x": 7,
+        "y": 67
+      },
+      "id": 180,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(cache_total{name=\"txpool\",instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "{{ result }}: {{ instance }} ",
+          "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(cache_timeout_total{name=\"txpool\",instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "timeout: {{ instance }} ",
+          "refId": "B"
+        }
+      ],
+      "title": "Cache rps",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 7,
+        "x": 14,
+        "y": 67
+      },
+      "id": 181,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(cache_keys_total{name=\"txpool\",instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "keys: {{ instance }} ",
+          "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(cache_timeout_total{name=\"txpool\",instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "timeout: {{ instance }} ",
+          "refId": "B"
+        }
+      ],
+      "title": "Cache keys",
       "type": "timeseries"
     },
     {
@@ -2700,7 +2911,7 @@
         "h": 6,
         "w": 8,
         "x": 7,
-        "y": 67
+        "y": 73
       },
       "id": 178,
       "options": {
@@ -2730,98 +2941,13 @@
       "type": "timeseries"
     },
     {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 9,
-        "x": 15,
-        "y": 67
-      },
-      "id": 179,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "last"
-          ],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "rate(pool_senders_evicted{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "pool_senders_evicted: {{ instance }}",
-          "refId": "A"
-        }
-      ],
-      "title": "Senders",
-      "type": "timeseries"
-    },
-    {
       "collapsed": true,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 79
       },
       "id": 146,
       "panels": [
@@ -3520,7 +3646,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 80
       },
       "id": 75,
       "panels": [],
@@ -3584,7 +3710,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 75
+        "y": 81
       },
       "id": 96,
       "links": [],
@@ -3687,7 +3813,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 75
+        "y": 81
       },
       "id": 77,
       "links": [],
@@ -3745,7 +3871,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 87
       },
       "id": 4,
       "panels": [],
@@ -3789,7 +3915,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 82
+        "y": 88
       },
       "id": 108,
       "interval": null,
@@ -3868,7 +3994,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 82
+        "y": 88
       },
       "id": 111,
       "interval": null,
@@ -3948,7 +4074,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 82
+        "y": 88
       },
       "id": 109,
       "interval": null,
@@ -4028,7 +4154,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 82
+        "y": 88
       },
       "id": 113,
       "interval": null,
@@ -4107,7 +4233,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 82
+        "y": 88
       },
       "id": 114,
       "interval": null,
@@ -4186,7 +4312,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 82
+        "y": 88
       },
       "id": 115,
       "interval": null,
@@ -4286,7 +4412,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 85
+        "y": 91
       },
       "id": 110,
       "links": [],
@@ -4390,7 +4516,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 85
+        "y": 91
       },
       "id": 116,
       "links": [],
@@ -4494,7 +4620,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 97
       },
       "id": 117,
       "links": [],
@@ -4622,7 +4748,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 98
+        "y": 104
       },
       "id": 138,
       "panels": [
@@ -4732,7 +4858,7 @@
       "type": "row"
     }
   ],
-  "refresh": "",
+  "refresh": "30s",
   "schemaVersion": 30,
   "style": "dark",
   "tags": [],
@@ -4823,7 +4949,7 @@
         "auto_count": 30,
         "auto_min": "10s",
         "current": {
-          "selected": false,
+          "selected": true,
           "text": "1m",
           "value": "1m"
         },
@@ -4928,5 +5054,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 28
+  "version": 34
 }
