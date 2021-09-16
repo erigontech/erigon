@@ -10,9 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -44,34 +42,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return hash, fmt.Errorf("%s: %s", txpool.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
 	}
 
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer tx.Rollback()
-
-	// Print a log with full txn details for manual investigations and interventions
-	blockNum := rawdb.ReadCurrentBlockNumber(tx)
-	if blockNum == nil {
-		return common.Hash{}, err
-	}
-	cc, err := api.chainConfig(tx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	signer := types.MakeSigner(cc, *blockNum)
-	from, err := txn.Sender(*signer)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	if txn.GetTo() == nil {
-		addr := crypto.CreateAddress(from, txn.GetNonce())
-		log.Info("Submitted contract creation", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "contract", addr.Hex(), "value", txn.GetValue())
-	} else {
-		log.Info("Submitted transaction", "hash", txn.Hash().Hex(), "from", from, "nonce", txn.GetNonce(), "recipient", txn.GetTo(), "value", txn.GetValue())
-	}
-
+	log.Info("Submitted transaction", "hash", txn.Hash().Hex(), "nonce", txn.GetNonce(), "recipient", txn.GetTo(), "value", txn.GetValue())
 	return txn.Hash(), nil
 }
 
