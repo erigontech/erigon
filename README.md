@@ -316,6 +316,14 @@ you'll have to change one if you want to run both at the same time. use `--help`
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
+### How to get diagnostic for bug report?
+
+- Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
+- Get CPU profiling: add `--pprof flag`
+  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+- Get RAM profiling: add `--pprof flag`
+  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+
 Getting in touch
 ================
 
