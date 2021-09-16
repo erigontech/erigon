@@ -110,10 +110,6 @@ func StageLoopStep(
 		return err
 	}
 
-	if notifications != nil && notifications.Accumulator != nil {
-		notifications.Accumulator.Reset()
-	}
-
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 1024 && highestSeenHeader-hashStateStageProgress < 1024
 
 	var tx kv.RwTx // on this variable will run sync cycle.
@@ -123,6 +119,10 @@ func StageLoopStep(
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction{
+		notifications.Accumulator.Reset(tx.ID())
 	}
 
 	err = sync.Run(db, tx, initialCycle)
