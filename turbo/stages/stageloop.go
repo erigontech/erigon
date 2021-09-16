@@ -121,7 +121,7 @@ func StageLoopStep(
 		defer tx.Rollback()
 	}
 
-	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction{
+	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
 		notifications.Accumulator.Reset(tx.ID())
 	}
 
