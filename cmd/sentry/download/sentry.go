@@ -193,7 +193,7 @@ func handShake(
 		var reply eth.StatusPacket
 		if err1 = msg.Decode(&reply); err1 != nil {
 			msg.Discard()
-			return fmt.Errorf("decode message %v: %v", msg, err1)
+			return fmt.Errorf("decode message %v: %w", msg, err1)
 		}
 		msg.Discard()
 		if reply.NetworkID != networkID {
@@ -209,7 +209,7 @@ func handShake(
 			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 		}
 		if err1 = forkFilter(reply.ForkID); err1 != nil {
-			return fmt.Errorf("%v", err1)
+			return fmt.Errorf("%w", err1)
 		}
 
 		td, overflow := uint256.FromBig(reply.TD)
@@ -284,7 +284,7 @@ func runPeer(
 		}
 		msg, err := rw.ReadMsg()
 		if err != nil {
-			return fmt.Errorf("reading message: %v", err)
+			return fmt.Errorf("reading message: %w", err)
 		}
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
@@ -303,7 +303,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockHeadersMsg:
@@ -313,7 +313,7 @@ func runPeer(
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockBodiesMsg:
@@ -322,7 +322,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
@@ -332,7 +332,7 @@ func runPeer(
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetNodeDataMsg:
@@ -347,7 +347,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
@@ -356,7 +356,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
@@ -366,7 +366,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetPooledTransactionsMsg:
@@ -376,7 +376,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.TransactionsMsg:
@@ -386,7 +386,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.PooledTransactionsMsg:
@@ -396,7 +396,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
@@ -485,7 +485,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				return ss.startSync(ctx, bestHash, peerID)
 			})
 			if err != nil {
-				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
+				return fmt.Errorf("handshake to peer %s: %w", peerID, err)
 			}
 			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
@@ -498,7 +498,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				ss.send,
 				ss.hasSubscribers,
 			); err != nil {
-				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
+				log.Debug(fmt.Sprintf("[%s] Error while running peer: %w", peerID, err))
 			}
 			return nil
 		},
@@ -565,7 +565,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 			Origin:  eth.HashOrNumber{Hash: bestHash},
 		})
 		if err != nil {
-			return fmt.Errorf("startSync encode packet failed: %v", err)
+			return fmt.Errorf("startSync encode packet failed: %w", err)
 		}
 
 		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
@@ -589,7 +589,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("startSync encode packet failed: %v", err)
+			return fmt.Errorf("startSync encode packet failed: %w", err)
 		}
 		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
 			PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
@@ -679,7 +679,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 			}
 		}
 		ss.GoodPeers.Delete(peerID)
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerID, err)
 	}
 	peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
@@ -714,7 +714,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 			}
 		}
 		ss.GoodPeers.Delete(peerID)
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %w", peerID, err)
 	}
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
 }
