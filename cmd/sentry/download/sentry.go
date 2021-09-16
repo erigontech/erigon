@@ -376,7 +376,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				log.Error(fmt.Sprintf("%s: reading msg into bytes: %w", peerID, err))
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.TransactionsMsg:
@@ -498,7 +498,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				ss.send,
 				ss.hasSubscribers,
 			); err != nil {
-				log.Debug(fmt.Sprintf("[%s] Error while running peer: %w", peerID, err))
+				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
 			return nil
 		},
