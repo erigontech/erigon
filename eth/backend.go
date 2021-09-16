@@ -652,7 +652,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 						baseFee = hh.BaseFee.Uint64()
 					}
 					return s.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-						DatabaseViewID: tx.ID(), ChangeBatch: []*remote.StateChange{
+						DatabaseViewID: tx.ViewID(), ChangeBatch: []*remote.StateChange{
 							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()), ProtocolBaseFee: baseFee},
 						},
 					}, txpool2.TxSlots{}, txpool2.TxSlots{})

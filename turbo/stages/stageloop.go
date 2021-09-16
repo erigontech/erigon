@@ -122,7 +122,7 @@ func StageLoopStep(
 	}
 
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
-		notifications.Accumulator.Reset(tx.ID())
+		notifications.Accumulator.Reset(tx.ViewID())
 	}
 
 	err = sync.Run(db, tx, initialCycle)

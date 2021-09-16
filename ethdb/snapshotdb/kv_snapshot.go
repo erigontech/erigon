@@ -289,7 +289,7 @@ type DBTX interface {
 }
 
 func (s *snTX) DBTX() kv.RwTx { return s.dbTX.(kv.RwTx) }
-func (s *snTX) ID() uint64    { return s.dbTX.ID() }
+func (s *snTX) ViewID() uint64    { return s.dbTX.ViewID() }
 
 func (s *snTX) RwCursor(bucket string) (kv.RwCursor, error) {
 	if !IsSnapshotBucket(bucket) {
