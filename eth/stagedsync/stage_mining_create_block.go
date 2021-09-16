@@ -123,7 +123,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		}); err != nil {
 			return err
 		}
-		txs, err := types.UnmarshalTransactionsFromBinary(txSlots.Txs)
+		txs, err := types.DecodeTransactions(txSlots.Txs)
 		if err != nil {
 			return fmt.Errorf("decode rlp of pending txs: %w", err)
 		}

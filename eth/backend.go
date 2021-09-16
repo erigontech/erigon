@@ -30,17 +30,22 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -57,7 +62,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	remotedbserver2 "github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
@@ -205,7 +209,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	kvRPC := remotedbserver2.NewKvServer(ctx, chainKv)
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
 	backend := &Ethereum{
 		downloadCtx:          ctx,
 		downloadCancel:       ctxCancel,
@@ -356,35 +360,23 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	config.BodyDownloadTimeoutSeconds = 30
 
-	emptyBadHash := config.BadBlockHash == common.Hash{}
-	if !emptyBadHash {
-		var badBlockHeader *types.Header
-		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			header, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
-			badBlockHeader = header
-			return hErr
-		}); err != nil {
-			return nil, err
-		}
-
-		if badBlockHeader != nil {
-			unwindPoint := badBlockHeader.Number.Uint64() - 1
-			backend.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
-		}
-	}
-
 	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
 	if config.TxPool.V2 {
 		cfg := txpool2.DefaultConfig
 		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.LogEvery = 5 * time.Minute
-		cfg.CommitEvery = 5 * time.Minute
+		cfg.LogEvery = 15 * time.Second    //5 * time.Minute
+		cfg.CommitEvery = 15 * time.Second //5 * time.Minute
+
+		cacheConfig := kvcache.DefaultCoherentCacheConfig
+		cacheConfig.MetricsLabel = "txpool"
 
 		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
 		//defer close(newTxs)
-		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(ctx, cfg, backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient)
+		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
+			ctx, cfg, kvcache.New(cacheConfig), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -451,34 +443,39 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 	}
 
-	if config.TxPool.V2 {
-		backend.txPool2Fetch.ConnectCore()
-		backend.txPool2Fetch.ConnectSentries()
-		go txpool2.MainLoop(backend.downloadCtx, backend.txPool2DB, backend.chainDB, backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams, func() {
-			select {
-			case backend.notifyMiningAboutNewTxs <- struct{}{}:
-			default:
-			}
-		})
-	} else {
-		go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
-		go func() {
-			newTransactions := make(chan core.NewTxsEvent, 128)
-			sub := backend.txPool.SubscribeNewTxsEvent(newTransactions)
-			defer sub.Unsubscribe()
-			defer close(newTransactions)
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-newTransactions:
+	if !config.TxPool.Disable {
+		if config.TxPool.V2 {
+			backend.txPool2Fetch.ConnectCore()
+			backend.txPool2Fetch.ConnectSentries()
+			go txpool2.MainLoop(backend.downloadCtx,
+				backend.txPool2DB, backend.chainDB,
+				backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams,
+				func() {
 					select {
 					case backend.notifyMiningAboutNewTxs <- struct{}{}:
 					default:
 					}
+				})
+		} else {
+			go txpropagate.BroadcastPendingTxsToNetwork(backend.downloadCtx, backend.txPool, backend.txPoolP2PServer.RecentPeers, backend.downloadServer)
+			go func() {
+				newTransactions := make(chan core.NewTxsEvent, 128)
+				sub := backend.txPool.SubscribeNewTxsEvent(newTransactions)
+				defer sub.Unsubscribe()
+				defer close(newTransactions)
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-newTransactions:
+						select {
+						case backend.notifyMiningAboutNewTxs <- struct{}{}:
+						default:
+						}
+					}
 				}
-			}
-		}()
+			}()
+		}
 	}
 	go func() {
 		defer debug.LogPanic()
@@ -527,6 +524,23 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	emptyBadHash := config.BadBlockHash == common.Hash{}
+	if !emptyBadHash {
+		var badBlockHeader *types.Header
+		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
+			header, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
+			badBlockHeader = header
+			return hErr
+		}); err != nil {
+			return nil, err
+		}
+
+		if badBlockHeader != nil {
+			unwindPoint := badBlockHeader.Number.Uint64() - 1
+			backend.stagedSync.UnwindTo(unwindPoint, config.BadBlockHash)
+		}
 	}
 
 	//eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
@@ -637,7 +651,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					if hh.BaseFee != nil {
 						baseFee = hh.BaseFee.Uint64()
 					}
-					return s.txPool2.OnNewBlock(nil, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee, hh.Number.Uint64(), hh.Hash())
+					return s.txPool2.OnNewBlock(context.Background(), &remote.StateChange{
+						BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()),
+					}, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee)
 				}); err != nil {
 					return err
 				}
@@ -677,7 +693,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			case err := <-errc:
 				works = false
 				hasWork = false
-				if errors.Is(err, common.ErrStopped) {
+				if errors.Is(err, libcommon.ErrStopped) {
 					return
 				}
 				if err != nil {

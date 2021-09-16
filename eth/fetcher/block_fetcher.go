@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/prque"
@@ -229,7 +230,7 @@ func (f *BlockFetcher) Start() {
 // Stop terminates the announcement based synchroniser, canceling all pending
 // operations.
 func (f *BlockFetcher) Stop() {
-	common.SafeClose(f.quit)
+	libcommon.SafeClose(f.quit)
 }
 
 // Notify announces the fetcher of the potential availability of a new block in
