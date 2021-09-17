@@ -92,7 +92,7 @@ func randomSource() *rand.Rand {
 	}
 
 	src := rand.NewSource(seed)
-	return rand.New(src)
+	return rand.New(src) //nolint:gosec
 }
 
 // This function runs the main event loop from a goroutine that is started

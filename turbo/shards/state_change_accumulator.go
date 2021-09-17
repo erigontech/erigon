@@ -11,40 +11,36 @@ import (
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
 type Accumulator struct {
-	changes            []remote.StateChange
+	viewID             uint64 // mdbx's txID
+	changes            []*remote.StateChange
 	latestChange       *remote.StateChange
 	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
 type StateChangeConsumer interface {
-	SendStateChanges(sc *remote.StateChange)
+	SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch)
 }
 
-func (a *Accumulator) Reset() {
+func (a *Accumulator) Reset(viewID uint64) {
 	a.changes = nil
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
+	a.viewID = viewID
 }
 func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
-	for i := range a.changes {
-		if err := libcommon.Stopped(ctx.Done()); err != nil {
-			return
-		}
-		c.SendStateChanges(&a.changes[i])
-	}
-	a.Reset()
+	c.SendStateChanges(ctx, &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes})
+	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
 }
 
 // StartChange begins accumulation of changes for a new block
-func (a *Accumulator) StartChange(txID, blockHeight uint64, blockHash common.Hash, prevBlockHeight uint64, prevBlockHash common.Hash, txs [][]byte, protocolBaseFee uint64, unwind bool) {
-	a.changes = append(a.changes, remote.StateChange{})
-	a.latestChange = &a.changes[len(a.changes)-1]
-	a.latestChange.DatabaseViewID = txID
+func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, prevBlockHeight uint64, prevBlockHash common.Hash, txs [][]byte, protocolBaseFee uint64, unwind bool) {
+	a.changes = append(a.changes, &remote.StateChange{})
+	a.latestChange = a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight
 	a.latestChange.BlockHash = gointerfaces.ConvertHashToH256(blockHash)
 	a.latestChange.PrevBlockHeight = prevBlockHeight
