@@ -25,6 +25,8 @@ var (
 	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
 	pruneFlag                      string
 	pruneH, pruneR, pruneT, pruneC uint64
+	pruneHBefore, pruneRBefore     uint64
+	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
