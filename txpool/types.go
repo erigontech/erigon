@@ -124,7 +124,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// therefore we assign the first returned value of Prefix function (list) to legacy variable
 	dataPos, dataLen, legacy, err := rlp.Prefix(payload, pos)
 	if err != nil {
-		return 0, fmt.Errorf("%s: size Prefix: %v", ParseTransactionErrorPrefix, err)
+		return 0, fmt.Errorf("%s: size Prefix: %w", ParseTransactionErrorPrefix, err)
 	}
 	if dataLen > txMaxSize {
 		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
@@ -151,7 +151,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%s: envelope Prefix: %v", ParseTransactionErrorPrefix, err)
+			return 0, fmt.Errorf("%s: envelope Prefix: %w", ParseTransactionErrorPrefix, err)
 		}
 		// Hash the envelope, not the full payload
 		if _, err = ctx.keccak1.Write(payload[p : dataPos+dataLen]); err != nil {

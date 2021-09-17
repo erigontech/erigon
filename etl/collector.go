@@ -161,7 +161,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 			he := HeapElem{key, i, value}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
-			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%v",
+			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
 				logPrefix, len(providers), i, provider, err)
 			panic(eee)
 		}
@@ -263,7 +263,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 		if element.Key, element.Value, err = provider.Next(decoder); err == nil {
 			heap.Push(h, element)
 		} else if err != io.EOF {
-			return fmt.Errorf("%s: error while reading next element from disk: %v", logPrefix, err)
+			return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)
 		}
 	}
 

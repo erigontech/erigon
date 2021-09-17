@@ -476,7 +476,7 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 	return nil
 }
 
-func (tx *MdbxTx) ID() uint64 { return tx.tx.ID() }
+func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
 	if tx.db.opts.label != kv.ChainDB {

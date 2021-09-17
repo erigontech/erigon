@@ -228,7 +228,7 @@ type Tx interface {
 	// ID returns the identifier associated with this transaction. For a
 	// read-only transaction, this corresponds to the snapshot being read;
 	// concurrent readers will frequently have the same transaction ID.
-	ID() uint64
+	ViewID() uint64
 
 	// Cursor - creates cursor object on top of given bucket. Type of cursor - depends on bucket configuration.
 	// If bucket was created with mdbx.DupSort flag, then cursor with interface CursorDupSort created

@@ -32,7 +32,7 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
 // 				panic("mock out the IdHashKnown method")
 // 			},
-// 			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChange, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64) error {
+// 			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
 // 			StartedFunc: func() bool {
@@ -58,7 +58,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChange, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64) error
+	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots) error
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
@@ -96,13 +96,11 @@ type PoolMock struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// StateChanges is the stateChanges argument value.
-			StateChanges *remote.StateChange
+			StateChanges *remote.StateChangeBatch
 			// UnwindTxs is the unwindTxs argument value.
 			UnwindTxs TxSlots
 			// MinedTxs is the minedTxs argument value.
 			MinedTxs TxSlots
-			// BaseFee is the baseFee argument value.
-			BaseFee uint64
 		}
 		// Started holds details about calls to the Started method.
 		Started []struct {
@@ -261,19 +259,17 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChange, unwindTxs TxSlots, minedTxs TxSlots, baseFee uint64) error {
+func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots) error {
 	callInfo := struct {
 		Ctx          context.Context
-		StateChanges *remote.StateChange
+		StateChanges *remote.StateChangeBatch
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
-		BaseFee      uint64
 	}{
 		Ctx:          ctx,
 		StateChanges: stateChanges,
 		UnwindTxs:    unwindTxs,
 		MinedTxs:     minedTxs,
-		BaseFee:      baseFee,
 	}
 	mock.lockOnNewBlock.Lock()
 	mock.calls.OnNewBlock = append(mock.calls.OnNewBlock, callInfo)
@@ -284,7 +280,7 @@ func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.State
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(ctx, stateChanges, unwindTxs, minedTxs, baseFee)
+	return mock.OnNewBlockFunc(ctx, stateChanges, unwindTxs, minedTxs)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
@@ -292,17 +288,15 @@ func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.State
 //     len(mockedPool.OnNewBlockCalls())
 func (mock *PoolMock) OnNewBlockCalls() []struct {
 	Ctx          context.Context
-	StateChanges *remote.StateChange
+	StateChanges *remote.StateChangeBatch
 	UnwindTxs    TxSlots
 	MinedTxs     TxSlots
-	BaseFee      uint64
 } {
 	var calls []struct {
 		Ctx          context.Context
-		StateChanges *remote.StateChange
+		StateChanges *remote.StateChangeBatch
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
-		BaseFee      uint64
 	}
 	mock.lockOnNewBlock.RLock()
 	calls = mock.calls.OnNewBlock

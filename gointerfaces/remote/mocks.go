@@ -4,12 +4,13 @@
 package remote
 
 import (
-	context "context"
-	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	grpc "google.golang.org/grpc"
+	"context"
+	"sync"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
-	sync "sync"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Ensure, that KVClientMock does implement KVClient.
@@ -224,7 +225,7 @@ var _ KV_StateChangesClient = &KV_StateChangesClientMock{}
 // 			HeaderFunc: func() (metadata.MD, error) {
 // 				panic("mock out the Header method")
 // 			},
-// 			RecvFunc: func() (*StateChange, error) {
+// 			RecvFunc: func() (*StateChangeBatch, error) {
 // 				panic("mock out the Recv method")
 // 			},
 // 			RecvMsgFunc: func(m interface{}) error {
@@ -253,7 +254,7 @@ type KV_StateChangesClientMock struct {
 	HeaderFunc func() (metadata.MD, error)
 
 	// RecvFunc mocks the Recv method.
-	RecvFunc func() (*StateChange, error)
+	RecvFunc func() (*StateChangeBatch, error)
 
 	// RecvMsgFunc mocks the RecvMsg method.
 	RecvMsgFunc func(m interface{}) error
@@ -390,7 +391,7 @@ func (mock *KV_StateChangesClientMock) HeaderCalls() []struct {
 }
 
 // Recv calls RecvFunc.
-func (mock *KV_StateChangesClientMock) Recv() (*StateChange, error) {
+func (mock *KV_StateChangesClientMock) Recv() (*StateChangeBatch, error) {
 	callInfo := struct {
 	}{}
 	mock.lockRecv.Lock()
@@ -398,10 +399,10 @@ func (mock *KV_StateChangesClientMock) Recv() (*StateChange, error) {
 	mock.lockRecv.Unlock()
 	if mock.RecvFunc == nil {
 		var (
-			stateChangeOut *StateChange
-			errOut         error
+			stateChangeBatchOut *StateChangeBatch
+			errOut              error
 		)
-		return stateChangeOut, errOut
+		return stateChangeBatchOut, errOut
 	}
 	return mock.RecvFunc()
 }

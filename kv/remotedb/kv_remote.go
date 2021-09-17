@@ -159,7 +159,7 @@ func (db *RemoteKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
-func (tx *remoteTx) ID() uint64      { return tx.id }
+func (tx *remoteTx) ViewID() uint64  { return tx.id }
 func (tx *remoteTx) CollectMetrics() {}
 func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")

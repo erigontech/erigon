@@ -78,7 +78,7 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, tmpdir string) (d
 	for _, entry := range b.GetEntries() {
 		err = writeToDisk(encoder, entry.key, entry.value)
 		if err != nil {
-			return nil, fmt.Errorf("error writing entries to disk: %v", err)
+			return nil, fmt.Errorf("error writing entries to disk: %w", err)
 		}
 	}
 

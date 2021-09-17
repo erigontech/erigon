@@ -95,7 +95,7 @@ func (c *kVClient) StateChanges(ctx context.Context, in *StateChangeRequest, opt
 }
 
 type KV_StateChangesClient interface {
-	Recv() (*StateChange, error)
+	Recv() (*StateChangeBatch, error)
 	grpc.ClientStream
 }
 
@@ -103,8 +103,8 @@ type kVStateChangesClient struct {
 	grpc.ClientStream
 }
 
-func (x *kVStateChangesClient) Recv() (*StateChange, error) {
-	m := new(StateChange)
+func (x *kVStateChangesClient) Recv() (*StateChangeBatch, error) {
+	m := new(StateChangeBatch)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func _KV_StateChanges_Handler(srv interface{}, stream grpc.ServerStream) error {
 }
 
 type KV_StateChangesServer interface {
-	Send(*StateChange) error
+	Send(*StateChangeBatch) error
 	grpc.ServerStream
 }
 
@@ -214,7 +214,7 @@ type kVStateChangesServer struct {
 	grpc.ServerStream
 }
 
-func (x *kVStateChangesServer) Send(m *StateChange) error {
+func (x *kVStateChangesServer) Send(m *StateChangeBatch) error {
 	return x.ServerStream.SendMsg(m)
 }
 

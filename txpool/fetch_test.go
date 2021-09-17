@@ -137,12 +137,17 @@ func TestOnNewBlock(t *testing.T) {
 
 	i := 0
 	stream := &remote.KV_StateChangesClientMock{
-		RecvFunc: func() (*remote.StateChange, error) {
+		RecvFunc: func() (*remote.StateChangeBatch, error) {
 			if i > 0 {
 				return nil, io.EOF
 			}
 			i++
-			return &remote.StateChange{Txs: [][]byte{decodeHex(txParseTests[0].payloadStr), decodeHex(txParseTests[1].payloadStr), decodeHex(txParseTests[2].payloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})}, nil
+			return &remote.StateChangeBatch{
+				DatabaseViewID: 1,
+				ChangeBatch: []*remote.StateChange{
+					{Txs: [][]byte{decodeHex(txParseTests[0].payloadStr), decodeHex(txParseTests[1].payloadStr), decodeHex(txParseTests[2].payloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})},
+				},
+			}, nil
 		},
 	}
 	stateChanges := &remote.KVClientMock{

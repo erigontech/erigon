@@ -280,17 +280,10 @@ var (
 	//StorageModeTEVM - does not translate EVM to TEVM
 	StorageModeTEVM = []byte("smTEVM")
 
-	PruneHistoryTypeOlder  = []byte("older")
-	PruneHistoryTypeBefore = []byte("before")
-
-	PruneHistory        = []byte("pruneHistory")
-	PruneHistoryType    = []byte("pruneHistoryType")
-	PruneReceipts       = []byte("pruneReceipts")
-	PruneReceiptsType   = []byte("pruneReceiptsType")
-	PruneTxIndex        = []byte("pruneTxIndex")
-	PruneTxIndexType    = []byte("pruneTxIndexType")
-	PruneCallTraces     = []byte("pruneCallTraces")
-	PruneCallTracesType = []byte("pruneCallTracesType")
+	PruneDistanceHistory    = []byte("pruneHistory")
+	PruneDistanceReceipts   = []byte("pruneReceipts")
+	PruneDistanceTxIndex    = []byte("pruneTxIndex")
+	PruneDistanceCallTraces = []byte("pruneCallTraces")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 

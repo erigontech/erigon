@@ -30,14 +30,14 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-const MaxTxTTL = 30 * time.Second
+const MaxTxTTL = 60 * time.Second
 
 // KvServiceAPIVersion - use it to track changes in API
 // 1.1.0 - added pending transactions, add methods eth_getRawTransactionByHash, eth_retRawTransactionByBlockHashAndIndex, eth_retRawTransactionByBlockNumberAndIndex| Yes     |                                            |
 // 1.2.0 - Added separated services for mining and txpool methods
 // 2.0.0 - Rename all buckets
 // 3.0.0 - ??
-// 4.0.0 - Server send tx.ID() after open tx
+// 4.0.0 - Server send tx.ViewID() after open tx
 var KvServiceAPIVersion = &types.VersionReply{Major: 4, Minor: 0, Patch: 0}
 
 type KvServer struct {
@@ -80,7 +80,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	}
 	defer rollback()
 
-	if err := stream.Send(&remote.Pair{TxID: tx.ID()}); err != nil {
+	if err := stream.Send(&remote.Pair{TxID: tx.ViewID()}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
 	}
 
@@ -268,8 +268,8 @@ func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV
 	}
 }
 
-func (s *KvServer) SendStateChanges(sc *remote.StateChange) {
-	if err := s.stateChangeStreams.Broadcast(sc); err != nil {
+func (s *KvServer) SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch) {
+	if err := s.stateChangeStreams.Broadcast(ctx, sc); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "error", err)
 	}
 }
@@ -296,10 +296,17 @@ func (s *StateChangeStreams) Add(stream remote.KV_StateChangesServer) (remove fu
 	return func() { s.remove(id) }
 }
 
-func (s *StateChangeStreams) doBroadcast(reply *remote.StateChange) (ids []uint, errs []error) {
+func (s *StateChangeStreams) doBroadcast(ctx context.Context, reply *remote.StateChangeBatch) (ids []uint, errs []error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+Loop:
 	for id, stream := range s.streams {
+		select {
+		case <-ctx.Done():
+			errs = append(errs, ctx.Err())
+			break Loop
+		default:
+		}
 		err := stream.Send(reply)
 		if err != nil {
 			select {
@@ -313,13 +320,14 @@ func (s *StateChangeStreams) doBroadcast(reply *remote.StateChange) (ids []uint,
 	return
 }
 
-func (s *StateChangeStreams) Broadcast(reply *remote.StateChange) (errs []error) {
+func (s *StateChangeStreams) Broadcast(ctx context.Context, reply *remote.StateChangeBatch) (errs []error) {
 	var ids []uint
-	ids, errs = s.doBroadcast(reply)
-	if len(ids) > 0 {
-		s.mu.Lock()
-		defer s.mu.Unlock()
+	ids, errs = s.doBroadcast(ctx, reply)
+	if len(ids) == 0 {
+		return errs
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, id := range ids {
 		delete(s.streams, id)
 	}
