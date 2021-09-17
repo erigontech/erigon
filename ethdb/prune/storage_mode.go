@@ -153,10 +153,10 @@ type BlockAmount interface {
 // may delete whole db - because of uint64 underflow when pruningDistance > currentStageProgress
 type Distance uint64
 
-func (p Distance) Enabled() bool { return p != math.MaxUint64 }
-func (p Distance) toValue() uint64 { return uint64(p) }
+func (p Distance) Enabled() bool         { return p != math.MaxUint64 }
+func (p Distance) toValue() uint64       { return uint64(p) }
 func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmutabilityThreshold }
-func (p Distance) dbType() []byte { return kv.PruneHistoryTypeOlder }
+func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
 
 func (p Distance) PruneTo(stageHead uint64) uint64 {
 	if p == 0 {
@@ -171,14 +171,14 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 // Before number after which keep in DB
 type Before uint64
 
-func (b Before) Enabled() bool { return b > 0 }
-func (b Before) toValue() uint64 { return uint64(b) }
+func (b Before) Enabled() bool         { return b > 0 }
+func (b Before) toValue() uint64       { return uint64(b) }
 func (b Before) useDefaultValue() bool { return uint64(b) == 0 }
-func (b Before) dbType() []byte { return kv.PruneHistoryTypeBefore }
+func (b Before) dbType() []byte        { return kv.PruneTypeBefore }
 
 func (b Before) PruneTo(uint64) uint64 {
 	if b == 0 {
-		panic("block number were not set")
+		return uint64(b)
 	}
 
 	return uint64(b) - 1
@@ -266,9 +266,9 @@ func SetIfNotExist(db kv.GetPut, pm Mode) error {
 	}
 
 	pruneDBData := map[string]BlockAmount{
-		string(kv.PruneHistory): pm.History,
-		string(kv.PruneReceipts): pm.Receipts,
-		string(kv.PruneTxIndex): pm.TxIndex,
+		string(kv.PruneHistory):    pm.History,
+		string(kv.PruneReceipts):   pm.Receipts,
+		string(kv.PruneTxIndex):    pm.TxIndex,
 		string(kv.PruneCallTraces): pm.CallTraces,
 	}
 
@@ -291,9 +291,9 @@ func createBlockAmount(pruneType []byte, v []byte) (BlockAmount, error) {
 	var blockAmount BlockAmount
 
 	switch string(pruneType) {
-	case string(kv.PruneHistoryTypeOlder):
+	case string(kv.PruneTypeOlder):
 		blockAmount = Distance(binary.BigEndian.Uint64(v))
-	case string(kv.PruneHistoryTypeBefore):
+	case string(kv.PruneTypeBefore):
 		blockAmount = Before(binary.BigEndian.Uint64(v))
 	default:
 		return nil, fmt.Errorf("unexpected block amount type: %s", string(pruneType))
@@ -340,7 +340,7 @@ func set(db kv.Putter, key []byte, blockAmount BlockAmount) error {
 	return nil
 }
 
-func keyType(name []byte) []byte  {
+func keyType(name []byte) []byte {
 	return append(name, []byte("Type")...)
 }
 
