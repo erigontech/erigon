@@ -30,3 +30,7 @@ To change address/port of Erigon or Sentry:
 ```
 ./build/bin/txpool --private.api.addr localhost:9090 --sentry.api.addr localhost:9091 --txpool.api.addr localhost:9094
 ```
+
+## Increase pool limits
+
+Will add this part soon [tbd]
