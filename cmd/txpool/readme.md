@@ -1,4 +1,4 @@
-# TxPool
+# TxPool v2
 
 Design docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
 
@@ -34,3 +34,21 @@ To change address/port of Erigon or Sentry:
 ## Increase pool limits
 
 Will add this part soon [tbd]
+
+## ToDo list
+
+[x] Remote-mode support - with coherent state cache
+[x] Persistence
+[x] Grafana board
+[x] Non-mainnet support
+[] DevNet - doesn't send mined block notification on first mined block (because initialCycle = true)
+[] Add cli options to manage pool limits
+[] Add way for simple introspection - where is tx and why
+[] DiscardReasons - user must understand clearly why tx were rejected
+[] Hard-forks support (now rules are parsed ones on txPool start)
+[] Cache advanced eviction
+[] Add pool to docker-compose
+[] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
+[] Save history of local transactions - with 1 day expiration
+[] Miner - recheck if miner has all EIP-1559 patches
+[] Miner - to work on state cache

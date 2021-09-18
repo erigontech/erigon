@@ -365,17 +365,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.TxPool.V2 {
 		cfg := txpool2.DefaultConfig
 		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.LogEvery = 2 * time.Minute    //5 * time.Minute
+		cfg.LogEvery = 2 * time.Second    //5 * time.Minute
 		cfg.CommitEvery = 1 * time.Minute //5 * time.Minute
 
-		cacheConfig := kvcache.DefaultCoherentCacheConfig
-		cacheConfig.MetricsLabel = "txpool"
+		//cacheConfig := kvcache.DefaultCoherentCacheConfig
+		//cacheConfig.MetricsLabel = "txpool"
 
 		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, cfg, kvcache.New(cacheConfig), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
+			ctx, cfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
 		)
 		if err != nil {
 			return nil, err
@@ -669,7 +669,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 	if s.chainConfig.ChainID.Uint64() > 10 {
 		go func() {
-			skipCycleEvery := time.NewTicker(2 * time.Second)
+			skipCycleEvery := time.NewTicker(3 * time.Second)
 			defer skipCycleEvery.Stop()
 			for range skipCycleEvery.C {
 				select {
@@ -684,13 +684,19 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 
+		mineEvery := time.NewTicker(3 * time.Second)
+		defer mineEvery.Stop()
+
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
 
 		for {
+			mineEvery.Reset(3 * time.Second)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
+				hasWork = true
+			case <-mineEvery.C:
 				hasWork = true
 			case err := <-errc:
 				works = false
