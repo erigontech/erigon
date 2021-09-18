@@ -54,10 +54,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		PruneR             *uint64
 		PruneT             *uint64
 		PruneC             *uint64
-		PruneBeforeH       *uint64
-		PruneBeforeR       *uint64
-		PruneBeforeT       *uint64
-		PruneBeforeC       *uint64
 		Experiments        *[]string
 		OnlyAnnounce       *bool
 		SkipBcVersionCheck *bool `toml:"-"`
@@ -87,8 +83,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Whitelist = dec.Whitelist
 	}
 	if dec.Mode != nil {
-		mode, err := prune.FromCli(*dec.Mode, *dec.PruneH, *dec.PruneR, *dec.PruneT, *dec.PruneC,
-			*dec.PruneBeforeH, *dec.PruneBeforeR, *dec.PruneBeforeT, *dec.PruneBeforeC, *dec.Experiments)
+		mode, err := prune.FromCli(*dec.Mode, *dec.PruneH, *dec.PruneR, *dec.PruneT, *dec.PruneC, *dec.Experiments)
 		if err != nil {
 			return err
 		}
