@@ -41,6 +41,7 @@ Will add this part soon [tbd]
 [x] Persistence
 [x] Grafana board
 [x] Non-mainnet support
+[] DevNet - doesn't send mined block notification on first mined block (because initialCycle = true)
 [] Add cli options to manage pool limits
 [] Add way for simple introspection - where is tx and why
 [] DiscardReasons - user must understand clearly why tx were rejected

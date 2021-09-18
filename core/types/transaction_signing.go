@@ -242,7 +242,6 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}
-	fmt.Printf("recover: %x,%x,%x\n", R.Bytes(), S.Bytes(), V.Bytes())
 	return recoverPlain(context, tx.SigningHash(signChainID), R, S, &V, !sg.maleable)
 }
 
@@ -321,7 +320,6 @@ func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uin
 	if err != nil {
 		return common.Address{}, err
 	}
-	fmt.Printf("sighash: %x\n", sighash)
 	if len(pub) == 0 || pub[0] != 4 {
 		return common.Address{}, errors.New("invalid public key")
 	}
