@@ -1,3 +1,19 @@
+/*
+   Copyright 2021 Erigon contributors
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package txpool
 
 import (
@@ -9,6 +25,8 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -25,8 +43,8 @@ var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type txPool interface {
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocals(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
-	DeprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error
+	AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
+	deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 }
@@ -37,10 +55,13 @@ type GrpcServer struct {
 	txPool          txPool
 	db              kv.RoDB
 	NewSlotsStreams *NewSlotsStreams
+
+	rules   chain.Rules
+	chainID uint256.Int
 }
 
-func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB) *GrpcServer {
-	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}}
+func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, rules chain.Rules, chainID uint256.Int) *GrpcServer {
+	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, rules: rules, chainID: chainID}
 }
 
 func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -66,7 +87,7 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpool_proto.AllRequest) (*txpo
 	defer tx.Rollback()
 	reply := &txpool_proto.AllReply{}
 	reply.Txs = make([]*txpool_proto.AllReply_Tx, 0, 32)
-	if err := s.txPool.DeprecatedForEach(ctx, func(rlp, sender []byte, t SubPoolType) {
+	if err := s.txPool.deprecatedForEach(ctx, func(rlp, sender []byte, t SubPoolType) {
 		reply.Txs = append(reply.Txs, &txpool_proto.AllReply_Tx{
 			Sender: sender,
 			Type:   convertSubPoolType(t),
@@ -108,7 +129,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 
 	var slots TxSlots
 	slots.Resize(uint(len(in.RlpTxs)))
-	parseCtx := NewTxParseContext()
+	parseCtx := NewTxParseContext(s.rules, s.chainID)
 	parseCtx.Reject(func(hash []byte) bool {
 		known, _ := s.txPool.IdHashKnown(tx, hash)
 		return known
@@ -117,13 +138,13 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		slots.txs[i] = &TxSlot{}
 		slots.isLocal[i] = true
 		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.txs[i], slots.senders.At(i)); err != nil {
-			log.Warn("stream.Recv", "err", err)
+			log.Warn("pool add", "err", err)
 			continue
 		}
 	}
 
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
-	discardReasons, err := s.txPool.AddLocals(ctx, slots)
+	discardReasons, err := s.txPool.AddLocalTxs(ctx, slots)
 	if err != nil {
 		return nil, err
 	}

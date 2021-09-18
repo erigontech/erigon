@@ -35,4 +35,5 @@ func NewDummy() *DummyCache                                                 { re
 func (c *DummyCache) View(ctx context.Context, tx kv.Tx) (CacheView, error) { return dummyView, nil }
 func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch)                {}
 func (c *DummyCache) Evict() int                                            { return 0 }
+func (c *DummyCache) Len() int                                              { return 0 }
 func (c *DummyView) Get(k []byte, tx kv.Tx) ([]byte, error)                 { return tx.GetOne(kv.PlainState, k) }

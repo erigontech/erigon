@@ -40,6 +40,6 @@ jobs:
       - name: Install deps
         if: matrix.os == 'windows-2019'
         run: choco upgrade mingw cmake -y --no-progress
-      - run: go test -race ./...
+      - run: go test ./...
 
 

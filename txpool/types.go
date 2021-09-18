@@ -25,37 +25,71 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 )
 
+type TxParsseConfig struct {
+	chainID uint256.Int
+
+	protected  bool
+	accessList bool
+	dynamicFee bool
+	maleable   bool
+}
+
 // TxParseContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxParseContext struct {
-	recCtx        *secp256k1.Context // Context for sender recovery
-	keccak1       hash.Hash
-	keccak2       hash.Hash
-	chainId, r, s uint256.Int // Signature values
-	n27, n28, n35 uint256.Int
-	buf           [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
-	sighash       [32]byte
-	sig           [65]byte
-	withSender    bool
-	reject        func([]byte) bool
+	recCtx           *secp256k1.Context // Context for sender recovery
+	keccak1          hash.Hash
+	keccak2          hash.Hash
+	chainId, r, s, v uint256.Int // Signature values
+	chainIDMul       uint256.Int
+	buf              [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
+	sighash          [32]byte
+	sig              [65]byte
+	withSender       bool
+	isProtected      bool
+	reject           func([]byte) bool
+
+	cfg TxParsseConfig
 }
 
-func NewTxParseContext() *TxParseContext {
+func NewTxParseContext(rules chain.Rules, chainID uint256.Int) *TxParseContext {
 	ctx := &TxParseContext{
 		withSender: true,
 		keccak1:    sha3.NewLegacyKeccak256(),
 		keccak2:    sha3.NewLegacyKeccak256(),
 		recCtx:     secp256k1.NewContext(),
 	}
-	ctx.n27.SetUint64(27)
-	ctx.n28.SetUint64(28)
-	ctx.n35.SetUint64(35)
+
+	switch {
+	case rules.IsLondon:
+		// All transaction types are still supported
+		ctx.cfg.protected = true
+		ctx.cfg.accessList = true
+		ctx.cfg.dynamicFee = true
+		ctx.cfg.chainID.Set(&chainID)
+		ctx.chainIDMul.Mul(&chainID, u256.N2)
+	case rules.IsBerlin:
+		ctx.cfg.protected = true
+		ctx.cfg.accessList = true
+		ctx.cfg.chainID.Set(&chainID)
+		ctx.chainIDMul.Mul(&chainID, u256.N2)
+	case rules.IsEIP155:
+		ctx.cfg.protected = true
+		ctx.cfg.chainID.Set(&chainID)
+		ctx.chainIDMul.Mul(&chainID, u256.N2)
+	case rules.IsHomestead:
+	default:
+		// Only allow malleable transactions in Frontier
+		ctx.cfg.maleable = true
+	}
 	return ctx
 }
 
@@ -271,17 +305,18 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	sigHashLen := uint(sigHashEnd - sigHashPos)
 	var chainIdBits, chainIdLen int
 	if legacy {
-		p, err = rlp.U256(payload, p, &ctx.chainId)
+		p, err = rlp.U256(payload, p, &ctx.v)
 		if err != nil {
 			return 0, fmt.Errorf("%s: V: %w", ParseTransactionErrorPrefix, err)
 		}
+		ctx.isProtected = ctx.v.Eq(u256.N27) || ctx.v.Eq(u256.N28)
 		// Compute chainId from V
-		if ctx.chainId.Eq(&ctx.n27) || ctx.chainId.Eq(&ctx.n28) {
+		if ctx.isProtected {
 			// Do not add chain id and two extra zeros
-			vByte = byte(ctx.chainId.Uint64() - 27)
+			vByte = byte(ctx.v.Uint64() - 27)
+			ctx.chainId.Set(&ctx.cfg.chainID)
 		} else {
-			ctx.chainId.Sub(&ctx.chainId, &ctx.n35)
-			vByte = byte(1 - (ctx.chainId.Uint64() & 1))
+			ctx.chainId.Sub(&ctx.v, u256.N35)
 			ctx.chainId.Rsh(&ctx.chainId, 1)
 			chainIdBits = ctx.chainId.BitLen()
 			if chainIdBits <= 7 {
@@ -292,6 +327,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			}
 			sigHashLen += uint(chainIdLen) // For chainId
 			sigHashLen += 2                // For two extra zeros
+
+			//vByte = byte(1 - (ctx.v.Uint64() & 1))
+			v := uint256.NewInt(0).Sub(&ctx.v, &ctx.chainIDMul)
+			vByte = v.Sub(v, u256.N8).Bytes()[0] - 27
 		}
 	} else {
 		var v uint64
@@ -303,7 +342,13 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			return 0, fmt.Errorf("%s: V is loo large: %d", ParseTransactionErrorPrefix, v)
 		}
 		vByte = byte(v)
+		ctx.isProtected = true
+		ctx.chainId.Set(&ctx.cfg.chainID)
 	}
+	if ctx.chainId != ctx.cfg.chainID {
+		return 0, fmt.Errorf("%s: %s", ParseTransactionErrorPrefix, "invalid chainID")
+	}
+
 	// Next follows R of the signature
 	p, err = rlp.U256(payload, p, &ctx.r)
 	if err != nil {
@@ -314,6 +359,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if err != nil {
 		return 0, fmt.Errorf("%s: S: %w", ParseTransactionErrorPrefix, err)
 	}
+
 	// For legacy transactions, hash the full payload
 	if legacy {
 		if _, err = ctx.keccak1.Write(payload[pos:p]); err != nil {

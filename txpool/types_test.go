@@ -18,28 +18,29 @@ package txpool
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-var txParseTests = []struct {
+type parseTxTest struct {
 	payloadStr  string
 	senderStr   string
 	idHashStr   string
 	signHashStr string
 	nonce       uint64
-}{
+}
+
+var txParseMainnetTests = []parseTxTest{
 	// Legacy unprotected
 	{payloadStr: "f86a808459682f0082520894fe3b557e8fb62b89f4916b721be55ceb828dbd73872386f26fc10000801ca0d22fc3eed9b9b9dbef9eec230aa3fb849eff60356c6b34e86155dca5c03554c7a05e3903d7375337f103cb9583d97a59dcca7472908c31614ae240c6a8311b02d6",
 		senderStr: "fe3b557e8fb62b89f4916b721be55ceb828dbd73", idHashStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
 		signHashStr: "e2b043ecdbcfed773fe7b5ffc2e23ec238081c77137134a06d71eedf9cdd81d3", nonce: 0},
-	// Legacy protected (EIP-155) from calveras, with chainId 123
-	{payloadStr: "f86d808459682f0082520894e80d2a018c813577f33f9e69387dc621206fb3a48856bc75e2d63100008082011aa04ae3cae463329a32573f4fbf1bd9b011f93aecf80e4185add4682a03ba4a4919a02b8f05f3f4858b0da24c93c2a65e51b2fbbecf5ffdf97c1f8cc1801f307dc107",
-		idHashStr:   "f4a91979624effdb45d2ba012a7995c2652b62ebbeb08cdcab00f4923807aa8a",
-		signHashStr: "ff44cf01ee9b831f09910309a689e8da83d19aa60bad325ee9154b7c25cf4de8", nonce: 0},
+
 	{payloadStr: "b86d02f86a7b80843b9aca00843b9aca0082520894e80d2a018c813577f33f9e69387dc621206fb3a48080c001a02c73a04cd144e5a84ceb6da942f83763c2682896b51f7922e2e2f9a524dd90b7a0235adda5f87a1d098e2739e40e83129ff82837c9042e6ad61d0481334dcb6f1a",
 		senderStr: "e80d2a018c813577f33f9e69387dc621206fb3a4", idHashStr: "1247438da30b5919f1401eff4422fd11added646eff41278cd5276a5d3df802e",
 		signHashStr: "34ef1790ebd860a84c73ba27576ae96621ec21e96f70935c94e8e24dc1b62f2b", nonce: 0},
@@ -61,40 +62,75 @@ var txParseTests = []struct {
 		signHashStr: "7f69febd06ddc1e72d9cd34524c82b3a8a116a02a10757be34cf536d6992d51c", nonce: 499},
 }
 
+var txParseCalaverasTests = []parseTxTest{
+	// Legacy protected (EIP-155) from calveras, with chainId 123
+	{payloadStr: "f86d808459682f0082520894e80d2a018c813577f33f9e69387dc621206fb3a48856bc75e2d63100008082011aa04ae3cae463329a32573f4fbf1bd9b011f93aecf80e4185add4682a03ba4a4919a02b8f05f3f4858b0da24c93c2a65e51b2fbbecf5ffdf97c1f8cc1801f307dc107",
+		idHashStr:   "f4a91979624effdb45d2ba012a7995c2652b62ebbeb08cdcab00f4923807aa8a",
+		signHashStr: "ff44cf01ee9b831f09910309a689e8da83d19aa60bad325ee9154b7c25cf4de8", nonce: 0},
+}
+
+var txParseDevNetTests = []parseTxTest{
+	{payloadStr: "f8620101830186a09400000000000000000000000000000000000000006401820a96a04f353451b272c6b183cedf20787dab556db5afadf16733a3c6bffb0d2fcd2563a0773cd45f7cc62250f7ee715b9e19f0489176f8966f75c8eed2fbf1ac861cb50c",
+		idHashStr:   "35767571787cd95dd71e2081ac4f667076f012b854fc314ed3b131e12623cbbd",
+		signHashStr: "a2719fbc84efd65eee79201e46f5110edc4731c90ffe1cebf8644c8ddd62528d",
+		senderStr:   "67b1d87101671b127f5f8714789c7192f7ad340e", nonce: 1},
+}
+
+var allNetsTestCases = []struct {
+	chainID uint256.Int
+	tests   []parseTxTest
+}{
+	{
+		chainID: *uint256.NewInt(1),
+		tests:   txParseMainnetTests,
+	},
+	{
+		chainID: *uint256.NewInt(123),
+		tests:   txParseCalaverasTests,
+	},
+	{
+		chainID: *uint256.NewInt(1337),
+		tests:   txParseDevNetTests,
+	},
+}
+
 func TestParseTransactionRLP(t *testing.T) {
-	ctx := NewTxParseContext()
-	for i, tt := range txParseTests {
-		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+	for _, testSet := range allNetsTestCases {
+		t.Run(strconv.Itoa(int(testSet.chainID.Uint64())), func(t *testing.T) {
+			ctx := NewTxParseContext(chain.MainnetRules, testSet.chainID)
 			require := require.New(t)
-			var err error
-			payload := decodeHex(tt.payloadStr)
+
 			tx, txSender := &TxSlot{}, [20]byte{}
-			parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:])
-			require.NoError(err)
-			require.Equal(len(payload), parseEnd)
-			if tt.signHashStr != "" {
-				signHash := decodeHex(tt.signHashStr)
-				if !bytes.Equal(signHash, ctx.sighash[:]) {
-					t.Errorf("signHash expected %x, got %x", signHash, ctx.sighash)
-				}
+			for i, tt := range testSet.tests {
+				t.Run(strconv.Itoa(i), func(t *testing.T) {
+					payload := decodeHex(tt.payloadStr)
+					parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:])
+					require.NoError(err)
+					require.Equal(len(payload), parseEnd)
+					if tt.signHashStr != "" {
+						signHash := decodeHex(tt.signHashStr)
+						if !bytes.Equal(signHash, ctx.sighash[:]) {
+							t.Errorf("signHash expected %x, got %x", signHash, ctx.sighash)
+						}
+					}
+					if tt.idHashStr != "" {
+						idHash := decodeHex(tt.idHashStr)
+						if !bytes.Equal(idHash, tx.idHash[:]) {
+							t.Errorf("idHash expected %x, got %x", idHash, tx.idHash)
+						}
+					}
+					if tt.senderStr != "" {
+						expectSender := decodeHex(tt.senderStr)
+						if !bytes.Equal(expectSender, txSender[:]) {
+							t.Errorf("expectSender expected %x, got %x", expectSender, txSender)
+						}
+					}
+					require.Equal(tt.nonce, tx.nonce)
+				})
 			}
-			if tt.idHashStr != "" {
-				idHash := decodeHex(tt.idHashStr)
-				if !bytes.Equal(idHash, tx.idHash[:]) {
-					t.Errorf("idHash expected %x, got %x", idHash, tx.idHash)
-				}
-			}
-			if tt.senderStr != "" {
-				expectSender := decodeHex(tt.senderStr)
-				if !bytes.Equal(expectSender, txSender[:]) {
-					t.Errorf("expectSender expected %x, got %x", expectSender, txSender)
-				}
-			}
-			require.Equal(tt.nonce, tx.nonce)
 		})
 	}
 }
-
 func TestTxSlotsGrowth(t *testing.T) {
 	assert := assert.New(t)
 	s := &TxSlots{}

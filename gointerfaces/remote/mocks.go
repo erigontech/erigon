@@ -4,13 +4,12 @@
 package remote
 
 import (
-	"context"
-	"sync"
-
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"google.golang.org/grpc"
+	context "context"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/types/known/emptypb"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	sync "sync"
 )
 
 // Ensure, that KVClientMock does implement KVClient.

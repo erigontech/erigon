@@ -1,8 +1,27 @@
+/*
+   Copyright 2021 Erigon contributors
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package txpooluitl
 
 import (
 	"context"
+	"time"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -11,21 +30,87 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, newTxs chan txpool.Hashes, coreDB kv.RoDB, sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
+func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB) (cc *chain.Config, blockNum uint64, err error) {
+	if err = txPoolDB.View(ctx, func(tx kv.Tx) error {
+		cc, err = txpool.ChainConfig(tx)
+		if err != nil {
+			return err
+		}
+		blockNum, err = txpool.LastSeenBlock(tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
+	}
+	if cc != nil {
+		return cc, blockNum, nil
+	}
+
+	for {
+		if err = coreDB.View(ctx, func(tx kv.Tx) error {
+			cc, err = chain.GetConfig(tx, nil)
+			if err != nil {
+				return err
+			}
+			n, err := chain.CurrentBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+			if n != nil {
+				blockNum = *n
+			}
+			return nil
+		}); err != nil {
+			log.Error("cant read chain config from core db", "err", err)
+			time.Sleep(5 * time.Second)
+			continue
+		} else if cc == nil {
+			log.Error("cant read chain config from core db")
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		break
+	}
+
+	if err = txPoolDB.Update(ctx, func(tx kv.RwTx) error {
+		if err = txpool.PutChainConfig(tx, cc, nil); err != nil {
+			return err
+		}
+		if err = txpool.PutLastSeenBlock(tx, blockNum, nil); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, err
+	}
+	return cc, blockNum, nil
+}
+
+func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, newTxs chan txpool.Hashes, chainDB kv.RoDB, sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
 	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).Open()
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
-	txPool, err := txpool.New(newTxs, coreDB, cfg, cache)
+
+	chainConfig, blockNum, err := SaveChainConfigIfNeed(ctx, chainDB, txPoolDB)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 
-	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, coreDB, txPoolDB)
+	rules := chain.NewRules(chainConfig, blockNum)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, rules, *chainID)
+	if err != nil {
+		return nil, nil, nil, nil, nil, err
+	}
+
+	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, chainDB, txPoolDB, rules, *chainID)
 	//fetch.ConnectCore()
 	//fetch.ConnectSentries()
 
 	send := txpool.NewSend(ctx, sentryClients, txPool)
-	txpoolGrpcServer := txpool.NewGrpcServer(ctx, txPool, txPoolDB)
+	txpoolGrpcServer := txpool.NewGrpcServer(ctx, txPool, txPoolDB, rules, *chainID)
 	return txPoolDB, txPool, fetch, send, txpoolGrpcServer, nil
 }

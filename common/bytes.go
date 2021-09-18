@@ -40,3 +40,12 @@ func Copy(b []byte) []byte {
 	copy(c, b)
 	return c
 }
+
+func EnsureEnoughSize(in []byte, size int) []byte {
+	if cap(in) < size {
+		newBuf := make([]byte, size)
+		copy(newBuf, in)
+		return newBuf
+	}
+	return in[:size] // Reuse the space if it has enough capacity
+}

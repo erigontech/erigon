@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -54,12 +56,12 @@ func FuzzTwoQueue(f *testing.F) {
 
 			var prevBest *uint8
 			for i := range sub.best {
-				best := uint8(sub.best[i].subPool)
+				current := uint8(sub.best[i].subPool)
 				if prevBest != nil {
-					assert.LessOrEqual(best, *prevBest)
+					assert.LessOrEqual(current, *prevBest)
 				}
 				assert.Equal(i, sub.best[i].bestIndex)
-				prevBest = &best
+				prevBest = &current
 			}
 		}
 		{
@@ -217,7 +219,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		senderIDs[string(senders.At(i%senders.Len()))] = senderID
 	}
 	txs.txs = make([]*TxSlot, len(txNonce))
-	parseCtx := NewTxParseContext()
+	parseCtx := NewTxParseContext(chain.MainnetRules, *u256.N1)
 	parseCtx.WithSender(false)
 	for i := range txNonce {
 		txs.txs[i] = &TxSlot{
@@ -337,7 +339,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		cfg := DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentCacheConfig)
 
-		pool, err := New(ch, coreDB, cfg, sendersCache)
+		pool, err := New(ch, coreDB, cfg, sendersCache, chain.MainnetRules, *u256.N1)
 		assert.NoError(err)
 		pool.senders.senderIDs = senderIDs
 		for addr, id := range senderIDs {
@@ -351,7 +353,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			//}
 
 			best, worst := pending.Best(), pending.Worst()
-			assert.LessOrEqual(pending.Len(), PendingSubPoolLimit)
+			assert.LessOrEqual(pending.Len(), cfg.PendingSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
 			if worst != nil && worst.subPool < 0b11110 {
@@ -396,7 +398,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
-			assert.LessOrEqual(baseFee.Len(), BaseFeeSubPoolLimit, msg)
+			assert.LessOrEqual(baseFee.Len(), cfg.BaseFeeSubPoolLimit, msg)
 			if worst != nil && worst.subPool < 0b11100 {
 				t.Fatalf("baseFee worst too small %b", worst.subPool)
 			}
@@ -421,7 +423,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			})
 
 			best, worst = queued.Best(), queued.Worst()
-			assert.LessOrEqual(queued.Len(), QueuedSubPoolLimit)
+			assert.LessOrEqual(queued.Len(), cfg.QueuedSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
 			if worst != nil && worst.subPool < 0b10000 {
@@ -591,7 +593,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxSlots{}, "after_flush")
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
-		p2, err := New(ch, coreDB, DefaultConfig, sendersCache)
+		p2, err := New(ch, coreDB, DefaultConfig, sendersCache, chain.MainnetRules, *u256.N1)
 		assert.NoError(err)
 		p2.senders = pool.senders // senders are not persisted
 		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
@@ -45,7 +46,7 @@ func ParseHashesCount(payload []byte, pos int) (count int, dataPos int, err erro
 func EncodeHashes(hashes []byte, encodeBuf []byte) []byte {
 	hashesLen := len(hashes) / 32 * 33
 	dataLen := hashesLen
-	encodeBuf = ensureEnoughSize(encodeBuf, rlp.ListPrefixLen(hashesLen)+dataLen)
+	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(hashesLen)+dataLen)
 	rlp.EncodeHashes(hashes, encodeBuf)
 	return encodeBuf
 }
@@ -56,7 +57,7 @@ func EncodeHashes(hashes []byte, encodeBuf []byte) []byte {
 // The second returned value is the new position in the RLP payload after the extraction
 // of the hash.
 func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
-	hashbuf = ensureEnoughSize(hashbuf, 32)
+	hashbuf = common.EnsureEnoughSize(hashbuf, 32)
 	pos, err := rlp.ParseHash(payload, pos, hashbuf)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: hash len: %w", rlp.ParseHashErrorPrefix, err)
@@ -64,21 +65,12 @@ func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
 	return hashbuf, pos, nil
 }
 
-func ensureEnoughSize(in []byte, size int) []byte {
-	if cap(in) < size {
-		newBuf := make([]byte, size)
-		copy(newBuf, in)
-		return newBuf
-	}
-	return in[:size] // Reuse the space if it has enough capacity
-}
-
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
 func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []byte) ([]byte, error) {
 	pos := 0
 	hashesLen := len(hashes) / 32 * 33
 	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestId)
-	encodeBuf = ensureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
+	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
 	pos += rlp.EncodeU64(requestId, encodeBuf[pos:])
@@ -102,7 +94,7 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 	if err != nil {
 		return 0, hashes, 0, err
 	}
-	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
+	hashes = common.EnsureEnoughSize(hashbuf, 32*hashesCount)
 
 	for i := 0; pos < len(payload); i++ {
 		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
@@ -119,7 +111,7 @@ func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hash
 	if err != nil {
 		return hashes, 0, err
 	}
-	hashes = ensureEnoughSize(hashbuf, 32*hashesCount)
+	hashes = common.EnsureEnoughSize(hashbuf, 32*hashesCount)
 
 	for i := 0; pos < len(payload); i++ {
 		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
@@ -140,7 +132,7 @@ func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []b
 	}
 	dataLen := rlp.U64Len(requestId) + rlp.ListPrefixLen(txsRlpLen) + txsRlpLen
 
-	encodeBuf = ensureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
+	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
@@ -160,7 +152,7 @@ func EncodePooledTransactions65(txsRlp [][]byte, encodeBuf []byte) []byte {
 		dataLen += len(txsRlp[i])
 	}
 
-	encodeBuf = ensureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
+	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
 	for i := range txsRlp {

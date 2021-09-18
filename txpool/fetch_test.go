@@ -23,6 +23,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -42,7 +44,7 @@ func TestFetch(t *testing.T) {
 	sentryClient := direct.NewSentryClientDirect(direct.ETH66, m)
 	pool := &PoolMock{}
 
-	fetch := NewFetch(ctx, []direct.SentryClient{sentryClient}, pool, &remote.KVClientMock{}, nil, nil)
+	fetch := NewFetch(ctx, []direct.SentryClient{sentryClient}, pool, &remote.KVClientMock{}, nil, nil, chain.MainnetRules, *u256.N1)
 	var wg sync.WaitGroup
 	fetch.SetWaitGroup(&wg)
 	m.StreamWg.Add(2)
@@ -145,7 +147,7 @@ func TestOnNewBlock(t *testing.T) {
 			return &remote.StateChangeBatch{
 				DatabaseViewID: 1,
 				ChangeBatch: []*remote.StateChange{
-					{Txs: [][]byte{decodeHex(txParseTests[0].payloadStr), decodeHex(txParseTests[1].payloadStr), decodeHex(txParseTests[2].payloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})},
+					{Txs: [][]byte{decodeHex(txParseMainnetTests[0].payloadStr), decodeHex(txParseMainnetTests[1].payloadStr), decodeHex(txParseMainnetTests[2].payloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})},
 				},
 			}, nil
 		},
@@ -156,7 +158,7 @@ func TestOnNewBlock(t *testing.T) {
 		},
 	}
 	pool := &PoolMock{}
-	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db)
+	fetch := NewFetch(ctx, nil, pool, stateChanges, coreDB, db, chain.MainnetRules, *u256.N1)
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))

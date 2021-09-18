@@ -20,6 +20,9 @@ var _ Pool = &PoolMock{}
 //
 // 		// make and configure a mocked Pool
 // 		mockedPool := &PoolMock{
+// 			AddLocalTxsFunc: func(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error) {
+// 				panic("mock out the AddLocalTxs method")
+// 			},
 // 			AddNewGoodPeerFunc: func(peerID PeerID)  {
 // 				panic("mock out the AddNewGoodPeer method")
 // 			},
@@ -45,6 +48,9 @@ var _ Pool = &PoolMock{}
 //
 // 	}
 type PoolMock struct {
+	// AddLocalTxsFunc mocks the AddLocalTxs method.
+	AddLocalTxsFunc func(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
+
 	// AddNewGoodPeerFunc mocks the AddNewGoodPeer method.
 	AddNewGoodPeerFunc func(peerID PeerID)
 
@@ -65,6 +71,13 @@ type PoolMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// AddLocalTxs holds details about calls to the AddLocalTxs method.
+		AddLocalTxs []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// NewTxs is the newTxs argument value.
+			NewTxs TxSlots
+		}
 		// AddNewGoodPeer holds details about calls to the AddNewGoodPeer method.
 		AddNewGoodPeer []struct {
 			// PeerID is the peerID argument value.
@@ -106,12 +119,52 @@ type PoolMock struct {
 		Started []struct {
 		}
 	}
+	lockAddLocalTxs    sync.RWMutex
 	lockAddNewGoodPeer sync.RWMutex
 	lockAddRemoteTxs   sync.RWMutex
 	lockGetRlp         sync.RWMutex
 	lockIdHashKnown    sync.RWMutex
 	lockOnNewBlock     sync.RWMutex
 	lockStarted        sync.RWMutex
+}
+
+// AddLocalTxs calls AddLocalTxsFunc.
+func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error) {
+	callInfo := struct {
+		Ctx    context.Context
+		NewTxs TxSlots
+	}{
+		Ctx:    ctx,
+		NewTxs: newTxs,
+	}
+	mock.lockAddLocalTxs.Lock()
+	mock.calls.AddLocalTxs = append(mock.calls.AddLocalTxs, callInfo)
+	mock.lockAddLocalTxs.Unlock()
+	if mock.AddLocalTxsFunc == nil {
+		var (
+			discardReasonsOut []DiscardReason
+			errOut            error
+		)
+		return discardReasonsOut, errOut
+	}
+	return mock.AddLocalTxsFunc(ctx, newTxs)
+}
+
+// AddLocalTxsCalls gets all the calls that were made to AddLocalTxs.
+// Check the length with:
+//     len(mockedPool.AddLocalTxsCalls())
+func (mock *PoolMock) AddLocalTxsCalls() []struct {
+	Ctx    context.Context
+	NewTxs TxSlots
+} {
+	var calls []struct {
+		Ctx    context.Context
+		NewTxs TxSlots
+	}
+	mock.lockAddLocalTxs.RLock()
+	calls = mock.calls.AddLocalTxs
+	mock.lockAddLocalTxs.RUnlock()
+	return calls
 }
 
 // AddNewGoodPeer calls AddNewGoodPeerFunc.
