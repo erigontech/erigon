@@ -11,10 +11,10 @@ import (
 
 var DefaultMode = Mode{
 	Initialised: true,
-	History:     Distance(math.MaxUint64), // all off
-	Receipts:    Distance(math.MaxUint64),
-	TxIndex:     Distance(math.MaxUint64),
-	CallTraces:  Distance(math.MaxUint64),
+	History:     math.MaxUint64, // all off
+	Receipts:    math.MaxUint64,
+	TxIndex:     math.MaxUint64,
+	CallTraces:  math.MaxUint64,
 	Experiments: Experiments{}, // all off
 }
 
@@ -22,8 +22,7 @@ type Experiments struct {
 	TEVM bool
 }
 
-func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
-	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
+func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
 	if flags == "default" || flags == "disabled" {
 		return DefaultMode, nil
@@ -32,13 +31,13 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 	for _, flag := range flags {
 		switch flag {
 		case 'h':
-			mode.History = Distance(params.FullImmutabilityThreshold)
+			mode.History = params.FullImmutabilityThreshold
 		case 'r':
-			mode.Receipts = Distance(params.FullImmutabilityThreshold)
+			mode.Receipts = params.FullImmutabilityThreshold
 		case 't':
-			mode.TxIndex = Distance(params.FullImmutabilityThreshold)
+			mode.TxIndex = params.FullImmutabilityThreshold
 		case 'c':
-			mode.CallTraces = Distance(params.FullImmutabilityThreshold)
+			mode.CallTraces = params.FullImmutabilityThreshold
 		default:
 			return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
@@ -55,19 +54,6 @@ func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallT
 	}
 	if exactCallTraces > 0 {
 		mode.CallTraces = Distance(exactCallTraces)
-	}
-
-	if beforeH > 0 {
-		mode.History = Before(beforeH)
-	}
-	if beforeR > 0 {
-		mode.Receipts = Before(beforeR)
-	}
-	if beforeT > 0 {
-		mode.TxIndex = Before(beforeT)
-	}
-	if beforeC > 0 {
-		mode.CallTraces = Before(beforeC)
 	}
 
 	for _, ex := range experiments {
@@ -88,62 +74,59 @@ func Get(db kv.Getter) (Mode, error) {
 	prune := DefaultMode
 	prune.Initialised = true
 
-	blockAmount, err := get(db, kv.PruneHistory)
+	v, err := db.GetOne(kv.DatabaseInfo, kv.PruneDistanceHistory)
 	if err != nil {
 		return prune, err
 	}
-	if blockAmount != nil {
-		prune.History = blockAmount
+	if v != nil {
+		prune.History = Distance(binary.BigEndian.Uint64(v))
+	} else {
+		prune.History = math.MaxUint64
 	}
-
-	blockAmount, err = get(db, kv.PruneReceipts)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceReceipts)
 	if err != nil {
 		return prune, err
 	}
-	if blockAmount != nil {
-		prune.Receipts = blockAmount
+	if v != nil {
+		prune.Receipts = Distance(binary.BigEndian.Uint64(v))
+	} else {
+		prune.Receipts = math.MaxUint64
 	}
-
-	blockAmount, err = get(db, kv.PruneTxIndex)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceTxIndex)
 	if err != nil {
 		return prune, err
 	}
-	if blockAmount != nil {
-		prune.TxIndex = blockAmount
+	if v != nil {
+		prune.TxIndex = Distance(binary.BigEndian.Uint64(v))
+	} else {
+		prune.TxIndex = math.MaxUint64
 	}
 
-	blockAmount, err = get(db, kv.PruneCallTraces)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.PruneDistanceCallTraces)
 	if err != nil {
 		return prune, err
 	}
-	if blockAmount != nil {
-		prune.CallTraces = blockAmount
+	if v != nil {
+		prune.CallTraces = Distance(binary.BigEndian.Uint64(v))
+	} else {
+		prune.CallTraces = math.MaxUint64
 	}
 
-	v, err := db.GetOne(kv.DatabaseInfo, kv.StorageModeTEVM)
+	v, err = db.GetOne(kv.DatabaseInfo, kv.StorageModeTEVM)
 	if err != nil {
 		return prune, err
 	}
 	prune.Experiments.TEVM = len(v) == 1 && v[0] == 1
-
 	return prune, nil
 }
 
 type Mode struct {
 	Initialised bool // Set when the values are initialised (not default)
-	History     BlockAmount
-	Receipts    BlockAmount
-	TxIndex     BlockAmount
-	CallTraces  BlockAmount
+	History     Distance
+	Receipts    Distance
+	TxIndex     Distance
+	CallTraces  Distance
 	Experiments Experiments
-}
-
-type BlockAmount interface {
-	PruneTo(stageHead uint64) uint64
-	Enabled() bool
-	toValue() uint64
-	dbType() []byte
-	useDefaultValue() bool
 }
 
 // Distance amount of blocks to keep in DB
@@ -153,10 +136,7 @@ type BlockAmount interface {
 // may delete whole db - because of uint64 underflow when pruningDistance > currentStageProgress
 type Distance uint64
 
-func (p Distance) Enabled() bool         { return p != math.MaxUint64 }
-func (p Distance) toValue() uint64       { return uint64(p) }
-func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmutabilityThreshold }
-func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
+func (p Distance) Enabled() bool { return p != math.MaxUint64 }
 
 func (p Distance) PruneTo(stageHead uint64) uint64 {
 	if p == 0 {
@@ -168,22 +148,6 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 	return stageHead - uint64(p)
 }
 
-// Before number after which keep in DB
-type Before uint64
-
-func (b Before) Enabled() bool         { return b > 0 }
-func (b Before) toValue() uint64       { return uint64(b) }
-func (b Before) useDefaultValue() bool { return uint64(b) == 0 }
-func (b Before) dbType() []byte        { return kv.PruneTypeBefore }
-
-func (b Before) PruneTo(uint64) uint64 {
-	if b == 0 {
-		return uint64(b)
-	}
-
-	return uint64(b) - 1
-}
-
 func (m Mode) String() string {
 	if !m.Initialised {
 		return "default"
@@ -191,31 +155,31 @@ func (m Mode) String() string {
 	long := ""
 	short := "--prune="
 	if m.History.Enabled() {
-		if m.History.useDefaultValue() {
+		if m.History == params.FullImmutabilityThreshold {
 			short += "h"
 		} else {
-			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
+			long += fmt.Sprintf(" --prune.h.older=%d", m.History)
 		}
 	}
 	if m.Receipts.Enabled() {
-		if m.Receipts.useDefaultValue() {
+		if m.Receipts == params.FullImmutabilityThreshold {
 			short += "r"
 		} else {
-			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.toValue())
+			long += fmt.Sprintf(" --prune.r.older=%d", m.Receipts)
 		}
 	}
 	if m.TxIndex.Enabled() {
-		if m.TxIndex.useDefaultValue() {
+		if m.TxIndex == params.FullImmutabilityThreshold {
 			short += "t"
 		} else {
-			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.toValue())
+			long += fmt.Sprintf(" --prune.t.older=%d", m.TxIndex)
 		}
 	}
 	if m.CallTraces.Enabled() {
-		if m.CallTraces.useDefaultValue() {
+		if m.CallTraces == params.FullImmutabilityThreshold {
 			short += "c"
 		} else {
-			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.toValue())
+			long += fmt.Sprintf(" --prune.c.older=%d", m.CallTraces)
 		}
 	}
 	if m.Experiments.TEVM {
@@ -229,22 +193,22 @@ func Override(db kv.RwTx, sm Mode) error {
 		err error
 	)
 
-	err = set(db, kv.PruneHistory, sm.History)
+	err = setDistance(db, kv.PruneDistanceHistory, sm.History)
 	if err != nil {
 		return err
 	}
 
-	err = set(db, kv.PruneReceipts, sm.Receipts)
+	err = setDistance(db, kv.PruneDistanceReceipts, sm.Receipts)
 	if err != nil {
 		return err
 	}
 
-	err = set(db, kv.PruneTxIndex, sm.TxIndex)
+	err = setDistance(db, kv.PruneDistanceTxIndex, sm.TxIndex)
 	if err != nil {
 		return err
 	}
 
-	err = set(db, kv.PruneCallTraces, sm.CallTraces)
+	err = setDistance(db, kv.PruneDistanceCallTraces, sm.CallTraces)
 	if err != nil {
 		return err
 	}
@@ -265,18 +229,24 @@ func SetIfNotExist(db kv.GetPut, pm Mode) error {
 		pm = DefaultMode
 	}
 
-	pruneDBData := map[string]BlockAmount{
-		string(kv.PruneHistory):    pm.History,
-		string(kv.PruneReceipts):   pm.Receipts,
-		string(kv.PruneTxIndex):    pm.TxIndex,
-		string(kv.PruneCallTraces): pm.CallTraces,
+	err = setDistanceOnEmpty(db, kv.PruneDistanceHistory, pm.History)
+	if err != nil {
+		return err
 	}
 
-	for key, value := range pruneDBData {
-		err = setOnEmpty(db, []byte(key), value)
-		if err != nil {
-			return err
-		}
+	err = setDistanceOnEmpty(db, kv.PruneDistanceReceipts, pm.Receipts)
+	if err != nil {
+		return err
+	}
+
+	err = setDistanceOnEmpty(db, kv.PruneDistanceTxIndex, pm.TxIndex)
+	if err != nil {
+		return err
+	}
+
+	err = setDistanceOnEmpty(db, kv.PruneDistanceCallTraces, pm.CallTraces)
+	if err != nil {
+		return err
 	}
 
 	err = setModeOnEmpty(db, kv.StorageModeTEVM, pm.Experiments.TEVM)
@@ -287,75 +257,24 @@ func SetIfNotExist(db kv.GetPut, pm Mode) error {
 	return nil
 }
 
-func createBlockAmount(pruneType []byte, v []byte) (BlockAmount, error) {
-	var blockAmount BlockAmount
-
-	switch string(pruneType) {
-	case string(kv.PruneTypeOlder):
-		blockAmount = Distance(binary.BigEndian.Uint64(v))
-	case string(kv.PruneTypeBefore):
-		blockAmount = Before(binary.BigEndian.Uint64(v))
-	default:
-		return nil, fmt.Errorf("unexpected block amount type: %s", string(pruneType))
-	}
-
-	return blockAmount, nil
-}
-
-func get(db kv.Getter, key []byte) (BlockAmount, error) {
-	v, err := db.GetOne(kv.DatabaseInfo, key)
-	if err != nil {
-		return nil, err
-	}
-
-	vType, err := db.GetOne(kv.DatabaseInfo, keyType(key))
-	if err != nil {
-		return nil, err
-	}
-
-	if v != nil {
-		blockAmount, err := createBlockAmount(vType, v)
-		if err != nil {
-			return nil, err
-		}
-		return blockAmount, nil
-	}
-
-	return nil, nil
-}
-
-func set(db kv.Putter, key []byte, blockAmount BlockAmount) error {
+func setDistance(db kv.Putter, key []byte, distance Distance) error {
 	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, blockAmount.toValue())
+	binary.BigEndian.PutUint64(v, uint64(distance))
 	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
 		return err
 	}
-
-	keyType := keyType(key)
-
-	if err := db.Put(kv.DatabaseInfo, keyType, blockAmount.dbType()); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-func keyType(name []byte) []byte {
-	return append(name, []byte("Type")...)
-}
-
-func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
+func setDistanceOnEmpty(db kv.GetPut, key []byte, distance Distance) error {
 	mode, err := db.GetOne(kv.DatabaseInfo, key)
 	if err != nil {
 		return err
 	}
 	if len(mode) == 0 || binary.BigEndian.Uint64(mode) == math.MaxUint64 {
 		v := make([]byte, 8)
-		binary.BigEndian.PutUint64(v, blockAmount.toValue())
+		binary.BigEndian.PutUint64(v, uint64(distance))
 		if err = db.Put(kv.DatabaseInfo, key, v); err != nil {
-			return err
-		}
-		if err = db.Put(kv.DatabaseInfo, keyType(key), blockAmount.dbType()); err != nil {
 			return err
 		}
 	}
