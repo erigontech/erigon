@@ -643,8 +643,6 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 		if peerInfo == nil {
 			return true
 		}
-		peerInfo.lock.RLock()
-		defer peerInfo.lock.RUnlock()
 		if peerInfo.Height() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
