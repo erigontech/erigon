@@ -345,6 +345,8 @@ func (ethash *Ethash) CalcDifficulty(chain consensus.ChainHeaderReader, time, pa
 func CalcDifficulty(config *params.ChainConfig, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int {
 	next := parentNumber + 1
 	switch {
+	case config.IsCatalyst(next):
+		return big.NewInt(1)
 	case config.IsLondon(next):
 		return calcDifficultyEip3554(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsMuirGlacier(next):

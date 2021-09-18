@@ -2,6 +2,7 @@ package shards
 
 import (
 	"context"
+	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -33,6 +34,7 @@ func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
+	fmt.Printf("sent block: with txs %d\n", len(a.changes[0].Txs))
 	c.SendStateChanges(ctx, &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes})
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
 }
