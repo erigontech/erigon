@@ -40,7 +40,7 @@ Will add this part soon [tbd]
 [x] Remote-mode support - with coherent state cache
 [x] Persistence
 [x] Grafana board
-[] Non-mainnet support
+[x] Non-mainnet support
 [] Add cli options to manage pool limits
 [] Add way for simple introspection - where is tx and why
 [] DiscardReasons - user must understand clearly why tx were rejected
