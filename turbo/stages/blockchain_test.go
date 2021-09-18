@@ -837,7 +837,7 @@ func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, c
 	if err := runPermutation(t, testFunc, current+1, pm); err != nil {
 		return err
 	}
-	invert := func(a prune.BlockAmount) prune.Distance {
+	invert := func(a prune.Distance) prune.Distance {
 		if a.Enabled() {
 			return math.MaxUint64
 		}
