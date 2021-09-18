@@ -36,7 +36,7 @@ require (
 	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20210918111803-ff171457451f
+	github.com/ledgerwatch/erigon-lib v0.0.0-20210918124538-5a2d42a45254
 	github.com/ledgerwatch/log/v3 v3.3.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
