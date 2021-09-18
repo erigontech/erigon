@@ -20,7 +20,7 @@ import (
 	"testing"
 )
 
-func TestRecSplit(t *testing.T) {
+func TestRecSplit2(t *testing.T) {
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,

@@ -52,7 +52,7 @@ func FuzzRecSplit(f *testing.F) {
 			Salt:       0,
 			TmpDir:     t.TempDir(),
 			LeafSize:   8,
-			StartSeed:  []uint32{5, 100034, 405060, 60606},
+			StartSeed:  []uint32{5, 100034, 405060, 60606, 70000, 80000, 90000, 10000, 11000, 12000},
 		})
 		if err != nil {
 			t.Error(err)
@@ -63,6 +63,20 @@ func FuzzRecSplit(f *testing.F) {
 		rs.AddKey(in[i:])
 		if err = rs.Build(); err != nil {
 			t.Error(err)
+		}
+		// Check that there is a bijection
+		bitCount := (count + 63) / 64
+		bits := make([]uint64, bitCount)
+		for i = 0; i < len(in)-l; i += l {
+			idx := rs.Lookup(in[i : i+l])
+			if idx >= count {
+				t.Errorf("idx %d >= count %d", idx, count)
+			}
+			mask := uint64(1) << (idx & 63)
+			if bits[idx>>6]&mask != 0 {
+				t.Fatalf("no bijection count=%d", count)
+			}
+			bits[idx>>6] |= mask
 		}
 	})
 }
