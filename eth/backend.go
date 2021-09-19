@@ -476,6 +476,40 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				}
 			}()
 		}
+
+		// start pool on non-mainnet immediately
+		if backend.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !backend.config.TxPool.Disable {
+			if err := chainKv.View(ctx, func(tx kv.Tx) error {
+				execution, _ := stages.GetStageProgress(tx, stages.Execution)
+				hh := rawdb.ReadCurrentHeader(tx)
+				tx.Rollback()
+				if hh == nil {
+					return nil
+				}
+				if backend.config.TxPool.V2 {
+					if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+						var baseFee uint64
+						if hh.BaseFee != nil {
+							baseFee = hh.BaseFee.Uint64()
+						}
+						return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
+							DatabaseViewID: tx.ViewID(), ChangeBatch: []*remote.StateChange{
+								{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()), ProtocolBaseFee: baseFee},
+							},
+						}, txpool2.TxSlots{}, txpool2.TxSlots{})
+					}); err != nil {
+						return err
+					}
+				} else {
+					if err := backend.txPool.Start(hh.GasLimit, execution); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+		}
 	}
 	go func() {
 		defer debug.LogPanic()
@@ -633,38 +667,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
-	}
-
-	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !s.config.TxPool.Disable {
-		tx, err := db.BeginRo(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		execution, _ := stages.GetStageProgress(tx, stages.Execution)
-		hh := rawdb.ReadCurrentHeader(tx)
-		tx.Rollback()
-		if hh != nil {
-			if s.config.TxPool.V2 {
-				if err := s.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-					var baseFee uint64
-					if hh.BaseFee != nil {
-						baseFee = hh.BaseFee.Uint64()
-					}
-					return s.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-						DatabaseViewID: tx.ViewID(), ChangeBatch: []*remote.StateChange{
-							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()), ProtocolBaseFee: baseFee},
-						},
-					}, txpool2.TxSlots{}, txpool2.TxSlots{})
-				}); err != nil {
-					return err
-				}
-			} else {
-				if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-					return err
-				}
-			}
-		}
 	}
 
 	if s.chainConfig.ChainID.Uint64() > 10 {
