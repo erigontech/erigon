@@ -1238,7 +1238,7 @@ func dumpState(chaindata string, block uint64) error {
 			}
 			mask := uint64(1) << (idx & 63)
 			if bits[idx>>6]&mask != 0 {
-				return fmt.Errorf("no bijection count=%d", count)
+				return fmt.Errorf("no bijection count=%d", i)
 			}
 			bits[idx>>6] |= mask
 			i++
