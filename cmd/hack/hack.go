@@ -22,7 +22,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -1141,109 +1140,53 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 func dumpState(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("statedump.hex")
+	f, err := os.Create("statedump")
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	kf, err := os.Create("keys.dat")
-	if err != nil {
-		return err
-	}
-	defer kf.Close()
-	kw := bufio.NewWriter(kf)
-	defer kw.Flush()
 	stAccounts := 0
 	stStorage := 0
-	valueSize := 0
-	var rs *recsplit.RecSplit
+	var varintBuf [10]byte // Buffer for varint number
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
-		var count uint64
-		if count, err = c.Count(); err != nil {
-			return err
-		}
-		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:   int(count),
-			BucketSize: 2000,
-			Salt:       0,
-			LeafSize:   8,
-			TmpDir:     "",
-			StartSeed:  []uint32{1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000, 11000000, 12000000, 13000000, 14000000},
-		}); err != nil {
-			return err
-		}
-		var prevKey []byte
 		k, v, e := c.First()
 		for ; k != nil && e == nil; k, v, e = c.Next() {
-			fmt.Fprintf(w, "%x\n", k)
-			valueSize++
-			valueSize += len(v)
-
-			rs.AddKey(k)
-			prefixLen := 0
-			for ; prefixLen < len(prevKey) && prefixLen < len(k) && prevKey[prefixLen] == k[prefixLen]; prefixLen++ {
+			keyLen := binary.PutUvarint(varintBuf[:], uint64(len(k)))
+			if _, err = w.Write(varintBuf[:keyLen]); err != nil {
+				return err
 			}
-
+			if _, err = w.Write([]byte(k)); err != nil {
+				return err
+			}
+			valLen := binary.PutUvarint(varintBuf[:], uint64(len(v)))
+			if _, err = w.Write(varintBuf[:valLen]); err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				if _, err = w.Write(v); err != nil {
+					return err
+				}
+			}
 			if len(k) > 28 {
 				stStorage++
 			} else {
 				stAccounts++
 			}
-			if err = kw.WriteByte(byte(len(k))); err != nil {
-				return err
-			}
-			if err = kw.WriteByte(byte(prefixLen)); err != nil {
-				return err
-			}
-			if _, err = kw.Write(k[prefixLen:]); err != nil {
-				return err
-			}
-			prevKey = common.CopyBytes(k)
 			if (stStorage+stAccounts)%100000 == 0 {
-				log.Info("State", "record", stStorage+stAccounts)
+				fmt.Printf("State records: %d\n", stStorage+stAccounts)
 			}
 		}
-		if e != nil {
-			return e
-		}
-		start := time.Now()
-		log.Info("Building recsplit...")
-		if err = rs.Build(); err != nil {
-			return err
-		}
-		s1, s2 := rs.Stats()
-		log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
-		start = time.Now()
-		log.Info("Testing bijection")
-		bitCount := (count + 63) / 64
-		bits := make([]uint64, bitCount)
-		k, v, e = c.First()
-		for ; k != nil && e == nil; k, v, e = c.Next() {
-			idx := rs.Lookup(k)
-			if idx >= int(count) {
-				return fmt.Errorf("idx %d >= count %d", idx, count)
-			}
-			mask := uint64(1) << (idx & 63)
-			if bits[idx>>6]&mask != 0 {
-				return fmt.Errorf("no bijection count=%d", count)
-			}
-			bits[idx>>6] |= mask
-		}
-		if e != nil {
-			return e
-		}
-		log.Info("Done", "time", time.Since(start))
 		return e
 	}); err != nil {
 		return err
 	}
-	fmt.Printf("stAccounts = %d, stStorage = %d, valueSize = %d\n", stAccounts, stStorage, valueSize)
+	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
 	return nil
 }
 
