@@ -1183,6 +1183,9 @@ func dumpState(chaindata string, block uint64) error {
 		k, v, e := c.First()
 		i := 0
 		for ; k != nil && e == nil; k, v, e = c.Next() {
+			if i == int(count) {
+				break
+			}
 			fmt.Fprintf(w, "%x\n", k)
 			valueSize++
 			valueSize += len(v)
@@ -1211,9 +1214,6 @@ func dumpState(chaindata string, block uint64) error {
 				log.Info("State", "record", stStorage+stAccounts)
 			}
 			i++
-			if i == int(count) {
-				break
-			}
 		}
 		if e != nil {
 			return e
@@ -1232,6 +1232,9 @@ func dumpState(chaindata string, block uint64) error {
 		k, v, e = c.First()
 		i = 0
 		for ; k != nil && e == nil; k, v, e = c.Next() {
+			if i == int(count) {
+				break
+			}
 			idx := rs.Lookup(k)
 			if idx >= int(count) {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
@@ -1242,9 +1245,6 @@ func dumpState(chaindata string, block uint64) error {
 			}
 			bits[idx>>6] |= mask
 			i++
-			if i == int(count) {
-				break
-			}
 		}
 		if e != nil {
 			return e
