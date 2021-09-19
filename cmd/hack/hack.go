@@ -1168,6 +1168,7 @@ func dumpState(chaindata string) error {
 		if count, err = c.Count(); err != nil {
 			return err
 		}
+		count = 2_000_000
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   int(count),
 			BucketSize: 2000,
@@ -1180,6 +1181,7 @@ func dumpState(chaindata string) error {
 		}
 		var prevKey []byte
 		k, v, e := c.First()
+		i := 0
 		for ; k != nil && e == nil; k, v, e = c.Next() {
 			fmt.Fprintf(w, "%x\n", k)
 			valueSize++
@@ -1208,6 +1210,10 @@ func dumpState(chaindata string) error {
 			if (stStorage+stAccounts)%100000 == 0 {
 				log.Info("State", "record", stStorage+stAccounts)
 			}
+			i++
+			if i == int(count) {
+				break
+			}
 		}
 		if e != nil {
 			return e
@@ -1224,6 +1230,7 @@ func dumpState(chaindata string) error {
 		bitCount := (count + 63) / 64
 		bits := make([]uint64, bitCount)
 		k, v, e = c.First()
+		i = 0
 		for ; k != nil && e == nil; k, v, e = c.Next() {
 			idx := rs.Lookup(k)
 			if idx >= int(count) {
@@ -1234,6 +1241,10 @@ func dumpState(chaindata string) error {
 				return fmt.Errorf("no bijection count=%d", count)
 			}
 			bits[idx>>6] |= mask
+			i++
+			if i == int(count) {
+				break
+			}
 		}
 		if e != nil {
 			return e
