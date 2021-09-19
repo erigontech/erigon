@@ -1138,7 +1138,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func dumpState(chaindata string) error {
+func dumpState(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	f, err := os.Create("statedump.hex")
@@ -1168,7 +1168,7 @@ func dumpState(chaindata string) error {
 		if count, err = c.Count(); err != nil {
 			return err
 		}
-		count = 2_000_000
+		count = block
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   int(count),
 			BucketSize: 2000,
@@ -2472,7 +2472,7 @@ func main() {
 		err = snapSizes(*chaindata)
 
 	case "dumpState":
-		err = dumpState(*chaindata)
+		err = dumpState(*chaindata, uint64(*block))
 
 	case "readCallTraces":
 		err = readCallTraces(*chaindata, uint64(*block))
