@@ -41,12 +41,11 @@ Will add this part soon [tbd]
 [x] Persistence
 [x] Grafana board
 [x] Non-mainnet support
-[] DevNet - doesn't send mined block notification on first mined block (because initialCycle = true)
+[x] DevNet - doesn't send mined block notification on first mined block (because initialCycle = true)
 [] Add cli options to manage pool limits
 [] Add way for simple introspection - where is tx and why
-[] DiscardReasons - user must understand clearly why tx were rejected
+[x] DiscardReasons - user must understand clearly why tx were rejected
 [] Hard-forks support (now rules are parsed ones on txPool start)
-[] Cache advanced eviction
 [] Add pool to docker-compose
 [] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
 [] Save history of local transactions - with 1 day expiration
