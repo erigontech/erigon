@@ -1150,7 +1150,6 @@ func dumpState(chaindata string, block uint64) error {
 	defer w.Flush()
 	stAccounts := 0
 	stStorage := 0
-	var varintBuf [10]byte // Buffer for varint number
 	var rs *recsplit.RecSplit
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.PlainState)
@@ -1174,28 +1173,18 @@ func dumpState(chaindata string, block uint64) error {
 		}); err != nil {
 			return err
 		}
-		k, v, e := c.First()
+		k, _, e := c.First()
 		i := 0
-		for ; k != nil && e == nil; k, v, e = c.Next() {
-			keyLen := binary.PutUvarint(varintBuf[:], uint64(len(k)))
-			if _, err = w.Write(varintBuf[:keyLen]); err != nil {
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			if err := rs.AddKey(k); err != nil {
 				return err
-			}
-			if _, err = w.Write([]byte(k)); err != nil {
-				return err
-			}
-			valLen := binary.PutUvarint(varintBuf[:], uint64(len(v)))
-			if _, err = w.Write(varintBuf[:valLen]); err != nil {
-				return err
-			}
-			if len(v) > 0 {
-				if _, err = w.Write(v); err != nil {
-					return err
-				}
 			}
 			i++
 			if i == int(count) {
 				break
+			}
+			if i%1_000_000 == 0 {
+				log.Info("Added", "keys", i)
 			}
 		}
 		if e != nil {
@@ -1212,9 +1201,9 @@ func dumpState(chaindata string, block uint64) error {
 		log.Info("Testing bijection")
 		bitCount := (count + 63) / 64
 		bits := make([]uint64, bitCount)
-		k, v, e = c.First()
+		k, _, e = c.First()
 		i = 0
-		for ; k != nil && e == nil; k, v, e = c.Next() {
+		for ; k != nil && e == nil; k, _, e = c.Next() {
 			idx := rs.Lookup(k)
 			if idx >= int(count) {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
