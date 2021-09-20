@@ -1192,7 +1192,6 @@ func dumpState(chaindata string, block uint64) error {
 		}
 		start := time.Now()
 		log.Info("Building recsplit...")
-		rs.SetTrace(true)
 		if err = rs.Build(); err != nil {
 			return err
 		}
@@ -1208,8 +1207,11 @@ func dumpState(chaindata string, block uint64) error {
 		if count < 1000000 {
 			collisionMap = make(map[int]string)
 		}
+		var lookupTime time.Duration
 		for ; k != nil && e == nil; k, _, e = c.Next() {
+			start := time.Now()
 			idx := rs.Lookup(k, false /* trace */)
+			lookupTime += time.Since(start)
 			if idx >= int(count) {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
 			}
@@ -1231,6 +1233,7 @@ func dumpState(chaindata string, block uint64) error {
 				break
 			}
 		}
+		log.Info("Average lookup time", "per key", time.Duration(uint64(lookupTime)/count))
 		return e
 	}); err != nil {
 		return err
