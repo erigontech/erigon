@@ -496,7 +496,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 							DatabaseViewID: tx.ViewID(), ChangeBatch: []*remote.StateChange{
 								{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()), ProtocolBaseFee: baseFee},
 							},
-						}, txpool2.TxSlots{}, txpool2.TxSlots{})
+						}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
 					}); err != nil {
 						return err
 					}
