@@ -1199,6 +1199,7 @@ func dumpState(chaindata string, block uint64) error {
 		}
 		s1, s2 := rs.Stats()
 		log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
+		rs.PrintTimings()
 		log.Info("Testing bijection")
 		bitCount := (count + 63) / 64
 		bits := make([]uint64, bitCount)
