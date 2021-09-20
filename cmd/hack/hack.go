@@ -1160,7 +1160,7 @@ func dumpState(chaindata string, block uint64) error {
 		if count, err = c.Count(); err != nil {
 			return err
 		}
-		if block > 0 {
+		if block > 1 {
 			count = block
 		}
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
