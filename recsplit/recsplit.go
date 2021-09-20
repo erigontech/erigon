@@ -19,7 +19,6 @@ package recsplit
 import (
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"math"
 	"math/bits"
 
@@ -51,10 +50,10 @@ func remix(z uint64) uint64 {
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
 	bucketSize       int
-	keyExpectedCount uint64      // Number of keys in the hash table
-	keysAdded        uint64      // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
-	bucketCount      uint64      // Number of buckets
-	hasher           hash.Hash64 // Salted hash function to use for splitting into initial buckets
+	keyExpectedCount uint64          // Number of keys in the hash table
+	keysAdded        uint64          // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
+	bucketCount      uint64          // Number of buckets
+	hasher           murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
 	collector        *etl.Collector
 	built            bool       // Flag indicating that the hash function has been built and no more keys can be added
 	currentBucketIdx uint64     // Current bucket being accumulated
@@ -65,12 +64,13 @@ type RecSplit struct {
 	ef                 DoubleEliasFano
 	bucketSizeAcc      []uint64 // Bucket size accumulator
 	bucketPosAcc       []uint64 // Accumulator for position of every bucket in the encoding of the hash function
-	leafSize           int      // Leaf size for recursive split algorithm
-	primaryAggrBound   int      // The lower bound for primary key aggregation (computed from leafSize)
-	secondaryAggrBound int      // The lower bound for secondary key aggregation (computed from leadSize)
+	leafSize           uint16   // Leaf size for recursive split algorithm
+	primaryAggrBound   uint16   // The lower bound for primary key aggregation (computed from leafSize)
+	secondaryAggrBound uint16   // The lower bound for secondary key aggregation (computed from leadSize)
 	startSeed          []uint64
 	golombRice         []uint32
 	buffer             []uint64
+	count              []uint16
 	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
 	collision          bool
 	tmpDir             string
@@ -81,7 +81,7 @@ type RecSplitArgs struct {
 	KeyCount   int
 	BucketSize int
 	Salt       uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
-	LeafSize   int
+	LeafSize   uint16
 	TmpDir     string
 	StartSeed  []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
 }
@@ -94,7 +94,7 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	rs := &RecSplit{bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount)}
 	rs.salt = args.Salt
-	rs.hasher = murmur3.New64WithSeed(rs.salt)
+	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.collector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
@@ -104,13 +104,14 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 		return nil, fmt.Errorf("exceeded max leaf size %d: %d", MaxLeafSize, args.LeafSize)
 	}
 	rs.leafSize = args.LeafSize
-	rs.primaryAggrBound = rs.leafSize * int(math.Max(2, math.Ceil(0.35*float64(rs.leafSize)+1./2.)))
+	rs.primaryAggrBound = rs.leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(rs.leafSize)+1./2.)))
 	if rs.leafSize < 7 {
 		rs.secondaryAggrBound = rs.primaryAggrBound * 2
 	} else {
-		rs.secondaryAggrBound = rs.primaryAggrBound * int(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
+		rs.secondaryAggrBound = rs.primaryAggrBound * uint16(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
 	}
 	rs.startSeed = args.StartSeed
+	rs.count = make([]uint16, rs.secondaryAggrBound)
 	return rs, nil
 }
 
@@ -129,8 +130,8 @@ const mask48 uint64 = (1 << 48) - 1
 
 // remap converts the number x which is assumed to be uniformly distributed over the range [0..2^64) to the number that is uniformly
 // distributed over the range [0..n), under assumption that n is less than 2^16
-func remap16(x uint64, n int) int {
-	return int(((x & mask48) * uint64(n)) >> 48)
+func remap16(x uint64, n uint16) uint16 {
+	return uint16(((x & mask48) * uint64(n)) >> 48)
 }
 
 // ResetNextSalt resets the RecSplit and uses the next salt value to try to avoid collisions
@@ -139,14 +140,14 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
-	rs.hasher = murmur3.New64WithSeed(rs.salt)
+	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.collector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.bucketSizeAcc = rs.bucketSizeAcc[:1] // First entry is always zero
 	rs.bucketPosAcc = rs.bucketPosAcc[:0]   // First entry is always zero
 }
 
-func (rs *RecSplit) splitParams(m int) (fanout, unit int) {
+func (rs *RecSplit) splitParams(m uint16) (fanout, unit uint16) {
 	if m > rs.secondaryAggrBound { // High-level aggregation (fanout 2)
 		unit = rs.secondaryAggrBound * (((m+1)/2 + rs.secondaryAggrBound - 1) / rs.secondaryAggrBound)
 		fanout = 2
@@ -160,16 +161,16 @@ func (rs *RecSplit) splitParams(m int) (fanout, unit int) {
 	return
 }
 
-func (rs *RecSplit) computeGolombRice(m int, table []uint32) {
+func (rs *RecSplit) computeGolombRice(m uint16, table []uint32) {
 	fanout, unit := rs.splitParams(m)
-	k := make([]int, fanout)
+	k := make([]uint16, fanout)
 	k[fanout-1] = m
-	for i := 0; i < fanout-1; i++ {
+	for i := uint16(0); i < fanout-1; i++ {
 		k[i] = unit
 		k[fanout-1] -= k[i]
 	}
 	sqrt_prod := float64(1)
-	for i := 0; i < fanout; i++ {
+	for i := uint16(0); i < fanout; i++ {
 		sqrt_prod *= math.Sqrt(float64(k[i]))
 	}
 	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrt_prod)
@@ -178,7 +179,7 @@ func (rs *RecSplit) computeGolombRice(m int, table []uint32) {
 		panic("golombRiceLength > 0x1F")
 	}
 	table[m] = golombRiceLength << 27
-	for i := 0; i < fanout; i++ {
+	for i := uint16(0); i < fanout; i++ {
 		golombRiceLength += table[k[i]] & 0xFFFF
 	}
 	if golombRiceLength > 0xFFFF {
@@ -186,7 +187,7 @@ func (rs *RecSplit) computeGolombRice(m int, table []uint32) {
 	}
 	table[m] |= golombRiceLength // Sum of Golomb-Rice codeslengths in the subtree, stored in the lower 16 bits
 	nodes := uint32(1)
-	for i := 0; i < fanout; i++ {
+	for i := uint16(0); i < fanout; i++ {
 		nodes += (table[k[i]] >> 16) & 0x7FF
 	}
 	if rs.leafSize >= 3 && nodes > 0x7FF {
@@ -198,8 +199,8 @@ func (rs *RecSplit) computeGolombRice(m int, table []uint32) {
 // golombParam returns the optimal Golomb parameter to use for encoding
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
-func (rs *RecSplit) golombParam(m int) int {
-	s := len(rs.golombRice)
+func (rs *RecSplit) golombParam(m uint16) int {
+	s := uint16(len(rs.golombRice))
 	for m >= s {
 		rs.golombRice = append(rs.golombRice, 0)
 		// For the case where bucket is larger than planned
@@ -224,10 +225,10 @@ func (rs *RecSplit) AddKey(key []byte) error {
 	}
 	rs.hasher.Reset()
 	rs.hasher.Write(key) //nolint:errcheck
-	hash := rs.hasher.Sum64()
+	hi, lo := rs.hasher.Sum128()
 	var bucketKey [16]byte
-	binary.BigEndian.PutUint64(bucketKey[:], remap(hash, rs.bucketCount))
-	binary.BigEndian.PutUint64(bucketKey[8:], hash)
+	binary.BigEndian.PutUint64(bucketKey[:], remap(hi, rs.bucketCount))
+	binary.BigEndian.PutUint64(bucketKey[8:], lo)
 	rs.keysAdded++
 	return rs.collector.Collect(bucketKey[:], []byte{})
 }
@@ -276,14 +277,14 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint6
 	}
 	// Pick initial salt for this level of recursive split
 	salt := rs.startSeed[level]
-	m := len(bucket)
+	m := uint16(len(bucket))
 	if m <= rs.leafSize {
 		// No need to build aggregation levels - just find find bijection
 		var mask uint32
 		for {
 			mask = 0
 			var fail bool
-			for i := 0; !fail && i < m; i++ {
+			for i := uint16(0); !fail && i < m; i++ {
 				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
 				if mask&bit != 0 {
 					fail = true
@@ -305,36 +306,30 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint6
 		unary = append(unary, salt>>log2golomb)
 	} else {
 		fanout, unit := rs.splitParams(m)
-		count := make([]int, fanout)
+		count := rs.count
 		for {
-			var fail bool
-			for i := 0; !fail && i < m; i++ {
-				j := remap16(remix(bucket[i]+salt), m) / unit
-				if j >= len(count) {
-					fmt.Printf("rs.primaryAggrBound = %d, s.secondaryAggrBound = %d\n", rs.primaryAggrBound, rs.secondaryAggrBound)
-					fmt.Printf("m = %d, len(count) = %d, unit = %d, remap16(remix(bucket[i]+salt), m) = %d\n", m, len(count), unit, remap16(remix(bucket[i]+salt), m))
-				}
-				if count[j] == unit {
-					fail = true
-				} else {
-					count[j]++
-				}
+			for i := uint16(0); i < fanout-1; i++ {
+				count[i] = 0
 			}
-			if !fail && count[fanout-1] == m-(fanout-1)*unit {
+			var fail bool
+			for i := uint16(0); i < m; i++ {
+				count[remap16(remix(bucket[i]+salt), m)/unit]++
+			}
+			for i := uint16(0); i < fanout-1; i++ {
+				fail = fail || (count[i] != unit)
+			}
+			if !fail {
 				break
 			}
 			salt++
-			for i := 0; i < fanout; i++ {
-				count[i] = 0
-			}
 		}
-		for i, c := 0, 0; i < fanout; i++ {
+		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
 			c += unit
 		}
-		for _, fingerprint := range bucket {
-			j := remap16(remix(fingerprint+salt), m) / unit
-			rs.buffer[count[j]] = fingerprint
+		for i := uint16(0); i < m; i++ {
+			j := remap16(remix(bucket[i]+salt), m) / unit
+			rs.buffer[count[j]] = bucket[i]
 			count[j]++
 		}
 		copy(bucket, rs.buffer)
@@ -345,7 +340,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint6
 		}
 		rs.gr.appendFixed(salt, log2golomb)
 		unary = append(unary, salt>>log2golomb)
-		var i int
+		var i uint16
 		for i = 0; i < m-unit; i += unit {
 			unary = rs.recsplit(level+1, bucket[i:i+unit], unary)
 		}
@@ -398,24 +393,24 @@ func (rs *RecSplit) Build() error {
 	return nil
 }
 
-func (rs *RecSplit) skipBits(m int) int {
+func (rs *RecSplit) skipBits(m uint16) int {
 	return int(rs.golombRice[m] & 0xffff)
 }
 
-func (rs *RecSplit) skipNodes(m int) int {
+func (rs *RecSplit) skipNodes(m uint16) int {
 	return int(rs.golombRice[m]>>16) & 0x7FF
 }
 
 func (rs *RecSplit) Lookup(key []byte, trace bool) int {
 	rs.hasher.Reset()
 	rs.hasher.Write(key) //nolint:errcheck
-	fingerprint := rs.hasher.Sum64()
+	bucketHash, fingerprint := rs.hasher.Sum128()
 	if trace {
 		fmt.Printf("lookup key %x, fingerprint %x\n", key, fingerprint)
 	}
-	bucket := remap(fingerprint, rs.bucketCount)
+	bucket := remap(bucketHash, rs.bucketCount)
 	cumKeys, cumKeysNext, bitPos := rs.ef.Get3(bucket)
-	m := int(cumKeysNext - cumKeys) // Number of keys in this bucket
+	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
 	if trace {
 		fmt.Printf("bucket: %d, m = %d, bitPos = %d, unaryOffset = %d\n", bucket, m, bitPos, rs.skipBits(m))
 	}
@@ -458,7 +453,7 @@ func (rs *RecSplit) Lookup(key []byte, trace bool) int {
 		}
 		cumKeys += uint64(rs.primaryAggrBound * part)
 		if part != 0 {
-			rs.gr.SkipSubtree(rs.skipNodes(rs.primaryAggrBound)*part, rs.skipBits(rs.primaryAggrBound)*part)
+			rs.gr.SkipSubtree(rs.skipNodes(rs.primaryAggrBound)*int(part), rs.skipBits(rs.primaryAggrBound)*int(part))
 		}
 		level++
 	}
@@ -479,7 +474,7 @@ func (rs *RecSplit) Lookup(key []byte, trace bool) int {
 		}
 		cumKeys += uint64(rs.leafSize * part)
 		if part != 0 {
-			rs.gr.SkipSubtree(part, rs.skipBits(rs.leafSize)*part)
+			rs.gr.SkipSubtree(int(part), rs.skipBits(rs.leafSize)*int(part))
 		}
 		level++
 	}
@@ -490,7 +485,7 @@ func (rs *RecSplit) Lookup(key []byte, trace bool) int {
 	if trace {
 		fmt.Printf("level %d, p = %d, b = %d, golomn = %d\n", level, p, b, rs.golombParam(m))
 	}
-	return int(cumKeys) + remap16(remix(fingerprint+rs.startSeed[level]+b), m)
+	return int(cumKeys) + int(remap16(remix(fingerprint+rs.startSeed[level]+b), m))
 }
 
 // Stats returns the size of golomb rice encoding and ellias fano encoding
