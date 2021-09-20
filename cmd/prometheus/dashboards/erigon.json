@@ -22,7 +22,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1631842473201,
+  "iteration": 1632101487032,
   "links": [],
   "panels": [
     {
@@ -2388,7 +2388,32 @@
           },
           "unit": "s"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "pool_write_to_db: turbogeth16c.weblogix.it:6060"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -2415,7 +2440,7 @@
           "exemplar": true,
           "expr": "pool_process_remote_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "pool_process_remote_txs: {{ instance }}",
+          "legendFormat": "process_remote_txs: {{ instance }}",
           "refId": "A"
         },
         {
@@ -2423,7 +2448,7 @@
           "expr": "pool_add_remote_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "pool_add_remote_txs: {{ instance }}",
+          "legendFormat": "add_remote_txs: {{ instance }}",
           "refId": "B"
         },
         {
@@ -2431,7 +2456,7 @@
           "expr": "pool_new_block{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "pool_new_block: {{ instance }}",
+          "legendFormat": "new_block: {{ instance }}",
           "refId": "C"
         },
         {
@@ -2439,8 +2464,24 @@
           "expr": "pool_write_to_db{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "pool_write_to_db: {{ instance }}",
+          "legendFormat": "write_to_db: {{ instance }}",
           "refId": "D"
+        },
+        {
+          "exemplar": true,
+          "expr": "pool_propagate_to_new_peer{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "propagate_to_new_peer: {{ instance }}",
+          "refId": "E"
+        },
+        {
+          "exemplar": true,
+          "expr": "pool_propagate_new_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "propagate_new_txs: {{ instance }}",
+          "refId": "F"
         }
       ],
       "title": "Timings",
@@ -2498,7 +2539,32 @@
           },
           "unit": "reqps"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "pool_add_remote_txs_count: turbogeth16c.weblogix.it:6060"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -2693,7 +2759,32 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "hit: turbogeth16c.weblogix.it:6060 "
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 6,
@@ -2787,32 +2878,7 @@
           },
           "unit": "short"
         },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "keys: turbogeth16c.weblogix.it:6060 "
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 6,
@@ -2845,10 +2911,10 @@
         },
         {
           "exemplar": true,
-          "expr": "rate(cache_timeout_total{name=\"txpool\",instance=~\"$instance\"}[1m])",
+          "expr": "cache_list_total{name=\"txpool\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "timeout/sec: {{ instance }} ",
+          "legendFormat": "list: {{ instance }} ",
           "refId": "B"
         }
       ],
@@ -2904,14 +2970,14 @@
               }
             ]
           },
-          "unit": "decbytes"
+          "unit": "binBps"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 6,
         "w": 8,
-        "x": 8,
+        "x": 0,
         "y": 73
       },
       "id": 178,
@@ -4915,12 +4981,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": [
-            "turbogeth16c.weblogix.it:6060"
-          ],
-          "value": [
-            "turbogeth16c.weblogix.it:6060"
-          ]
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": "Prometheus",
         "definition": "go_goroutines",
@@ -5055,5 +5117,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 35
+  "version": 40
 }
