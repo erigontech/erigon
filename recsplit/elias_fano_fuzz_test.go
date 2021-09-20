@@ -23,7 +23,7 @@ import (
 	"testing"
 )
 
-// gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./recsplit
+// gotip test -trimpath -v -fuzz=FuzzEliasFano -fuzztime=10s ./recsplit
 
 func FuzzEliasFano(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
