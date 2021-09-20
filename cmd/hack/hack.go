@@ -1212,15 +1212,15 @@ func dumpState(chaindata string, block uint64) error {
 			if idx >= int(count) {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
 			}
-			if collisionMap != nil {
-				collisionMap[idx] = string(k)
-			}
 			mask := uint64(1) << (idx & 63)
 			if bits[idx>>6]&mask != 0 {
 				if collisionMap != nil {
 					fmt.Printf("Key %x collided with key %x\n", k, collisionMap[idx])
 				}
 				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, idx)
+			}
+			if collisionMap != nil {
+				collisionMap[idx] = string(k)
 			}
 			bits[idx>>6] |= mask
 			i++
