@@ -365,7 +365,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.TxPool.V2 {
 		cfg := txpool2.DefaultConfig
 		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.LogEvery = 2 * time.Minute    //5 * time.Minute
+		cfg.LogEvery = 1 * time.Minute    //5 * time.Minute
 		cfg.CommitEvery = 1 * time.Minute //5 * time.Minute
 
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
