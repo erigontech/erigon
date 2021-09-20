@@ -492,10 +492,10 @@ github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758 h1:0D5M2HQSGD3P
 github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210919153113-7ba3708326ee h1:fWlAxcRzbEh76HWlfDEngtK3SSrrJhRY7A3x4+I4mYI=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210919153113-7ba3708326ee/go.mod h1:darGhVf++67hq/fQQ92zT+1EjE+FDxHd/OU7OKK4uWI=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210919184530-e9bb35330995 h1:MoSFLfLgKV3ZdK8lINpaHbxVM4WCHyzQl8ZYobyw2mk=
-github.com/ledgerwatch/erigon-lib v0.0.0-20210919184530-e9bb35330995/go.mod h1:darGhVf++67hq/fQQ92zT+1EjE+FDxHd/OU7OKK4uWI=
+github.com/ledgerwatch/erigon-lib v0.0.0-20210920034821-ae9197c34bd1 h1:9fOCTX4CpzolyEGJZc3mobTYLL+XTXO2fuzyFW1QWTM=
+github.com/ledgerwatch/erigon-lib v0.0.0-20210920034821-ae9197c34bd1/go.mod h1:kZsi9wFAOYIkegoiSj10RXOVc0EmDtUxltnNP1f1ZE0=
+github.com/ledgerwatch/erigon-lib v0.0.0-20210920095746-e154b0add7d0 h1:MqLNtqTed4Snx2FFB5XhDUiGkE5CaTZJ2l3Cs30QDNc=
+github.com/ledgerwatch/erigon-lib v0.0.0-20210920095746-e154b0add7d0/go.mod h1:darGhVf++67hq/fQQ92zT+1EjE+FDxHd/OU7OKK4uWI=
 github.com/ledgerwatch/log/v3 v3.3.0 h1:k8N/3NQLILr8CKCMyza261vLFKU7VA+nMNNb0wVyQSc=
 github.com/ledgerwatch/log/v3 v3.3.0/go.mod h1:J58eOHHrIYHxl7LKkRsb/0YibKwtLfauUryl5SLRGm0=
 github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d h1:/IKMrJdfRsoYNc36PXqP4xMH3vhW/8IQyBKGQbKZUno=
@@ -1024,8 +1024,8 @@ golang.org/x/sys v0.0.0-20210403161142-5e06dd20ab57/go.mod h1:h1NjWce9XRLGQEsW7w
 golang.org/x/sys v0.0.0-20210510120138-977fb7262007/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
-golang.org/x/sys v0.0.0-20210917161153-d61c044b1678 h1:J27LZFQBFoihqXoegpscI10HpjZ7B5WQLLKL2FZXQKw=
-golang.org/x/sys v0.0.0-20210917161153-d61c044b1678/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.0.0-20210910150752-751e447fb3d0 h1:xrCZDmdtoloIiooiA9q0OQb9r8HejIHYoHGhGCe1pGg=
+golang.org/x/sys v0.0.0-20210910150752-751e447fb3d0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/term v0.0.0-20201117132131-f5c789dd3221/go.mod h1:Nr5EML6q2oocZ2LXRh80K7BxOlk5/8JxuGnuhpl+muw=
 golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1/go.mod h1:bj7SfCRtBDWHUb9snDiAeCFNEtKQo2Wmx5Cou7ajbmo=
 golang.org/x/text v0.0.0-20170915032832-14c0d48ead0c/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=

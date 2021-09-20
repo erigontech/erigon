@@ -1141,23 +1141,16 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 func dumpState(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("statedump.hex")
+	f, err := os.Create("statedump")
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	kf, err := os.Create("keys.dat")
-	if err != nil {
-		return err
-	}
-	defer kf.Close()
-	kw := bufio.NewWriter(kf)
-	defer kw.Flush()
 	stAccounts := 0
 	stStorage := 0
-	valueSize := 0
+	var varintBuf [10]byte // Buffer for varint number
 	var rs *recsplit.RecSplit
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.PlainState)
@@ -1175,40 +1168,30 @@ func dumpState(chaindata string, block uint64) error {
 			Salt:       0,
 			LeafSize:   8,
 			TmpDir:     "",
-			StartSeed:  []uint32{1000000, 2000000, 3000000, 4000000, 5000000, 6000000, 7000000, 8000000, 9000000, 10000000, 11000000, 12000000, 13000000, 14000000},
+			StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+				0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
+				0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
 		}); err != nil {
 			return err
 		}
-		var prevKey []byte
 		k, v, e := c.First()
 		i := 0
 		for ; k != nil && e == nil; k, v, e = c.Next() {
-			fmt.Fprintf(w, "%x\n", k)
-			valueSize++
-			valueSize += len(v)
-
-			rs.AddKey(k)
-			prefixLen := 0
-			for ; prefixLen < len(prevKey) && prefixLen < len(k) && prevKey[prefixLen] == k[prefixLen]; prefixLen++ {
-			}
-
-			if len(k) > 28 {
-				stStorage++
-			} else {
-				stAccounts++
-			}
-			if err = kw.WriteByte(byte(len(k))); err != nil {
+			keyLen := binary.PutUvarint(varintBuf[:], uint64(len(k)))
+			if _, err = w.Write(varintBuf[:keyLen]); err != nil {
 				return err
 			}
-			if err = kw.WriteByte(byte(prefixLen)); err != nil {
+			if _, err = w.Write([]byte(k)); err != nil {
 				return err
 			}
-			if _, err = kw.Write(k[prefixLen:]); err != nil {
+			valLen := binary.PutUvarint(varintBuf[:], uint64(len(v)))
+			if _, err = w.Write(varintBuf[:valLen]); err != nil {
 				return err
 			}
-			prevKey = common.CopyBytes(k)
-			if (stStorage+stAccounts)%100000 == 0 {
-				log.Info("State", "record", stStorage+stAccounts)
+			if len(v) > 0 {
+				if _, err = w.Write(v); err != nil {
+					return err
+				}
 			}
 			i++
 			if i == int(count) {
@@ -1246,15 +1229,11 @@ func dumpState(chaindata string, block uint64) error {
 				break
 			}
 		}
-		if e != nil {
-			return e
-		}
-		log.Info("Done", "time", time.Since(start))
 		return e
 	}); err != nil {
 		return err
 	}
-	fmt.Printf("stAccounts = %d, stStorage = %d, valueSize = %d\n", stAccounts, stStorage, valueSize)
+	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
 	return nil
 }
 
