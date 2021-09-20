@@ -1160,7 +1160,9 @@ func dumpState(chaindata string, block uint64) error {
 		if count, err = c.Count(); err != nil {
 			return err
 		}
-		count = block
+		if block > 0 {
+			count = block
+		}
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 			KeyCount:   int(count),
 			BucketSize: 2000,
