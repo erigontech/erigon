@@ -1203,14 +1203,24 @@ func dumpState(chaindata string, block uint64) error {
 		bits := make([]uint64, bitCount)
 		k, _, e = c.First()
 		i = 0
+		var collisionMap map[int]string
+		if count < 1000000 {
+			collisionMap = make(map[int]string)
+		}
 		for ; k != nil && e == nil; k, _, e = c.Next() {
 			idx := rs.Lookup(k)
 			if idx >= int(count) {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
 			}
+			if collisionMap != nil {
+				collisionMap[idx] = string(k)
+			}
 			mask := uint64(1) << (idx & 63)
 			if bits[idx>>6]&mask != 0 {
-				return fmt.Errorf("no bijection count=%d", i)
+				if collisionMap != nil {
+					fmt.Printf("Key %x collided with key %x\n", k, collisionMap[idx])
+				}
+				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, idx)
 			}
 			bits[idx>>6] |= mask
 			i++
