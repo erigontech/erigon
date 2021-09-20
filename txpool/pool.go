@@ -81,9 +81,9 @@ var DefaultConfig = Config{
 	LogEvery:              30 * time.Second,
 	CacheEvictEvery:       1 * time.Minute,
 
-	PendingSubPoolLimit: 50_000,
+	PendingSubPoolLimit: 200_000,
 	BaseFeeSubPoolLimit: 200_000,
-	QueuedSubPoolLimit:  90_000,
+	QueuedSubPoolLimit:  200_000,
 }
 
 // Pool is interface for the transaction pool
@@ -1077,12 +1077,14 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		}
 		copy(v[20:], metaTx.Tx.rlp)
 
-		has, _ := tx.Has(kv.PoolTransaction, []byte(txHash))
-		if has {
-			panic("must not happen")
-		}
-		if err := tx.Put(kv.PoolTransaction, []byte(txHash), v); err != nil {
+		has, err := tx.Has(kv.PoolTransaction, []byte(txHash))
+		if err != nil {
 			return err
+		}
+		if !has {
+			if err := tx.Put(kv.PoolTransaction, []byte(txHash), v); err != nil {
+				return err
+			}
 		}
 		metaTx.Tx.rlp = nil
 	}
@@ -1247,6 +1249,9 @@ func (p *TxPool) printDebug(prefix string) {
 	}
 }
 func (p *TxPool) logStats() {
+	if !p.started.Load() {
+		log.Info("[txpool] Not started yet, waiting for new blocks...")
+	}
 	//protocolBaseFee, currentBaseFee := p.protocolBaseFee.Load(), p.currentBaseFee.Load()
 
 	p.lock.RLock()

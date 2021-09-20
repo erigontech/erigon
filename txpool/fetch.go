@@ -79,14 +79,23 @@ func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
 
 // ConnectSentries initialises connection to the sentry
 func (f *Fetch) ConnectSentries() {
-	for i := range f.sentryClients {
-		go func(i int) {
-			f.receiveMessageLoop(f.sentryClients[i])
-		}(i)
-		go func(i int) {
-			f.receivePeerLoop(f.sentryClients[i])
-		}(i)
-	}
+	//TODO: fix race in parse ctx - 2 sentries causing it
+	go func(i int) {
+		f.receiveMessageLoop(f.sentryClients[i])
+	}(0)
+	go func(i int) {
+		f.receivePeerLoop(f.sentryClients[i])
+	}(0)
+	/*
+		for i := range f.sentryClients {
+			go func(i int) {
+				f.receiveMessageLoop(f.sentryClients[i])
+			}(i)
+			go func(i int) {
+				f.receivePeerLoop(f.sentryClients[i])
+			}(i)
+		}
+	*/
 }
 func (f *Fetch) ConnectCore() {
 	go func() {
@@ -303,7 +312,11 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66:
 		txs := TxSlots{}
 		f.pooledTxsParseCtx.Reject(func(hash []byte) error {
-			if known, _ := f.pool.IdHashKnown(tx, hash); known {
+			known, err := f.pool.IdHashKnown(tx, hash)
+			if err != nil {
+				return err
+			}
+			if known {
 				return ErrRejected
 			}
 			return nil
