@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -130,28 +131,35 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	var slots TxSlots
 	slots.Resize(uint(len(in.RlpTxs)))
 	parseCtx := NewTxParseContext(s.rules, s.chainID)
-	parseCtx.Reject(func(hash []byte) bool {
-		known, _ := s.txPool.IdHashKnown(tx, hash)
-		return known
+	parseCtx.Reject(func(hash []byte) error {
+		if known, _ := s.txPool.IdHashKnown(tx, hash); known {
+			return ErrAlreadyKnown
+		}
+		return nil
 	})
+	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
+
 	for i := range in.RlpTxs {
 		slots.txs[i] = &TxSlot{}
 		slots.isLocal[i] = true
 		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.txs[i], slots.senders.At(i)); err != nil {
-			log.Warn("pool add", "err", err)
+			if errors.Is(err, ErrAlreadyKnown) {
+
+			} else {
+				log.Warn("pool add", "err", err)
+			}
 			continue
 		}
 	}
 
-	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 	discardReasons, err := s.txPool.AddLocalTxs(ctx, slots)
 	if err != nil {
 		return nil, err
 	}
-	//TODO: concept of discardReasons not really implemented yet
+	//TODO: concept of discardReasonsLRU not really implemented yet
 	_ = discardReasons
 	/*
-		for i, err := range discardReasons {
+		for i, err := range discardReasonsLRU {
 			if err == nil {
 				continue
 			}

@@ -15,3 +15,42 @@
 */
 
 package txpool
+
+import (
+	"container/heap"
+	"testing"
+)
+
+func BenchmarkName(b *testing.B) {
+	txs := make([]*metaTx, 10_000)
+	p := NewSubPool(BaseFeeSubPool)
+	for i := 0; i < len(txs); i++ {
+		txs[i] = &metaTx{Tx: &TxSlot{}}
+	}
+	for i := 0; i < len(txs); i++ {
+		p.UnsafeAdd(txs[i])
+	}
+	p.EnforceInvariants()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		txs[0].timestamp = 1
+		heap.Fix(p.best, txs[0].bestIndex)
+		heap.Fix(p.worst, txs[0].worstIndex)
+	}
+}
+
+func BenchmarkName2(b *testing.B) {
+	txs := make([]*metaTx, 10_000)
+	p := NewSubPool(BaseFeeSubPool)
+	for i := 0; i < len(txs); i++ {
+		txs[i] = &metaTx{Tx: &TxSlot{}}
+	}
+	for i := 0; i < len(txs); i++ {
+		p.UnsafeAdd(txs[i])
+	}
+	p.EnforceInvariants()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+	}
+}

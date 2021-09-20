@@ -29,6 +29,126 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestEvictionInUnexpectedOrder(t *testing.T) {
+	// Order: View - 2, OnNewBlock - 2, View - 5, View - 6, OnNewBlock - 3, OnNewBlock - 4, View - 5, OnNewBlock - 5, OnNewBlock - 100
+	require := require.New(t)
+	cfg := DefaultCoherentCacheConfig
+	cfg.KeysLimit = 3
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	c.selectOrCreateRoot(2)
+	require.Equal(1, len(c.roots))
+	require.Equal(0, int(c.latestViewID))
+	require.False(c.roots[2].isCanonical)
+
+	c.add([]byte{1}, nil, c.roots[2], 2)
+	require.Equal(0, c.evictList.Len())
+
+	c.advanceRoot(2)
+	require.Equal(1, len(c.roots))
+	require.Equal(2, int(c.latestViewID))
+	require.True(c.roots[2].isCanonical)
+
+	c.add([]byte{1}, nil, c.roots[2], 2)
+	require.Equal(1, c.evictList.Len())
+
+	c.selectOrCreateRoot(5)
+	require.Equal(2, len(c.roots))
+	require.Equal(2, int(c.latestViewID))
+	require.False(c.roots[5].isCanonical)
+
+	c.add([]byte{2}, nil, c.roots[5], 5) // not added to evict list
+	require.Equal(1, c.evictList.Len())
+	c.add([]byte{2}, nil, c.roots[2], 2) // added to evict list, because it's latest view
+	require.Equal(2, c.evictList.Len())
+
+	c.selectOrCreateRoot(6)
+	require.Equal(3, len(c.roots))
+	require.Equal(2, int(c.latestViewID))
+	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
+
+	c.advanceRoot(3)
+	require.Equal(4, len(c.roots))
+	require.Equal(3, int(c.latestViewID))
+	require.True(c.roots[3].isCanonical)
+
+	c.advanceRoot(4)
+	require.Equal(5, len(c.roots))
+	require.Equal(4, int(c.latestViewID))
+	require.True(c.roots[4].isCanonical)
+
+	c.selectOrCreateRoot(5)
+	require.Equal(5, len(c.roots))
+	require.Equal(4, int(c.latestViewID))
+	require.False(c.roots[5].isCanonical)
+
+	c.advanceRoot(5)
+	require.Equal(5, len(c.roots))
+	require.Equal(5, int(c.latestViewID))
+	require.True(c.roots[5].isCanonical)
+
+	c.advanceRoot(100)
+	require.Equal(6, len(c.roots))
+	require.Equal(100, int(c.latestViewID))
+	require.True(c.roots[100].isCanonical)
+
+	//c.add([]byte{1}, nil, c.roots[2], 2)
+	require.Equal(0, c.latestView.cache.Len())
+	require.Equal(0, c.evictList.Len())
+}
+
+func TestEviction(t *testing.T) {
+	require, ctx := require.New(t), context.Background()
+	cfg := DefaultCoherentCacheConfig
+	cfg.KeysLimit = 3
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+	db := memdb.NewTestDB(t)
+	k1, k2 := [20]byte{1}, [20]byte{2}
+
+	var id uint64
+	_ = db.Update(ctx, func(tx kv.RwTx) error {
+		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
+		viewID, _ := c.View(ctx, tx)
+		id = tx.ViewID()
+		_, _ = c.Get(k1[:], tx, viewID)
+		_, _ = c.Get([]byte{1}, tx, viewID)
+		_, _ = c.Get([]byte{2}, tx, viewID)
+		_, _ = c.Get([]byte{3}, tx, viewID)
+		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
+		return nil
+	})
+	require.Equal(0, c.evictList.Len())
+	//require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
+	c.OnNewBlock(&remote.StateChangeBatch{
+		DatabaseViewID: id + 1,
+		ChangeBatch: []*remote.StateChange{
+			{
+				Direction: remote.Direction_FORWARD,
+				Changes: []*remote.AccountChange{{
+					Action:  remote.Action_UPSERT,
+					Address: gointerfaces.ConvertAddressToH160(k1),
+					Data:    []byte{2},
+				}},
+			},
+		},
+	})
+	require.Equal(1, c.evictList.Len())
+	require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
+	_ = db.Update(ctx, func(tx kv.RwTx) error {
+		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
+		viewID, _ := c.View(ctx, tx)
+		id = tx.ViewID()
+		_, _ = c.Get(k1[:], tx, viewID)
+		_, _ = c.Get(k2[:], tx, viewID)
+		_, _ = c.Get([]byte{5}, tx, viewID)
+		_, _ = c.Get([]byte{6}, tx, viewID)
+		return nil
+	})
+	require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
+	require.Equal(cfg.KeysLimit, c.evictList.Len())
+}
+
 func TestAPI(t *testing.T) {
 	require := require.New(t)
 	c := New(DefaultCoherentCacheConfig)
@@ -45,11 +165,11 @@ func TestAPI(t *testing.T) {
 						panic(fmt.Sprintf("epxected: %d, got: %d", expectTxnID, tx.ViewID()))
 					}
 					wg.Done()
-					cache, err := c.View(context.Background(), tx)
+					viewID, err := c.View(context.Background(), tx)
 					if err != nil {
 						panic(err)
 					}
-					v, err := cache.Get(key[:], tx)
+					v, err := c.Get(key[:], tx, viewID)
 					if err != nil {
 						panic(err)
 					}

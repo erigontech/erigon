@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-	goatomic "sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -31,19 +30,16 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 )
 
 type Cache interface {
 	// View - returns CacheView consistent with givent kv.Tx
-	View(ctx context.Context, tx kv.Tx) (CacheView, error)
+	View(ctx context.Context, tx kv.Tx) (ViewID, error)
 	OnNewBlock(sc *remote.StateChangeBatch)
-	Evict() int
+	//Evict() int
 	Len() int
-}
-type CacheView interface {
-	Get(k []byte, tx kv.Tx) ([]byte, error)
+	Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error)
 }
 
 // Coherent works on top of Database Transaction and pair Coherent+ReadTransaction must
@@ -68,36 +64,46 @@ type CacheView interface {
 // it until either cache with the given identifier appears, or timeout (indicating that the cache update
 // mechanism is broken and cache is likely invalidated).
 //
-// Tech details:
-// - If found in cache - return value without copy (reader can rely on fact that data are immutable until end of db transaction)
-// - Otherwise just read from db (no requests deduplication for now - preliminary optimization).
-//
+
 // Pair.Value == nil - is a marker of absense key in db
 
+// Coherent
+// High-level guaranties:
+// - Keys/Values returned by cache are valid/immutable until end of db transaction
+// - CacheView is always coherent with given db transaction -
+//
+// Rules of set view.isCanonical value:
+//  - method View can't parent.Clone() - because parent view is not coherent with current kv.Tx
+//  - only OnNewBlock method may do parent.Clone() and apply StateChanges to create coherent view of kv.Tx
+//  - parent.Clone() can't be caled if parent.isCanonical=false
+//  - only OnNewBlock method can set view.isCanonical=true
+// Rules of filling cache.evictList:
+//  - changes in Canonical View SHOULD reflect in evictList
+//  - changes in Non-Canonical View SHOULD NOT reflect in evictList
 type Coherent struct {
-	hits, miss, timeout, keys *metrics.Counter
-	evict                     *metrics.Summary
-	roots                     map[uint64]*CoherentView
-	rootsLock                 sync.RWMutex
-	cfg                       CoherentCacheConfig
+	hits, miss, timeout *metrics.Counter
+	keys, keys2         *metrics.Counter
+	latestViewID        ViewID
+	latestView          *CoherentView
+	evictList           *List
+	roots               map[ViewID]*CoherentView
+	lock                sync.RWMutex
+	cfg                 CoherentCacheConfig
 }
 type CoherentView struct {
-	hits, miss      *metrics.Counter
 	cache           *btree.BTree
-	lock            sync.RWMutex
-	id              atomic.Uint64
 	ready           chan struct{} // close when ready
 	readyChanClosed atomic.Bool   // protecting `ready` field from double-close (on unwind). Consumers don't need check this field.
+
+	// Views marked as `Canonical` if it received onNewBlock message
+	// we may drop `Non-Canonical` views even if they had fresh keys
+	// keys added to `Non-Canonical` views SHOULD NOT be added to evictList
+	// cache.latestView is always `Canonical`
+	isCanonical bool
 }
 
-var _ Cache = (*Coherent)(nil)         // compile-time interface check
-var _ CacheView = (*CoherentView)(nil) // compile-time interface check
-type Pair struct {
-	K, V []byte
-	t    uint64 //TODO: can be uint32 if remember first txID and use it as base zero. because it's monotonic.
-}
-
-func (p *Pair) Less(than btree.Item) bool { return bytes.Compare(p.K, than.(*Pair).K) < 0 }
+var _ Cache = (*Coherent)(nil) // compile-time interface check
+//var _ CacheView = (*CoherentView)(nil) // compile-time interface check
 
 type CoherentCacheConfig struct {
 	KeepViews    uint64        // keep in memory up to this amount of views, evict older
@@ -110,63 +116,83 @@ type CoherentCacheConfig struct {
 var DefaultCoherentCacheConfig = CoherentCacheConfig{
 	KeepViews:    50,
 	NewBlockWait: 50 * time.Millisecond,
-	KeysLimit:    1_000_000,
+	KeysLimit:    400_000,
 	MetricsLabel: "default",
-	WithStorage:  false,
+	WithStorage:  true,
 }
 
 func New(cfg CoherentCacheConfig) *Coherent {
-	return &Coherent{roots: map[uint64]*CoherentView{}, cfg: cfg,
-		miss:    metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		hits:    metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		timeout: metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:    metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:   metrics.GetOrCreateSummary(fmt.Sprintf(`cache_evict{name="%s"}`, cfg.MetricsLabel)),
+	return &Coherent{
+		roots:     map[ViewID]*CoherentView{},
+		evictList: NewList(),
+		cfg:       cfg,
+		miss:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
+		hits:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
+		timeout:   metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
+		keys:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		keys2:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
 	}
 }
 
 // selectOrCreateRoot - used for usual getting root
-func (c *Coherent) selectOrCreateRoot(txID uint64) *CoherentView {
-	c.rootsLock.Lock()
-	defer c.rootsLock.Unlock()
-	r, ok := c.roots[txID]
+func (c *Coherent) selectOrCreateRoot(viewID ViewID) *CoherentView {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	r, ok := c.roots[viewID]
 	if ok {
 		return r
 	}
-	r = &CoherentView{ready: make(chan struct{}), hits: c.hits, miss: c.miss}
-	r.id.Store(txID)
-	c.roots[txID] = r
+	r = &CoherentView{ready: make(chan struct{})}
+	if prevView, ok := c.roots[viewID-1]; ok {
+		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
+		r.cache = prevView.cache.Clone()
+		r.isCanonical = prevView.isCanonical
+	} else {
+		//log.Info("advance: new", "to", viewID)
+		r.cache = btree.New(32)
+	}
+	c.roots[viewID] = r
 	return r
 }
 
 // advanceRoot - used for advancing root onNewBlock
-func (c *Coherent) advanceRoot(viewID uint64) (r *CoherentView) {
-	c.rootsLock.Lock()
-	defer c.rootsLock.Unlock()
+func (c *Coherent) advanceRoot(viewID ViewID) (r *CoherentView) {
 	r, rootExists := c.roots[viewID]
 	if !rootExists {
-		r = &CoherentView{ready: make(chan struct{}), hits: c.hits, miss: c.miss}
-		r.id.Store(viewID)
+		r = &CoherentView{ready: make(chan struct{})}
 		c.roots[viewID] = r
 	}
-
-	//TODO: need check if c.latest hash is still canonical. If not - can't clone from it
-	if prevView, ok := c.roots[viewID-1]; ok {
+	if prevView, ok := c.roots[viewID-1]; ok && prevView.isCanonical {
 		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
-		r.cache = prevView.Clone()
+		r.cache = prevView.cache.Clone()
 	} else {
+		c.evictList.Init()
 		if r.cache == nil {
 			//log.Info("advance: new", "to", viewID)
 			r.cache = btree.New(32)
+		} else {
+			r.cache.Ascend(func(i btree.Item) bool {
+				c.evictList.PushFront(i.(*Element))
+				return true
+			})
 		}
 	}
+	r.isCanonical = true
+
+	c.evictRoots()
+	c.latestViewID = viewID
+	c.latestView = r
+
+	c.keys.Set(uint64(c.latestView.cache.Len()))
+	c.keys2.Set(uint64(c.evictList.Len()))
 	return r
 }
 
 func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
-	r := c.advanceRoot(stateChanges.DatabaseViewID)
-	r.lock.Lock()
-	defer r.lock.Unlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	id := ViewID(stateChanges.DatabaseViewID)
+	r := c.advanceRoot(id)
 	for _, sc := range stateChanges.ChangeBatch {
 		for i := range sc.Changes {
 			switch sc.Changes[i].Action {
@@ -174,10 +200,10 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
 				v := sc.Changes[i].Data
 				//fmt.Printf("set: %x,%x\n", addr, v)
-				r.cache.ReplaceOrInsert(&Pair{K: addr[:], V: v, t: sc.BlockHeight})
+				c.add(addr[:], v, r, id)
 			case remote.Action_DELETE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
-				r.cache.ReplaceOrInsert(&Pair{K: addr[:], V: nil, t: sc.BlockHeight})
+				c.add(addr[:], nil, r, id)
 			case remote.Action_CODE, remote.Action_STORAGE:
 				//skip
 			default:
@@ -191,11 +217,12 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 					copy(k, addr[:])
 					binary.BigEndian.PutUint64(k[20:], sc.Changes[i].Incarnation)
 					copy(k[20+8:], loc[:])
-					r.cache.ReplaceOrInsert(&Pair{K: k, V: change.Data, t: sc.BlockHeight})
+					c.add(k, change.Data, r, id)
 				}
 			}
 		}
 	}
+
 	switched := r.readyChanClosed.CAS(false, true)
 	if switched {
 		close(r.ready) //broadcast
@@ -203,48 +230,47 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 	//log.Info("on new block handled", "viewID", stateChanges.DatabaseViewID)
 }
 
-func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
-	r := c.selectOrCreateRoot(tx.ViewID())
+type ViewID uint64
+
+func (c *Coherent) View(ctx context.Context, tx kv.Tx) (ViewID, error) {
+	id := ViewID(tx.ViewID())
+	r := c.selectOrCreateRoot(id)
 	select { // fast non-blocking path
 	case <-r.ready:
-		//fmt.Printf("recv broadcast: %d,%d\n", r.id.Load(), tx.ViewID())
-		return r, nil
+		//fmt.Printf("recv broadcast: %d\n", id)
+		return id, nil
 	default:
 	}
 
 	select { // slow blocking path
 	case <-r.ready:
-		//fmt.Printf("recv broadcast2: %d,%d\n", r.id.Load(), tx.ViewID())
+		//fmt.Printf("recv broadcast2: %d\n", tx.ViewID())
 	case <-ctx.Done():
-		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
+		return 0, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
 	case <-time.After(c.cfg.NewBlockWait): //TODO: switch to timer to save resources
 		c.timeout.Inc()
-		r.lock.Lock()
-		//log.Info("timeout", "mem_id", r.id.Load(), "db_id", tx.ViewID(), "has_btree", r.cache != nil)
-		if r.cache == nil {
-			//parent := c.selectOrCreateRoot(tx.ViewID() - 1)
-			//if parent.cache != nil {
-			//	r.cache = parent.Clone()
-			//} else {
-			//	r.cache = btree.New(32)
-			//}
-			r.cache = btree.New(32)
-		}
-		r.lock.Unlock()
+		//log.Info("timeout", "db_id", id, "has_btree", r.cache != nil)
 	}
-	return r, nil
+	return ViewID(tx.ViewID()), nil
 }
 
-func (c *CoherentView) Get(k []byte, tx kv.Tx) ([]byte, error) {
+func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	c.lock.RLock()
-	it := c.cache.Get(&Pair{K: k})
+	isLatest := c.latestViewID == id
+	r, ok := c.roots[id]
+	if !ok {
+		return nil, fmt.Errorf("too old ViewID: %d, latestViewID=%d", id, c.latestViewID)
+	}
+	it := r.cache.Get(&Element{K: k})
 	c.lock.RUnlock()
 
 	if it != nil {
 		c.hits.Inc()
-		goatomic.StoreUint64(&it.(*Pair).t, c.id.Load())
-		//fmt.Printf("from cache %x: %#x,%x\n", c.id.Load(), k, it.(*Pair).V)
-		return it.(*Pair).V, nil
+		if isLatest {
+			c.evictList.MoveToFront(it.(*Element))
+		}
+		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
+		return it.(*Element).V, nil
 	}
 	c.miss.Inc()
 
@@ -252,27 +278,38 @@ func (c *CoherentView) Get(k []byte, tx kv.Tx) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("from db %x: %#x,%x\n", c.id.Load(), k, v)
+	//fmt.Printf("from db: %#x,%x\n", k, v)
 
-	it = &Pair{K: k, V: common.Copy(v), t: c.id.Load()}
 	c.lock.Lock()
-	c.cache.ReplaceOrInsert(it)
+	v = c.add(common.Copy(k), common.Copy(v), r, id).V
 	c.lock.Unlock()
-	return it.(*Pair).V, nil
+	return v, nil
 }
-func (c *CoherentView) Len() int {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-	return c.cache.Len()
-}
-func (c *CoherentView) Clone() *btree.BTree {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	if c.cache == nil {
-		c.cache = btree.New(32)
-		return btree.New(32) // return independent tree because nothing to share
+
+func (c *Coherent) removeOldest(r *CoherentView) {
+	e := c.evictList.Back()
+	if e != nil {
+		c.evictList.Remove(e)
+		r.cache.Delete(e)
 	}
-	return c.cache.Clone()
+}
+func (c *Coherent) add(k, v []byte, r *CoherentView, id ViewID) *Element {
+	it := &Element{K: k, V: v}
+	replaced := r.cache.ReplaceOrInsert(it)
+	if c.latestViewID != id {
+		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
+		return it
+	}
+	if replaced != nil {
+		c.evictList.Remove(replaced.(*Element))
+	}
+	c.evictList.PushFront(it)
+	evict := c.evictList.Len() > c.cfg.KeysLimit
+	// Verify size not exceeded
+	if evict {
+		c.removeOldest(r)
+	}
+	return it
 }
 
 type Stat struct {
@@ -287,51 +324,24 @@ func DebugStats(cache Cache) []Stat {
 	if !ok {
 		return res
 	}
-	casted.rootsLock.RLock()
-	defer casted.rootsLock.RUnlock()
+	casted.lock.RLock()
+	defer casted.lock.RUnlock()
 	for root, r := range casted.roots {
 		res = append(res, Stat{
-			BlockNum: root,
-			Lenght:   r.Len(),
+			BlockNum: uint64(root),
+			Lenght:   r.cache.Len(),
 		})
-	}
-	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
-	return res
-}
-func DebugAges(cache Cache) []Stat {
-	res := []Stat{}
-	casted, ok := cache.(*Coherent)
-	if !ok {
-		return res
-	}
-	casted.rootsLock.RLock()
-	defer casted.rootsLock.RUnlock()
-	_, latestView := cache.(*Coherent).lastRoot()
-	latestView.lock.RLock()
-	defer latestView.lock.RUnlock()
-	counters := map[uint64]int{}
-	latestView.cache.Ascend(func(it btree.Item) bool {
-		age := goatomic.LoadUint64(&it.(*Pair).t)
-		_, ok := counters[age]
-		if !ok {
-			counters[age] = 0
-		}
-		counters[age]++
-		return true
-	})
-	for i, j := range counters {
-		res = append(res, Stat{BlockNum: i, Lenght: j})
 	}
 	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
 	return res
 }
 func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) {
 	defer func(t time.Time) { fmt.Printf("AssertCheckValues:327: %s\n", time.Since(t)) }(time.Now())
-	c, err := cache.View(ctx, tx)
+	viewID, err := cache.View(ctx, tx)
 	if err != nil {
 		return 0, err
 	}
-	casted, ok := c.(*CoherentView)
+	casted, ok := cache.(*Coherent)
 	if !ok {
 		return 0, nil
 	}
@@ -339,15 +349,19 @@ func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) 
 	casted.lock.RLock()
 	defer casted.lock.RUnlock()
 	//log.Info("AssertCheckValues start", "db_id", tx.ViewID(), "mem_id", casted.id.Load(), "len", casted.cache.Len())
-	casted.cache.Ascend(func(i btree.Item) bool {
-		k, v := i.(*Pair).K, i.(*Pair).V
+	view, ok := casted.roots[viewID]
+	if !ok {
+		return 0, nil
+	}
+	view.cache.Ascend(func(i btree.Item) bool {
+		k, v := i.(*Element).K, i.(*Element).V
 		var dbV []byte
 		dbV, err = tx.GetOne(kv.PlainState, k)
 		if err != nil {
 			return false
 		}
 		if !bytes.Equal(dbV, v) {
-			err = fmt.Errorf("key: %x, has different values: %x != %x, viewID: %d", k, v, dbV, casted.id.Load())
+			err = fmt.Errorf("key: %x, has different values: %x != %x", k, v, dbV)
 			return false
 		}
 		checked++
@@ -355,21 +369,16 @@ func AssertCheckValues(ctx context.Context, tx kv.Tx, cache Cache) (int, error) 
 	})
 	return checked, err
 }
-
-func (c *Coherent) lastRoot() (latestTxId uint64, view *CoherentView) {
-	c.rootsLock.RLock()
-	defer c.rootsLock.RUnlock()
-	for txID := range c.roots { // max
-		if txID > latestTxId {
-			latestTxId = txID
-		}
+func (c *Coherent) evictRoots() {
+	if c.latestViewID <= ViewID(c.cfg.KeepViews) {
+		return
 	}
-	return latestTxId, c.roots[latestTxId]
-}
-func (c *Coherent) evictRoots(to uint64) {
-	c.rootsLock.Lock()
-	defer c.rootsLock.Unlock()
-	var toDel []uint64
+	if len(c.roots) < int(c.cfg.KeepViews) {
+		return
+	}
+	to := c.latestViewID - ViewID(c.cfg.KeepViews)
+	//fmt.Printf("collecting: %d\n", to)
+	var toDel []ViewID
 	for txId := range c.roots {
 		if txId > to {
 			continue
@@ -382,78 +391,222 @@ func (c *Coherent) evictRoots(to uint64) {
 	}
 }
 func (c *Coherent) Len() int {
-	_, lastView := c.lastRoot()
-	return lastView.Len()
-}
-
-func (c *Coherent) Evict() int {
-	defer c.evict.UpdateDuration(time.Now())
-	latestBlockNum, lastView := c.lastRoot()
-	c.evictRoots(latestBlockNum - 10)
-	if lastView == nil {
+	c.lock.RLock()
+	defer c.lock.RUnlock()
+	if c.latestView == nil {
 		return 0
 	}
-	keysAmount := lastView.Len()
-	c.keys.Set(uint64(keysAmount))
-	lastView.evictOld(c.cfg.KeepViews, c.cfg.KeysLimit)
-	//lastView.evictNew2Random(c.cfg.KeysLimit)
-	return lastView.Len()
+	return c.latestView.cache.Len() //todo: is it same with cache.len()?
 }
 
-//nolint
-func (c *CoherentView) evictOld(dropOlder uint64, keysLimit int) {
-	if c.Len() < keysLimit {
-		return
-	}
-	c.lock.Lock()
-	defer c.lock.Unlock()
+// Element is an element of a linked list.
+type Element struct {
+	// Next and previous pointers in the doubly-linked list of elements.
+	// To simplify the implementation, internally a list l is implemented
+	// as a ring, such that &l.root is both the next element of the last
+	// list element (l.Back()) and the previous element of the first list
+	// element (l.Front()).
+	next, prev *Element
 
-	var toDel []btree.Item
-	c.cache.Ascend(func(it btree.Item) bool {
-		age := goatomic.LoadUint64(&it.(*Pair).t)
-		if age < dropOlder {
-			toDel = append(toDel, it)
-		}
-		return true
-	})
-	for _, it := range toDel {
-		c.cache.Delete(it)
-	}
-	log.Info("evicted", "too_old_amount", len(toDel))
+	// The list to which this element belongs.
+	list *List
+
+	// The value stored with this element.
+	K, V []byte
 }
 
-//nolint
-func (c *CoherentView) evictNew2Random(keysLimit int) {
-	if c.Len() < keysLimit {
+func (p *Element) Less(than btree.Item) bool { return bytes.Compare(p.K, than.(*Element).K) < 0 }
+
+// ========= copypaste of List implementation from stdlib ========
+
+// Next returns the next list element or nil.
+func (e *Element) Next() *Element {
+	if p := e.next; e.list != nil && p != &e.list.root {
+		return p
+	}
+	return nil
+}
+
+// Prev returns the previous list element or nil.
+func (e *Element) Prev() *Element {
+	if p := e.prev; e.list != nil && p != &e.list.root {
+		return p
+	}
+	return nil
+}
+
+// List represents a doubly linked list.
+// The zero value for List is an empty list ready to use.
+type List struct {
+	root Element // sentinel list element, only &root, root.prev, and root.next are used
+	len  int     // current list length excluding (this) sentinel element
+}
+
+// Init initializes or clears list l.
+func (l *List) Init() *List {
+	l.root.next = &l.root
+	l.root.prev = &l.root
+	l.len = 0
+	return l
+}
+
+// New returns an initialized list.
+func NewList() *List { return new(List).Init() }
+
+// Len returns the number of elements of list l.
+// The complexity is O(1).
+func (l *List) Len() int { return l.len }
+
+// Front returns the first element of list l or nil if the list is empty.
+func (l *List) Front() *Element {
+	if l.len == 0 {
+		return nil
+	}
+	return l.root.next
+}
+
+// Back returns the last element of list l or nil if the list is empty.
+func (l *List) Back() *Element {
+	if l.len == 0 {
+		return nil
+	}
+	return l.root.prev
+}
+
+// lazyInit lazily initializes a zero List value.
+func (l *List) lazyInit() {
+	if l.root.next == nil {
+		l.Init()
+	}
+}
+
+// insert inserts e after at, increments l.len, and returns e.
+func (l *List) insert(e, at *Element) *Element {
+	e.prev = at
+	e.next = at.next
+	e.prev.next = e
+	e.next.prev = e
+	e.list = l
+	l.len++
+	return e
+}
+
+// insertValue is a convenience wrapper for insert(&Element{Value: v}, at).
+func (l *List) insertValue(e, at *Element) *Element {
+	return l.insert(e, at)
+}
+
+// remove removes e from its list, decrements l.len, and returns e.
+func (l *List) remove(e *Element) *Element {
+	e.prev.next = e.next
+	e.next.prev = e.prev
+	e.next = nil // avoid memory leaks
+	e.prev = nil // avoid memory leaks
+	e.list = nil
+	l.len--
+	return e
+}
+
+// move moves e to next to at and returns e.
+func (l *List) move(e, at *Element) *Element {
+	if e == at {
+		return e
+	}
+	e.prev.next = e.next
+	e.next.prev = e.prev
+
+	e.prev = at
+	e.next = at.next
+	e.prev.next = e
+	e.next.prev = e
+
+	return e
+}
+
+// Remove removes e from l if e is an element of list l.
+// It returns the element value e.Value.
+// The element must not be nil.
+func (l *List) Remove(e *Element) ([]byte, []byte) {
+	if e.list == l {
+		// if e.list == l, l must have been initialized when e was inserted
+		// in l or l == nil (e is a zero Element) and l.remove will crash
+		l.remove(e)
+	}
+	return e.K, e.V
+}
+
+// PushFront inserts a new element e with value v at the front of list l and returns e.
+func (l *List) PushFront(e *Element) *Element {
+	l.lazyInit()
+	return l.insertValue(e, &l.root)
+}
+
+// PushBack inserts a new element e with value v at the back of list l and returns e.
+func (l *List) PushBack(e *Element) *Element {
+	l.lazyInit()
+	return l.insertValue(e, l.root.prev)
+}
+
+// InsertBefore inserts a new element e with value v immediately before mark and returns e.
+// If mark is not an element of l, the list is not modified.
+// The mark must not be nil.
+func (l *List) InsertBefore(e *Element, mark *Element) *Element {
+	if mark.list != l {
+		return nil
+	}
+	// see comment in List.Remove about initialization of l
+	return l.insertValue(e, mark.prev)
+}
+
+// InsertAfter inserts a new element e with value v immediately after mark and returns e.
+// If mark is not an element of l, the list is not modified.
+// The mark must not be nil.
+func (l *List) InsertAfter(e *Element, mark *Element) *Element {
+	if mark.list != l {
+		return nil
+	}
+	// see comment in List.Remove about initialization of l
+	return l.insertValue(e, mark)
+}
+
+// MoveToFront moves element e to the front of list l.
+// If e is not an element of l, the list is not modified.
+// The element must not be nil.
+func (l *List) MoveToFront(e *Element) {
+	if e.list != l || l.root.next == e {
 		return
 	}
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	i := 0
-	var toDel []btree.Item
-	var fst, snd btree.Item
-	firstPrime, secondPrime := 11, 13 // to choose 2-pseudo-random elements and evict worse one
-	c.cache.Ascend(func(it btree.Item) bool {
-		if i%firstPrime == 0 {
-			fst = it
-		}
-		if i%secondPrime == 0 {
-			snd = it
-		}
-		if fst != nil && snd != nil {
-			if goatomic.LoadUint64(&fst.(*Pair).t) < goatomic.LoadUint64(&snd.(*Pair).t) {
-				toDel = append(toDel, fst)
-			} else {
-				toDel = append(toDel, snd)
-			}
-			fst = nil
-			snd = nil
-		}
-		return true
-	})
+	// see comment in List.Remove about initialization of l
+	l.move(e, &l.root)
+}
 
-	for _, it := range toDel {
-		c.cache.Delete(it)
+// MoveToBack moves element e to the back of list l.
+// If e is not an element of l, the list is not modified.
+// The element must not be nil.
+func (l *List) MoveToBack(e *Element) {
+	if e.list != l || l.root.prev == e {
+		return
 	}
-	log.Info("evicted", "2_random__amount", len(toDel))
+	// see comment in List.Remove about initialization of l
+	l.move(e, l.root.prev)
+}
+
+// MoveBefore moves element e to its new position before mark.
+// If e or mark is not an element of l, or e == mark, the list is not modified.
+// The element and mark must not be nil.
+func (l *List) MoveBefore(e, mark *Element) {
+	if e.list != l || e == mark || mark.list != l {
+		return
+	}
+	l.move(e, mark.prev)
+}
+
+// MoveAfter moves element e to its new position after mark.
+// If e or mark is not an element of l, or e == mark, the list is not modified.
+// The element and mark must not be nil.
+func (l *List) MoveAfter(e, mark *Element) {
+	if e.list != l || e == mark || mark.list != l {
+		return
+	}
+	l.move(e, mark)
 }

@@ -30,6 +30,14 @@ func MustOpen(path string) kv.RwDB {
 	return db
 }
 
+func MustOpenRo(path string) kv.RoDB {
+	db, err := Open(path, log.New(), true)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
 // Open - main method to open database.
 func Open(path string, logger log.Logger, readOnly bool) (kv.RwDB, error) {
 	var db kv.RwDB

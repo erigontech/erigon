@@ -159,7 +159,7 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			ctx := NewTxParseContext(chain.MainnetRules, *u256.N1)
-			ctx.reject = func(bytes []byte) bool { return true }
+			ctx.checkHash = func(bytes []byte) error { return ErrRejected }
 			slots := &TxSlots{}
 			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
 			require.NoError(err)

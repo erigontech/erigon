@@ -302,9 +302,11 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66:
 		txs := TxSlots{}
-		f.pooledTxsParseCtx.Reject(func(hash []byte) bool {
-			known, _ := f.pool.IdHashKnown(tx, hash)
-			return known
+		f.pooledTxsParseCtx.Reject(func(hash []byte) error {
+			if known, _ := f.pool.IdHashKnown(tx, hash); known {
+				return ErrRejected
+			}
+			return nil
 		})
 		switch req.Id {
 		case sentry.MessageId_POOLED_TRANSACTIONS_65:
@@ -449,7 +451,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 			}
 		}
 		if err := f.db.View(ctx, func(tx kv.Tx) error {
-			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs)
+			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
 		}); err != nil {
 			log.Warn("onNewBlock", "err", err)
 		}
