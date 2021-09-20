@@ -1192,6 +1192,7 @@ func dumpState(chaindata string, block uint64) error {
 		}
 		start := time.Now()
 		log.Info("Building recsplit...")
+		rs.SetTrace(true)
 		if err = rs.Build(); err != nil {
 			return err
 		}
@@ -1208,7 +1209,7 @@ func dumpState(chaindata string, block uint64) error {
 			collisionMap = make(map[int]string)
 		}
 		for ; k != nil && e == nil; k, _, e = c.Next() {
-			idx := rs.Lookup(k)
+			idx := rs.Lookup(k, false /* trace */)
 			if idx >= int(count) {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
 			}
@@ -1217,6 +1218,8 @@ func dumpState(chaindata string, block uint64) error {
 				if collisionMap != nil {
 					fmt.Printf("Key %x collided with key %x\n", k, collisionMap[idx])
 				}
+				rs.Lookup([]byte(collisionMap[idx]), true)
+				rs.Lookup(k, true)
 				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, idx)
 			}
 			if collisionMap != nil {
