@@ -6,8 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"google.golang.org/grpc/reflection"
-
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -24,7 +22,6 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 	}
 
 	grpcServer := grpcutil.NewServer(rateLimit, creds)
-	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	remote.RegisterETHBACKENDServer(grpcServer, ethBackendSrv)
 	if txPoolServer != nil {
 		txpool_proto.RegisterTxpoolServer(grpcServer, txPoolServer)
