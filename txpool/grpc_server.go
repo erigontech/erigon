@@ -290,8 +290,6 @@ func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto
 	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	//}
 
-	var grpcServer *grpc.Server
-	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
 		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
@@ -310,7 +308,8 @@ func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto
 	} else {
 		opts = append(opts, grpc.Creds(*creds))
 	}
-	grpcServer = grpc.NewServer(opts...)
+	grpcServer := grpc.NewServer(opts...)
+	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	if txPoolServer != nil {
 		txpool_proto.RegisterTxpoolServer(grpcServer, txPoolServer)
 	}

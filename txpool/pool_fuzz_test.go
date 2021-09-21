@@ -34,7 +34,7 @@ import (
 // gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
 
 func init() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
 func FuzzTwoQueue(f *testing.F) {
@@ -44,7 +44,7 @@ func FuzzTwoQueue(f *testing.F) {
 		t.Parallel()
 		assert := assert.New(t)
 		{
-			sub := NewPendingSubPool(PendingSubPool)
+			sub := NewPendingSubPool(PendingSubPool, 1024)
 			for _, i := range in {
 				sub.UnsafeAdd(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
@@ -65,7 +65,7 @@ func FuzzTwoQueue(f *testing.F) {
 			}
 		}
 		{
-			sub := NewSubPool(BaseFeeSubPool)
+			sub := NewSubPool(BaseFeeSubPool, 1024)
 			for _, i := range in {
 				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
@@ -98,7 +98,7 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 
 		{
-			sub := NewSubPool(QueuedSubPool)
+			sub := NewSubPool(QueuedSubPool, 1024)
 			for _, i := range in {
 				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
@@ -304,9 +304,9 @@ func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
 func FuzzOnNewBlocks(f *testing.F) {
 	var u64 = [1 * 4]byte{1}
 	var senderAddr = [1 + 1 + 1]byte{1}
-	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], 12)
-	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], 14)
-	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], 123)
+	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(12))
+	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(14))
+	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(123))
 	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, senderAddr []byte, currentBaseFee1 uint8) {
 		//t.Parallel()
 		ctx := context.Background()
@@ -328,7 +328,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		err := txs.Valid()
 		assert.NoError(err)
 
-		var prevTotal int
+		var prevHashes Hashes
 
 		ch := make(chan Hashes, 100)
 
@@ -348,10 +348,6 @@ func FuzzOnNewBlocks(f *testing.F) {
 		pool.senders.senderID = uint64(len(senderIDs))
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
-			//if pending.Len() > 5 && baseFee.Len() > 5 && queued.Len() > 5 {
-			//	fmt.Printf("len %s: %d,%d,%d\n", msg, pending.Len(), baseFee.Len(), queued.Len())
-			//}
-
 			best, worst := pending.Best(), pending.Worst()
 			assert.LessOrEqual(pending.Len(), cfg.PendingSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
@@ -362,10 +358,6 @@ func FuzzOnNewBlocks(f *testing.F) {
 			for _, tx := range pending.best {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
-					//for id := range senders {
-					//	fmt.Printf("now: %d, %d\n", id, senders[id].nonce)
-					//}
-					//fmt.Printf("?? %d,%d\n", i.senderID, senders[i.senderID].nonce)
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg, i.senderID)
 				}
 				if tx.subPool&EnoughBalance > 0 {
@@ -481,6 +473,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		checkNotify := func(unwindTxs, minedTxs TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
+			_, _ = baseFee, queued
 			select {
 			case newHashes := <-ch:
 				//assert.Equal(len(txs1.txs), newHashes.Len())
@@ -505,9 +498,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 					assert.False(foundInMined, msg)
 				}
 			default: // no notifications - means pools must be unchanged or drop some txs
-				assert.GreaterOrEqual(prevTotal, pending.Len()+baseFee.Len()+queued.Len(), msg)
+				pendingHashes := copyHashes(pending)
+				require.Zero(extractNewHashes(pendingHashes, prevHashes).Len())
 			}
-			prevTotal = pending.Len() + baseFee.Len() + queued.Len()
+			prevHashes = copyHashes(pending)
+			_ = prevHashes
 		}
 		//TODO: check that id=>addr and addr=>id mappings have same len
 
@@ -540,9 +535,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 			})
 		}
 		// go to first fork
-		//fmt.Printf("ll1: %d,%d,%d\n", pool.pending.Len(), pool.baseFee.Len(), pool.queued.Len())
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(ctx, change, txs1, TxSlots{}, nil)
+		err = pool.OnNewBlock(ctx, change, txs1, TxSlots{}, tx)
 		assert.NoError(err)
 		check(txs1, TxSlots{}, "fork1")
 		checkNotify(txs1, TxSlots{}, "fork1")
@@ -554,7 +548,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h1, PrevBlockHeight: 0, PrevBlockHash: h1, ProtocolBaseFee: currentBaseFee},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs2, nil)
+		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs2, tx)
 		check(TxSlots{}, txs2, "fork1 mined")
 		checkNotify(TxSlots{}, txs2, "fork1 mined")
 
@@ -565,7 +559,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 0, BlockHash: h1, Direction: remote.Direction_UNWIND, PrevBlockHeight: 1, PrevBlockHash: h1, ProtocolBaseFee: currentBaseFee},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, txs2, TxSlots{}, nil)
+		err = pool.OnNewBlock(ctx, change, txs2, TxSlots{}, tx)
 		assert.NoError(err)
 		check(txs2, TxSlots{}, "fork2")
 		checkNotify(txs2, TxSlots{}, "fork2")
@@ -576,7 +570,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h22, PrevBlockHeight: 0, PrevBlockHash: h1, ProtocolBaseFee: currentBaseFee},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs3, nil)
+		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs3, tx)
 		assert.NoError(err)
 		check(TxSlots{}, txs3, "fork2 mined")
 		checkNotify(TxSlots{}, txs3, "fork2 mined")
@@ -610,7 +604,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
-		assert.Equal(pool.queued.Len(), p2.queued.Len())
+		require.Equal(pool.queued.Len(), p2.queued.Len())
 		assert.Equal(pool.currentBaseFee.Load(), p2.currentBaseFee.Load())
 		assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
 	})
@@ -621,4 +615,28 @@ func bigEndian(n uint64) []byte {
 	num := [8]byte{}
 	binary.BigEndian.PutUint64(num[:], n)
 	return num[:]
+}
+
+func copyHashes(p *PendingPool) (hashes Hashes) {
+	for i := range p.best {
+		hashes = append(hashes, p.best[i].Tx.idHash[:]...)
+	}
+	return hashes
+}
+
+//extractNewHashes - extract from h1 hashes which do not exist in h2
+func extractNewHashes(h1, h2 Hashes) (result Hashes) {
+	for i := 0; i < h1.Len(); i++ {
+		found := false
+		for j := 0; j < h2.Len(); j++ {
+			if bytes.Equal(h1.At(i), h2.At(j)) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, h1.At(i)...)
+		}
+	}
+	return result
 }

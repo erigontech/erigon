@@ -23,7 +23,7 @@ import (
 
 func BenchmarkName(b *testing.B) {
 	txs := make([]*metaTx, 10_000)
-	p := NewSubPool(BaseFeeSubPool)
+	p := NewSubPool(BaseFeeSubPool, 1024)
 	for i := 0; i < len(txs); i++ {
 		txs[i] = &metaTx{Tx: &TxSlot{}}
 	}
@@ -41,7 +41,7 @@ func BenchmarkName(b *testing.B) {
 
 func BenchmarkName2(b *testing.B) {
 	txs := make([]*metaTx, 10_000)
-	p := NewSubPool(BaseFeeSubPool)
+	p := NewSubPool(BaseFeeSubPool, 1024)
 	for i := 0; i < len(txs); i++ {
 		txs[i] = &metaTx{Tx: &TxSlot{}}
 	}

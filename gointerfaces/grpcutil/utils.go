@@ -60,8 +60,6 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	//}
 
-	var grpcServer *grpc.Server
-	reflection.Register(grpcServer)
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
 		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
@@ -78,7 +76,8 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 		grpc.Creds(creds),
 	}
-	grpcServer = grpc.NewServer(opts...)
+	grpcServer := grpc.NewServer(opts...)
+	reflection.Register(grpcServer)
 
 	//if metrics.Enabled {
 	//	grpc_prometheus.Register(grpcServer)
