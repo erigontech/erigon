@@ -100,13 +100,14 @@ func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collec
 }
 
 func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
-	if err := ForRange(db,bucket, timestampDst, timestampSrc+1, func(_ uint64, k, v []byte) error {
+	if err := ForRange(db, bucket, timestampDst, timestampSrc+1, func(_ uint64, k, v []byte) error {
 		if err := libcommon.Stopped(quit); err != nil {
-			return  err
+			return err
 		}
 		if innerErr := collectorFunc(libcommon.Copy(k), libcommon.Copy(v)); innerErr != nil {
-			return  innerErr
+			return innerErr
 		}
+		return nil
 	}); err != nil {
 		return err
 	}
