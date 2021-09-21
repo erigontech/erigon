@@ -121,7 +121,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | net_version                                | Yes     | `remote`.                                  |
 |                                            |         |                                            |
 | eth_blockNumber                            | Yes     |                                            |
-| eth_chainID                                | Yes     |                                            |
+| eth_chainID/eth_chainId                    | Yes     |                                            |
 | eth_protocolVersion                        | Yes     |                                            |
 | eth_syncing                                | Yes     |                                            |
 | eth_gasPrice                               | Yes     |                                            |
