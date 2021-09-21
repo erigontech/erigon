@@ -17,7 +17,7 @@ const (
 )
 
 var (
-	ErrNotFound  = errors.New("not found")
+	ErrNotFound = errors.New("not found")
 )
 
 func NewStorageChangeSet() *ChangeSet {
