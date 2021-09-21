@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -1137,7 +1138,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func dumpState(chaindata string) error {
+func dumpState(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	f, err := os.Create("statedump")
@@ -1149,39 +1150,91 @@ func dumpState(chaindata string) error {
 	defer w.Flush()
 	stAccounts := 0
 	stStorage := 0
-	var varintBuf [10]byte // Buffer for varint number
+	var rs *recsplit.RecSplit
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.PlainState)
 		if err != nil {
 			return err
 		}
-		k, v, e := c.First()
-		for ; k != nil && e == nil; k, v, e = c.Next() {
-			keyLen := binary.PutUvarint(varintBuf[:], uint64(len(k)))
-			if _, err = w.Write(varintBuf[:keyLen]); err != nil {
+		var count uint64
+		if count, err = c.Count(); err != nil {
+			return err
+		}
+		if block > 1 {
+			count = block
+		}
+		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   int(count),
+			BucketSize: 2000,
+			Salt:       0,
+			LeafSize:   8,
+			TmpDir:     "",
+			StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+				0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
+				0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
+		}); err != nil {
+			return err
+		}
+		k, _, e := c.First()
+		i := 0
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			if err := rs.AddKey(k); err != nil {
 				return err
 			}
-			if _, err = w.Write([]byte(k)); err != nil {
-				return err
+			i++
+			if i == int(count) {
+				break
 			}
-			valLen := binary.PutUvarint(varintBuf[:], uint64(len(v)))
-			if _, err = w.Write(varintBuf[:valLen]); err != nil {
-				return err
-			}
-			if len(v) > 0 {
-				if _, err = w.Write(v); err != nil {
-					return err
-				}
-			}
-			if len(k) > 28 {
-				stStorage++
-			} else {
-				stAccounts++
-			}
-			if (stStorage+stAccounts)%100000 == 0 {
-				fmt.Printf("State records: %d\n", stStorage+stAccounts)
+			if i%1_000_000 == 0 {
+				log.Info("Added", "keys", i)
 			}
 		}
+		if e != nil {
+			return e
+		}
+		start := time.Now()
+		log.Info("Building recsplit...")
+		if err = rs.Build(); err != nil {
+			return err
+		}
+		s1, s2 := rs.Stats()
+		log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
+		log.Info("Testing bijection")
+		bitCount := (count + 63) / 64
+		bits := make([]uint64, bitCount)
+		k, _, e = c.First()
+		i = 0
+		var collisionMap map[int]string
+		if count < 1000000 {
+			collisionMap = make(map[int]string)
+		}
+		var lookupTime time.Duration
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			start := time.Now()
+			idx := rs.Lookup(k, false /* trace */)
+			lookupTime += time.Since(start)
+			if idx >= int(count) {
+				return fmt.Errorf("idx %d >= count %d", idx, count)
+			}
+			mask := uint64(1) << (idx & 63)
+			if bits[idx>>6]&mask != 0 {
+				if collisionMap != nil {
+					fmt.Printf("Key %x collided with key %x\n", k, collisionMap[idx])
+				}
+				rs.Lookup([]byte(collisionMap[idx]), true)
+				rs.Lookup(k, true)
+				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, idx)
+			}
+			if collisionMap != nil {
+				collisionMap[idx] = string(k)
+			}
+			bits[idx>>6] |= mask
+			i++
+			if i == int(count) {
+				break
+			}
+		}
+		log.Info("Average lookup time", "per key", time.Duration(uint64(lookupTime)/count))
 		return e
 	}); err != nil {
 		return err
@@ -2404,7 +2457,7 @@ func main() {
 		err = snapSizes(*chaindata)
 
 	case "dumpState":
-		err = dumpState(*chaindata)
+		err = dumpState(*chaindata, uint64(*block))
 
 	case "readCallTraces":
 		err = readCallTraces(*chaindata, uint64(*block))
