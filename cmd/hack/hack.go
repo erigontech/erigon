@@ -5,9 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
+	"index/suffixarray"
+	"io"
 	"io/ioutil"
+	"math"
 	"math/big"
 	"os"
 	"os/signal"
@@ -1240,6 +1244,288 @@ func dumpState(chaindata string, block uint64) error {
 		return err
 	}
 	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
+	return nil
+}
+
+const bufSize = 16 << 10
+
+// readInt reads an int x from r using buf to buffer the read and returns x.
+func readInt(r io.Reader, buf []byte) (int64, error) {
+	_, err := io.ReadFull(r, buf[0:binary.MaxVarintLen64]) // ok to continue with error
+	x, _ := binary.Varint(buf)
+	return x, err
+}
+
+var errTooBig = errors.New("suffixarray: data too large")
+
+// An ints is either an []int32 or an []int64.
+// That is, one of them is empty, and one is the real data.
+// The int64 form is used when len(data) > maxData32
+type ints struct {
+	int32 []int32
+	int64 []int64
+}
+
+func (a *ints) len() int {
+	return len(a.int32) + len(a.int64)
+}
+
+func (a *ints) get(i int) int64 {
+	if a.int32 != nil {
+		return int64(a.int32[i])
+	}
+	return a.int64[i]
+}
+
+func (a *ints) set(i int, v int64) {
+	if a.int32 != nil {
+		a.int32[i] = int32(v)
+	} else {
+		a.int64[i] = v
+	}
+}
+
+func (a *ints) slice(i, j int) ints {
+	if a.int32 != nil {
+		return ints{a.int32[i:j], nil}
+	}
+	return ints{nil, a.int64[i:j]}
+}
+
+// readSlice reads data[:n] from r and returns n.
+// It uses buf to buffer the read.
+func readSlice(r io.Reader, buf []byte, data ints) (n int, err error) {
+	// read buffer size
+	var size64 int64
+	size64, err = readInt(r, buf)
+	if err != nil {
+		return
+	}
+	if int64(int(size64)) != size64 || int(size64) < 0 {
+		// We never write chunks this big anyway.
+		return 0, errTooBig
+	}
+	size := int(size64)
+
+	// read buffer w/o the size
+	if _, err = io.ReadFull(r, buf[binary.MaxVarintLen64:size]); err != nil {
+		return
+	}
+
+	// decode as many elements as present in buf
+	for p := binary.MaxVarintLen64; p < size; n++ {
+		x, w := binary.Uvarint(buf[p:])
+		data.set(n, int64(x))
+		p += w
+	}
+
+	return
+}
+
+var maxData32 int = realMaxData32
+
+const realMaxData32 = math.MaxInt32
+
+func kasai(chaindata string, block uint64) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	var superstring []byte
+	f, err := os.Create("sa")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.PlainState)
+		if err != nil {
+			return err
+		}
+		var count uint64
+		if count, err = c.Count(); err != nil {
+			return err
+		}
+		if block > 1 {
+			count = block
+		}
+		k, _, e := c.First()
+		i := 0
+		for ; k != nil && e == nil; k, _, e = c.Next() {
+			for _, a := range k {
+				superstring = append(superstring, 1, a)
+			}
+			superstring = append(superstring, 0, 0)
+			i++
+			if i == int(count) {
+				break
+			}
+			if i%1_000_000 == 0 {
+				log.Info("Added", "keys", i)
+			}
+		}
+		if e != nil {
+			return e
+		}
+		log.Info("Superstring", "len", len(superstring))
+		start := time.Now()
+		index := suffixarray.New(superstring)
+		log.Info("Suffix array built", "in", time.Since(start))
+		if err = index.Write(w); err != nil {
+			return err
+		}
+		index = nil // Release the index
+		w.Flush()
+		f.Close()
+		return nil
+	}); err != nil {
+		return err
+	}
+	var r *os.File
+	if r, err = os.Open("sa"); err != nil {
+		return err
+	}
+	defer r.Close()
+	buf := make([]byte, bufSize)
+	// read length
+	n64, err := readInt(r, buf)
+	if err != nil {
+		return err
+	}
+	if int64(int(n64)) != n64 || int(n64) < 0 {
+		return errTooBig
+	}
+	n := int(n64)
+	fmt.Printf("n = %d\n", n)
+	// Skip data
+	io.CopyN(io.Discard, r, int64(len(superstring))) // nolint:errcheck
+	var sa, saslice ints
+	sa.int32 = nil
+	sa.int64 = nil
+	if n <= maxData32 {
+		sa.int32 = make([]int32, n)
+	} else {
+		sa.int64 = make([]int64, n)
+	}
+	saslice = sa
+	for saslice.len() > 0 {
+		n, err := readSlice(r, buf, saslice)
+		if err != nil {
+			return err
+		}
+		saslice = saslice.slice(n, saslice.len())
+	}
+	log.Info("Read suffix array from file", "len", sa.len())
+	// filter out suffixes that start with odd positions
+	n = n / 2
+	filtered := make([]int, n)
+	var j int
+	for i := 0; i < sa.len(); i++ {
+		if sa.get(i)&1 == 0 {
+			filtered[j] = int(sa.get(i) >> 1)
+			j++
+		}
+	}
+	sa.int32 = nil
+	sa.int64 = nil
+	log.Info("Suffix array filtered")
+	// invert suffixes
+	inv := make([]int, n)
+	for i := 0; i < n; i++ {
+		inv[filtered[i]] = i
+	}
+	log.Info("Inverted array done")
+	lcp := make([]byte, n)
+	var k int
+	// Process all suffixes one by one starting from
+	// first suffix in txt[]
+	for i := 0; i < n; i++ {
+		/* If the current suffix is at n-1, then we don’t
+		   have next substring to consider. So lcp is not
+		   defined for this substring, we put zero. */
+		if inv[i] == n-1 {
+			k = 0
+			continue
+		}
+
+		/* j contains index of the next substring to
+		   be considered  to compare with the present
+		   substring, i.e., next string in suffix array */
+		j := int(filtered[inv[i]+1])
+
+		// Directly start matching from k'th index as
+		// at-least k-1 characters will match
+		for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
+			k++
+		}
+
+		lcp[inv[i]] = byte(k) // lcp for the present suffix.
+
+		// Deleting the starting character from the string.
+		if k > 0 {
+			k--
+		}
+	}
+	log.Info("Kasai algorithm finished")
+	// Verify the algorithm worked correctly
+	if block < 100 {
+		fmt.Printf("lcp = %d\n", lcp)
+	}
+	// Checking LCP array
+	for i := 0; i < n-1; i++ {
+		var prefixLen int
+		p1 := int(filtered[i])
+		p2 := int(filtered[i+1])
+		for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+			prefixLen++
+		}
+		if prefixLen != int(lcp[i]) {
+			fmt.Printf("prefixLen %d != int(lcp[i]) %d\n", prefixLen, lcp[i])
+			break
+		}
+	}
+	log.Info("LCP array checked")
+	b := make([]int, 1000) // Sorting buffer
+	// Walk over LCP array and compute the scores of the strings
+	for i := 0; i < n-1; i++ {
+		// Only when there is a drop in LCP value
+		if lcp[i+1] >= lcp[i] {
+			continue
+		}
+		l := int(lcp[i]) // Length of potential dictionary word
+		if l == 1 {
+			continue
+		}
+		// Go back
+		j := i
+		for j > 0 && int(lcp[j-1]) >= l {
+			j--
+		}
+		window := i - j + 2
+		for len(b) < window {
+			b = append(b, 0)
+		}
+		copy(b, filtered[j:i+2])
+		sort.Ints(b[:window])
+		repeats := 1
+		lastK := 0
+		for k := 1; k < window; k++ {
+			if b[k] >= b[lastK]+l {
+				repeats++
+				lastK = k
+			}
+		}
+		score := repeats * int(l-1)
+		var word []byte
+		for s := 0; s < l; s++ {
+			if superstring[(filtered[j]+s)*2] != 0 {
+				word = append(word, superstring[(filtered[j]+s)*2+1])
+			}
+		}
+		if repeats > 1 {
+			fmt.Printf("%d (%d x %d) = %x\n", score, repeats, l, word)
+		}
+	}
 	return nil
 }
 
@@ -2491,6 +2777,8 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
+	case "kasai":
+		err = kasai(*chaindata, uint64(*block))
 	}
 
 	if err != nil {
