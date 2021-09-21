@@ -413,3 +413,7 @@ non-batched way.
 ### Filesystem's background features are expensive
 
 For example: btrfs's autodefrag option - may increase write IO 100x times
+
+### Gnome Tracker can kill Erigon
+
+[Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.

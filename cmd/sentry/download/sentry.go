@@ -20,6 +20,7 @@ import (
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -440,6 +441,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 		return nil, fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
 	}
 	grpcServer := grpcutil.NewServer(100, nil)
+	reflection.Register(grpcServer)
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
