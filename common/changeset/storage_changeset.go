@@ -10,8 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 const (
@@ -100,7 +98,7 @@ func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collec
 }
 
 func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
-	if err := ForRange(db, bucket, timestampDst, timestampSrc+1, func(_ uint64, k, v []byte) error {
+	return ForRange(db, bucket, timestampDst, timestampSrc+1, func(_ uint64, k, v []byte) error {
 		if err := libcommon.Stopped(quit); err != nil {
 			return err
 		}
@@ -108,7 +106,5 @@ func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket s
 			return innerErr
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
+	})
 }
