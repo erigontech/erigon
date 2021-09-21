@@ -665,6 +665,15 @@ func TestModes(t *testing.T) {
 	)
 }
 
+func TestBeforeModes(t *testing.T) {
+	mode := prune.DefaultMode
+	mode.History = prune.Before(0)
+	mode.Receipts = prune.Before(1)
+	mode.TxIndex = prune.Before(2)
+	mode.CallTraces = prune.Before(3)
+	doModesTest(t, mode)
+}
+
 func doModesTest(t *testing.T, pm prune.Mode) error {
 	fmt.Printf("h=%v, r=%v, t=%v\n", pm.History.Enabled(), pm.Receipts.Enabled(), pm.TxIndex.Enabled())
 	require := require.New(t)
