@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/reflection"
 )
 
 func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCredentials, error) {
@@ -60,11 +61,12 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 	//}
 
 	var grpcServer *grpc.Server
+	reflection.Register(grpcServer)
 	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
 		//grpc.NumStreamWorkers(cpus), // reduce amount of goroutines
-		grpc.WriteBufferSize(1024), // reduce buffers to save mem
-		grpc.ReadBufferSize(1024),
+		//grpc.WriteBufferSize(1024), // reduce buffers to save mem
+		//grpc.ReadBufferSize(1024),
 		grpc.MaxConcurrentStreams(rateLimit), // to force clients reduce concurrency level
 		// Don't drop the connection, settings accordign to this comment on GitHub
 		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779

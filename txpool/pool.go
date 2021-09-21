@@ -331,6 +331,26 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
+	for _, changesList := range stateChanges.ChangeBatch {
+		for _, change := range changesList.Changes {
+			switch change.Action {
+			case remote.Action_UPSERT, remote.Action_UPSERT_CODE:
+				if change.Incarnation > 0 {
+					continue
+				}
+				addr := gointerfaces.ConvertH160toAddress(change.Address)
+				id, ok := p.senders.id(string(addr[:]))
+				if !ok {
+					continue
+				}
+				nonce, balance, err := p.senders.info(cache, viewID, coreTx, id)
+				if err != nil {
+					return err
+				}
+				onSenderChange(id, nonce, balance, p.byNonce, protocolBaseFee, baseFee, p.pending, p.baseFee, p.queued)
+			}
+		}
+	}
 	//log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "baseFee", baseFee, "blockHeight", blockHeight)
 	if err := addTxs(p.lastSeenBlock.Load(), cache, viewID, coreTx, p.cfg, p.senders, unwindTxs, protocolBaseFee, baseFee, p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
