@@ -18,7 +18,6 @@ const (
 
 var (
 	ErrNotFound  = errors.New("not found")
-	ErrFindValue = errors.New("find value error")
 )
 
 func NewStorageChangeSet() *ChangeSet {
