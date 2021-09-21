@@ -888,19 +888,6 @@ func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 	}
 }
 
-func getModifiedAccounts(chaindata string) {
-	// TODO(tjayrush): The call to GetModifiedAccounts needs a database tx
-	fmt.Println("hack - getModiiedAccounts is temporarily disabled.")
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tool.Check(db.View(context.Background(), func(tx kv.Tx) error {
-		addrs, err := changeset.GetModifiedAccounts(tx, 49300, 49400)
-		tool.Check(err)
-		fmt.Printf("Len(addrs)=%d\n", len(addrs))
-		return nil
-	}))
-}
-
 type Receiver struct {
 	defaultReceiver *trie.RootHashAggregator
 	accountMap      map[string]*accounts.Account
@@ -1012,17 +999,12 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 
-	ts := dbutils.EncodeBlockNumber(block + 1)
 	accountMap := make(map[string]*accounts.Account)
 
-	if err := changeset.Walk(tx, kv.AccountChangeSet, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
-		if blockN > *headNumber {
-			return false, nil
-		}
-
+	if err := changeset.ForRange(tx, kv.AccountChangeSet, block+1, *headNumber+1, func(blockN uint64, address, v []byte) error {
 		var addrHash, err = common.HashData(address)
 		if err != nil {
-			return false, err
+			return err
 		}
 		k := addrHash[:]
 
@@ -1030,14 +1012,14 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 			if len(v) > 0 {
 				var a accounts.Account
 				if innerErr := a.DecodeForStorage(v); innerErr != nil {
-					return false, innerErr
+					return innerErr
 				}
 				accountMap[string(k)] = &a
 			} else {
 				accountMap[string(k)] = nil
 			}
 		}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -1045,19 +1027,16 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	storageMap := make(map[string][]byte)
-	if err := changeset.Walk(tx, kv.StorageChangeSet, ts, 0, func(blockN uint64, address, v []byte) (bool, error) {
-		if blockN > *headNumber {
-			return false, nil
-		}
+	if err := changeset.ForRange(tx, kv.StorageChangeSet, block+1, *headNumber+1, func(blockN uint64, address, v []byte) error {
 		var addrHash, err = common.HashData(address)
 		if err != nil {
-			return false, err
+			return err
 		}
 		k := addrHash[:]
 		if _, ok := storageMap[string(k)]; !ok {
 			storageMap[string(k)] = v
 		}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -1278,29 +1257,23 @@ func changeSetStats(chaindata string, block1, block2 uint64) error {
 		return err1
 	}
 	defer tx.Rollback()
-	if err := changeset.Walk(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if blockN >= block2 {
-			return false, nil
-		}
+	if err := changeset.ForRange(tx, kv.AccountChangeSet, block1, block2, func(blockN uint64, k, v []byte) error {
 		if (blockN-block1)%100000 == 0 {
 			fmt.Printf("at the block %d for accounts, booster size: %d\n", blockN, len(accounts))
 		}
 		accounts[string(common.CopyBytes(k))] = struct{}{}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
 
 	storage := make(map[string]struct{})
-	if err := changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block1), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if blockN >= block2 {
-			return false, nil
-		}
+	if err := changeset.ForRange(tx, kv.StorageChangeSet, block1, block2, func(blockN uint64, k, v []byte) error {
 		if (blockN-block1)%100000 == 0 {
 			fmt.Printf("at the block %d for accounts, booster size: %d\n", blockN, len(accounts))
 		}
 		storage[string(common.CopyBytes(k))] = struct{}{}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -1319,11 +1292,11 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	}
 	defer tx.Rollback()
 
-	if err := changeset.Walk(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.ForEach(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -1339,11 +1312,11 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 		return err1
 	}
 	defer tx.Rollback()
-	if err := changeset.Walk(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.ForEach(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -2383,9 +2356,6 @@ func main() {
 
 	case "val-tx-lookup-2":
 		ValidateTxLookups2(*chaindata)
-
-	case "modiAccounts":
-		getModifiedAccounts(*chaindata)
 
 	case "slice":
 		dbSlice(*chaindata, *bucket, common.FromHex(*hash))
