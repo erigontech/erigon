@@ -18,7 +18,6 @@ package txpool
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -140,16 +139,17 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	})
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
-	for i := range in.RlpTxs {
-		slots.txs[i] = &TxSlot{}
-		slots.isLocal[i] = true
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.txs[i], slots.senders.At(i)); err != nil {
-			if errors.Is(err, ErrAlreadyKnown) {
-
-			} else {
-				log.Warn("pool add", "err", err)
+	for i, j := 0, 0; i < len(in.RlpTxs); i, j = i+1, j+1 { // some incoming txs may be rejected, so - need secnod index
+		slots.txs[j] = &TxSlot{}
+		slots.isLocal[j] = true
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[j], 0, slots.txs[j], slots.senders.At(j)); err != nil {
+			j--
+			switch err {
+			case ErrAlreadyKnown: // Noop, but need to handle to not count these
+				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
+			default:
+				reply.Imported[i] = txpool_proto.ImportResult_INTERNAL_ERROR
 			}
-			continue
 		}
 	}
 
@@ -157,7 +157,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	if err != nil {
 		return nil, err
 	}
-	//TODO: concept of discardReasonsLRU not really implemented yet
+	//TODO: concept of discardReasonsLRU not really implemented yet. Indices are not match here!
 	_ = discardReasons
 	/*
 		for i, err := range discardReasonsLRU {

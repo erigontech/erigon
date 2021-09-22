@@ -194,7 +194,7 @@ func calcProtocolBaseFee(baseFee uint64) uint64 {
 //
 // txpool doesn't start any goroutines - "leave concurrency to user" design
 // txpool has no DB or TX fields - "leave db transactions management to user" design
-// txpool has _coreDB field - but it must maximize local state cache hit-rate - and perform minimum _coreDB transactions
+// txpool has _chainDB field - but it must maximize local state cache hit-rate - and perform minimum _chainDB transactions
 //
 // It preserve TxSlot objects immutable
 type TxPool struct {
@@ -205,34 +205,30 @@ type TxPool struct {
 	protocolBaseFee atomic.Uint64
 	currentBaseFee  atomic.Uint64
 
-	senderID          uint64
-	byHash            map[string]*metaTx // tx_hash => tx
-	discardReasonsLRU *simplelru.LRU     // tx_hash => discard_reason
-	pending           *PendingPool
-	baseFee, queued   *SubPool
-
-	// track isLocal flag of already mined transactions. used at unwind.
-	isLocalLRU *simplelru.LRU // tx_hash => is_local
-	_coreDB    kv.RoDB
-
-	// fields for transaction propagation
-	recentlyConnectedPeers *recentlyConnectedPeers
-	newTxs                 chan Hashes
-	deletedTxs             []*metaTx
-	senders                *sendersBatch
-	_cache                 kvcache.Cache
-	byNonce                *ByNonce // senderID => (sorted map of tx nonce => *metaTx)
-	promoted               Hashes   // pre-allocated buffer to write promoted to pending pool txn hashes
-
 	// batch processing of remote transactions
 	// handling works fast without batching, but batching allow:
-	//   - reduce amount of _coreDB transactions
+	//   - reduce amount of _chainDB transactions
 	//   - batch notifications about new txs (reduce P2P spam to other nodes about txs propagation)
 	//   - and as a result reducing pool.RWLock contention
 	unprocessedRemoteTxs    *TxSlots
 	unprocessedRemoteByHash map[string]int // to reject duplicates
 
-	cfg     Config
+	byHash            map[string]*metaTx // tx_hash => tx : only not committed to db yet records
+	discardReasonsLRU *simplelru.LRU     // tx_hash => discard_reason : non-persisted
+	pending           *PendingPool
+	baseFee, queued   *SubPool
+	isLocalLRU        *simplelru.LRU // tx_hash => is_local : to restore isLocal flag of unwinded transactions
+	newPendingTxs     chan Hashes    // notifications about new txs in Pending sub-pool
+	deletedTxs        []*metaTx      // list of discarded txs since last db commit
+	byNonce           *ByNonce       // senderID => (sorted map of tx nonce => *metaTx)
+	promoted          Hashes         // pre-allocated temporary buffer to write promoted to pending pool txn hashes
+	_chainDB          kv.RoDB        // remote db - use it wisely
+	_stateCache       kvcache.Cache
+	cfg               Config
+
+	recentlyConnectedPeers *recentlyConnectedPeers // all txs will be propagated to this peers eventually, and clear list
+	senders                *sendersBatch
+
 	rules   chain.Rules
 	chainID uint256.Int
 }
@@ -246,6 +242,7 @@ func New(newTxs chan Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, ru
 	if err != nil {
 		return nil, err
 	}
+
 	return &TxPool{
 		lock:                    &sync.RWMutex{},
 		byHash:                  map[string]*metaTx{},
@@ -256,14 +253,13 @@ func New(newTxs chan Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, ru
 		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit),
 		baseFee:                 NewSubPool(BaseFeeSubPool, cfg.BaseFeeSubPoolLimit),
 		queued:                  NewSubPool(QueuedSubPool, cfg.QueuedSubPoolLimit),
-		newTxs:                  newTxs,
-		_cache:                  cache,
+		newPendingTxs:           newTxs,
+		_stateCache:             cache,
 		senders:                 newSendersCache(),
-		_coreDB:                 coreDB,
+		_chainDB:                coreDB,
 		cfg:                     cfg,
 		rules:                   rules,
 		chainID:                 chainID,
-		senderID:                1,
 		unprocessedRemoteTxs:    &TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		promoted:                make(Hashes, 0, 32*1024),
@@ -347,7 +343,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	if p.promoted.Len() > 0 {
 		select {
-		case p.newTxs <- common.Copy(p.promoted):
+		case p.newPendingTxs <- common.Copy(p.promoted):
 		default:
 		}
 	}
@@ -401,7 +397,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case p.newTxs <- common.Copy(p.promoted):
+		case p.newPendingTxs <- common.Copy(p.promoted):
 		default:
 		}
 	}
@@ -409,7 +405,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	p.unprocessedRemoteTxs.Resize(0)
 	p.unprocessedRemoteByHash = map[string]int{}
 
-	//log.Info("[txpool] on new txs", "amount", len(newTxs.txs), "in", time.Since(t))
+	//log.Info("[txpool] on new txs", "amount", len(newPendingTxs.txs), "in", time.Since(t))
 	return nil
 }
 func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender []byte, isLocal bool, err error) {
@@ -560,14 +556,14 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReas
 	}
 
 	p.pending.captureAddedHashes(&p.promoted)
-	if err := addTxs(p.lastSeenBlock.Load(), nil, p._cache, viewID, coreTx, p.senders, newTxs, p.protocolBaseFee.Load(), p.currentBaseFee.Load(), p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if err := addTxs(p.lastSeenBlock.Load(), nil, p._stateCache, viewID, coreTx, p.senders, newTxs, p.protocolBaseFee.Load(), p.currentBaseFee.Load(), p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return nil, err
 	}
 	p.pending.added = nil
 
 	if p.promoted.Len() > 0 {
 		select {
-		case p.newTxs <- common.Copy(p.promoted):
+		case p.newPendingTxs <- common.Copy(p.promoted):
 		default:
 		}
 	}
@@ -584,13 +580,13 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReas
 func (p *TxPool) coreDB() kv.RoDB {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	return p._coreDB
+	return p._chainDB
 }
 
 func (p *TxPool) cache() kvcache.Cache {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	return p._cache
+	return p._stateCache
 }
 func addTxs(blockNum uint64, stateChanges *remote.StateChangeBatch, cache kvcache.Cache, viewID kvcache.ViewID, coreTx kv.Tx, senders *sendersBatch, newTxs TxSlots, protocolBaseFee, currentBaseFee uint64, pending *PendingPool, baseFee, queued *SubPool, byNonce *ByNonce, byHash map[string]*metaTx, add func(*metaTx) bool, discard func(*metaTx, DiscardReason)) error {
 	if ASSERT {
@@ -1109,7 +1105,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	}
 	p.lastSeenBlock.Store(lastSeenBlock)
 
-	viewID, err := p._cache.View(ctx, coreTx)
+	viewID, err := p._stateCache.View(ctx, coreTx)
 	if err != nil {
 		return err
 	}
@@ -1179,7 +1175,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if err := addTxs(p.lastSeenBlock.Load(), nil, p._cache, viewID, coreTx, p.senders, txs, protocolBaseFee, currentBaseFee, p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if err := addTxs(p.lastSeenBlock.Load(), nil, p._stateCache, viewID, coreTx, p.senders, txs, protocolBaseFee, currentBaseFee, p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
 	p.currentBaseFee.Store(currentBaseFee)
@@ -1268,7 +1264,7 @@ func (p *TxPool) logStats() {
 		"baseFee", p.baseFee.Len(),
 		"queued", p.queued.Len(),
 	}
-	cacheKeys := p._cache.Len()
+	cacheKeys := p._stateCache.Len()
 	if cacheKeys > 0 {
 		ctx = append(ctx, "cache_keys", cacheKeys)
 	}
@@ -1386,7 +1382,6 @@ func (sc *sendersBatch) id(addr string) (uint64, bool) {
 	return id, ok
 }
 func (sc *sendersBatch) info(cache kvcache.Cache, viewID kvcache.ViewID, coreTx kv.Tx, id uint64) (nonce uint64, balance uint256.Int, err error) {
-	//cacheTotalCounter.Inc()
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
 		panic("must not happen")

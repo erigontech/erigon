@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -86,9 +87,10 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 		data := EncodeHashes(pending, nil)
 		var req66, req65 *sentry.OutboundMessageData
 		for _, sentryClient := range f.sentryClients {
-			//if !sentryClient.Ready() {
-			//	continue
-			//}
+			fmt.Printf("ready: %t\n", sentryClient.Ready())
+			if !sentryClient.Ready() {
+				continue
+			}
 			switch sentryClient.Protocol() {
 			case direct.ETH65:
 				if req65 == nil {
@@ -142,9 +144,9 @@ func (f *Send) BroadcastRemotePooledTxs(txs Hashes) {
 		data := EncodeHashes(pending, nil)
 		var req66, req65 *sentry.SendMessageToRandomPeersRequest
 		for _, sentryClient := range f.sentryClients {
-			//if !sentryClient.Ready() {
-			//	continue
-			//}
+			if !sentryClient.Ready() {
+				continue
+			}
 
 			switch sentryClient.Protocol() {
 			case direct.ETH65:
@@ -199,9 +201,9 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 
 		data := EncodeHashes(pending, nil)
 		for _, sentryClient := range f.sentryClients {
-			//if !sentryClient.Ready() {
-			//	continue
-			//}
+			if !sentryClient.Ready() {
+				continue
+			}
 
 			for _, peer := range peers {
 				switch sentryClient.Protocol() {
