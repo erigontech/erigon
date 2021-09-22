@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -1203,6 +1204,9 @@ func mphf(chaindata string, block uint64) error {
 		return err
 	}
 	count := binary.BigEndian.Uint64(countBuf[:])
+	if block > 1 {
+		count = block
+	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(count),
 		BucketSize: 2000,
@@ -1229,6 +1233,9 @@ func mphf(chaindata string, block uint64) error {
 			}
 		}
 		i++
+		if i == int(count*2) {
+			break
+		}
 	}
 	if !errors.Is(e, io.EOF) {
 		return e
@@ -1267,10 +1274,11 @@ func mphf(chaindata string, block uint64) error {
 				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, idx)
 			}
 			bits[idx>>6] |= mask
-			i++
-
 		}
 		i++
+		if i == int(count*2) {
+			break
+		}
 	}
 	log.Info("Average lookup time", "per key", time.Duration(uint64(lookupTime)/count))
 	return nil
@@ -1382,12 +1390,13 @@ func processSuperstring(superstring []byte, dictCollector *etl.Collector) error 
 		if repeats > 1 {
 			score := uint64(repeats * int(l-1))
 			// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
-			dictKey := make([]byte, 8+l)
-			binary.BigEndian.PutUint64(dictKey, score)
+			dictKey := make([]byte, l)
 			for s := 0; s < l; s++ {
-				dictKey[8+s] = superstring[(filtered[j]+s)*2+1]
+				dictKey[s] = superstring[(filtered[j]+s)*2+1]
 			}
-			if err = dictCollector.Collect(dictKey, []byte{}); err != nil {
+			var dictVal [8]byte
+			binary.BigEndian.PutUint64(dictVal[:], score)
+			if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
 				return err
 			}
 		}
@@ -1395,25 +1404,59 @@ func processSuperstring(superstring []byte, dictCollector *etl.Collector) error 
 	return nil
 }
 
+type DictionaryItem struct {
+	word  []byte
+	score uint64
+}
+
 type DictionaryBuilder struct {
+	limit         int
 	lastWord      []byte
 	lastWordScore uint64
+	items         []DictionaryItem
+}
+
+func (db DictionaryBuilder) Len() int {
+	return len(db.items)
+}
+
+func (db DictionaryBuilder) Less(i, j int) bool {
+	return db.items[i].score < db.items[j].score
+}
+
+func (db *DictionaryBuilder) Swap(i, j int) {
+	db.items[i], db.items[j] = db.items[j], db.items[i]
+}
+
+func (db *DictionaryBuilder) Push(x interface{}) {
+	db.items = append(db.items, x.(DictionaryItem))
+}
+
+func (db *DictionaryBuilder) Pop() interface{} {
+	old := db.items
+	n := len(old)
+	x := old[n-1]
+	db.items = old[0 : n-1]
+	return x
 }
 
 func (db *DictionaryBuilder) processWord(word []byte, score uint64) {
-	fmt.Printf("%d %x\n", score, word)
+	heap.Push(db, DictionaryItem{word: word, score: score})
+	if db.Len() > db.limit {
+		// Remove the element with smallest score
+		heap.Pop(db)
+	}
 }
 
 func (db *DictionaryBuilder) compressLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	score := binary.BigEndian.Uint64(k)
-	word := k[8:]
-	if bytes.Equal(word, db.lastWord) {
+	score := binary.BigEndian.Uint64(v)
+	if bytes.Equal(k, db.lastWord) {
 		db.lastWordScore += score
 	} else {
 		if db.lastWord != nil {
 			db.processWord(db.lastWord, db.lastWordScore)
 		}
-		db.lastWord = word
+		db.lastWord = common.CopyBytes(k)
 		db.lastWordScore = score
 	}
 	return nil
@@ -1427,7 +1470,7 @@ func (db DictionaryBuilder) finish() {
 
 const CompressLogPrefix = "compress"
 
-func compress(chaindata string) error {
+func compress(chaindata string, block uint64) error {
 	// Create a file to compress if it does not exist already
 	statefile := "statedump.dat"
 	if _, err := os.Stat(statefile); err != nil {
@@ -1475,11 +1518,14 @@ func compress(chaindata string) error {
 			superstring = append(superstring, 0, 0)
 		}
 		i++
+		if i == int(block*2) {
+			break
+		}
 		if i%2_000_000 == 0 {
 			log.Info("Dictionary preprocessing", "key/value pairs", i/2)
 		}
 	}
-	if !errors.Is(e, io.EOF) {
+	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
 	if len(superstring) > 0 {
@@ -1490,11 +1536,23 @@ func compress(chaindata string) error {
 	f.Close()
 	// Aggregate the dictionary and build Aho-Corassick matcher
 	defer dictCollector.Close(CompressLogPrefix)
-	var db DictionaryBuilder
+	db := &DictionaryBuilder{limit: 1_000_000} // Only collect 1m words with highest scores
 	if err = dictCollector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, db.compressLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	db.finish()
+	f, err = os.Create("dictionary.txt")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	// Sort dictionary builder
+	sort.Sort(db)
+	for _, item := range db.items {
+		fmt.Fprintf(w, "%d %x\n", item.score, item.word)
+	}
 	return nil
 }
 
@@ -2738,7 +2796,7 @@ func main() {
 	case "devTx":
 		err = devTx(*chaindata)
 	case "compress":
-		err = compress(*chaindata)
+		err = compress(*chaindata, uint64(*block))
 	}
 
 	if err != nil {
