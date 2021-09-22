@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/wcharczuk/go-chart/v2"
 
+	ahocorasick "github.com/BobuSumisu/aho-corasick"
 	"github.com/flanglet/kanzi-go/transform"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
@@ -1237,7 +1238,7 @@ func mphf(chaindata string, block uint64) error {
 			break
 		}
 	}
-	if !errors.Is(e, io.EOF) {
+	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
 	start := time.Now()
@@ -1257,7 +1258,7 @@ func mphf(chaindata string, block uint64) error {
 	l, e = r.ReadByte()
 	i = 0
 	var lookupTime time.Duration
-	for ; e == nil; l, err = r.ReadByte() {
+	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
@@ -1280,12 +1281,15 @@ func mphf(chaindata string, block uint64) error {
 			break
 		}
 	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
+	}
 	log.Info("Average lookup time", "per key", time.Duration(uint64(lookupTime)/count))
 	return nil
 }
 
 func processSuperstring(superstring []byte, dictCollector *etl.Collector) error {
-	//log.Info("Superstring", "len", len(superstring))
+	log.Info("Superstring", "len", len(superstring))
 	sa := make([]int32, len(superstring))
 	divsufsort, err := transform.NewDivSufSort()
 	if err != nil {
@@ -1353,7 +1357,7 @@ func processSuperstring(superstring []byte, dictCollector *etl.Collector) error 
 			prefixLen++
 		}
 		if prefixLen != int(lcp[i]) {
-			return fmt.Errorf("prefixLen %d != int(lcp[i]) %d\n", prefixLen, lcp[i])
+			return fmt.Errorf("prefixLen %d != int(lcp[i]) %d", prefixLen, lcp[i])
 		}
 	}
 	//log.Info("LCP array checked")
@@ -1365,7 +1369,7 @@ func processSuperstring(superstring []byte, dictCollector *etl.Collector) error 
 			continue
 		}
 		l := int(lcp[i]) // Length of potential dictionary word
-		if l < 3 {
+		if l < 5 {
 			continue
 		}
 		// Go back
@@ -1421,6 +1425,9 @@ func (db DictionaryBuilder) Len() int {
 }
 
 func (db DictionaryBuilder) Less(i, j int) bool {
+	if db.items[i].score == db.items[j].score {
+		return bytes.Compare(db.items[i].word, db.items[j].word) < 0
+	}
 	return db.items[i].score < db.items[j].score
 }
 
@@ -1468,6 +1475,21 @@ func (db DictionaryBuilder) finish() {
 	}
 }
 
+// MatchSorter is helper type to sort matches by their end position
+type MatchSorter []*ahocorasick.Match
+
+func (ms MatchSorter) Len() int {
+	return len(ms)
+}
+
+func (ms MatchSorter) Less(i, j int) bool {
+	return int(ms[i].Pos())+len(ms[i].Match()) < int(ms[j].Pos())+len(ms[j].Match())
+}
+
+func (ms *MatchSorter) Swap(i, j int) {
+	(*ms)[i], (*ms)[j] = (*ms)[j], (*ms)[i]
+}
+
 const CompressLogPrefix = "compress"
 
 func compress(chaindata string, block uint64) error {
@@ -1494,18 +1516,25 @@ func compress(chaindata string, block uint64) error {
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
 	dictCollector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	// Read number of keys and discard
-	if _, err = io.CopyN(io.Discard, r, 8); err != nil {
+	// Read number of keys
+	var countBuf [8]byte
+	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
 		return err
+	}
+	count := binary.BigEndian.Uint64(countBuf[:])
+	var stride int
+	if block > 1 {
+		stride = int(count) / int(block)
 	}
 	var buf [256]byte
 	l, e := r.ReadByte()
 	i := 0
-	for ; e == nil; l, err = r.ReadByte() {
+	p := 0
+	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		if l > 2 {
+		if (stride == 0 || (i/2)%stride == 0) && l > 4 {
 			if len(superstring)+2*int(l)+2 > superstringLimit {
 				if e = processSuperstring(superstring, dictCollector); e != nil {
 					return e
@@ -1516,13 +1545,11 @@ func compress(chaindata string, block uint64) error {
 				superstring = append(superstring, 1, a)
 			}
 			superstring = append(superstring, 0, 0)
+			p++
 		}
 		i++
-		if i == int(block*2) {
-			break
-		}
-		if i%2_000_000 == 0 {
-			log.Info("Dictionary preprocessing", "key/value pairs", i/2)
+		if p%2_000_000 == 0 {
+			log.Info("Dictionary preprocessing", "key/value pairs", p/2)
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
@@ -1533,7 +1560,6 @@ func compress(chaindata string, block uint64) error {
 			return e
 		}
 	}
-	f.Close()
 	// Aggregate the dictionary and build Aho-Corassick matcher
 	defer dictCollector.Close(CompressLogPrefix)
 	db := &DictionaryBuilder{limit: 1_000_000} // Only collect 1m words with highest scores
@@ -1541,18 +1567,67 @@ func compress(chaindata string, block uint64) error {
 		return err
 	}
 	db.finish()
-	f, err = os.Create("dictionary.txt")
+	var df *os.File
+	df, err = os.Create("dictionary.txt")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
+	defer df.Close()
+	w := bufio.NewWriter(df)
 	defer w.Flush()
 	// Sort dictionary builder
 	sort.Sort(db)
+	trieBuilder := ahocorasick.NewTrieBuilder()
 	for _, item := range db.items {
 		fmt.Fprintf(w, "%d %x\n", item.score, item.word)
+		trieBuilder.AddPattern(item.word)
 	}
+	trie := trieBuilder.Build()
+	if _, err = f.Seek(8, 0); err != nil {
+		return err
+	}
+	r = bufio.NewReader(f)
+	l, e = r.ReadByte()
+	i = 0
+	compression := 0
+	// For counting how many times each word would be used for replacement
+	replacements := make([]int, len(db.items))
+	for ; e == nil; l, e = r.ReadByte() {
+		if _, e = io.ReadFull(r, buf[:l]); e != nil {
+			return e
+		}
+		matches := MatchSorter(trie.Match(buf[:l]))
+		if matches.Len() > 0 {
+			sort.Sort(&matches)
+			lastMatch := matches[0]
+			for j := 1; j < matches.Len(); j++ {
+				match := matches[j]
+				// check overlap with lastMatch
+				if int(match.Pos()) < int(lastMatch.Pos())+len(lastMatch.Match()) {
+					// match with the highest pattern ID (corresponds to pattern with higher score) wins
+					if match.Pattern() > lastMatch.Pattern() {
+						// Replace the last match
+						lastMatch = match
+					}
+				} else {
+					// No overlap, count lastMatch and move on
+					replacements[lastMatch.Pattern()]++
+					compression += len(lastMatch.Match()) - 4
+					lastMatch = match
+				}
+			}
+			replacements[lastMatch.Pattern()]++
+			compression += len(lastMatch.Match()) - 4
+		}
+		i++
+		if i%2_000_000 == 0 {
+			log.Info("Replacement preprocessing", "key/value pairs", i/2, "estimated saving", compression)
+		}
+	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
+	}
+	log.Info("Estimated actual saving", "bytes", compression)
 	return nil
 }
 

@@ -3,6 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.16
 
 require (
+	github.com/BobuSumisu/aho-corasick v1.0.3
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.6.0
 	github.com/VictoriaMetrics/metrics v1.18.0
