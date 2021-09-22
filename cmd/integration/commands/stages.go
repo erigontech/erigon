@@ -423,7 +423,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 				log.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
 				return nil
 			}
-			if txs.Len() == 0 || len(senders) == 0 {
+			if txs.Len() == 0 {
 				continue
 			}
 			signer := types.MakeSigner(chainConfig, i)
