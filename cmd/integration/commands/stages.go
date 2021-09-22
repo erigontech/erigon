@@ -415,7 +415,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 			}
 			withoutSenders, _ := rawdb.ReadBlockByNumber(tx, i)
 			if withoutSenders == nil {
-				continue
+				break
 			}
 			txs := withoutSenders.Transactions()
 			_, senders, _ := rawdb.ReadBlockByNumberWithSenders(tx, i)
@@ -440,6 +440,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 				log.Info("checked", "block", i)
 			}
 		}
+		return nil
 	}
 
 	if reset {
