@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"index/suffixarray"
 	"io"
 	"io/ioutil"
 	"math"
@@ -33,6 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/wcharczuk/go-chart/v2"
+
+	"github.com/flanglet/kanzi-go/transform"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -1309,13 +1310,7 @@ func kasai(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	var superstring []byte
-	f, err := os.Create("sa")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
+	var sa []int32
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.PlainState)
 		if err != nil {
@@ -1347,66 +1342,29 @@ func kasai(chaindata string, block uint64) error {
 			return e
 		}
 		log.Info("Superstring", "len", len(superstring))
-		start := time.Now()
-		index := suffixarray.New(superstring)
-		log.Info("Suffix array built", "in", time.Since(start))
-		if err = index.Write(w); err != nil {
+		sa = make([]int32, len(superstring))
+		var divsufsort *transform.DivSufSort
+		if divsufsort, err = transform.NewDivSufSort(); err != nil {
 			return err
 		}
-		index = nil // Release the index
-		w.Flush()
-		f.Close()
+		start := time.Now()
+		divsufsort.ComputeSuffixArray(superstring, sa)
+		log.Info("Suffix array built", "in", time.Since(start))
 		return nil
 	}); err != nil {
 		return err
 	}
-	var r *os.File
-	if r, err = os.Open("sa"); err != nil {
-		return err
-	}
-	defer r.Close()
-	buf := make([]byte, bufSize)
-	// read length
-	n64, err := readInt(r, buf)
-	if err != nil {
-		return err
-	}
-	if int64(int(n64)) != n64 || int(n64) < 0 {
-		return errTooBig
-	}
-	n := int(n64)
-	fmt.Printf("n = %d\n", n)
-	// Skip data
-	io.CopyN(io.Discard, r, int64(len(superstring))) // nolint:errcheck
-	var sa, saslice ints
-	sa.int32 = nil
-	sa.int64 = nil
-	if n <= maxData32 {
-		sa.int32 = make([]int32, n)
-	} else {
-		sa.int64 = make([]int64, n)
-	}
-	saslice = sa
-	for saslice.len() > 0 {
-		n, err := readSlice(r, buf, saslice)
-		if err != nil {
-			return err
-		}
-		saslice = saslice.slice(n, saslice.len())
-	}
-	log.Info("Read suffix array from file", "len", sa.len())
 	// filter out suffixes that start with odd positions
-	n = n / 2
+	n := len(sa) / 2
 	filtered := make([]int, n)
 	var j int
-	for i := 0; i < sa.len(); i++ {
-		if sa.get(i)&1 == 0 {
-			filtered[j] = int(sa.get(i) >> 1)
+	for i := 0; i < len(sa); i++ {
+		if sa[i]&1 == 0 {
+			filtered[j] = int(sa[i] >> 1)
 			j++
 		}
 	}
-	sa.int32 = nil
-	sa.int64 = nil
+	sa = nil
 	log.Info("Suffix array filtered")
 	// invert suffixes
 	inv := make([]int, n)
@@ -1494,7 +1452,7 @@ func kasai(chaindata string, block uint64) error {
 				lastK = k
 			}
 		}
-		score := repeats * int(l-1)
+		//score := repeats * int(l-1)
 		var word []byte
 		for s := 0; s < l; s++ {
 			if superstring[(filtered[j]+s)*2] != 0 {
@@ -1502,7 +1460,7 @@ func kasai(chaindata string, block uint64) error {
 			}
 		}
 		if repeats > 1 {
-			fmt.Printf("%d (%d x %d) = %x\n", score, repeats, l, word)
+			//fmt.Printf("%d (%d x %d) = %x\n", score, repeats, l, word)
 		}
 	}
 	return nil
