@@ -851,9 +851,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	var err error
 	result.From, err = tx.Sender(*signer)
 	if err != nil {
-		log.Error("sender recovery", "err", err)
-	} else {
-		log.Info("recovered", "tx", fmt.Sprintf("%x", tx.Hash()), "sender", fmt.Sprintf("%x\n", result.From))
+		log.Warn("sender recovery", "err", err)
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
