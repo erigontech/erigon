@@ -429,6 +429,9 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 					fmt.Printf("block: %d, tx: %d, not equal sender: db=%x, mem=%x\n", i, j, senders[j], from)
 				}
 			}
+			if i%10 == 0 {
+				log.Info("checked", "block", i)
+			}
 		}
 	}
 
