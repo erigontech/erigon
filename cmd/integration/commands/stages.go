@@ -433,7 +433,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 					return err
 				}
 				if !bytes.Equal(from[:], senders[j][:]) {
-					log.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", txs.Len()))
+					log.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
 				}
 			}
 			if i%10 == 0 {
