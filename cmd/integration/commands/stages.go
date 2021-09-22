@@ -420,7 +420,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 			txs := withoutSenders.Transactions()
 			_, senders, _ := rawdb.ReadBlockByNumberWithSenders(tx, i)
 			if txs.Len() != len(senders) {
-				fmt.Printf("block: %d, not equal amount of sender: db=%d, expect=%d\n", i, len(senders), txs.Len())
+				log.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
 				return nil
 			}
 			if txs.Len() == 0 || len(senders) == 0 {
@@ -433,7 +433,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 					return err
 				}
 				if !bytes.Equal(from[:], senders[j][:]) {
-					fmt.Printf("block: %d, tx: %d, not equal sender: db=%x, expect=%x\n", i, j, senders[j], from)
+					log.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", txs.Len()))
 				}
 			}
 			if i%10 == 0 {
