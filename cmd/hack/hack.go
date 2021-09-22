@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/big"
 	"os"
 	"os/signal"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -1122,19 +1122,18 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	return nil
 }
 
-func dumpState(chaindata string, block uint64) error {
+// dumpState writes the content of current state into a file with given name
+func dumpState(chaindata string, statefile string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create("statedump")
+	f, err := os.Create(statefile)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	stAccounts := 0
-	stStorage := 0
-	var rs *recsplit.RecSplit
+	i := 0
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.PlainState)
 		if err != nil {
@@ -1144,216 +1143,149 @@ func dumpState(chaindata string, block uint64) error {
 		if count, err = c.Count(); err != nil {
 			return err
 		}
-		if block > 1 {
-			count = block
-		}
-		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:   int(count),
-			BucketSize: 2000,
-			Salt:       0,
-			LeafSize:   8,
-			TmpDir:     "",
-			StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
-				0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-				0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
-		}); err != nil {
+		// Write out number of key/value pairs first
+		var countBytes [8]byte
+		binary.BigEndian.PutUint64(countBytes[:], count)
+		if _, err = w.Write(countBytes[:]); err != nil {
 			return err
 		}
-		k, _, e := c.First()
-		i := 0
-		for ; k != nil && e == nil; k, _, e = c.Next() {
-			if err := rs.AddKey(k); err != nil {
+		k, v, e := c.First()
+		for ; k != nil && e == nil; k, v, e = c.Next() {
+			if err = w.WriteByte(byte(len(k))); err != nil {
 				return err
 			}
-			i++
-			if i == int(count) {
-				break
+			if _, err = w.Write(k); err != nil {
+				return err
 			}
+			if err = w.WriteByte(byte(len(v))); err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				if _, err = w.Write(v); err != nil {
+					return err
+				}
+			}
+			i++
 			if i%1_000_000 == 0 {
-				log.Info("Added", "keys", i)
+				log.Info("Written into file", "key/value pairs", i)
 			}
 		}
 		if e != nil {
 			return e
 		}
-		start := time.Now()
-		log.Info("Building recsplit...")
-		if err = rs.Build(); err != nil {
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func mphf(chaindata string, block uint64) error {
+	// Create a file to compress if it does not exist already
+	statefile := "statedump.dat"
+	if _, err := os.Stat(statefile); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("not sure if statedump.dat exists: %v", err)
+		}
+		if err = dumpState(chaindata, statefile); err != nil {
 			return err
 		}
-		s1, s2 := rs.Stats()
-		log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
-		log.Info("Testing bijection")
-		bitCount := (count + 63) / 64
-		bits := make([]uint64, bitCount)
-		k, _, e = c.First()
-		i = 0
-		var collisionMap map[int]string
-		if count < 1000000 {
-			collisionMap = make(map[int]string)
+	}
+	var rs *recsplit.RecSplit
+	f, err := os.Open(statefile)
+	if err != nil {
+		return err
+	}
+	r := bufio.NewReader(f)
+	defer f.Close()
+	var countBuf [8]byte
+	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
+		return err
+	}
+	count := binary.BigEndian.Uint64(countBuf[:])
+	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   int(count),
+		BucketSize: 2000,
+		Salt:       0,
+		LeafSize:   8,
+		TmpDir:     "",
+		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
+			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
+	}); err != nil {
+		return err
+	}
+	var buf [256]byte
+	l, e := r.ReadByte()
+	i := 0
+	for ; e == nil; l, err = r.ReadByte() {
+		if _, e = io.ReadFull(r, buf[:l]); e != nil {
+			return e
 		}
-		var lookupTime time.Duration
-		for ; k != nil && e == nil; k, _, e = c.Next() {
+		if i%1 == 0 {
+			// It is key, we skip the values here
+			if err := rs.AddKey(buf[:l]); err != nil {
+				return err
+			}
+		}
+		i++
+	}
+	if !errors.Is(e, io.EOF) {
+		return e
+	}
+	start := time.Now()
+	log.Info("Building recsplit...")
+	if err = rs.Build(); err != nil {
+		return err
+	}
+	s1, s2 := rs.Stats()
+	log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
+	log.Info("Testing bijection")
+	bitCount := (count + 63) / 64
+	bits := make([]uint64, bitCount)
+	if _, err = f.Seek(8, 0); err != nil {
+		return err
+	}
+	r = bufio.NewReader(f)
+	l, e = r.ReadByte()
+	i = 0
+	var lookupTime time.Duration
+	for ; e == nil; l, err = r.ReadByte() {
+		if _, e = io.ReadFull(r, buf[:l]); e != nil {
+			return e
+		}
+		if i%1 == 0 {
+			// It is key, we skip the values here
 			start := time.Now()
-			idx := rs.Lookup(k, false /* trace */)
+			idx := rs.Lookup(buf[:l], false /* trace */)
 			lookupTime += time.Since(start)
 			if idx >= int(count) {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
 			}
 			mask := uint64(1) << (idx & 63)
 			if bits[idx>>6]&mask != 0 {
-				if collisionMap != nil {
-					fmt.Printf("Key %x collided with key %x\n", k, collisionMap[idx])
-				}
-				rs.Lookup([]byte(collisionMap[idx]), true)
-				rs.Lookup(k, true)
 				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, idx)
-			}
-			if collisionMap != nil {
-				collisionMap[idx] = string(k)
 			}
 			bits[idx>>6] |= mask
 			i++
-			if i == int(count) {
-				break
-			}
+
 		}
-		log.Info("Average lookup time", "per key", time.Duration(uint64(lookupTime)/count))
-		return e
-	}); err != nil {
-		return err
+		i++
 	}
-	fmt.Printf("stAccounts = %d, stStorage = %d\n", stAccounts, stStorage)
+	log.Info("Average lookup time", "per key", time.Duration(uint64(lookupTime)/count))
 	return nil
 }
 
-const bufSize = 16 << 10
-
-// readInt reads an int x from r using buf to buffer the read and returns x.
-func readInt(r io.Reader, buf []byte) (int64, error) {
-	_, err := io.ReadFull(r, buf[0:binary.MaxVarintLen64]) // ok to continue with error
-	x, _ := binary.Varint(buf)
-	return x, err
-}
-
-var errTooBig = errors.New("suffixarray: data too large")
-
-// An ints is either an []int32 or an []int64.
-// That is, one of them is empty, and one is the real data.
-// The int64 form is used when len(data) > maxData32
-type ints struct {
-	int32 []int32
-	int64 []int64
-}
-
-func (a *ints) len() int {
-	return len(a.int32) + len(a.int64)
-}
-
-func (a *ints) get(i int) int64 {
-	if a.int32 != nil {
-		return int64(a.int32[i])
-	}
-	return a.int64[i]
-}
-
-func (a *ints) set(i int, v int64) {
-	if a.int32 != nil {
-		a.int32[i] = int32(v)
-	} else {
-		a.int64[i] = v
-	}
-}
-
-func (a *ints) slice(i, j int) ints {
-	if a.int32 != nil {
-		return ints{a.int32[i:j], nil}
-	}
-	return ints{nil, a.int64[i:j]}
-}
-
-// readSlice reads data[:n] from r and returns n.
-// It uses buf to buffer the read.
-func readSlice(r io.Reader, buf []byte, data ints) (n int, err error) {
-	// read buffer size
-	var size64 int64
-	size64, err = readInt(r, buf)
+func processSuperstring(superstring []byte, dictCollector *etl.Collector) error {
+	//log.Info("Superstring", "len", len(superstring))
+	sa := make([]int32, len(superstring))
+	divsufsort, err := transform.NewDivSufSort()
 	if err != nil {
-		return
-	}
-	if int64(int(size64)) != size64 || int(size64) < 0 {
-		// We never write chunks this big anyway.
-		return 0, errTooBig
-	}
-	size := int(size64)
-
-	// read buffer w/o the size
-	if _, err = io.ReadFull(r, buf[binary.MaxVarintLen64:size]); err != nil {
-		return
-	}
-
-	// decode as many elements as present in buf
-	for p := binary.MaxVarintLen64; p < size; n++ {
-		x, w := binary.Uvarint(buf[p:])
-		data.set(n, int64(x))
-		p += w
-	}
-
-	return
-}
-
-var maxData32 int = realMaxData32
-
-const realMaxData32 = math.MaxInt32
-
-func kasai(chaindata string, block uint64) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	var superstring []byte
-	var sa []int32
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainState)
-		if err != nil {
-			return err
-		}
-		var count uint64
-		if count, err = c.Count(); err != nil {
-			return err
-		}
-		if block > 1 {
-			count = block
-		}
-		k, _, e := c.First()
-		i := 0
-		for ; k != nil && e == nil; k, _, e = c.Next() {
-			for _, a := range k {
-				superstring = append(superstring, 1, a)
-			}
-			superstring = append(superstring, 0, 0)
-			i++
-			if i == int(count) {
-				break
-			}
-			if i%1_000_000 == 0 {
-				log.Info("Added", "keys", i)
-			}
-		}
-		if e != nil {
-			return e
-		}
-		log.Info("Superstring", "len", len(superstring))
-		sa = make([]int32, len(superstring))
-		var divsufsort *transform.DivSufSort
-		if divsufsort, err = transform.NewDivSufSort(); err != nil {
-			return err
-		}
-		start := time.Now()
-		divsufsort.ComputeSuffixArray(superstring, sa)
-		log.Info("Suffix array built", "in", time.Since(start))
-		return nil
-	}); err != nil {
 		return err
 	}
+	//start := time.Now()
+	divsufsort.ComputeSuffixArray(superstring, sa)
+	//log.Info("Suffix array built", "in", time.Since(start))
 	// filter out suffixes that start with odd positions
 	n := len(sa) / 2
 	filtered := make([]int, n)
@@ -1365,13 +1297,13 @@ func kasai(chaindata string, block uint64) error {
 		}
 	}
 	sa = nil
-	log.Info("Suffix array filtered")
+	//log.Info("Suffix array filtered")
 	// invert suffixes
 	inv := make([]int, n)
 	for i := 0; i < n; i++ {
 		inv[filtered[i]] = i
 	}
-	log.Info("Inverted array done")
+	//log.Info("Inverted array done")
 	lcp := make([]byte, n)
 	var k int
 	// Process all suffixes one by one starting from
@@ -1403,11 +1335,7 @@ func kasai(chaindata string, block uint64) error {
 			k--
 		}
 	}
-	log.Info("Kasai algorithm finished")
-	// Verify the algorithm worked correctly
-	if block < 100 {
-		fmt.Printf("lcp = %d\n", lcp)
-	}
+	//log.Info("Kasai algorithm finished")
 	// Checking LCP array
 	for i := 0; i < n-1; i++ {
 		var prefixLen int
@@ -1417,11 +1345,10 @@ func kasai(chaindata string, block uint64) error {
 			prefixLen++
 		}
 		if prefixLen != int(lcp[i]) {
-			fmt.Printf("prefixLen %d != int(lcp[i]) %d\n", prefixLen, lcp[i])
-			break
+			return fmt.Errorf("prefixLen %d != int(lcp[i]) %d\n", prefixLen, lcp[i])
 		}
 	}
-	log.Info("LCP array checked")
+	//log.Info("LCP array checked")
 	b := make([]int, 1000) // Sorting buffer
 	// Walk over LCP array and compute the scores of the strings
 	for i := 0; i < n-1; i++ {
@@ -1430,7 +1357,7 @@ func kasai(chaindata string, block uint64) error {
 			continue
 		}
 		l := int(lcp[i]) // Length of potential dictionary word
-		if l == 1 {
+		if l < 3 {
 			continue
 		}
 		// Go back
@@ -1452,17 +1379,122 @@ func kasai(chaindata string, block uint64) error {
 				lastK = k
 			}
 		}
-		//score := repeats * int(l-1)
-		var word []byte
-		for s := 0; s < l; s++ {
-			if superstring[(filtered[j]+s)*2] != 0 {
-				word = append(word, superstring[(filtered[j]+s)*2+1])
+		if repeats > 1 {
+			score := uint64(repeats * int(l-1))
+			// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
+			dictKey := make([]byte, 8+l)
+			binary.BigEndian.PutUint64(dictKey, score)
+			for s := 0; s < l; s++ {
+				dictKey[8+s] = superstring[(filtered[j]+s)*2+1]
+			}
+			if err = dictCollector.Collect(dictKey, []byte{}); err != nil {
+				return err
 			}
 		}
-		if repeats > 1 {
-			//fmt.Printf("%d (%d x %d) = %x\n", score, repeats, l, word)
+	}
+	return nil
+}
+
+type DictionaryBuilder struct {
+	lastWord      []byte
+	lastWordScore uint64
+}
+
+func (db *DictionaryBuilder) processWord(word []byte, score uint64) {
+	fmt.Printf("%d %x\n", score, word)
+}
+
+func (db *DictionaryBuilder) compressLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	score := binary.BigEndian.Uint64(k)
+	word := k[8:]
+	if bytes.Equal(word, db.lastWord) {
+		db.lastWordScore += score
+	} else {
+		if db.lastWord != nil {
+			db.processWord(db.lastWord, db.lastWordScore)
+		}
+		db.lastWord = word
+		db.lastWordScore = score
+	}
+	return nil
+}
+
+func (db DictionaryBuilder) finish() {
+	if db.lastWord != nil {
+		db.processWord(db.lastWord, db.lastWordScore)
+	}
+}
+
+const CompressLogPrefix = "compress"
+
+func compress(chaindata string) error {
+	// Create a file to compress if it does not exist already
+	statefile := "statedump.dat"
+	if _, err := os.Stat(statefile); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("not sure if statedump.dat exists: %v", err)
+		}
+		if err = dumpState(chaindata, statefile); err != nil {
+			return err
 		}
 	}
+	var superstring []byte
+	const superstringLimit = 64 * 1024 * 1024
+	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
+	// We only consider values with length > 2, because smaller values are not compressible without going into bits
+	f, err := os.Open(statefile)
+	if err != nil {
+		return err
+	}
+	r := bufio.NewReader(f)
+	defer f.Close()
+	// Collector for dictionary words (sorted by their score)
+	tmpDir := ""
+	dictCollector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	// Read number of keys and discard
+	if _, err = io.CopyN(io.Discard, r, 8); err != nil {
+		return err
+	}
+	var buf [256]byte
+	l, e := r.ReadByte()
+	i := 0
+	for ; e == nil; l, err = r.ReadByte() {
+		if _, e = io.ReadFull(r, buf[:l]); e != nil {
+			return e
+		}
+		if l > 2 {
+			if len(superstring)+2*int(l)+2 > superstringLimit {
+				if e = processSuperstring(superstring, dictCollector); e != nil {
+					return e
+				}
+				superstring = superstring[:0]
+			}
+			for _, a := range buf[:l] {
+				superstring = append(superstring, 1, a)
+			}
+			superstring = append(superstring, 0, 0)
+		}
+		i++
+		if i%2_000_000 == 0 {
+			log.Info("Dictionary preprocessing", "key/value pairs", i/2)
+		}
+	}
+	if !errors.Is(e, io.EOF) {
+		return e
+	}
+	if len(superstring) > 0 {
+		if e = processSuperstring(superstring, dictCollector); e != nil {
+			return e
+		}
+	}
+	f.Close()
+	// Aggregate the dictionary and build Aho-Corassick matcher
+	defer dictCollector.Close(CompressLogPrefix)
+	var db DictionaryBuilder
+	if err = dictCollector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, db.compressLoadFunc, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	db.finish()
 	return nil
 }
 
@@ -2670,8 +2702,8 @@ func main() {
 	case "snapSizes":
 		err = snapSizes(*chaindata)
 
-	case "dumpState":
-		err = dumpState(*chaindata, uint64(*block))
+	case "mphf":
+		err = mphf(*chaindata, uint64(*block))
 
 	case "readCallTraces":
 		err = readCallTraces(*chaindata, uint64(*block))
@@ -2705,8 +2737,8 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
-	case "kasai":
-		err = kasai(*chaindata, uint64(*block))
+	case "compress":
+		err = compress(*chaindata)
 	}
 
 	if err != nil {
