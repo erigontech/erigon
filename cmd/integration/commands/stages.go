@@ -419,7 +419,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 			}
 			txs := withoutSenders.Transactions()
 			_, senders, _ := rawdb.ReadBlockByNumberWithSenders(tx, i)
-			if txs.Len() == 0 {
+			if txs.Len() != len(senders) {
+				fmt.Printf("block: %d, not equal amount of sender: db=%d, expect=%d\n", i, len(senders), txs.Len())
+				return nil
+			}
+			if txs.Len() == 0 || len(senders) == 0 {
 				continue
 			}
 			signer := types.MakeSigner(chainConfig, i)
@@ -429,7 +433,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 					return err
 				}
 				if !bytes.Equal(from[:], senders[j][:]) {
-					fmt.Printf("block: %d, tx: %d, not equal sender: db=%x, mem=%x\n", i, j, senders[j], from)
+					fmt.Printf("block: %d, tx: %d, not equal sender: db=%x, expect=%x\n", i, j, senders[j], from)
 				}
 			}
 			if i%10 == 0 {
