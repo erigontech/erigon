@@ -408,9 +408,8 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	defer tx.Rollback()
 
 	if integritySlow {
-		head := rawdb.ReadCurrentBlockNumber(tx)
 		secp256k1.ContextForThread(1)
-		for i := *head; i > 0; i-- {
+		for i := block; ; i++ {
 			if err := common2.Stopped(ctx.Done()); err != nil {
 				return err
 			}
