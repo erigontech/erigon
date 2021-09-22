@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -410,6 +411,9 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 		head := rawdb.ReadCurrentBlockNumber(tx)
 		secp256k1.ContextForThread(1)
 		for i := *head; i > 0; i-- {
+			if err := common2.Stopped(ctx.Done()); err != nil {
+				return err
+			}
 			withoutSenders, _ := rawdb.ReadBlockByNumber(tx, i)
 			if withoutSenders == nil {
 				continue
