@@ -277,7 +277,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.Bool(StateStreamFlag.Name, false, StateStreamFlag.Usage); v != nil {
 		cfg.StateStream = *v
 	}
-	fmt.Printf("1\n")
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
