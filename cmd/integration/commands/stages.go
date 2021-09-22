@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path"
@@ -16,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -30,6 +33,7 @@ import (
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 )
 
@@ -262,6 +266,7 @@ func init() {
 	withChain(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
+	withIntegrityChecks(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -400,6 +405,32 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	if integritySlow {
+		head := rawdb.ReadCurrentBlockNumber(tx)
+		secp256k1.ContextForThread(1)
+		for i := *head; i > 0; i-- {
+			withoutSenders, _ := rawdb.ReadBlockByNumber(tx, i)
+			if withoutSenders == nil {
+				continue
+			}
+			txs := withoutSenders.Transactions()
+			_, senders, _ := rawdb.ReadBlockByNumberWithSenders(tx, i)
+			if txs.Len() == 0 {
+				continue
+			}
+			signer := types.MakeSigner(chainConfig, i)
+			for j := 0; j < txs.Len(); j++ {
+				from, err := signer.Sender(txs[j])
+				if err != nil {
+					return err
+				}
+				if !bytes.Equal(from[:], senders[j][:]) {
+					fmt.Printf("block: %d, tx: %d, not equal sender: db=%x, mem=%x\n", i, j, senders[j], from)
+				}
+			}
+		}
+	}
 
 	if reset {
 		err = resetSenders(tx)
