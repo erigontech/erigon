@@ -848,7 +848,13 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		}
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
-	result.From, _ = tx.Sender(*signer)
+	var err error
+	result.From, err = tx.Sender(*signer)
+	if err != nil {
+		log.Error("sender recovery", "err", err)
+	} else {
+		log.Info("recovered", "tx", fmt.Sprintf("%x", tx.Hash()), "sender", fmt.Sprintf("%x\n", result.From))
+	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))

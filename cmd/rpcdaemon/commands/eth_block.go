@@ -215,7 +215,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	additionalFields := make(map[string]interface{})
 
-	block, _, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	block, err := rawdb.ReadBlockByHash(tx, hash)
 	if err != nil {
 		return nil, err
 	}
