@@ -6,7 +6,7 @@ Has 2 modes: internal and external
 
 ## Internal mode
 
-Works inside Erigon: add `--state.stream --txpool.v2` flags to Erigon, and `--txpool.v2` flag to RPCDaemon
+Works inside Erigon: add `--txpool.v2` flags to Erigon, and `--txpool.v2` flag to RPCDaemon
 
 ## External mode
 

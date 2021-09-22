@@ -180,7 +180,7 @@ Erigon uses a rearchitected full sync algorithm from
 It uses the same network primitives and is compatible with regular go-ethereum nodes that are using full sync, you do
 not need any special sync capabilities for Erigon to sync.
 
-When reimagining the full sync, we focused on batching data together and minimize DB overwrites. That makes it possible
+When reimagining the full sync, with focus on batching data together and minimize DB overwrites. That makes it possible
 to sync Ethereum mainnet in under 2 days if you have a fast enough network connection and an SSD drive.
 
 Examples of stages are:
