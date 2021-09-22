@@ -199,7 +199,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
-	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
+	cfg.StateStream = cfg.TxPool.V2 || ctx.GlobalBool(StateStreamFlag.Name)
 	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
 
 	if ctx.GlobalString(SyncLoopThrottleFlag.Name) != "" {

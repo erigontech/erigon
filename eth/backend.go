@@ -479,35 +479,37 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 		// start pool on non-mainnet immediately
 		if backend.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !backend.config.TxPool.Disable {
+			var execution uint64
+			var hh *types.Header
 			if err := chainKv.View(ctx, func(tx kv.Tx) error {
-				execution, _ := stages.GetStageProgress(tx, stages.Execution)
-				hh := rawdb.ReadCurrentHeader(tx)
-				tx.Rollback()
-				if hh == nil {
-					return nil
+				execution, err = stages.GetStageProgress(tx, stages.Execution)
+				if err != nil {
+					return err
 				}
-				if backend.config.TxPool.V2 {
-					if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-						var baseFee uint64
-						if hh.BaseFee != nil {
-							baseFee = hh.BaseFee.Uint64()
-						}
-						return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-							DatabaseViewID: tx.ViewID(), ChangeBatch: []*remote.StateChange{
-								{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()), ProtocolBaseFee: baseFee},
-							},
-						}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
-					}); err != nil {
-						return err
-					}
-				} else {
-					if err := backend.txPool.Start(hh.GasLimit, execution); err != nil {
-						return err
-					}
-				}
+				hh = rawdb.ReadCurrentHeader(tx)
 				return nil
 			}); err != nil {
 				return nil, err
+			}
+
+			if backend.config.TxPool.V2 {
+				if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+					var baseFee uint64
+					if hh.BaseFee != nil {
+						baseFee = hh.BaseFee.Uint64()
+					}
+					return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
+						DatabaseViewID: tx.ViewID(), ChangeBatch: []*remote.StateChange{
+							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()), ProtocolBaseFee: baseFee},
+						},
+					}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
+				}); err != nil {
+					return nil, err
+				}
+			} else {
+				if err := backend.txPool.Start(hh.GasLimit, execution); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

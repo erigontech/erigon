@@ -6,7 +6,7 @@ Has 2 modes: internal and external
 
 ## Internal mode
 
-Works inside Erigon: add `--state.stream --txpool.v2` flags to Erigon, and `--txpool.v2` flag to RPCDaemon
+Works inside Erigon: add `--txpool.v2` flags to Erigon, and `--txpool.v2` flag to RPCDaemon
 
 ## External mode
 
@@ -45,10 +45,10 @@ Will add this part soon [tbd]
 [] Add cli options to manage pool limits
 [] Add way for simple introspection - where is tx and why
 [x] DiscardReasons - user must understand clearly why tx were rejected
-[] Notify about new pending transactions - we sending more than need
+[x] Notify about new pending transactions - we sending more than need
 [] Hard-forks support (now rules are parsed ones on txPool start)
 [] Add pool to docker-compose
 [] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
 [] Save history of local transactions - with 1 day expiration
 [] Miner - recheck if miner has all EIP-1559 patches
-[] Miner - to work on state cache
+[] Remote Miner - to work on state cache
