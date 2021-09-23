@@ -1293,7 +1293,7 @@ func mphf(chaindata string, block uint64) error {
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector, collectorLock sync.Locker, completion *sync.WaitGroup) {
+func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector, completion *sync.WaitGroup) {
 	for superstring := range superstringCh {
 		//log.Info("Superstring", "len", len(superstring))
 		sa := make([]int32, len(superstring))
@@ -1407,11 +1407,9 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				var dictVal [8]byte
 				binary.BigEndian.PutUint64(dictVal[:], score)
-				collectorLock.Lock()
 				if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
 					log.Error("processSuperstring", "collect", err)
 				}
-				collectorLock.Unlock()
 			}
 		}
 	}
@@ -1479,10 +1477,45 @@ func (db *DictionaryBuilder) compressLoadFunc(k, v []byte, table etl.CurrentTabl
 	return nil
 }
 
-func (db DictionaryBuilder) finish() {
+func (db *DictionaryBuilder) finish() {
 	if db.lastWord != nil {
 		db.processWord(db.lastWord, db.lastWordScore)
 	}
+}
+
+type DictAggregator struct {
+	lastWord      []byte
+	lastWordScore uint64
+	collector     *etl.Collector
+}
+
+func (da *DictAggregator) processWord(word []byte, score uint64) error {
+	var scoreBuf [8]byte
+	binary.BigEndian.PutUint64(scoreBuf[:], score)
+	return da.collector.Collect(word, scoreBuf[:])
+}
+
+func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	score := binary.BigEndian.Uint64(v)
+	if bytes.Equal(k, da.lastWord) {
+		da.lastWordScore += score
+	} else {
+		if da.lastWord != nil {
+			if err := da.processWord(da.lastWord, da.lastWordScore); err != nil {
+				return err
+			}
+		}
+		da.lastWord = common.CopyBytes(k)
+		da.lastWordScore = score
+	}
+	return nil
+}
+
+func (da *DictAggregator) finish() error {
+	if da.lastWord != nil {
+		return da.processWord(da.lastWord, da.lastWordScore)
+	}
+	return nil
 }
 
 // MatchSorter is helper type to sort matches by their end position
@@ -1514,7 +1547,7 @@ func compress(chaindata string, block uint64) error {
 		}
 	}
 	var superstring []byte
-	const superstringLimit = 256 * 1024 * 1024
+	const superstringLimit = 128 * 1024 * 1024
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
 	f, err := os.Open(statefile)
@@ -1525,8 +1558,6 @@ func compress(chaindata string, block uint64) error {
 	defer f.Close()
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
-	dictCollector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	var collectorLock sync.Mutex
 	// Read number of keys
 	var countBuf [8]byte
 	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
@@ -1540,8 +1571,11 @@ func compress(chaindata string, block uint64) error {
 	ch := make(chan []byte, runtime.NumCPU())
 	var wg sync.WaitGroup
 	wg.Add(runtime.NumCPU())
+	collectors := make([]*etl.Collector, runtime.NumCPU())
 	for i := 0; i < runtime.NumCPU(); i++ {
-		go processSuperstring(ch, dictCollector, &collectorLock, &wg)
+		collector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collectors[i] = collector
+		go processSuperstring(ch, collector, &wg)
 	}
 	var buf [256]byte
 	l, e := r.ReadByte()
@@ -1573,10 +1607,22 @@ func compress(chaindata string, block uint64) error {
 	if len(superstring) > 0 {
 		ch <- superstring
 	}
+	close(ch)
 	wg.Wait()
+	dictCollector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	dictAggregator := &DictAggregator{collector: dictCollector}
+	for _, collector := range collectors {
+		if err = collector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, dictAggregator.aggLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		collector.Close(CompressLogPrefix)
+	}
+	if err = dictAggregator.finish(); err != nil {
+		return err
+	}
 	// Aggregate the dictionary and build Aho-Corassick matcher
 	defer dictCollector.Close(CompressLogPrefix)
-	db := &DictionaryBuilder{limit: 1_000_000} // Only collect 1m words with highest scores
+	db := &DictionaryBuilder{limit: 16_000_000} // Only collect 16m words with highest scores
 	if err = dictCollector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, db.compressLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
@@ -1649,6 +1695,19 @@ func compress(chaindata string, block uint64) error {
 		return e
 	}
 	log.Info("Estimated saving", "bytes", compression, "effective dict size", dictSize)
+	var rf *os.File
+	rf, err = os.Create("reduced_dictionary.txt")
+	if err != nil {
+		return err
+	}
+	defer rf.Close()
+	rw := bufio.NewWriter(rf)
+	defer rw.Flush()
+	for j, item := range db.items {
+		if replacements[j] > 0 {
+			fmt.Fprintf(rw, "%d %x\n", replacements[j], item.word)
+		}
+	}
 	return nil
 }
 
