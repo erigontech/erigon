@@ -18,6 +18,7 @@ import (
 	"runtime/pprof"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -1288,124 +1289,134 @@ func mphf(chaindata string, block uint64) error {
 	return nil
 }
 
-func processSuperstring(superstring []byte, dictCollector *etl.Collector) error {
-	//log.Info("Superstring", "len", len(superstring))
-	sa := make([]int32, len(superstring))
-	divsufsort, err := transform.NewDivSufSort()
-	if err != nil {
-		return err
-	}
-	//start := time.Now()
-	divsufsort.ComputeSuffixArray(superstring, sa)
-	//log.Info("Suffix array built", "in", time.Since(start))
-	// filter out suffixes that start with odd positions
-	n := len(sa) / 2
-	filtered := make([]int, n)
-	var j int
-	for i := 0; i < len(sa); i++ {
-		if sa[i]&1 == 0 {
-			filtered[j] = int(sa[i] >> 1)
-			j++
+// processSuperstring is the worker that processes one superstring and puts results
+// into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
+// it notifies the waitgroup before exiting, so that the caller known when all work is done
+// No error channels for now
+func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector, collectorLock sync.Locker, completion *sync.WaitGroup) {
+	for superstring := range superstringCh {
+		//log.Info("Superstring", "len", len(superstring))
+		sa := make([]int32, len(superstring))
+		divsufsort, err := transform.NewDivSufSort()
+		if err != nil {
+			log.Error("processSuperstring", "create divsufsoet", err)
 		}
-	}
-	sa = nil
-	//log.Info("Suffix array filtered")
-	// invert suffixes
-	inv := make([]int, n)
-	for i := 0; i < n; i++ {
-		inv[filtered[i]] = i
-	}
-	//log.Info("Inverted array done")
-	lcp := make([]byte, n)
-	var k int
-	// Process all suffixes one by one starting from
-	// first suffix in txt[]
-	for i := 0; i < n; i++ {
-		/* If the current suffix is at n-1, then we don’t
-		   have next substring to consider. So lcp is not
-		   defined for this substring, we put zero. */
-		if inv[i] == n-1 {
-			k = 0
-			continue
-		}
-
-		/* j contains index of the next substring to
-		   be considered  to compare with the present
-		   substring, i.e., next string in suffix array */
-		j := int(filtered[inv[i]+1])
-
-		// Directly start matching from k'th index as
-		// at-least k-1 characters will match
-		for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
-			k++
-		}
-
-		lcp[inv[i]] = byte(k) // lcp for the present suffix.
-
-		// Deleting the starting character from the string.
-		if k > 0 {
-			k--
-		}
-	}
-	//log.Info("Kasai algorithm finished")
-	// Checking LCP array
-	for i := 0; i < n-1; i++ {
-		var prefixLen int
-		p1 := int(filtered[i])
-		p2 := int(filtered[i+1])
-		for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
-			prefixLen++
-		}
-		if prefixLen != int(lcp[i]) {
-			return fmt.Errorf("prefixLen %d != int(lcp[i]) %d", prefixLen, lcp[i])
-		}
-	}
-	//log.Info("LCP array checked")
-	b := make([]int, 1000) // Sorting buffer
-	// Walk over LCP array and compute the scores of the strings
-	for i := 0; i < n-1; i++ {
-		// Only when there is a drop in LCP value
-		if lcp[i+1] >= lcp[i] {
-			continue
-		}
-		l := int(lcp[i]) // Length of potential dictionary word
-		if l < 5 {
-			continue
-		}
-		// Go back
-		j := i
-		for j > 0 && int(lcp[j-1]) >= l {
-			j--
-		}
-		window := i - j + 2
-		for len(b) < window {
-			b = append(b, 0)
-		}
-		copy(b, filtered[j:i+2])
-		sort.Ints(b[:window])
-		repeats := 1
-		lastK := 0
-		for k := 1; k < window; k++ {
-			if b[k] >= b[lastK]+l {
-				repeats++
-				lastK = k
+		//start := time.Now()
+		divsufsort.ComputeSuffixArray(superstring, sa)
+		//log.Info("Suffix array built", "in", time.Since(start))
+		// filter out suffixes that start with odd positions
+		n := len(sa) / 2
+		filtered := make([]int, n)
+		var j int
+		for i := 0; i < len(sa); i++ {
+			if sa[i]&1 == 0 {
+				filtered[j] = int(sa[i] >> 1)
+				j++
 			}
 		}
-		if repeats > 1 {
-			score := uint64(repeats * int(l-1))
-			// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
-			dictKey := make([]byte, l)
-			for s := 0; s < l; s++ {
-				dictKey[s] = superstring[(filtered[j]+s)*2+1]
+		sa = nil
+		//log.Info("Suffix array filtered")
+		// invert suffixes
+		inv := make([]int, n)
+		for i := 0; i < n; i++ {
+			inv[filtered[i]] = i
+		}
+		//log.Info("Inverted array done")
+		lcp := make([]byte, n)
+		var k int
+		// Process all suffixes one by one starting from
+		// first suffix in txt[]
+		for i := 0; i < n; i++ {
+			/* If the current suffix is at n-1, then we don’t
+			   have next substring to consider. So lcp is not
+			   defined for this substring, we put zero. */
+			if inv[i] == n-1 {
+				k = 0
+				continue
 			}
-			var dictVal [8]byte
-			binary.BigEndian.PutUint64(dictVal[:], score)
-			if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
-				return err
+
+			/* j contains index of the next substring to
+			   be considered  to compare with the present
+			   substring, i.e., next string in suffix array */
+			j := int(filtered[inv[i]+1])
+
+			// Directly start matching from k'th index as
+			// at-least k-1 characters will match
+			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
+				k++
+			}
+
+			lcp[inv[i]] = byte(k) // lcp for the present suffix.
+
+			// Deleting the starting character from the string.
+			if k > 0 {
+				k--
+			}
+		}
+		//log.Info("Kasai algorithm finished")
+		// Checking LCP array
+		/*
+			for i := 0; i < n-1; i++ {
+				var prefixLen int
+				p1 := int(filtered[i])
+				p2 := int(filtered[i+1])
+				for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+					prefixLen++
+				}
+				if prefixLen != int(lcp[i]) {
+					return fmt.Errorf("prefixLen %d != int(lcp[i]) %d", prefixLen, lcp[i])
+				}
+			}
+		*/
+		//log.Info("LCP array checked")
+		b := make([]int, 1000) // Sorting buffer
+		// Walk over LCP array and compute the scores of the strings
+		for i := 0; i < n-1; i++ {
+			// Only when there is a drop in LCP value
+			if lcp[i+1] >= lcp[i] {
+				continue
+			}
+			l := int(lcp[i]) // Length of potential dictionary word
+			if l < 5 {
+				continue
+			}
+			// Go back
+			j := i
+			for j > 0 && int(lcp[j-1]) >= l {
+				j--
+			}
+			window := i - j + 2
+			for len(b) < window {
+				b = append(b, 0)
+			}
+			copy(b, filtered[j:i+2])
+			sort.Ints(b[:window])
+			repeats := 1
+			lastK := 0
+			for k := 1; k < window; k++ {
+				if b[k] >= b[lastK]+l {
+					repeats++
+					lastK = k
+				}
+			}
+			if repeats > 1 {
+				score := uint64(repeats * int(l-1))
+				// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
+				dictKey := make([]byte, l)
+				for s := 0; s < l; s++ {
+					dictKey[s] = superstring[(filtered[j]+s)*2+1]
+				}
+				var dictVal [8]byte
+				binary.BigEndian.PutUint64(dictVal[:], score)
+				collectorLock.Lock()
+				if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
+					log.Error("processSuperstring", "collect", err)
+				}
+				collectorLock.Unlock()
 			}
 		}
 	}
-	return nil
+	completion.Done()
 }
 
 type DictionaryItem struct {
@@ -1504,7 +1515,7 @@ func compress(chaindata string, block uint64) error {
 		}
 	}
 	var superstring []byte
-	const superstringLimit = 64 * 1024 * 1024
+	const superstringLimit = 256 * 1024 * 1024
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
 	f, err := os.Open(statefile)
@@ -1516,6 +1527,7 @@ func compress(chaindata string, block uint64) error {
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
 	dictCollector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	var collectorLock sync.Mutex
 	// Read number of keys
 	var countBuf [8]byte
 	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
@@ -1525,6 +1537,12 @@ func compress(chaindata string, block uint64) error {
 	var stride int
 	if block > 1 {
 		stride = int(count) / int(block)
+	}
+	ch := make(chan []byte, runtime.NumCPU())
+	var wg sync.WaitGroup
+	wg.Add(runtime.NumCPU())
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go processSuperstring(ch, dictCollector, &collectorLock, &wg)
 	}
 	var buf [256]byte
 	l, e := r.ReadByte()
@@ -1536,10 +1554,8 @@ func compress(chaindata string, block uint64) error {
 		}
 		if (stride == 0 || (i/2)%stride == 0) && l > 4 {
 			if len(superstring)+2*int(l)+2 > superstringLimit {
-				if e = processSuperstring(superstring, dictCollector); e != nil {
-					return e
-				}
-				superstring = superstring[:0]
+				ch <- superstring
+				superstring = nil
 			}
 			for _, a := range buf[:l] {
 				superstring = append(superstring, 1, a)
@@ -1556,10 +1572,10 @@ func compress(chaindata string, block uint64) error {
 		return e
 	}
 	if len(superstring) > 0 {
-		if e = processSuperstring(superstring, dictCollector); e != nil {
-			return e
-		}
+		ch <- superstring
+		superstring = nil
 	}
+	wg.Wait()
 	// Aggregate the dictionary and build Aho-Corassick matcher
 	defer dictCollector.Close(CompressLogPrefix)
 	db := &DictionaryBuilder{limit: 1_000_000} // Only collect 1m words with highest scores
