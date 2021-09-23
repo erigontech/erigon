@@ -143,17 +143,6 @@ func (db *ObjectDatabase) Last(bucket string) ([]byte, []byte, error) {
 	return key, value, nil
 }
 
-func (db *ObjectDatabase) Walk(bucket string, startkey []byte, fixedbits int, walker func(k, v []byte) (bool, error)) error {
-	err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(bucket)
-		if err != nil {
-			return err
-		}
-		return ethdb.Walk(c, startkey, fixedbits, walker)
-	})
-	return err
-}
-
 func (db *ObjectDatabase) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	return db.kv.View(context.Background(), func(tx kv.Tx) error {
 		return tx.ForEach(bucket, fromPrefix, walker)

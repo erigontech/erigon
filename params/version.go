@@ -18,6 +18,7 @@ package params
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -32,7 +33,7 @@ var (
 const (
 	VersionMajor       = 2021    // Major version component of the current release
 	VersionMinor       = 9       // Minor version component of the current release
-	VersionMicro       = 3       // Patch version component of the current release
+	VersionMicro       = 4       // Patch version component of the current release
 	VersionModifier    = "alpha" // Patch version component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"

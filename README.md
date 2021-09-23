@@ -180,7 +180,7 @@ Erigon uses a rearchitected full sync algorithm from
 It uses the same network primitives and is compatible with regular go-ethereum nodes that are using full sync, you do
 not need any special sync capabilities for Erigon to sync.
 
-When reimagining the full sync, we focused on batching data together and minimize DB overwrites. That makes it possible
+When reimagining the full sync, with focus on batching data together and minimize DB overwrites. That makes it possible
 to sync Ethereum mainnet in under 2 days if you have a fast enough network connection and an SSD drive.
 
 Examples of stages are:
@@ -316,6 +316,14 @@ you'll have to change one if you want to run both at the same time. use `--help`
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
+### How to get diagnostic for bug report?
+
+- Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
+- Get CPU profiling: add `--pprof flag`
+  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+- Get RAM profiling: add `--pprof flag`
+  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+
 Getting in touch
 ================
 
@@ -405,3 +413,7 @@ non-batched way.
 ### Filesystem's background features are expensive
 
 For example: btrfs's autodefrag option - may increase write IO 100x times
+
+### Gnome Tracker can kill Erigon
+
+[Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.

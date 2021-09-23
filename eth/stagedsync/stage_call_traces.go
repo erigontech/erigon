@@ -179,13 +179,13 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 }
 
 func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix string, tx kv.RwTx, quit <-chan struct{}) error {
-	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
 	lastChunkKey := make([]byte, 128)
 	reader := bytes.NewReader(nil)
 	reader2 := bytes.NewReader(nil)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		reader.Reset(v)
+		currentBitmap := roaring64.New()
 		if _, err := currentBitmap.ReadFrom(reader); err != nil {
 			return err
 		}
@@ -215,7 +215,6 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 		}); err != nil {
 			return err
 		}
-		currentBitmap.Clear()
 		return nil
 	}
 	if err := collectorFrom.Load(logPrefix, tx, kv.CallFromIndex, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {

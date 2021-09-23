@@ -221,7 +221,8 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(21050600),
 		//LondonBlock:         big.NewInt(21050600),
-		Aura: &AuRaConfig{},
+		CatalystBlock: nil,
+		Aura:          &AuRaConfig{},
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -245,6 +246,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
+		CatalystBlock:       nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
@@ -270,6 +272,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
+		CatalystBlock:       nil,
 		Ethash:              nil,
 		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
 	}
@@ -292,6 +295,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
+		CatalystBlock:       nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
@@ -327,6 +331,7 @@ type ChainConfig struct {
 	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
+	CatalystBlock       *big.Int `json:"catalystBlock,omitempty"`       // Catalyst switch block (nil = no fork, 0 = already on catalyst)
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -474,6 +479,11 @@ func (c *ChainConfig) IsBerlin(num uint64) bool {
 // IsLondon returns whether num is either equal to the London fork block or greater.
 func (c *ChainConfig) IsLondon(num uint64) bool {
 	return isForked(c.LondonBlock, num)
+}
+
+// IsCatalyst returns whether num is either equal to the Merge fork block or greater.
+func (c *ChainConfig) IsCatalyst(num uint64) bool {
+	return isForked(c.CatalystBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -655,7 +665,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon                                      bool
+	IsBerlin, IsLondon, IsCatalyst                          bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -676,5 +686,6 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsIstanbul:       c.IsIstanbul(num),
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
+		IsCatalyst:       c.IsCatalyst(num),
 	}
 }

@@ -28,6 +28,26 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+func TestEIP1559Signing(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+
+	chainId := uint256.NewInt(18)
+	signer := LatestSignerForChainID(chainId.ToBig())
+	tx, err := SignTx(NewEIP1559Transaction(*chainId, 0, addr, new(uint256.Int), 0, new(uint256.Int), new(uint256.Int), new(uint256.Int), nil), *signer, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	from, err := tx.Sender(*signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if from != addr {
+		t.Errorf("exected from and address to be equal. Got %x want %x", from, addr)
+	}
+}
+
 func TestEIP155Signing(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)

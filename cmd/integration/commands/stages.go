@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -16,6 +18,8 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -30,6 +34,7 @@ import (
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 )
 
@@ -262,6 +267,7 @@ func init() {
 	withChain(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
+	withIntegrityChecks(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -358,10 +364,14 @@ func init() {
 	withDatadir(cmdSetPrune)
 	withChain(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
-	cmdSetPrune.Flags().Uint64Var(&pruneH, "--prune.h.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneR, "--prune.r.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneT, "--prune.t.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneC, "--prune.c.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneC, "prune.c.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneHBefore, "prune.h.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneRBefore, "prune.r.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
 }
@@ -400,6 +410,42 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	if integritySlow {
+		secp256k1.ContextForThread(1)
+		for i := block; ; i++ {
+			if err := common2.Stopped(ctx.Done()); err != nil {
+				return err
+			}
+			withoutSenders, _ := rawdb.ReadBlockByNumber(tx, i)
+			if withoutSenders == nil {
+				break
+			}
+			txs := withoutSenders.Transactions()
+			_, senders, _ := rawdb.ReadBlockByNumberWithSenders(tx, i)
+			if txs.Len() != len(senders) {
+				log.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
+				return nil
+			}
+			if txs.Len() == 0 {
+				continue
+			}
+			signer := types.MakeSigner(chainConfig, i)
+			for j := 0; j < txs.Len(); j++ {
+				from, err := signer.Sender(txs[j])
+				if err != nil {
+					return err
+				}
+				if !bytes.Equal(from[:], senders[j][:]) {
+					log.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
+				}
+			}
+			if i%10 == 0 {
+				log.Info("checked", "block", i)
+			}
+		}
+		return nil
+	}
 
 	if reset {
 		err = resetSenders(tx)
@@ -993,7 +1039,8 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 }
 
 func overrideStorageMode(db kv.RwDB) error {
-	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC, experiments)
+	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC,
+		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, experiments)
 	if err != nil {
 		return err
 	}
