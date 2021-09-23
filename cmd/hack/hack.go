@@ -1289,7 +1289,7 @@ func mphf(chaindata string, block uint64) error {
 }
 
 func processSuperstring(superstring []byte, dictCollector *etl.Collector) error {
-	log.Info("Superstring", "len", len(superstring))
+	//log.Info("Superstring", "len", len(superstring))
 	sa := make([]int32, len(superstring))
 	divsufsort, err := transform.NewDivSufSort()
 	if err != nil {
@@ -1546,11 +1546,11 @@ func compress(chaindata string, block uint64) error {
 			}
 			superstring = append(superstring, 0, 0)
 			p++
+			if p%2_000_000 == 0 {
+				log.Info("Dictionary preprocessing", "key/value pairs", p/2)
+			}
 		}
 		i++
-		if p%2_000_000 == 0 {
-			log.Info("Dictionary preprocessing", "key/value pairs", p/2)
-		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
@@ -1590,6 +1590,7 @@ func compress(chaindata string, block uint64) error {
 	l, e = r.ReadByte()
 	i = 0
 	compression := 0
+	dictSize := 0
 	// For counting how many times each word would be used for replacement
 	replacements := make([]int, len(db.items))
 	for ; e == nil; l, e = r.ReadByte() {
@@ -1611,23 +1612,29 @@ func compress(chaindata string, block uint64) error {
 					}
 				} else {
 					// No overlap, count lastMatch and move on
+					if replacements[lastMatch.Pattern()] == 0 {
+						dictSize++
+					}
 					replacements[lastMatch.Pattern()]++
 					compression += len(lastMatch.Match()) - 4
 					lastMatch = match
 				}
+			}
+			if replacements[lastMatch.Pattern()] == 0 {
+				dictSize++
 			}
 			replacements[lastMatch.Pattern()]++
 			compression += len(lastMatch.Match()) - 4
 		}
 		i++
 		if i%2_000_000 == 0 {
-			log.Info("Replacement preprocessing", "key/value pairs", i/2, "estimated saving", compression)
+			log.Info("Replacement preprocessing", "key/value pairs", i/2, "estimated saving", compression, "effective dict size", dictSize)
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
-	log.Info("Estimated actual saving", "bytes", compression)
+	log.Info("Estimated saving", "bytes", compression, "effective dict size", dictSize)
 	return nil
 }
 
