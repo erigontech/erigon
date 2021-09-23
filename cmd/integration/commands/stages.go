@@ -364,10 +364,14 @@ func init() {
 	withDatadir(cmdSetPrune)
 	withChain(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
-	cmdSetPrune.Flags().Uint64Var(&pruneH, "--prune.h.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneR, "--prune.r.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneT, "--prune.t.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneC, "--prune.c.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneC, "prune.c.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneHBefore, "prune.h.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneRBefore, "prune.r.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
 }
@@ -1035,7 +1039,8 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 }
 
 func overrideStorageMode(db kv.RwDB) error {
-	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC, experiments)
+	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC,
+		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, experiments)
 	if err != nil {
 		return err
 	}
