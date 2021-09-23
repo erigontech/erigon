@@ -1224,7 +1224,7 @@ func mphf(chaindata string, block uint64) error {
 	var buf [256]byte
 	l, e := r.ReadByte()
 	i := 0
-	for ; e == nil; l, err = r.ReadByte() {
+	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
@@ -1314,7 +1314,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				j++
 			}
 		}
-		sa = nil
 		//log.Info("Suffix array filtered")
 		// invert suffixes
 		inv := make([]int, n)
@@ -1573,7 +1572,6 @@ func compress(chaindata string, block uint64) error {
 	}
 	if len(superstring) > 0 {
 		ch <- superstring
-		superstring = nil
 	}
 	wg.Wait()
 	// Aggregate the dictionary and build Aho-Corassick matcher
