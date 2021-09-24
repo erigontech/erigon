@@ -41,7 +41,7 @@ it's much faster than TCP access. Provide both `--datadir` and `--private.api.ad
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 Note that we've also specified which RPC namespaces to enable in the above command by `--http.api` flag.
@@ -54,7 +54,7 @@ To start the daemon remotely - just don't set `--datadir` flag:
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=0.0.0.0:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 The daemon should respond with something like:
@@ -211,17 +211,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | db_getString                               | No      | deprecated                                 |
 | db_putHex                                  | No      | deprecated                                 |
 | db_getHex                                  | No      | deprecated                                 |
-|                                            |         |                                            |
-| shh_post                                   | No      | deprecated                                 |
-| shh_version                                | No      | deprecated                                 |
-| shh_newIdentity                            | No      | deprecated                                 |
-| shh_hasIdentity                            | No      | deprecated                                 |
-| shh_newGroup                               | No      | deprecated                                 |
-| shh_addToGroup                             | No      | deprecated                                 |
-| shh_newFilter                              | No      | deprecated                                 |
-| shh_uninstallFilter                        | No      | deprecated                                 |
-| shh_getFilterChanges                       | No      | deprecated                                 |
-| shh_getMessages                            | No      | deprecated                                 |
 |                                            |         |                                            |
 | erigon_getHeaderByHash                     | Yes     | Erigon only                                |
 | erigon_getHeaderByNumber                   | Yes     | Erigon only                                |
