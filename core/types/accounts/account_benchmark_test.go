@@ -289,6 +289,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 				b.StartTimer()
 			}
 		})
+
 	}
 
 	b.StopTimer()
@@ -332,6 +333,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) {
 			},
 		},
 	}
+
 	var decodedIncarnations []uint64
 	b.ResetTimer()
 	for _, test := range accountCases {
@@ -340,22 +342,22 @@ func BenchmarkDecodingIncarnation(b *testing.B) {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
+
 				test.acc.Nonce = uint64(i)
 				test.acc.Balance.SetUint64(uint64(i))
-
 				test.acc.EncodeForStorage(encodedAccount)
 
 				b.StartTimer()
 
-				var decodedAccount Account
-				if _, err := decodedAccount.DecodeIncarnationFromStorage(encodedAccount); err != nil {
+				if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
 					b.Fatal("can't decode the incarnation", err, encodedAccount)
 				}
 
-				decodedIncarnation, _ := decodedAccount.DecodeIncarnationFromStorage(encodedAccount)
+				decodedIncarnation, _ := DecodeIncarnationFromStorage(encodedAccount)
 
 				b.StopTimer()
 				decodedIncarnations = append(decodedIncarnations, decodedIncarnation)
+
 				b.StartTimer()
 			}
 		})

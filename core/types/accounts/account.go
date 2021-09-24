@@ -504,6 +504,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	}
 
 	if fieldSet&8 > 0 {
+
 		decodeLength := int(enc[pos])
 
 		if decodeLength != 32 {
@@ -526,8 +527,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	return nil
 }
 
-func (a *Account) DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
-	a.Reset()
+func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 
 	if len(enc) == 0 {
 		return 0, nil
@@ -539,11 +539,21 @@ func (a *Account) DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 	//looks for the position incarnation is at
 	if fieldSet&1 > 0 {
 		decodeLength := int(enc[pos])
+		if len(enc) < pos+decodeLength+1 {
+			return 0, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
 		pos += decodeLength + 1
 	}
 
 	if fieldSet&2 > 0 {
 		decodeLength := int(enc[pos])
+		if len(enc) < pos+decodeLength+1 {
+			return 0, fmt.Errorf(
+				"malformed CBOR for Account.Nonce: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
 		pos += decodeLength + 1
 	}
 
