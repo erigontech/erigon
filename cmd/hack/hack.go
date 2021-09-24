@@ -6,6 +6,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -1711,6 +1713,129 @@ func compress(chaindata string, block uint64) error {
 	return nil
 }
 
+// trueCompress compresses statedump.dat using dictionary in reduced_dictionary.txt
+func truecompress() error {
+	// Read up the reduced dictionary
+	df, err := os.Open("reduced_dictionary.txt")
+	if err != nil {
+		return err
+	}
+	defer df.Close()
+	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
+	db := DictionaryBuilder{}
+	// Matcher
+	trieBuilder := ahocorasick.NewTrieBuilder()
+	ds := bufio.NewScanner(df)
+	for ds.Scan() {
+		tokens := strings.Split(ds.Text(), " ")
+		var freq int64
+		if freq, err = strconv.ParseInt(tokens[0], 10, 64); err != nil {
+			return err
+		}
+		var word []byte
+		if word, err = hex.DecodeString(tokens[1]); err != nil {
+			return err
+		}
+		db.items = append(db.items, DictionaryItem{score: uint64(freq), word: word})
+		trieBuilder.AddPattern(word)
+	}
+	trie := trieBuilder.Build()
+	sort.Sort(&db)
+	// Assign codewords to dictionary items
+	word2code := make(map[string][]byte)
+	code2word := make(map[string][]byte)
+	lastw := len(db.items) - 1
+	// One byte codewords
+	for c1 := 0; c1 < 256 && lastw >= 0; c1++ {
+		code := []byte{byte(c1)}
+		word := db.items[lastw].word
+		code2word[string(code)] = word
+		word2code[string(word)] = code
+		lastw--
+	}
+	// Two byte codewords
+	for c1 := 0; c1 < 256 && lastw >= 0; c1++ {
+		for c2 := 0; c2 < 256 && lastw >= 0; c2++ {
+			code := []byte{byte(c1), byte(c2)}
+			word := db.items[lastw].word
+			code2word[string(code)] = word
+			word2code[string(word)] = code
+			lastw--
+		}
+	}
+	// Three byte codewords
+	for c1 := 0; c1 < 256 && lastw >= 0; c1++ {
+		for c2 := 0; c2 < 256 && lastw >= 0; c2++ {
+			for c3 := 0; c3 < 256 && lastw >= 0; c3++ {
+				code := []byte{byte(c1), byte(c2), byte(c3)}
+				word := db.items[lastw].word
+				code2word[string(code)] = word
+				word2code[string(word)] = code
+				lastw--
+			}
+		}
+	}
+	statefile := "statedump.dat"
+	f, err := os.Open(statefile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// File to output the compression
+	var cf *os.File
+	if cf, err = os.Create("compressed.dat"); err != nil {
+		return err
+	}
+	defer cf.Close()
+	w := bufio.NewWriter(cf)
+	defer w.Flush()
+	if _, err = f.Seek(8, 0); err != nil {
+		return err
+	}
+	r := bufio.NewReader(f)
+	var buf [256]byte
+	l, e := r.ReadByte()
+	i := 0
+	for ; e == nil; l, e = r.ReadByte() {
+		if _, e = io.ReadFull(r, buf[:l]); e != nil {
+			return e
+		}
+		matches := MatchSorter(trie.Match(buf[:l]))
+		if matches.Len() > 0 {
+			sort.Sort(&matches)
+			lastMatch := matches[0]
+			for j := 1; j < matches.Len(); j++ {
+				match := matches[j]
+				// check overlap with lastMatch
+				if int(match.Pos()) < int(lastMatch.Pos())+len(lastMatch.Match()) {
+					// match with the highest pattern ID (corresponds to pattern with higher score) wins
+					if match.Pattern() > lastMatch.Pattern() {
+						// Replace the last match
+						lastMatch = match
+					}
+				} else {
+					// No overlap, count lastMatch and move on
+					compression += len(lastMatch.Match()) - 4
+					lastMatch = match
+				}
+			}
+			if replacements[lastMatch.Pattern()] == 0 {
+				dictSize++
+			}
+			replacements[lastMatch.Pattern()]++
+			compression += len(lastMatch.Match()) - 4
+		}
+		i++
+		if i%2_000_000 == 0 {
+			log.Info("Replacement", "key/value pairs", i/2)
+		}
+	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
+	}
+	return nil
+}
+
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -2952,6 +3077,8 @@ func main() {
 		err = devTx(*chaindata)
 	case "compress":
 		err = compress(*chaindata, uint64(*block))
+	case "truecompress":
+		err = truecompress()
 	}
 
 	if err != nil {
