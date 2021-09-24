@@ -215,7 +215,7 @@ Provide both `--datadir` and `--private.api.addr` options:
 make erigon
 ./build/bin/erigon --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 #### **For remote DB**
@@ -227,7 +227,7 @@ socket connection to pass data between them. To use this mode, run Erigon in one
 make erigon
 ./build/bin/erigon --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 **gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
