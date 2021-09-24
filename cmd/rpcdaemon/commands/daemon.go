@@ -23,7 +23,7 @@ func APIList(ctx context.Context, db kv.RoDB, eth services.ApiBackend, txPool tx
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
-	dbImpl := NewDBAPIImpl()   /* deprecated */
+	dbImpl := NewDBAPIImpl() /* deprecated */
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
