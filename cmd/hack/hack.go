@@ -1378,7 +1378,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				continue
 			}
 			l := int(lcp[i]) // Length of potential dictionary word
-			if l < 5 {
+			if l < 2 {
 				continue
 			}
 			// Go back
@@ -1400,19 +1400,19 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					lastK = k
 				}
 			}
-			if repeats > 1 {
-				score := uint64(repeats * int(l-1))
-				// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
-				dictKey := make([]byte, l)
-				for s := 0; s < l; s++ {
-					dictKey[s] = superstring[(filtered[j]+s)*2+1]
-				}
-				var dictVal [8]byte
-				binary.BigEndian.PutUint64(dictVal[:], score)
-				if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
-					log.Error("processSuperstring", "collect", err)
-				}
+			//if repeats > 1 {
+			score := uint64(repeats * int(l-1))
+			// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
+			dictKey := make([]byte, l)
+			for s := 0; s < l; s++ {
+				dictKey[s] = superstring[(filtered[j]+s)*2+1]
 			}
+			var dictVal [8]byte
+			binary.BigEndian.PutUint64(dictVal[:], score)
+			if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
+				log.Error("processSuperstring", "collect", err)
+			}
+			//}
 		}
 	}
 	completion.Done()
@@ -1528,7 +1528,7 @@ func (ms MatchSorter) Len() int {
 }
 
 func (ms MatchSorter) Less(i, j int) bool {
-	return int(ms[i].Pos())+len(ms[i].Match()) < int(ms[j].Pos())+len(ms[j].Match())
+	return ms[i].Pos() < ms[j].Pos()
 }
 
 func (ms *MatchSorter) Swap(i, j int) {
@@ -1639,18 +1639,73 @@ func compress(chaindata string, block uint64) error {
 	defer w.Flush()
 	// Sort dictionary builder
 	sort.Sort(db)
-	trieBuilder := ahocorasick.NewTrieBuilder()
 	for _, item := range db.items {
 		fmt.Fprintf(w, "%d %x\n", item.score, item.word)
-		trieBuilder.AddPattern(item.word)
+	}
+	return nil
+}
+
+func encodeWithoutDictionary(buf []byte, encodedPos, limit int, w *bufio.Writer, setTerminal bool) error {
+	for encodedPos < limit {
+		codingLen := limit - encodedPos
+		var header byte = 0x00 // No dictionary bit set
+		if codingLen > 64 {
+			codingLen = 64
+		} else if setTerminal {
+			header |= 0x80 // Terminal bit set
+		}
+		header |= byte(codingLen - 1)
+		if err := w.WriteByte(header); err != nil {
+			return err
+		}
+		if _, err := w.Write(buf[encodedPos : encodedPos+codingLen]); err != nil {
+			return err
+		}
+		encodedPos += codingLen
+	}
+	return nil
+}
+
+// reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
+func reducedict() error {
+	// Read up the dictionary
+	df, err := os.Open("dictionary.txt")
+	if err != nil {
+		return err
+	}
+	defer df.Close()
+	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
+	db := DictionaryBuilder{}
+	// Matcher
+	trieBuilder := ahocorasick.NewTrieBuilder()
+	ds := bufio.NewScanner(df)
+	for ds.Scan() {
+		tokens := strings.Split(ds.Text(), " ")
+		var score int64
+		if score, err = strconv.ParseInt(tokens[0], 10, 64); err != nil {
+			return err
+		}
+		var word []byte
+		if word, err = hex.DecodeString(tokens[1]); err != nil {
+			return err
+		}
+		db.items = append(db.items, DictionaryItem{score: uint64(score), word: word})
+		trieBuilder.AddPattern(word)
 	}
 	trie := trieBuilder.Build()
+	statefile := "statedump.dat"
+	f, err := os.Open(statefile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 	if _, err = f.Seek(8, 0); err != nil {
 		return err
 	}
-	r = bufio.NewReader(f)
-	l, e = r.ReadByte()
-	i = 0
+	r := bufio.NewReader(f)
+	var buf [256]byte
+	l, e := r.ReadByte()
+	i := 0
 	compression := 0
 	dictSize := 0
 	// For counting how many times each word would be used for replacement
@@ -1744,33 +1799,44 @@ func truecompress() error {
 	// Assign codewords to dictionary items
 	word2code := make(map[string][]byte)
 	code2word := make(map[string][]byte)
+	word2codeTerm := make(map[string][]byte)
+	code2wordTerm := make(map[string][]byte)
 	lastw := len(db.items) - 1
 	// One byte codewords
-	for c1 := 0; c1 < 256 && lastw >= 0; c1++ {
-		code := []byte{byte(c1)}
+	for c1 := 0; c1 < 32 && lastw >= 0; c1++ {
+		code := []byte{0x40 | 0x20 | byte(c1)} // 0x40 is "dictionary encoded" flag, and 0x20 is flag meaning "last byte of codeword"
+		codeTerm := []byte{0x80 | 0x40 | 0x20 | byte(c1)}
 		word := db.items[lastw].word
 		code2word[string(code)] = word
 		word2code[string(word)] = code
+		code2wordTerm[string(codeTerm)] = word
+		word2codeTerm[string(word)] = codeTerm
 		lastw--
 	}
 	// Two byte codewords
-	for c1 := 0; c1 < 256 && lastw >= 0; c1++ {
-		for c2 := 0; c2 < 256 && lastw >= 0; c2++ {
-			code := []byte{byte(c1), byte(c2)}
+	for c1 := 0; c1 < 32 && lastw >= 0; c1++ {
+		for c2 := 0; c2 < 128 && lastw >= 0; c2++ {
+			code := []byte{0x40 | byte(c1), 0x20 | byte(c2)} // 0x40 is "dictionary encoded" flag, and 0x20 is flag meaning "last byte of codeword"
+			codeTerm := []byte{0x80 | 0x40 | byte(c1), 0x20 | byte(c2)}
 			word := db.items[lastw].word
 			code2word[string(code)] = word
 			word2code[string(word)] = code
+			code2wordTerm[string(codeTerm)] = word
+			word2codeTerm[string(word)] = codeTerm
 			lastw--
 		}
 	}
 	// Three byte codewords
-	for c1 := 0; c1 < 256 && lastw >= 0; c1++ {
-		for c2 := 0; c2 < 256 && lastw >= 0; c2++ {
-			for c3 := 0; c3 < 256 && lastw >= 0; c3++ {
-				code := []byte{byte(c1), byte(c2), byte(c3)}
+	for c1 := 0; c1 < 32 && lastw >= 0; c1++ {
+		for c2 := 0; c2 < 128 && lastw >= 0; c2++ {
+			for c3 := 0; c3 < 128 && lastw >= 0; c3++ {
+				code := []byte{0x40 | byte(c1), byte(c2), 0x20 | byte(c3)} // 0x40 is "dictionary encoded" flag, and 0x20 is flag meaning "last byte of codeword"
+				codeTerm := []byte{0x80 | 0x40 | byte(c1), byte(c2), 0x20 | byte(c3)}
 				word := db.items[lastw].word
 				code2word[string(code)] = word
 				word2code[string(word)] = code
+				code2wordTerm[string(codeTerm)] = word
+				word2codeTerm[string(word)] = codeTerm
 				lastw--
 			}
 		}
@@ -1796,10 +1862,12 @@ func truecompress() error {
 	var buf [256]byte
 	l, e := r.ReadByte()
 	i := 0
+	output := 0
 	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
+		encodedPos := 0
 		matches := MatchSorter(trie.Match(buf[:l]))
 		if matches.Len() > 0 {
 			sort.Sort(&matches)
@@ -1814,20 +1882,59 @@ func truecompress() error {
 						lastMatch = match
 					}
 				} else {
-					// No overlap, count lastMatch and move on
-					compression += len(lastMatch.Match()) - 4
+					// No overlap, make substituion
+					// Encode any leading characters
+					if err = encodeWithoutDictionary(buf[:], encodedPos, int(lastMatch.Pos()), w, false /* setTerminal */); err != nil {
+						return err
+					}
+					if encodedPos < int(lastMatch.Pos()) {
+						output += 1 + int(lastMatch.Pos()) - encodedPos
+					}
+					if int(l) == int(lastMatch.Pos())+len(lastMatch.Match()) {
+						if _, err = w.Write(word2codeTerm[lastMatch.MatchString()]); err != nil {
+							return err
+						}
+						output += len(word2codeTerm[lastMatch.MatchString()])
+					} else {
+						if _, err = w.Write(word2code[lastMatch.MatchString()]); err != nil {
+							return err
+						}
+						output += len(word2code[lastMatch.MatchString()])
+					}
+					encodedPos = int(lastMatch.Pos()) + len(lastMatch.Match())
 					lastMatch = match
 				}
 			}
-			if replacements[lastMatch.Pattern()] == 0 {
-				dictSize++
+			// Encode any leading characters
+			if err = encodeWithoutDictionary(buf[:], encodedPos, int(lastMatch.Pos()), w, false /* setTerminal */); err != nil {
+				return err
 			}
-			replacements[lastMatch.Pattern()]++
-			compression += len(lastMatch.Match()) - 4
+			if encodedPos < int(lastMatch.Pos()) {
+				output += 1 + int(lastMatch.Pos()) - encodedPos
+			}
+			if int(l) == int(lastMatch.Pos())+len(lastMatch.Match()) {
+				if _, err = w.Write(word2codeTerm[lastMatch.MatchString()]); err != nil {
+					return err
+				}
+				output += len(word2codeTerm[lastMatch.MatchString()])
+			} else {
+				if _, err = w.Write(word2code[lastMatch.MatchString()]); err != nil {
+					return err
+				}
+				output += len(word2code[lastMatch.MatchString()])
+			}
+			encodedPos = int(lastMatch.Pos()) + len(lastMatch.Match())
+		}
+		// Encode any remaining things
+		if err = encodeWithoutDictionary(buf[:], encodedPos, int(l), w, true /* setTerminal */); err != nil {
+			return err
+		}
+		if encodedPos < int(l) {
+			output += 1 + int(l) - encodedPos
 		}
 		i++
 		if i%2_000_000 == 0 {
-			log.Info("Replacement", "key/value pairs", i/2)
+			log.Info("Replacement", "key/value pairs", i/2, "output", common.StorageSize(output))
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
@@ -3077,6 +3184,8 @@ func main() {
 		err = devTx(*chaindata)
 	case "compress":
 		err = compress(*chaindata, uint64(*block))
+	case "reducedict":
+		err = reducedict()
 	case "truecompress":
 		err = truecompress()
 	}
