@@ -1291,6 +1291,42 @@ func mphf(chaindata string, block uint64) error {
 	return nil
 }
 
+// genstate generates statedump.dat file for testing
+func genstate() error {
+	f, err := os.Create("statedump.dat")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	var count uint64 = 25
+	var countBuf [8]byte
+	binary.BigEndian.PutUint64(countBuf[:], count)
+	if _, err = w.Write(countBuf[:]); err != nil {
+		return err
+	}
+	for i := 0; i < 5; i++ {
+		for j := 0; j < 5; j++ {
+			key := fmt.Sprintf("addr%dxlocation%d", i, j)
+			val := "value"
+			if err = w.WriteByte(byte(len(key))); err != nil {
+				return err
+			}
+			if _, err = w.Write([]byte(key)); err != nil {
+				return err
+			}
+			if err = w.WriteByte(byte(len(val))); err != nil {
+				return err
+			}
+			if _, err = w.Write([]byte(val)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // processSuperstring is the worker that processes one superstring and puts results
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
@@ -1356,19 +1392,28 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
-		/*
-			for i := 0; i < n-1; i++ {
-				var prefixLen int
-				p1 := int(filtered[i])
-				p2 := int(filtered[i+1])
-				for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
-					prefixLen++
-				}
-				if prefixLen != int(lcp[i]) {
-					return fmt.Errorf("prefixLen %d != int(lcp[i]) %d", prefixLen, lcp[i])
-				}
+
+		for i := 0; i < n-1; i++ {
+			var prefixLen int
+			p1 := int(filtered[i])
+			p2 := int(filtered[i+1])
+			for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+				prefixLen++
 			}
-		*/
+			if prefixLen != int(lcp[i]) {
+				log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i])
+			}
+			l := int(lcp[i]) // Length of potential dictionary word
+			if l < 2 {
+				continue
+			}
+			dictKey := make([]byte, l)
+			for s := 0; s < l; s++ {
+				dictKey[s] = superstring[(filtered[i]+s)*2+1]
+			}
+			fmt.Printf("%d %d %s\n", filtered[i], lcp[i], dictKey)
+		}
+
 		//log.Info("LCP array checked")
 		b := make([]int, 1000) // Sorting buffer
 		// Walk over LCP array and compute the scores of the strings
@@ -1405,7 +1450,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
 			dictKey := make([]byte, l)
 			for s := 0; s < l; s++ {
-				dictKey[s] = superstring[(filtered[j]+s)*2+1]
+				dictKey[s] = superstring[(filtered[i]+s)*2+1]
 			}
 			var dictVal [8]byte
 			binary.BigEndian.PutUint64(dictVal[:], score)
@@ -1640,7 +1685,7 @@ func compress(chaindata string, block uint64) error {
 	// Sort dictionary builder
 	sort.Sort(db)
 	for _, item := range db.items {
-		fmt.Fprintf(w, "%d %x\n", item.score, item.word)
+		fmt.Fprintf(w, "%d %x %s\n", item.score, item.word, item.word)
 	}
 	return nil
 }
@@ -3188,6 +3233,8 @@ func main() {
 		err = reducedict()
 	case "truecompress":
 		err = truecompress()
+	case "genstate":
+		err = genstate()
 	}
 
 	if err != nil {
