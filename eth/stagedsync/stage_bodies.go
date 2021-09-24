@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -212,7 +213,7 @@ Loop:
 		}
 	}
 	if stopped {
-		return common.ErrStopped
+		return libcommon.ErrStopped
 	}
 	if bodyProgress > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)

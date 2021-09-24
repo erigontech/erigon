@@ -148,6 +148,10 @@ var (
 	// Transaction pool settings
 	TxPoolV2Flag = cli.BoolFlag{
 		Name:  "txpool.v2",
+		Usage: "experimental internal pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+	}
+	TxPoolDisableFlag = cli.BoolFlag{
+		Name:  "txpool.disable",
 		Usage: "experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
 	}
 	TxPoolLocalsFlag = cli.StringFlag{
@@ -919,6 +923,9 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	if ctx.GlobalIsSet(TxPoolV2Flag.Name) {
 		cfg.V2 = true
+	}
+	if ctx.GlobalIsSet(TxPoolDisableFlag.Name) {
+		cfg.Disable = true
 	}
 	if ctx.GlobalIsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.GlobalString(TxPoolLocalsFlag.Name), ",")

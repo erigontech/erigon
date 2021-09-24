@@ -6,10 +6,11 @@ import (
 	"errors"
 	"sort"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
@@ -105,14 +106,14 @@ func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket s
 	}
 	defer c.Close()
 	return ethdb.Walk(c, dbutils.EncodeBlockNumber(timestampDst), 0, func(dbKey, dbValue []byte) (bool, error) {
-		if err := common.Stopped(quit); err != nil {
+		if err := libcommon.Stopped(quit); err != nil {
 			return false, err
 		}
 		timestamp, k, v := Mapper[bucket].Decode(dbKey, dbValue)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
-		if innerErr := collectorFunc(common.CopyBytes(k), common.CopyBytes(v)); innerErr != nil {
+		if innerErr := collectorFunc(libcommon.Copy(k), libcommon.Copy(v)); innerErr != nil {
 			return false, innerErr
 		}
 		return true, nil
