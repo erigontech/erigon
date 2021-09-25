@@ -23,8 +23,7 @@ func APIList(ctx context.Context, db kv.RoDB, eth services.ApiBackend, txPool tx
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
-	dbImpl := NewDBAPIImpl()   /* deprecated */
-	shhImpl := NewSHHAPIImpl() /* deprecated */
+	dbImpl := NewDBAPIImpl() /* deprecated */
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -70,18 +69,11 @@ func APIList(ctx context.Context, db kv.RoDB, eth services.ApiBackend, txPool tx
 				Service:   TraceAPI(traceImpl),
 				Version:   "1.0",
 			})
-		case "db":
+		case "db": /* Deprecated */
 			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "db",
 				Public:    true,
 				Service:   DBAPI(dbImpl),
-				Version:   "1.0",
-			})
-		case "shh":
-			defaultAPIList = append(defaultAPIList, rpc.API{
-				Namespace: "shh",
-				Public:    true,
-				Service:   SHHAPI(shhImpl),
 				Version:   "1.0",
 			})
 		case "erigon":
