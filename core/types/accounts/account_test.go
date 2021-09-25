@@ -253,12 +253,12 @@ func testIncarnationWithCode(t *testing.T) {
 
 }
 
-func testIncarnationWithNoIncarnation(t *testing.T){
+func testIncarnationWithNoIncarnation(t *testing.T) {
 	a := Account{
 		Initialised: true,
-		Nonce: 2,
-		Balance: *new(uint256.Int).SetUint64(1000),
-		Root: common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		Nonce:       2,
+		Balance:     *new(uint256.Int).SetUint64(1000),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		Incarnation: 0,
 	}
