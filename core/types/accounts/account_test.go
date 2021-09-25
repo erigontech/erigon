@@ -197,7 +197,7 @@ func testIncarnationForEmptyAccount(t *testing.T) {
 		Balance:     *new(uint256.Int),
 		Root:        emptyRoot,
 		CodeHash:    emptyCodeHash,
-		Incarnation: 5,
+		Incarnation: 4,
 	}
 
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
@@ -229,7 +229,7 @@ func testEmptyIncarnationForEmptyAccount2(t *testing.T) {
 
 }
 
-func testIncarnationWithCode(t *testing.T) {
+func testIncarnationWithNonEmptyAccount(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
