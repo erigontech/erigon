@@ -33,6 +33,7 @@ const (
 	DevChainName     = "dev"
 	ErigonMineName   = "erigonmine"
 	SokolChainName   = "sokol"
+	KovanChainName   = "kovan"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -223,6 +224,26 @@ var (
 		//LondonBlock:         big.NewInt(21050600),
 		CatalystBlock: nil,
 		Aura:          &AuRaConfig{},
+	}
+
+	KovanChainConfig = &ChainConfig{
+		ChainName:           KovanChainName,
+		ChainID:             big.NewInt(42),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(5067000),
+		ConstantinopleBlock: big.NewInt(9200000),
+		PetersburgBlock:     big.NewInt(10255201),
+		IstanbulBlock:       big.NewInt(14111141),
+		MuirGlacierBlock:    nil,
+		BerlinBlock:         big.NewInt(24770900),
+		LondonBlock:         big.NewInt(26741100),
+		CatalystBlock:       nil,
+		Aura:                &AuRaConfig{},
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

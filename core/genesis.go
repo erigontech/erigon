@@ -601,6 +601,24 @@ func DefaultSokolGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultKovanGenesisBlock() *Genesis {
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &Genesis{
+		Config:     params.KovanChainConfig,
+		Timestamp:  0x0,
+		SealRlp:    sealRlp,
+		GasLimit:   0x5B8D80,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/kovan.json"),
+	}
+}
+
 // Pre-calculated version of:
 //    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
 //    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
