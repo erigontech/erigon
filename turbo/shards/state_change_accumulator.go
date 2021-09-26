@@ -6,10 +6,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -38,16 +35,12 @@ func (a *Accumulator) Reset(viewID uint64) {
 	a.storageChangeIndex = nil
 	a.viewID = viewID
 }
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, tx kv.Tx) error {
+func (a *Accumulator) ChainConfig() *params.ChainConfig { return a.chainConfig }
+func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64) error {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return nil
 	}
-	head := rawdb.ReadCurrentHeader(tx)
-	if head == nil {
-		return nil
-	}
-	pendingBaseFee := misc.CalcBaseFee(a.chainConfig, head)
-	sc := &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee.Uint64()}
+	sc := &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee}
 	c.SendStateChanges(ctx, sc)
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
 	return nil

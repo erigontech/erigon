@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -171,16 +172,23 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, tx)
+	if notifications.Accumulator != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			header := rawdb.ReadCurrentHeader(tx)
+			if header == nil {
+				return nil
+			}
+			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
+			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
 
-		err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, tx)
-		if err != nil {
+			err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	return nil
