@@ -3,13 +3,12 @@
 package remote
 
 import (
-	"context"
-
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
+	context "context"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -26,7 +25,7 @@ type KVClient interface {
 	// Tx exposes read-only transactions for the key-value store
 	//
 	// When tx open, client must receive 1 message from server with txID
-	// When cursor open, client must receive 1 message from server with txID
+	// When cursor open, client must receive 1 message from server with cursorID
 	// Then only client can initiate messages from server
 	Tx(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error)
 	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
@@ -121,7 +120,7 @@ type KVServer interface {
 	// Tx exposes read-only transactions for the key-value store
 	//
 	// When tx open, client must receive 1 message from server with txID
-	// When cursor open, client must receive 1 message from server with txID
+	// When cursor open, client must receive 1 message from server with cursorID
 	// Then only client can initiate messages from server
 	Tx(KV_TxServer) error
 	StateChanges(*StateChangeRequest, KV_StateChangesServer) error

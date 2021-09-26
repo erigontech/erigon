@@ -15,7 +15,7 @@ service KV {
   // Tx exposes read-only transactions for the key-value store
   //
   // When tx open, client must receive 1 message from server with txID
-  // When cursor open, client must receive 1 message from server with txID
+  // When cursor open, client must receive 1 message from server with cursorID
   // Then only client can initiate messages from server
   rpc Tx(stream Cursor) returns (stream Pair);
 
@@ -89,6 +89,7 @@ enum Direction {
 message StateChangeBatch {
   uint64 databaseViewID = 1; // mdbx's tx.ID() - id of write transaction in db - where this changes happened
   repeated StateChange changeBatch = 2;
+  uint64 pendingBlockBaseFee = 3;
 }
 
 // StateChange - changes done by 1 block or by 1 unwind
@@ -98,9 +99,6 @@ message StateChange {
   types.H256 blockHash = 3;
   repeated AccountChange changes = 4;
   repeated bytes txs = 5;     // enable by withTransactions=true
-  uint64 protocolBaseFee = 6; // enable by withTransactions=true
-  uint64 prevBlockHeight = 7;
-  types.H256 prevBlockHash = 8;
 }
 
 message StateChangeRequest {

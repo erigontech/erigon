@@ -164,3 +164,7 @@ pub mod db {
     pub static TABLES: Lazy<HashMap<String, TableInfo>> =
         Lazy::new(|| toml::from_str(include_str!("../db_tables.toml")).unwrap());
 }
+#[cfg(feature = "web3")]
+pub mod web3 {
+    tonic::include_proto!("web3");
+}

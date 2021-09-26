@@ -25,14 +25,23 @@ import (
 // DummyCache - doesn't remember anything - can be used when service is not remote
 type DummyCache struct{}
 
-var _ Cache = (*DummyCache)(nil) // compile-time interface check
-//var _ CacheView = (*DummyView)(nil) // compile-time interface check
+var _ Cache = (*DummyCache)(nil)    // compile-time interface check
+var _ CacheView = (*DummyView)(nil) // compile-time interface check
 
-func NewDummy() *DummyCache                                              { return &DummyCache{} }
-func (c *DummyCache) View(ctx context.Context, tx kv.Tx) (ViewID, error) { return 0, nil }
-func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch)             {}
-func (c *DummyCache) Evict() int                                         { return 0 }
-func (c *DummyCache) Len() int                                           { return 0 }
+func NewDummy() *DummyCache { return &DummyCache{} }
+func (c *DummyCache) View(_ context.Context, tx kv.Tx) (CacheView, error) {
+	return &DummyView{cache: c, tx: tx}, nil
+}
+func (c *DummyCache) OnNewBlock(sc *remote.StateChangeBatch) {}
+func (c *DummyCache) Evict() int                             { return 0 }
+func (c *DummyCache) Len() int                               { return 0 }
 func (c *DummyCache) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	return tx.GetOne(kv.PlainState, k)
 }
+
+type DummyView struct {
+	cache *DummyCache
+	tx    kv.Tx
+}
+
+func (c *DummyView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }

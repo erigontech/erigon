@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "web3/common.proto";
+import "types/types.proto";
+
+package web3;
+
+message BlockSearchLocation {
+  oneof location {
+    types.H256 hash = 1;
+    uint64 number = 2;
+  }
+}
+
+message BlockNumberResponse { uint64 block_number = 1; }
+
+message ResolveBlockHashRequest { uint64 block_number = 1; }
+message ResolveBlockHashResponse { optional types.H256 block_hash = 1; }
+
+message BlockRequest { optional BlockSearchLocation search_location = 1; }
+message LightBlockResponse { optional LightBlock block = 1; }
+message FullBlockResponse { optional FullBlock block = 1; }
+
+message TransactionResponse { optional StoredTransaction transaction = 1; }
+
+service EthApi {
+  rpc BlockNumber(google.protobuf.Empty) returns (BlockNumberResponse);
+  rpc ResolveBlockHash(ResolveBlockHashRequest)
+      returns (ResolveBlockHashResponse);
+
+  rpc LightBlock(BlockRequest) returns (LightBlockResponse);
+  rpc FullBlock(BlockRequest) returns (FullBlockResponse);
+  rpc TransactionByHash(types.H256) returns (TransactionResponse);
+  rpc SendTransaction(Transaction) returns (google.protobuf.Empty);
+}

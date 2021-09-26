@@ -38,5 +38,11 @@ fn main() {
         protos.push("txpool/txpool_control.proto");
     }
 
+    if cfg!(feature = "web3") {
+        protos.push("web3/common.proto");
+        protos.push("web3/eth.proto");
+        protos.push("web3/trace.proto");
+    }
+
     make_protos(&protos);
 }

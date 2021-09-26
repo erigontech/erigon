@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -307,12 +308,12 @@ func FuzzOnNewBlocks(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(12))
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(14))
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(123))
-	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, senderAddr []byte, currentBaseFee1 uint8) {
+	f.Fuzz(func(t *testing.T, txNonce, values, tips, feeCap, senderAddr []byte, pendingBaseFee1 uint8) {
 		//t.Parallel()
 		ctx := context.Background()
 
-		currentBaseFee := uint64(currentBaseFee1%16 + 1)
-		if currentBaseFee == 0 {
+		pendingBaseFee := uint64(pendingBaseFee1%16 + 1)
+		if pendingBaseFee == 0 {
 			t.Skip()
 		}
 		if len(senderAddr) < 1+1+1 {
@@ -364,10 +365,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 					//assert.True(tx.SenderHasEnoughBalance)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(calcProtocolBaseFee(currentBaseFee), tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(currentBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				// side data structures must have all txs
@@ -403,10 +404,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 					//assert.True(tx.SenderHasEnoughBalance, msg)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(calcProtocolBaseFee(currentBaseFee), tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(currentBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				assert.True(pool.byNonce.has(tx), msg)
@@ -430,10 +431,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 					//assert.True(tx.SenderHasEnoughBalance, msg)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(calcProtocolBaseFee(currentBaseFee), tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(currentBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
 				assert.True(pool.byNonce.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
@@ -518,9 +519,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 			return nil
 		})
 		change := &remote.StateChangeBatch{
-			DatabaseViewID: txID,
+			DatabaseViewID:      txID,
+			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 0, BlockHash: h1, PrevBlockHeight: 0, PrevBlockHash: h1, ProtocolBaseFee: currentBaseFee},
+				{BlockHeight: 0, BlockHash: h1},
 			},
 		}
 		for id, sender := range senders {
@@ -543,9 +545,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		_, _, _ = p2pReceived, txs2, txs3
 		change = &remote.StateChangeBatch{
-			DatabaseViewID: txID,
+			DatabaseViewID:      txID,
+			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 1, BlockHash: h1, PrevBlockHeight: 0, PrevBlockHash: h1, ProtocolBaseFee: currentBaseFee},
+				{BlockHeight: 1, BlockHash: h1},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs2, tx)
@@ -554,9 +557,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		// unwind everything and switch to new fork (need unwind mined now)
 		change = &remote.StateChangeBatch{
-			DatabaseViewID: txID,
+			DatabaseViewID:      txID,
+			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 0, BlockHash: h1, Direction: remote.Direction_UNWIND, PrevBlockHeight: 1, PrevBlockHash: h1, ProtocolBaseFee: currentBaseFee},
+				{BlockHeight: 0, BlockHash: h1, Direction: remote.Direction_UNWIND},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, txs2, TxSlots{}, tx)
@@ -565,9 +569,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(txs2, TxSlots{}, "fork2")
 
 		change = &remote.StateChangeBatch{
-			DatabaseViewID: txID,
+			DatabaseViewID:      txID,
+			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 1, BlockHash: h22, PrevBlockHeight: 0, PrevBlockHash: h1, ProtocolBaseFee: currentBaseFee},
+				{BlockHeight: 1, BlockHash: h22},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs3, tx)
@@ -605,7 +610,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
 		require.Equal(pool.queued.Len(), p2.queued.Len())
-		assert.Equal(pool.currentBaseFee.Load(), p2.currentBaseFee.Load())
+		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
 		assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
 	})
 
