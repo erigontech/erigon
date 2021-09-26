@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -123,12 +124,7 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db kv.RwDB) error {
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
 	notifyTo, err := stages.GetStageProgress(tx, stages.Finish) // because later stages can be disabled
 	if err != nil {
 		return err
