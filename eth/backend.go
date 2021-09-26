@@ -226,7 +226,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		sentries:             []direct.SentryClient{},
 		notifications: &stagedsync.Notifications{
 			Events:               privateapi.NewEvents(),
-			Accumulator:          &shards.Accumulator{},
+			Accumulator:          shards.NewAccumulator(chainConfig),
 			StateChangesConsumer: kvRPC,
 		},
 	}
