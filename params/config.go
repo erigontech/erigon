@@ -35,6 +35,14 @@ const (
 	SokolChainName   = "sokol"
 )
 
+type ConsensusType string
+
+const (
+	AuRaConsensus   ConsensusType = "aura"
+	EtHashConsensus ConsensusType = "ethhash"
+	CliqueConsensus ConsensusType = "clique"
+)
+
 // Genesis hashes to enforce below configs on.
 var (
 	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
@@ -58,6 +66,7 @@ var (
 	MainnetChainConfig = &ChainConfig{
 		ChainName:           MainnetChainName,
 		ChainID:             big.NewInt(1),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(1_150_000),
 		DAOForkBlock:        big.NewInt(1_920_000),
 		DAOForkSupport:      true,
@@ -79,6 +88,7 @@ var (
 	RopstenChainConfig = &ChainConfig{
 		ChainName:           RopstenChainName,
 		ChainID:             big.NewInt(3),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -100,6 +110,7 @@ var (
 	RinkebyChainConfig = &ChainConfig{
 		ChainName:           RinkebyChainName,
 		ChainID:             big.NewInt(4),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(1),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -124,6 +135,7 @@ var (
 	GoerliChainConfig = &ChainConfig{
 		ChainName:           GoerliChainName,
 		ChainID:             big.NewInt(5),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -147,6 +159,7 @@ var (
 	ErigonChainConfig = &ChainConfig{
 		ChainName:           ErigonMineName,
 		ChainID:             new(big.Int).SetBytes([]byte("erigon-mine")),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -165,6 +178,7 @@ var (
 	SokolChainConfig = &ChainConfig{
 		ChainName:      SokolChainName,
 		ChainID:        big.NewInt(77),
+		Consensus:      AuRaConsensus,
 		HomesteadBlock: big.NewInt(0),
 		DAOForkBlock:   nil,
 		DAOForkSupport: false,
@@ -232,6 +246,7 @@ var (
 	// adding flags to the config to also have to set these fields.
 	AllEthashProtocolChanges = &ChainConfig{
 		ChainID:             big.NewInt(1337),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
@@ -258,6 +273,7 @@ var (
 	// adding flags to the config to also have to set these fields.
 	AllCliqueProtocolChanges = &ChainConfig{
 		ChainID:             big.NewInt(1337),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
@@ -281,6 +297,7 @@ var (
 
 	TestChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(1),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
@@ -300,6 +317,27 @@ var (
 		Clique:              nil,
 	}
 
+	TestChainAuraConfig = &ChainConfig{
+		ChainID:             big.NewInt(1),
+		Consensus:           AuRaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
+		EIP150Block:         big.NewInt(0),
+		EIP150Hash:          common.Hash{},
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         nil,
+		CatalystBlock:       nil,
+		Aura:                &AuRaConfig{},
+	}
+
 	TestRules = TestChainConfig.Rules(0)
 )
 
@@ -312,6 +350,7 @@ type ChainConfig struct {
 	ChainName string
 	ChainID   *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
 
+	Consensus ConsensusType `json:"consensus,omitempty"`      // aura, ethash or clique
 	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"` // Homestead switch block (nil = no fork, 0 = already homestead)
 
 	DAOForkBlock   *big.Int `json:"daoForkBlock,omitempty"`   // TheDAO hard-fork switch block (nil = no fork)
@@ -393,6 +432,10 @@ func (c *ChainConfig) String() string {
 		c.LondonBlock,
 		engine,
 	)
+}
+
+func (c *ChainConfig) IsHeaderWithSeal() bool {
+	return c.Consensus == AuRaConsensus
 }
 
 type SnapshotConfig struct {

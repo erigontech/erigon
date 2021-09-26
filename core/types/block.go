@@ -30,7 +30,6 @@ import (
 
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -38,7 +37,16 @@ import (
 var (
 	EmptyRootHash  = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	EmptyUncleHash = rlpHash([]*Header(nil))
+	headerWithSeal = false
 )
+
+func SetHeaderSealFlag(withSeal bool) {
+	headerWithSeal = withSeal
+}
+
+func IsHeaderWithSeal() bool {
+	return headerWithSeal
+}
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
 // mix-hash) that a sufficient amount of computation has been carried
@@ -398,7 +406,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if !h.WithSeal { // then tests can enable without env flag
-		h.WithSeal = debug.HeadersSeal()
+		h.WithSeal = IsHeaderWithSeal()
 	}
 	_, err := s.List()
 	if err != nil {
