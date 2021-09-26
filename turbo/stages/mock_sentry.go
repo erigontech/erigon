@@ -275,7 +275,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
-				shards.NewAccumulator(mock.ChainConfig),
+				mock.Notifications.Accumulator,
 				cfg.StateStream,
 				mock.tmpdir,
 			),
