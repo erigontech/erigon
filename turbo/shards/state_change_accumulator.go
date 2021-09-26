@@ -36,14 +36,14 @@ func (a *Accumulator) Reset(viewID uint64) {
 	a.viewID = viewID
 }
 func (a *Accumulator) ChainConfig() *params.ChainConfig { return a.chainConfig }
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64) error {
+func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64) {
 	if a == nil || c == nil || len(a.changes) == 0 {
-		return nil
+		return
 	}
 	sc := &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee}
 	c.SendStateChanges(ctx, sc)
 	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
-	return nil
+	w
 }
 
 // StartChange begins accumulation of changes for a new block
