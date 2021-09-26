@@ -39,7 +39,7 @@ type ConsensusType string
 
 const (
 	AuRaConsensus   ConsensusType = "aura"
-	EtHashConsensus ConsensusType = "ethhash"
+	EtHashConsensus ConsensusType = "ethash"
 	CliqueConsensus ConsensusType = "clique"
 )
 
