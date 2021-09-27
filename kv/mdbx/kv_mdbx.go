@@ -1315,7 +1315,7 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 		return nil
 	}
 	if err := c.put(key, value); err != nil {
-		return err
+		return fmt.Errorf("table: %s, err: %w", c.bucketName, err)
 	}
 	return nil
 }

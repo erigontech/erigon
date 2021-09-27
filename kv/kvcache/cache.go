@@ -85,13 +85,13 @@ type CacheView interface {
 type Coherent struct {
 	hits, miss, timeout *metrics.Counter
 	keys, keys2         *metrics.Counter
-	latestViewID        ViewID
 	latestView          *CoherentRoot
 	evictList           *List
+	search              *Element // pre-allocated object used for search in b-tree
 	roots               map[ViewID]*CoherentRoot
 	lock                sync.RWMutex
 	cfg                 CoherentCacheConfig
-	search              *Element
+	latestViewID        ViewID
 }
 
 type CoherentRoot struct {
