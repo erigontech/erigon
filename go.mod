@@ -3,6 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.16
 
 require (
+	github.com/BobuSumisu/aho-corasick v1.0.3
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.6.0
 	github.com/VictoriaMetrics/metrics v1.18.0
@@ -20,6 +21,7 @@ require (
 	github.com/emicklei/dot v0.16.0
 	github.com/fatih/color v1.12.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
+	github.com/flanglet/kanzi-go v1.9.0
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.7.4
 	github.com/gofrs/flock v0.8.1
