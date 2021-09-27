@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"math/bits"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -274,6 +275,33 @@ func testIncarnationWithNoIncarnation(t *testing.T) {
 	decodedIncarnation, _ = DecodeIncarnationFromStorage(encodedAccount)
 
 	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+
+}
+
+func testIncarnationWithInvalidEncodedAccount(t *testing.T){
+	a := Account{
+		Initialised: true,
+		Nonce:       2,
+		Balance:     *new(uint256.Int).SetUint64(1000),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Incarnation: 4,
+	}
+
+	encodedAccount := make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount)
+
+	pos := 1
+	nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
+
+	pos += nonceBytes+1 //gets the exact positions of the balance account, since we know there is a balance
+
+	balanceBytes := a.Balance.ByteLen()-2
+	a.Balance.WriteToSlice(encodedAccount[pos: pos+balanceBytes])
+
+	if _, err := DecodeIncarnationFromStorage(encodedAccount); err == nil {
+		t.Fatal("decoded the incarnation", err, encodedAccount)
+	}
 
 }
 
