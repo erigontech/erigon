@@ -49,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -227,7 +228,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		sentries:             []direct.SentryClient{},
 		notifications: &stagedsync.Notifications{
 			Events:               privateapi.NewEvents(),
-			Accumulator:          &shards.Accumulator{},
+			Accumulator:          shards.NewAccumulator(chainConfig),
 			StateChangesConsumer: kvRPC,
 		},
 	}
@@ -495,13 +496,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 			if backend.config.TxPool.V2 {
 				if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-					var baseFee uint64
-					if hh.BaseFee != nil {
-						baseFee = hh.BaseFee.Uint64()
-					}
+					pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
 					return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-						DatabaseViewID: tx.ViewID(), ChangeBatch: []*remote.StateChange{
-							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash()), ProtocolBaseFee: baseFee},
+						PendingBlockBaseFee: pendingBaseFee.Uint64(),
+						DatabaseViewID:      tx.ViewID(),
+						ChangeBatch: []*remote.StateChange{
+							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
 						},
 					}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
 				}); err != nil {
