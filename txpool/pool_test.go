@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"container/heap"
+	"math/rand"
 	"testing"
 )
 
@@ -40,17 +41,32 @@ func BenchmarkName(b *testing.B) {
 }
 
 func BenchmarkName2(b *testing.B) {
-	txs := make([]*metaTx, 10_000)
-	p := NewSubPool(BaseFeeSubPool, 1024)
-	for i := 0; i < len(txs); i++ {
-		txs[i] = &metaTx{Tx: &TxSlot{}}
-	}
-	for i := 0; i < len(txs); i++ {
-		p.UnsafeAdd(txs[i])
-	}
-	p.EnforceInvariants()
+
+	var (
+		a = rand.Uint64()
+		c = rand.Uint64()
+		d = rand.Uint64()
+	)
 	b.ResetTimer()
+	var min1 uint64
+	var min2 uint64
+	var r uint64
 
 	for i := 0; i < b.N; i++ {
+		min1 = min(min1, a)
+		min2 = min(min2, c)
+		if d <= min1 {
+			r = min(min1-d, min2)
+		} else {
+			r = 0
+		}
+		//
+		//// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
+		//// baseFee of the currently pending block. Set to 0 otherwise.
+		//mt.subPool &^= EnoughFeeCapBlock
+		//if mt.Tx.feeCap >= pendingBaseFee {
+		//	mt.subPool |= EnoughFeeCapBlock
+		//}
 	}
+	_ = r
 }
