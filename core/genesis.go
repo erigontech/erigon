@@ -309,6 +309,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.SokolChainConfig
 	case ghash == params.KovanGenesisHash:
 		return params.KovanChainConfig
+	case ghash == params.FermionGenesisHash:
+		return params.FermionChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -618,6 +620,24 @@ func DefaultKovanGenesisBlock() *Genesis {
 		GasLimit:   0x5B8D80,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/kovan.json"),
+	}
+}
+
+func DefaultFermionGenesisBlock() *Genesis {
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &Genesis{
+		Config:     params.FermionChainConfig,
+		Timestamp:  0x0,
+		SealRlp:    sealRlp,
+		GasLimit:   0x5B8D80,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/fermion.json"),
 	}
 }
 
