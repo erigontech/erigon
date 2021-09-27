@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -1714,6 +1715,92 @@ func encodeWithoutDictionary(buf []byte, encodedPos, limit int, w *bufio.Writer,
 	return nil
 }
 
+// DynamicCell is cell for dynamic programming
+type DynamicCell struct {
+	scores         int64
+	compression    int
+	lastCompressed int      // position of last compressed word
+	words          [][]byte // dictionary words used for this cell
+}
+
+func reduceDictWorker(inputCh chan []byte, dict map[string]int64, usedDict map[string]int, totalCompression *uint64, completion *sync.WaitGroup) {
+	for input := range inputCh {
+		l := len(input)
+		// Dynamic programming. We use 2 programs - one always ending with a compressed word (if possible), another - without
+		compressedEnd := make(map[int]DynamicCell)
+		simpleEnd := make(map[int]DynamicCell)
+		compressedEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
+		simpleEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
+		for k := 1; k <= l; k++ {
+			var maxC, maxS int
+			var wordsC, wordsS [][]byte
+			var scoresC, scoresS int64
+			var lastC, lastS int
+			for j := 0; j < k; j++ {
+				cc := compressedEnd[j]
+				sc := simpleEnd[j]
+				// First assume we are not compressing slice [j:k]
+				ccCompression := ((j - cc.lastCompressed + 63) / 64) - ((k - cc.lastCompressed + 63) / 64) + cc.compression
+				scCompression := ((j - sc.lastCompressed + 63) / 64) - ((k - sc.lastCompressed + 63) / 64) + sc.compression
+				var compression int
+				var words [][]byte
+				var scores int64
+				var lastCompressed int
+				if (ccCompression == scCompression && cc.scores > sc.scores) || ccCompression > scCompression {
+					compression = ccCompression
+					words = cc.words
+					scores = cc.scores
+					lastCompressed = cc.lastCompressed
+				} else {
+					compression = scCompression
+					words = sc.words
+					scores = sc.scores
+					lastCompressed = sc.lastCompressed
+				}
+				if j == 0 || (compression == maxS && scores > scoresS) || compression > maxS {
+					maxS = compression
+					wordsS = words
+					scoresS = scores
+					lastS = lastCompressed
+				}
+				// Now try to apply compression, if possible
+				if dictScore, ok := dict[string(input[j:k])]; ok {
+					words = append(append([][]byte{}, words...), input[j:k])
+					lastCompressed = k
+					if (cc.compression == sc.compression && cc.scores > sc.scores) || cc.compression > sc.compression {
+						compression = cc.compression + (k - j) - 3
+						scores = cc.scores + dictScore
+					} else {
+						compression = sc.compression + (k - j) - 3
+						scores = sc.scores + dictScore
+					}
+				}
+				if j == 0 || compression > maxC {
+					maxC = compression
+					wordsC = words
+					scoresC = scores
+					lastC = lastCompressed
+				}
+			}
+			compressedEnd[k] = DynamicCell{scores: scoresC, compression: maxC, lastCompressed: lastC, words: wordsC}
+			simpleEnd[k] = DynamicCell{scores: scoresS, compression: maxS, lastCompressed: lastS, words: wordsS}
+		}
+		if (compressedEnd[l].compression == simpleEnd[l].compression && compressedEnd[l].scores > simpleEnd[l].scores) || compressedEnd[l].compression > simpleEnd[l].compression {
+			atomic.AddUint64(totalCompression, uint64(compressedEnd[l].compression))
+			for _, word := range compressedEnd[int(l)].words {
+				usedDict[string(word)]++
+			}
+		} else {
+			atomic.AddUint64(totalCompression, uint64(simpleEnd[l].compression))
+			for _, word := range simpleEnd[int(l)].words {
+				usedDict[string(word)]++
+			}
+		}
+
+	}
+	completion.Done()
+}
+
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict() error {
 	// Read up the dictionary
@@ -1723,9 +1810,7 @@ func reducedict() error {
 	}
 	defer df.Close()
 	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
-	db := DictionaryBuilder{}
-	// Matcher
-	trieBuilder := ahocorasick.NewTrieBuilder()
+	dict := make(map[string]int64)
 	ds := bufio.NewScanner(df)
 	for ds.Scan() {
 		tokens := strings.Split(ds.Text(), " ")
@@ -1737,12 +1822,10 @@ func reducedict() error {
 		if word, err = hex.DecodeString(tokens[1]); err != nil {
 			return err
 		}
-		db.items = append(db.items, DictionaryItem{score: uint64(score), word: word})
-		trieBuilder.AddPattern(word)
+		dict[string(word)] = score
 	}
 	df.Close()
-	log.Info("dictionary file parsed", "entries", len(db.items))
-	trie := trieBuilder.Build()
+	log.Info("dictionary file parsed", "entries", len(dict))
 	statefile := "statedump.dat"
 	f, err := os.Open(statefile)
 	if err != nil {
@@ -1752,66 +1835,51 @@ func reducedict() error {
 	if _, err = f.Seek(8, 0); err != nil {
 		return err
 	}
+
+	var usedDicts []map[string]int
+	var totalCompression uint64
+	inputCh := make(chan []byte, 10000)
+	var completion sync.WaitGroup
+	for p := 0; p < runtime.NumCPU(); p++ {
+		usedDict := make(map[string]int)
+		usedDicts = append(usedDicts, usedDict)
+		completion.Add(1)
+		go reduceDictWorker(inputCh, dict, usedDict, &totalCompression, &completion)
+	}
 	r := bufio.NewReader(f)
 	var buf [256]byte
 	l, e := r.ReadByte()
 	i := 0
-	compression := 0
-	dictSize := 0
-	// For counting how many times each word would be used for replacement
-	replacements := make([]int, len(db.items))
 	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		matches := MatchSorter(trie.Match(buf[:l]))
-		if matches.Len() > 0 {
-			sort.Sort(&matches)
-			lastMatch := matches[0]
-			for j := 1; j < matches.Len(); j++ {
-				match := matches[j]
-				// check overlap with lastMatch
-				if int(match.Pos()) < int(lastMatch.Pos())+len(lastMatch.Match()) {
-					// match with the highest pattern ID (corresponds to pattern with higher score) wins
-					if match.Pattern() > lastMatch.Pattern() {
-						// Replace the last match
-						lastMatch = match
-					}
-				} else {
-					// No overlap, count lastMatch and move on
-					if replacements[lastMatch.Pattern()] == 0 {
-						dictSize++
-					}
-					replacements[lastMatch.Pattern()]++
-					compression += len(lastMatch.Match()) - 1
-					lastMatch = match
-				}
-			}
-			if replacements[lastMatch.Pattern()] == 0 {
-				dictSize++
-			}
-			replacements[lastMatch.Pattern()]++
-			compression += len(lastMatch.Match()) - 1
-		}
+		inputCh <- common.CopyBytes(buf[:l])
 		i++
 		if i%2_000_000 == 0 {
-			log.Info("Replacement preprocessing", "key/value pairs", i/2, "estimated saving", common.StorageSize(compression), "effective dict size", dictSize)
+			log.Info("Replacement preprocessing", "key/value pairs", i/2, "estimated saving", common.StorageSize(atomic.LoadUint64(&totalCompression)))
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
-	log.Info("Estimated saving", "bytes", compression, "effective dict size", dictSize)
+	close(inputCh)
+	completion.Wait()
+	usedDict := make(map[string]int)
+	for _, d := range usedDicts {
+		for word, r := range d {
+			usedDict[word] += r
+		}
+	}
+	log.Info("Done", "estimated saving", common.StorageSize(totalCompression), "effective dict size", len(usedDict))
 	var rf *os.File
 	rf, err = os.Create("reduced_dictionary.txt")
 	if err != nil {
 		return err
 	}
 	rw := bufio.NewWriter(rf)
-	for j, item := range db.items {
-		if replacements[j] > 0 {
-			fmt.Fprintf(rw, "%d %x\n", replacements[j], item.word)
-		}
+	for word, used := range usedDict {
+		fmt.Fprintf(rw, "%d %x\n", used, word)
 	}
 	if err = rw.Flush(); err != nil {
 		return err
@@ -1830,8 +1898,6 @@ func truecompress() error {
 	defer df.Close()
 	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
 	db := DictionaryBuilder{}
-	// Matcher
-	trieBuilder := ahocorasick.NewTrieBuilder()
 	ds := bufio.NewScanner(df)
 	for ds.Scan() {
 		tokens := strings.Split(ds.Text(), " ")
@@ -1844,11 +1910,16 @@ func truecompress() error {
 			return err
 		}
 		db.items = append(db.items, DictionaryItem{score: uint64(freq), word: word})
-		trieBuilder.AddPattern(word)
 	}
 	df.Close()
-	trie := trieBuilder.Build()
+	log.Info("Loaded dictionary", "items", len(db.items))
 	sort.Sort(&db)
+	// Matcher
+	trieBuilder := ahocorasick.NewTrieBuilder()
+	for _, item := range db.items {
+		trieBuilder.AddPattern(item.word)
+	}
+	trie := trieBuilder.Build()
 	// Assign codewords to dictionary items
 	word2code := make(map[string][]byte)
 	code2word := make(map[string][]byte)
