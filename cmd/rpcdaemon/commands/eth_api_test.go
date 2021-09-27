@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -32,122 +33,171 @@ func TestGetTransactionReceiptUnprotected(t *testing.T) {
 
 // EIP-1898 test cases
 
-func TestGetStorageAtZeroWithRequireCanonicalDefault(t *testing.T) {
+func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	assert := assert.New(t)
 	db := rpcdaemontest.CreateTestKV(t)
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
-	if err != nil { // GetStorageAt
+	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
 }
 
-func TestGetStorageAtWithRequireCanonicalDefault(t *testing.T) {
+func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	assert := assert.New(t)
-	m := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
-	if err != nil { // GetStorageAt
+	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
 }
 
-func TestGetStorageAtWithRequireCanonicalTrue(t *testing.T) {
+func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	assert := assert.New(t)
-	m := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
-	if err != nil { // GetStorageAt
+	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
 }
 
-func TestGetStorageAtWithRequireCanonicalDefaultBlockNotFoundError(t *testing.T) {
-	m := rpcdaemontest.CreateTestSentry(t)
+func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
+	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
 	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = m.InsertChain(orphanedChain); err != nil {
-		t.Fatal(err)
-	}
+	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedChain.Blocks[0].Hash(), false)); err != nil { // GetStorageAt
-		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", orphanedChain.Blocks[0].Hash().String()[2:]) {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
+	} else {
+		t.Error("error expected")
 	}
 }
 
-func TestGetStorageAtWithRequireCanonicalTrueBlockNotFoundError(t *testing.T) {
-	m := rpcdaemontest.CreateTestSentry(t)
+func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
+	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
 	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = m.InsertChain(orphanedChain); err != nil {
-		t.Fatal(err)
-	}
+	offChainBlock := offChain.Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedChain.Blocks[0].Hash(), true)); err != nil { // GetStorageAt
-		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", orphanedChain.Blocks[0].Hash().String()[2:]) {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
+	} else {
+		t.Error("error expected")
 	}
 }
 
-func TestGetStorageAtWithRequireCanonicalDefaultNonCanonicalBlock(t *testing.T) {
+func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testing.T) {
 	assert := assert.New(t)
-	m := rpcdaemontest.CreateTestSentry(t)
+	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	blockHash := "0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"
+	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(common.HexToHash(blockHash), false))
-	if err != nil { // GetStorageAt
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
+	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
 }
 
-func TestGetStorageAtWithRequireCanonicalTrueNonCanonicalBlock(t *testing.T) {
-	m := rpcdaemontest.CreateTestSentry(t)
+func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
 	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	blockHash := "0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"
+	orphanedBlock := orphanedChain[0].Blocks[0]
 
-	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(common.HexToHash(blockHash), true)); err != nil { // GetStorageAt
-		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", blockHash[2:]) {
+	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
 			t.Errorf("wrong error: %v", err)
 		}
+	} else {
+		t.Error("error expected")
+	}
+}
+
+func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
+	db := m.DB
+	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+
+	orphanedBlock := orphanedChain[0].Blocks[0]
+
+	if _, err := api.Call(context.Background(), ethapi.CallArgs{
+		From: &from,
+		To:   &to,
+	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false), nil); err != nil {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
+			/*
+			Not sure. Here https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md it is not explicitly said that
+			eth_call should only work with canonical blocks.
+			But since there is no point in changing the state of non-canonical block, it ignores RequireCanonical.
+			*/
+			t.Errorf("wrong error: %v", err)
+		}
+	} else {
+		t.Error("error expected")
+	}
+}
+
+func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
+	db := m.DB
+	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+
+	orphanedBlock := orphanedChain[0].Blocks[0]
+
+	if _, err := api.Call(context.Background(), ethapi.CallArgs{
+		From: &from,
+		To:   &to,
+	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true), nil); err != nil {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
+			t.Errorf("wrong error: %v", err)
+		}
+	} else {
+		t.Error("error expected")
 	}
 }
