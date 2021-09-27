@@ -47,14 +47,15 @@ func WithChaindataTables(defaultBuckets kv.TableCfg) kv.TableCfg {
 }
 
 type MdbxOpts struct {
-	bucketsCfg TableCfgFunc
-	path       string
-	inMem      bool
-	label      kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
-	verbosity  kv.DBVerbosityLvl
-	mapSize    datasize.ByteSize
-	flags      uint
-	log        log.Logger
+	bucketsCfg    TableCfgFunc
+	path          string
+	inMem         bool
+	label         kv.Label // marker to distinct db instances - one process may open many databases. for example to collect metrics of only 1 database
+	verbosity     kv.DBVerbosityLvl
+	mapSize       datasize.ByteSize
+	flags         uint
+	log           log.Logger
+	augumentLimit uint64
 }
 
 func testKVPath() string {
@@ -75,6 +76,11 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 	opts.label = label
+	return opts
+}
+
+func (opts MdbxOpts) AugumentLimit(v uint64) MdbxOpts {
+	opts.augumentLimit = v
 	return opts
 }
 
@@ -166,7 +172,11 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 				return nil, err
 			}
 		}
-		if err = env.SetOption(mdbx.OptRpAugmentLimit, 32*1024*1024); err != nil {
+
+		if opts.augumentLimit == 0 {
+			opts.augumentLimit = 32 * 1024 * 1024 // mdbx's default 256 * 1024
+		}
+		if err = env.SetOption(mdbx.OptRpAugmentLimit, opts.augumentLimit); err != nil {
 			return nil, err
 		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
