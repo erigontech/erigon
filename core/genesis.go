@@ -307,6 +307,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.ErigonChainConfig
 	case ghash == params.SokolGenesisHash:
 		return params.SokolChainConfig
+	case ghash == params.KovanGenesisHash:
+		return params.KovanChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
