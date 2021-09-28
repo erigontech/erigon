@@ -1261,7 +1261,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.Genesis = core.DefaultKovanGenesisBlock()
 	case params.FermionChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 42
+			cfg.NetworkID = 102
 		}
 		cfg.Genesis = core.DefaultFermionGenesisBlock()
 	case params.DevChainName:
