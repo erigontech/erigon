@@ -90,7 +90,7 @@ type Coherent struct {
 	search              *Element // pre-allocated object used for search in b-tree
 	roots               map[ViewID]*CoherentRoot
 	lock                sync.RWMutex
-	cfg                 CoherentCacheConfig
+	cfg                 CoherentConfig
 	latestViewID        ViewID
 }
 
@@ -121,7 +121,7 @@ var _ CacheView = (*CoherentView)(nil) // compile-time interface check
 
 const DEGREE = 32
 
-type CoherentCacheConfig struct {
+type CoherentConfig struct {
 	KeepViews    uint64        // keep in memory up to this amount of views, evict older
 	NewBlockWait time.Duration // how long wait
 	MetricsLabel string
@@ -129,15 +129,15 @@ type CoherentCacheConfig struct {
 	KeysLimit    int
 }
 
-var DefaultCoherentCacheConfig = CoherentCacheConfig{
+var DefaultCoherentConfig = CoherentConfig{
 	KeepViews:    50,
 	NewBlockWait: 50 * time.Millisecond,
 	KeysLimit:    1_000_000,
 	MetricsLabel: "default",
-	WithStorage:  false,
+	WithStorage:  true,
 }
 
-func New(cfg CoherentCacheConfig) *Coherent {
+func New(cfg CoherentConfig) *Coherent {
 	return &Coherent{
 		roots:     map[ViewID]*CoherentRoot{},
 		evictList: NewList(),

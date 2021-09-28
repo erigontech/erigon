@@ -176,8 +176,11 @@ var emptySender = newSender(0, *uint256.NewInt(0))
 
 type sortByNonce struct{ *metaTx }
 
-func (i *sortByNonce) Less(than btree.Item) bool {
-	return i.metaTx.Tx.nonce < than.(*sortByNonce).metaTx.Tx.nonce
+func (i sortByNonce) Less(than btree.Item) bool {
+	if i.metaTx.Tx.senderID != than.(sortByNonce).metaTx.Tx.senderID {
+		return i.metaTx.Tx.senderID < than.(sortByNonce).metaTx.Tx.senderID
+	}
+	return i.metaTx.Tx.nonce < than.(sortByNonce).metaTx.Tx.nonce
 }
 
 func calcProtocolBaseFee(baseFee uint64) uint64 {
@@ -243,7 +246,7 @@ func New(newTxs chan Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, ru
 		byHash:                  map[string]*metaTx{},
 		isLocalLRU:              localsHistory,
 		discardReasonsLRU:       discardHistory,
-		byNonce:                 &ByNonce{bySenderID: map[uint64]*btree.BTree{}, search: &sortByNonce{&metaTx{Tx: &TxSlot{}}}},
+		byNonce:                 &ByNonce{tree: btree.New(32), search: sortByNonce{&metaTx{Tx: &TxSlot{}}}},
 		recentlyConnectedPeers:  &recentlyConnectedPeers{},
 		pending:                 NewPendingSubPool(PendingSubPool, cfg.PendingSubPoolLimit),
 		baseFee:                 NewSubPool(BaseFeeSubPool, cfg.BaseFeeSubPoolLimit),
@@ -686,7 +689,6 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 			}
 		}
 	}
-
 	if baseFeeChanged {
 		// TODO: add here protocolBaseFee also
 		onBaseFeeChange(byNonce, pendingBaseFee) // re-calc all fields depending on pendingBaseFee
@@ -699,7 +701,6 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		onSenderChange(senderID, nonce, balance, byNonce, protocolBaseFee, pendingBaseFee, pending, baseFee, queued, true)
 	}
-
 	pending.EnforceWorstInvariants()
 	baseFee.EnforceInvariants()
 	queued.EnforceInvariants()
@@ -814,31 +815,30 @@ func removeMined(byNonce *ByNonce, minedTxs []*TxSlot, pending *PendingPool, bas
 }
 
 func onBaseFeeChange(byNonce *ByNonce, pendingBaseFee uint64) {
-	for _, byNonceSet := range byNonce.bySenderID {
-		if byNonceSet == nil || byNonceSet.Len() == 0 {
-			continue
+	var prevSenderID uint64
+	var minFeeCap, minTip uint64
+	byNonce.tree.Ascend(func(i btree.Item) bool {
+		mt := i.(sortByNonce).metaTx
+		if mt.Tx.senderID != prevSenderID {
+			minFeeCap, minTip = uint64(math.MaxUint64), uint64(math.MaxUint64) // min of given sender
+			prevSenderID = mt.Tx.senderID
+		}
+		minFeeCap = min(minFeeCap, mt.Tx.feeCap)
+		minTip = min(minTip, mt.Tx.tip)
+		if pendingBaseFee <= minFeeCap {
+			mt.effectiveTip = min(minFeeCap-pendingBaseFee, minTip)
+		} else {
+			mt.effectiveTip = 0
 		}
 
-		minFeeCap, minTip := uint64(math.MaxUint64), uint64(math.MaxUint64)
-		byNonceSet.Ascend(func(i btree.Item) bool {
-			mt := i.(*sortByNonce).metaTx
-			minFeeCap = min(minFeeCap, mt.Tx.feeCap)
-			minTip = min(minTip, mt.Tx.tip)
-			if pendingBaseFee <= minFeeCap {
-				mt.effectiveTip = min(minFeeCap-pendingBaseFee, minTip)
-			} else {
-				mt.effectiveTip = 0
-			}
-
-			// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
-			// baseFee of the currently pending block. Set to 0 otherwise.
-			mt.subPool &^= EnoughFeeCapBlock
-			if mt.Tx.feeCap >= pendingBaseFee {
-				mt.subPool |= EnoughFeeCapBlock
-			}
-			return true
-		})
-	}
+		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
+		// baseFee of the currently pending block. Set to 0 otherwise.
+		mt.subPool &^= EnoughFeeCapBlock
+		if mt.Tx.feeCap >= pendingBaseFee {
+			mt.subPool |= EnoughFeeCapBlock
+		}
+		return true
+	})
 }
 
 func onSenderChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, byNonce *ByNonce, protocolBaseFee, pendingBaseFee uint64, pending *PendingPool, baseFee, queued *SubPool, unsafe bool) {
@@ -1381,41 +1381,42 @@ func (p *TxPool) logStats() {
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
+	/*
+		for _, byNonce := range p.byNonce.bySenderID {
+			byNonce.Ascend(func(i btree.Item) bool {
+				mt := i.(sortByNonce).metaTx
+				slot := mt.Tx
+				slotRlp := slot.rlp
+				if slot.rlp == nil {
+					v, err := tx.GetOne(kv.PoolTransaction, slot.idHash[:])
+					if err != nil {
+						log.Error("[txpool] get tx from db", "err", err)
+						return false
+					}
+					if v == nil {
+						log.Error("[txpool] tx not found in db")
+						return false
+					}
+					slotRlp = v[20:]
+				}
 
-	for _, byNonce := range p.byNonce.bySenderID {
-		byNonce.Ascend(func(i btree.Item) bool {
-			mt := i.(*sortByNonce).metaTx
-			slot := mt.Tx
-			slotRlp := slot.rlp
-			if slot.rlp == nil {
-				v, err := tx.GetOne(kv.PoolTransaction, slot.idHash[:])
-				if err != nil {
-					log.Error("[txpool] get tx from db", "err", err)
-					return false
+				var sender []byte
+				found := false
+				for addr, senderID := range p.senders.senderIDs { // TODO: do we need inverted index here?
+					if slot.senderID == senderID {
+						sender = []byte(addr)
+						found = true
+						break
+					}
 				}
-				if v == nil {
-					log.Error("[txpool] tx not found in db")
-					return false
+				if !found {
+					return true
 				}
-				slotRlp = v[20:]
-			}
-
-			var sender []byte
-			found := false
-			for addr, senderID := range p.senders.senderIDs { // TODO: do we need inverted index here?
-				if slot.senderID == senderID {
-					sender = []byte(addr)
-					found = true
-					break
-				}
-			}
-			if !found {
+				f(slotRlp, sender, mt.currentSubPool)
 				return true
-			}
-			f(slotRlp, sender, mt.currentSubPool)
-			return true
-		})
-	}
+			})
+		}
+	*/
 	return nil
 }
 
@@ -1551,64 +1552,50 @@ func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwind
 }
 
 type ByNonce struct {
-	bySenderID map[uint64]*btree.BTree // senderID -> nonce ordered txs
-	search     *sortByNonce
+	tree   *btree.BTree
+	search sortByNonce
 }
 
 func (b *ByNonce) ascend(senderID uint64, f func(*metaTx) bool) {
-	byNonce, ok := b.bySenderID[senderID]
-	if !ok || byNonce == nil || byNonce.Len() == 0 {
-		return
-	}
-
-	byNonce.Ascend(func(i btree.Item) bool {
-		return f(i.(*sortByNonce).metaTx)
+	s := b.search
+	s.metaTx.Tx.senderID = senderID
+	s.metaTx.Tx.nonce = 0
+	b.tree.AscendGreaterOrEqual(s, func(i btree.Item) bool {
+		mt := i.(sortByNonce).metaTx
+		if mt.Tx.senderID != senderID {
+			return false
+		}
+		return f(mt)
 	})
 }
 func (b *ByNonce) hasTxs(senderID uint64) bool {
-	byNonce, ok := b.bySenderID[senderID]
-	return ok && byNonce != nil && byNonce.Len() > 0
+	has := false
+	b.ascend(senderID, func(*metaTx) bool {
+		has = true
+		return false
+	})
+	return has
 }
 func (b *ByNonce) get(senderID, txNonce uint64) *metaTx {
-	byNonce, ok := b.bySenderID[senderID]
-	if !ok || byNonce == nil || byNonce.Len() == 0 {
-		return nil
-	}
-	b.search.metaTx.Tx.nonce = txNonce
-	if found := byNonce.Get(b.search); found != nil {
-		return found.(*sortByNonce).metaTx
+	s := b.search
+	s.metaTx.Tx.senderID = senderID
+	s.metaTx.Tx.nonce = txNonce
+	if found := b.tree.Get(s); found != nil {
+		return found.(sortByNonce).metaTx
 	}
 	return nil
 }
 
 //nolint
 func (b *ByNonce) has(mt *metaTx) bool {
-	byNonce, ok := b.bySenderID[mt.Tx.senderID]
-	if !ok || byNonce == nil || byNonce.Len() == 0 {
-		return false
-	}
-	found := byNonce.Get(&sortByNonce{mt})
+	found := b.tree.Get(sortByNonce{mt})
 	return found != nil
 }
-func (b *ByNonce) delete(mt *metaTx) {
-	byNonce, ok := b.bySenderID[mt.Tx.senderID]
-	if !ok || byNonce == nil || byNonce.Len() == 0 {
-		return
-	}
-	byNonce.Delete(&sortByNonce{mt})
-	if byNonce.Len() == 0 {
-		delete(b.bySenderID, mt.Tx.senderID)
-	}
-}
+func (b *ByNonce) delete(mt *metaTx) { b.tree.Delete(sortByNonce{mt}) }
 func (b *ByNonce) replaceOrInsert(mt *metaTx) *metaTx {
-	byNonce, ok := b.bySenderID[mt.Tx.senderID]
-	if !ok || byNonce == nil || byNonce.Len() == 0 {
-		byNonce = btree.New(32)
-		b.bySenderID[mt.Tx.senderID] = byNonce
-	}
-	it := byNonce.ReplaceOrInsert(&sortByNonce{mt})
+	it := b.tree.ReplaceOrInsert(sortByNonce{mt})
 	if it != nil {
-		return it.(*sortByNonce).metaTx
+		return it.(sortByNonce).metaTx
 	}
 	return nil
 }
