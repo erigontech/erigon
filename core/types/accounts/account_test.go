@@ -278,7 +278,7 @@ func testIncarnationWithNoIncarnation(t *testing.T) {
 
 }
 
-func testIncarnationWithInvalidEncodedAccount(t *testing.T){
+func testIncarnationWithInvalidEncodedAccount(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
@@ -294,10 +294,10 @@ func testIncarnationWithInvalidEncodedAccount(t *testing.T){
 	pos := 1
 	nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
 
-	pos += nonceBytes+1 //gets the exact positions of the balance account, since we know there is a balance
+	pos += nonceBytes + 1 //gets the exact positions of the balance account, since we know there is a balance
 
-	balanceBytes := a.Balance.ByteLen()-2
-	a.Balance.WriteToSlice(encodedAccount[pos: pos+balanceBytes])
+	balanceBytes := a.Balance.ByteLen() - 2
+	a.Balance.WriteToSlice(encodedAccount[pos : pos+balanceBytes])
 
 	if _, err := DecodeIncarnationFromStorage(encodedAccount); err == nil {
 		t.Fatal("decoded the incarnation", err, encodedAccount)
