@@ -71,7 +71,7 @@ func (s SignersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[
 func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
-// method does not initialize the set of recent signers, so only ever use if for
+// method does not initialize the set of recent signers, so only ever use it for
 // the genesis block.
 func newSnapshot(config *params.CliqueConfig, number uint64, hash common.Hash, signers []common.Address) *Snapshot {
 	snap := &Snapshot{

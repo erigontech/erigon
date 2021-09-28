@@ -25,6 +25,7 @@ import (
 	"sort"
 	"sync"
 	"time"
+	"errors"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
@@ -48,6 +49,38 @@ import (
 )
 
 const DEBUG_LOG_FROM = 999_999_999
+
+const (
+	ExtraSeal            = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
+)
+
+// Aura proof-of-authority protocol constants.
+var (
+	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
+)
+
+var (
+	// errUnknownBlock is returned when the list of signers is requested for a block
+	// that is not part of the local blockchain.
+	errUnknownBlock = errors.New("unknown block")
+
+	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
+	errInvalidMixDigest = errors.New("non-zero mix digest")
+
+	// errInvalidValidatorSeal is returned if the extra data field length is not
+	// equal to the length of a seal
+	errInvalidExtraData = errors.New("extra data field in block header is invalid")
+
+	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
+	errInvalidUncleHash = errors.New("non empty uncle hash")
+
+	// errInvalidTimestamp is returned if the timestamp of a block is lower than
+	// the previous block's timestamp + the minimum block period.
+	errInvalidTimestamp = errors.New("invalid timestamp")
+
+	// errInvalidDifficulty is returned if the difficulty of a block neither 1 or 2.
+	errInvalidDifficulty = errors.New("invalid difficulty")
+)
 
 /*
 Not implemented features from OS:
@@ -514,7 +547,7 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	return nil
+	return c.verifyHeader(chain, header, nil)
 }
 
 //nolint
@@ -701,6 +734,19 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
 func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
+	//abort := make(chan struct{})
+	//results := make(chan error, len(headers))
+
+	if len(headers) == 0 {
+		return nil
+	}
+
+	for i, header := range headers {
+		if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
