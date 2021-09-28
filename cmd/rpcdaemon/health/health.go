@@ -74,3 +74,35 @@ func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 
 	return body, nil
 }
+
+func reportHealth(errMinPeerCount, errMaxTimeLatestSync, errCustomQuery error, w http.ResponseWriter) error {
+	statusCode := http.StatusOK
+
+	if errMinPeerCount != nil {
+		statusCode = http.StatusInternalServerError
+	}
+
+	if errMaxTimeLatestSync != nil {
+		statusCode = http.StatusInternalServerError
+	}
+
+	if errCustomQuery == nil {
+		statusCode = http.StatusInternalServerError
+	}
+
+	w.WriteHeader(statusCode)
+
+	return nil
+}
+
+func checkMinPeers(minPeers uint) error {
+	return nil
+}
+
+func checkMaxTimeLatestSync(maxTimeInSeconds uint) error {
+	return nil
+}
+
+func checkCustomQuery(query string) error {
+	return nil
+}
