@@ -9,13 +9,14 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type requestBody struct {
-	MinPeerCount      *uint  `json:"min_peer_count,omitempty"`
-	MaxTimeLatestSync *uint  `json:"max_time_from_latest_sync"`
-	Query             string `json:"query"`
+	MinPeerCount      *uint            `json:"min_peer_count"`
+	MaxTimeLatestSync *uint            `json:"max_time_from_latest_sync"`
+	BlockNumber       *rpc.BlockNumber `json:"known_block"`
 }
 
 const (
@@ -26,14 +27,20 @@ var (
 	errCheckDisabled = errors.New("error check disabled")
 )
 
-func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request, netApi NetAPI) bool {
+func ProcessHealthcheckIfNeeded(
+	w http.ResponseWriter,
+	r *http.Request,
+	rpcAPI []rpc.API,
+) bool {
 	if !strings.EqualFold(r.URL.Path, urlPath) {
 		return false
 	}
 
+	netAPI, ethAPI := parseAPI(rpc.API)
+
 	var errMinPeerCount = errCheckDisabled
 	var errMaxTimeLatestSync = errCheckDisabled
-	var errCustomQuery = errCheckDisabled
+	var errCheckBlock = errCheckDisabled
 
 	body, errParse := parseHealthCheckBody(r.Body)
 	defer r.Body.Close()
@@ -45,19 +52,19 @@ func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request, netApi N
 	} else {
 		// 1. net_peerCount
 		if body.MinPeerCount != nil {
-			errMinPeerCount = checkMinPeers(*body.MinPeerCount, netApi)
+			errMinPeerCount = checkMinPeers(*body.MinPeerCount, netAPI)
 		}
 		// 2. time from the last sync cycle (if possible)
 		if body.MaxTimeLatestSync != nil {
 			errMaxTimeLatestSync = checkMaxTimeLatestSync(*body.MaxTimeLatestSync)
 		}
 		// 3. custom query (shouldn't fail)
-		if len(strings.TrimSpace(body.Query)) > 0 {
-			errCustomQuery = checkCustomQuery(body.Query)
+		if body.BlockNumber != nil {
+			errCheckBlock = checkBlockNumber(*body.BlockNumber, ethAPI)
 		}
 	}
 
-	err := reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCustomQuery, w)
+	err := reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCheckBlock, w)
 	if err != nil {
 		log.Root().Warn("unable to process healthcheck request", "error", err)
 	}
@@ -81,7 +88,7 @@ func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 	return body, nil
 }
 
-func reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCustomQuery error, w http.ResponseWriter) error {
+func reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCheckBlock error, w http.ResponseWriter) error {
 	statusCode := http.StatusOK
 	errors := make(map[string]string)
 
@@ -100,10 +107,10 @@ func reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCustomQuer
 	}
 	errors["min_time_latest_sync"] = errorStringOrOK(errMaxTimeLatestSync)
 
-	if shouldChangeStatusCode(errCustomQuery) {
+	if shouldChangeStatusCode(errCheckBlock) {
 		statusCode = http.StatusInternalServerError
 	}
-	errors["min_custom_query"] = errorStringOrOK(errCustomQuery)
+	errors["check_block"] = errorStringOrOK(errCheckBlock)
 
 	w.WriteHeader(statusCode)
 
@@ -137,9 +144,5 @@ func errorStringOrOK(err error) string {
 }
 
 func checkMaxTimeLatestSync(maxTimeInSeconds uint) error {
-	return nil
-}
-
-func checkCustomQuery(query string) error {
 	return nil
 }

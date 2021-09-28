@@ -254,7 +254,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API, netAPI hea
 
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
-		if health.ProcessHealthcheckIfNeeded(w, r, netAPI) {
+		if health.ProcessHealthcheckIfNeeded(w, r, rpcAPI) {
 			return
 		}
 		if cfg.WebsocketEnabled && r.Method == "GET" {

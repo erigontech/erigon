@@ -2,8 +2,15 @@ package health
 
 import (
 	"context"
+
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type NetAPI interface {
-	NetPeerCount(_ context.Context) (uint64, error)
+	PeerCount(_ context.Context) (hexutil.Uint, error)
+}
+
+type EthAPI interface {
+	GetBlockByNumber(_ context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 }
