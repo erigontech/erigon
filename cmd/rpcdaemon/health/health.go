@@ -26,7 +26,7 @@ var (
 	errCheckDisabled = errors.New("error check disabled")
 )
 
-func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request) bool {
+func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request, netApi NetAPI) bool {
 	if !strings.EqualFold(r.URL.Path, urlPath) {
 		return false
 	}
@@ -45,7 +45,7 @@ func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request) bool {
 	} else {
 		// 1. net_peerCount
 		if body.MinPeerCount != nil {
-			errMinPeerCount = checkMinPeers(*body.MinPeerCount, nil)
+			errMinPeerCount = checkMinPeers(*body.MinPeerCount, netApi)
 		}
 		// 2. time from the last sync cycle (if possible)
 		if body.MaxTimeLatestSync != nil {

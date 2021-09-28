@@ -3,13 +3,7 @@ package health
 import (
 	"context"
 	"fmt"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
-
-type NetAPI interface {
-	PeerCount(_ context.Context) (hexutil.Uint, error)
-}
 
 func checkMinPeers(minPeerCount uint, api NetAPI) error {
 	if api == nil {

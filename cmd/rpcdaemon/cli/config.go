@@ -230,7 +230,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	return db, eth, txPool, mining, err
 }
 
-func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
+func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API, netAPI health.NetAPI) error {
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
@@ -254,7 +254,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
-		if health.ProcessHealthcheckIfNeeded(w, r) {
+		if health.ProcessHealthcheckIfNeeded(w, r, netAPI) {
 			return
 		}
 		if cfg.WebsocketEnabled && r.Method == "GET" {
