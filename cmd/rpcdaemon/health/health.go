@@ -2,6 +2,7 @@ package health
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -23,35 +24,35 @@ func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	body, err := parseHealthCheckBody(r.Body)
+	var errMinPeerCount error
+	var errMaxTimeLatestSync error
+	var errCustomQuery error
+
+	body, errParse := parseHealthCheckBody(r.Body)
 	defer r.Body.Close()
 
-	if err != nil {
-		log.Root().Warn("unable to process healthcheck request", "error", err)
+	if errParse != nil {
+		log.Root().Warn("unable to process healthcheck request", "error", errParse)
 		// we return true because we already decided that that is a healthcheck
 		// no need to go further
-		return true
+	} else {
+		// 1. net_peerCount
+		if body.MinPeerCount != nil {
+			errMinPeerCount = checkMinPeers(*body.MinPeerCount)
+		}
+
+		// 2. time from the last sync cycle (if possible)
+		if body.MaxTimeLatestSync != nil {
+			errMaxTimeLatestSync = checkMaxTimeLatestSync(*body.MaxTimeLatestSync)
+		}
+
+		// 3. custom query (shouldn't fail)
+		if len(strings.TrimSpace(body.Query)) > 0 {
+			errCustomQuery = checkCustomQuery(body.Query)
+		}
 	}
 
-	// 1. net_peerCount
-	var errMinPeerCount error
-	if body.MinPeerCount != nil {
-		errMinPeerCount = checkMinPeers(*body.MinPeerCount)
-	}
-
-	// 2. time from the last sync cycle (if possible)
-	var errMaxTimeLatestSync error
-	if body.MaxTimeLatestSync != nil {
-		errMaxTimeLatestSync = checkMaxTimeLatestSync(*body.MaxTimeLatestSync)
-	}
-
-	// 3. custom query (shouldn't fail)
-	var errCustomQuery error
-	if len(strings.TrimSpace(body.Query)) > 0 {
-		errCustomQuery = checkCustomQuery(body.Query)
-	}
-
-	err = reportHealth(errMinPeerCount, errMaxTimeLatestSync, errCustomQuery, w)
+	err := reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCustomQuery, w)
 	if err != nil {
 		log.Root().Warn("unable to process healthcheck request", "error", err)
 	}
@@ -75,24 +76,51 @@ func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 	return body, nil
 }
 
-func reportHealth(errMinPeerCount, errMaxTimeLatestSync, errCustomQuery error, w http.ResponseWriter) error {
+func reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCustomQuery error, w http.ResponseWriter) error {
 	statusCode := http.StatusOK
+	errors := make(map[string]string)
+
+	if errParse != nil {
+		statusCode = http.StatusInternalServerError
+	}
+	errors["healthcheck_query"] = errorStringOrOK(errParse)
 
 	if errMinPeerCount != nil {
 		statusCode = http.StatusInternalServerError
 	}
+	errors["min_peer_count"] = errorStringOrOK(errMinPeerCount)
 
 	if errMaxTimeLatestSync != nil {
 		statusCode = http.StatusInternalServerError
 	}
+	errors["min_time_latest_sync"] = errorStringOrOK(errMaxTimeLatestSync)
 
 	if errCustomQuery == nil {
 		statusCode = http.StatusInternalServerError
 	}
+	errors["min_custom_query"] = errorStringOrOK(errCustomQuery)
 
 	w.WriteHeader(statusCode)
 
+	bodyJson, err := json.Marshal(errors)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(bodyJson)
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func errorStringOrOK(err error) string {
+	if err == nil {
+		return "HEALTHY"
+	}
+
+	return fmt.Sprintf("ERROR: %v", err)
 }
 
 func checkMinPeers(minPeers uint) error {
