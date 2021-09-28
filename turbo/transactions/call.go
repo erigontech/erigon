@@ -32,8 +32,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 			return state, block.Header(), nil
 		}
 	*/
-	blockNrOrHash.RequireCanonical = true // DoCall cannot be executed on non-canonical blocks
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, filters)
+	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}

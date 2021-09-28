@@ -83,7 +83,7 @@ func CompileVyper(vyper string, sourcefiles ...string) (map[string]*Contract, er
 		return nil, err
 	}
 	args := s.makeArgs()
-	cmd := exec.Command(s.Path, append(args, sourcefiles...)...)
+	cmd := exec.Command(s.Path, append(args, sourcefiles...)...) //nolint:gosec
 	return s.run(cmd, source)
 }
 

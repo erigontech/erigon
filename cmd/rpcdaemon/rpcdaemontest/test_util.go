@@ -26,6 +26,11 @@ import (
 )
 
 func CreateTestKV(t *testing.T) kv.RwDB {
+	s, _, _ := CreateTestSentry(t)
+	return s.DB
+}
+
+func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*core.ChainPack) {
 	// Configure and generate a sample block chain
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -196,7 +201,7 @@ func CreateTestKV(t *testing.T) kv.RwDB {
 		t.Fatal(err)
 	}
 
-	return m.DB
+	return m, chain, []*core.ChainPack{orphanedChain}
 }
 
 type IsMiningMock struct{}

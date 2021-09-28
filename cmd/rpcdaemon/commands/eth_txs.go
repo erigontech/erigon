@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	types2 "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -56,7 +57,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		return nil, err
 	}
 	if len(reply.RlpTxs[0]) > 0 {
-		txn, err = types2.UnmarshalTransactionFromBinary(reply.RlpTxs[0])
+		s := rlp.NewStream(bytes.NewReader(reply.RlpTxs[0]), uint64(len(reply.RlpTxs[0])))
+		txn, err = types2.DecodeTransaction(s)
 		if err != nil {
 			return nil, err
 		}

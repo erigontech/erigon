@@ -109,7 +109,7 @@ func CompileSolidityString(solc, source string) (map[string]*Contract, error) {
 		return nil, err
 	}
 	args := append(s.makeArgs(), "--")
-	cmd := exec.Command(s.Path, append(args, "-")...)
+	cmd := exec.Command(s.Path, append(args, "-")...) //nolint:gosec
 	cmd.Stdin = strings.NewReader(source)
 	return s.run(cmd, source)
 }
@@ -128,7 +128,7 @@ func CompileSolidity(solc string, sourcefiles ...string) (map[string]*Contract, 
 		return nil, err
 	}
 	args := append(s.makeArgs(), "--")
-	cmd := exec.Command(s.Path, append(args, sourcefiles...)...)
+	cmd := exec.Command(s.Path, append(args, sourcefiles...)...) //nolint:gosec
 	return s.run(cmd, source)
 }
 

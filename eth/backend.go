@@ -33,11 +33,14 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
@@ -46,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -59,7 +63,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	remotedbserver2 "github.com/ledgerwatch/erigon/ethdb/remotedbserver"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
@@ -207,7 +210,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	kvRPC := remotedbserver2.NewKvServer(ctx, chainKv)
+	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
 	backend := &Ethereum{
 		downloadCtx:          ctx,
 		downloadCancel:       ctxCancel,
@@ -224,7 +227,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		sentries:             []direct.SentryClient{},
 		notifications: &stagedsync.Notifications{
 			Events:               privateapi.NewEvents(),
-			Accumulator:          &shards.Accumulator{},
+			Accumulator:          shards.NewAccumulator(chainConfig),
 			StateChangesConsumer: kvRPC,
 		},
 	}
@@ -363,17 +366,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.TxPool.V2 {
 		cfg := txpool2.DefaultConfig
 		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.LogEvery = 15 * time.Second    //5 * time.Minute
-		cfg.CommitEvery = 15 * time.Second //5 * time.Minute
+		cfg.LogEvery = 1 * time.Minute    //5 * time.Minute
+		cfg.CommitEvery = 1 * time.Minute //5 * time.Minute
 
-		cacheConfig := kvcache.DefaultCoherentCacheConfig
-		cacheConfig.MetricsLabel = "txpool"
+		//cacheConfig := kvcache.DefaultCoherentCacheConfig
+		//cacheConfig.MetricsLabel = "txpool"
 
 		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, cfg, kvcache.New(cacheConfig), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
+			ctx, cfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
 		)
 		if err != nil {
 			return nil, err
@@ -473,6 +476,41 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 					}
 				}
 			}()
+		}
+
+		// start pool on non-mainnet immediately
+		if backend.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !backend.config.TxPool.Disable {
+			var execution uint64
+			var hh *types.Header
+			if err := chainKv.View(ctx, func(tx kv.Tx) error {
+				execution, err = stages.GetStageProgress(tx, stages.Execution)
+				if err != nil {
+					return err
+				}
+				hh = rawdb.ReadCurrentHeader(tx)
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+
+			if backend.config.TxPool.V2 {
+				if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+					pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
+					return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
+						PendingBlockBaseFee: pendingBaseFee.Uint64(),
+						DatabaseViewID:      tx.ViewID(),
+						ChangeBatch: []*remote.StateChange{
+							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
+						},
+					}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
+				}); err != nil {
+					return nil, err
+				}
+			} else {
+				if err := backend.txPool.Start(hh.GasLimit, execution); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	go func() {
@@ -633,37 +671,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		})
 	}
 
-	if s.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !s.config.TxPool.Disable {
-		tx, err := db.BeginRo(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		execution, _ := stages.GetStageProgress(tx, stages.Execution)
-		hh := rawdb.ReadCurrentHeader(tx)
-		tx.Rollback()
-		if hh != nil {
-			if s.config.TxPool.V2 {
-				if err := s.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-					var baseFee uint64
-					if hh.BaseFee != nil {
-						baseFee = hh.BaseFee.Uint64()
-					}
-					return s.txPool2.OnNewBlock(context.Background(), nil, txpool2.TxSlots{}, txpool2.TxSlots{}, baseFee, hh.Number.Uint64(), hh.Hash())
-				}); err != nil {
-					return err
-				}
-			} else {
-				if err := s.txPool.Start(hh.GasLimit, execution); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
 	if s.chainConfig.ChainID.Uint64() > 10 {
 		go func() {
-			skipCycleEvery := time.NewTicker(2 * time.Second)
+			skipCycleEvery := time.NewTicker(3 * time.Second)
 			defer skipCycleEvery.Stop()
 			for range skipCycleEvery.C {
 				select {
@@ -678,13 +688,19 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 
+		mineEvery := time.NewTicker(3 * time.Second)
+		defer mineEvery.Stop()
+
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
 
 		for {
+			mineEvery.Reset(3 * time.Second)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
+				hasWork = true
+			case <-mineEvery.C:
 				hasWork = true
 			case err := <-errc:
 				works = false

@@ -307,6 +307,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.ErigonChainConfig
 	case ghash == params.SokolGenesisHash:
 		return params.SokolChainConfig
+	case ghash == params.KovanGenesisHash:
+		return params.KovanChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -598,6 +600,24 @@ func DefaultSokolGenesisBlock() *Genesis {
 		GasLimit:   0x663BE0,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/sokol.json"),
+	}
+}
+
+func DefaultKovanGenesisBlock() *Genesis {
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &Genesis{
+		Config:     params.KovanChainConfig,
+		Timestamp:  0x0,
+		SealRlp:    sealRlp,
+		GasLimit:   0x5B8D80,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/kovan.json"),
 	}
 }
 

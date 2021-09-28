@@ -180,7 +180,7 @@ Erigon uses a rearchitected full sync algorithm from
 It uses the same network primitives and is compatible with regular go-ethereum nodes that are using full sync, you do
 not need any special sync capabilities for Erigon to sync.
 
-When reimagining the full sync, we focused on batching data together and minimize DB overwrites. That makes it possible
+When reimagining the full sync, with focus on batching data together and minimize DB overwrites. That makes it possible
 to sync Ethereum mainnet in under 2 days if you have a fast enough network connection and an SSD drive.
 
 Examples of stages are:
@@ -215,7 +215,7 @@ Provide both `--datadir` and `--private.api.addr` options:
 make erigon
 ./build/bin/erigon --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 #### **For remote DB**
@@ -227,7 +227,7 @@ socket connection to pass data between them. To use this mode, run Erigon in one
 make erigon
 ./build/bin/erigon --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 **gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
@@ -315,6 +315,14 @@ Optional flags can be enabled that enable pprof or metrics (or both) - however, 
 you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
 
 Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+
+### How to get diagnostic for bug report?
+
+- Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
+- Get CPU profiling: add `--pprof flag`
+  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+- Get RAM profiling: add `--pprof flag`
+  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
 Getting in touch
 ================
@@ -405,3 +413,7 @@ non-batched way.
 ### Filesystem's background features are expensive
 
 For example: btrfs's autodefrag option - may increase write IO 100x times
+
+### Gnome Tracker can kill Erigon
+
+[Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.

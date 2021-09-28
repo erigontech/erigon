@@ -88,6 +88,24 @@ var (
 		Name:  "prune.c.older",
 		Usage: `Prune data after this amount of blocks (if --prune flag has 'c', then default is 90K)`,
 	}
+
+	PruneHistoryBeforeFlag = cli.Uint64Flag{
+		Name:  "prune.h.before",
+		Usage: `Prune data before this block`,
+	}
+	PruneReceiptBeforeFlag = cli.Uint64Flag{
+		Name:  "prune.r.before",
+		Usage: `Prune data before this block`,
+	}
+	PruneTxIndexBeforeFlag = cli.Uint64Flag{
+		Name:  "prune.t.before",
+		Usage: `Prune data before this block`,
+	}
+	PruneCallTracesBeforeFlag = cli.Uint64Flag{
+		Name:  "prune.c.before",
+		Usage: `Prune data before this block`,
+	}
+
 	ExperimentsFlag = cli.StringFlag{
 		Name: "experiments",
 		Usage: `Enable some experimental stages:
@@ -166,6 +184,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ctx.GlobalUint64(PruneReceiptFlag.Name),
 		ctx.GlobalUint64(PruneTxIndexFlag.Name),
 		ctx.GlobalUint64(PruneCallTracesFlag.Name),
+		ctx.GlobalUint64(PruneHistoryBeforeFlag.Name),
+		ctx.GlobalUint64(PruneReceiptBeforeFlag.Name),
+		ctx.GlobalUint64(PruneTxIndexBeforeFlag.Name),
+		ctx.GlobalUint64(PruneCallTracesBeforeFlag.Name),
 		strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","),
 	)
 	if err != nil {
@@ -199,7 +221,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
-	cfg.StateStream = ctx.GlobalBool(StateStreamFlag.Name)
+	cfg.StateStream = cfg.TxPool.V2 || ctx.GlobalBool(StateStreamFlag.Name)
 	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
 
 	if ctx.GlobalString(SyncLoopThrottleFlag.Name) != "" {
@@ -239,7 +261,22 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		if v := f.Uint64(PruneCallTracesFlag.Name, PruneCallTracesFlag.Value, PruneCallTracesFlag.Usage); v != nil {
 			exactC = *v
 		}
-		mode, err := prune.FromCli(*v, exactH, exactR, exactT, exactC, experiments)
+
+		var beforeH, beforeR, beforeT, beforeC uint64
+		if v := f.Uint64(PruneHistoryBeforeFlag.Name, PruneHistoryBeforeFlag.Value, PruneHistoryBeforeFlag.Usage); v != nil {
+			beforeH = *v
+		}
+		if v := f.Uint64(PruneReceiptBeforeFlag.Name, PruneReceiptBeforeFlag.Value, PruneReceiptBeforeFlag.Usage); v != nil {
+			beforeR = *v
+		}
+		if v := f.Uint64(PruneTxIndexBeforeFlag.Name, PruneTxIndexBeforeFlag.Value, PruneTxIndexBeforeFlag.Usage); v != nil {
+			beforeT = *v
+		}
+		if v := f.Uint64(PruneCallTracesBeforeFlag.Name, PruneCallTracesBeforeFlag.Value, PruneCallTracesBeforeFlag.Usage); v != nil {
+			beforeC = *v
+		}
+
+		mode, err := prune.FromCli(*v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}

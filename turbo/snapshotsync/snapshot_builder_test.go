@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -177,15 +176,13 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err := rotx.Cursor(kv.Headers)
-	require.NoError(t, err)
 	var headerNumber uint64
 	headerNumber = 11
 
-	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = rotx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		require.Equal(t, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)}), k)
 		headerNumber++
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -300,12 +297,10 @@ func TestSnapshotMigratorStageAsync(t *testing.T) {
 	rotx, err = db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err = rotx.Cursor(kv.Headers)
-	require.NoError(t, err)
 
-	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = rotx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		t.Fatal("main db must be empty here", k)
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -492,15 +487,13 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	rotx, err := db.WriteDB().BeginRo(context.Background())
 	require.NoError(t, err)
 	defer rotx.Rollback()
-	roc, err := rotx.Cursor(kv.Headers)
-	require.NoError(t, err)
 	var headerNumber uint64
 	headerNumber = 11
 
-	err = ethdb.Walk(roc, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = rotx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		require.Equal(t, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)}), k)
 		headerNumber++
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -513,17 +506,15 @@ func TestSnapshotMigratorStageSyncMode(t *testing.T) {
 	snokv := db.HeadersSnapshot()
 	snRoTx, err := snokv.BeginRo(context.Background())
 	require.NoError(t, err)
-	headersCursor, err := snRoTx.Cursor(kv.Headers)
-	require.NoError(t, err)
 	headerNumber = 0
-	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = snRoTx.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		if !bytes.Equal(k, dbutils.HeaderKey(headerNumber, common.Hash{uint8(headerNumber)})) {
 			t.Fatal(k)
 		}
 		headerNumber++
-
-		return true, nil
+		return nil
 	})
+
 	snRoTx.Rollback()
 	if err != nil {
 		t.Fatal(err)
@@ -827,14 +818,9 @@ func GenerateBodyData(tx kv.RwTx, from, to uint64) error {
 // check snapshot data based on GenerateBodyData
 func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX kv.Tx, snapshotTo uint64) {
 	t.Helper()
-	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBody)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer bodyCursor.Close()
 
 	var blockNum uint64
-	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err := bodySnapshotTX.ForEach(kv.BlockBody, nil, func(k, v []byte) error {
 		//fmt.Println(common.Bytes2Hex(k))
 		if binary.BigEndian.Uint64(k[:8]) != blockNum {
 			t.Fatal("incorrect block number", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
@@ -843,7 +829,7 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX kv.Tx, snapshotTo uint64)
 			t.Fatal("block is not canonical", blockNum, common.Bytes2Hex(k))
 		}
 		bfs := types.BodyForStorage{}
-		err = rlp.DecodeBytes(v, &bfs)
+		err := rlp.DecodeBytes(v, &bfs)
 		if err != nil {
 			t.Fatal(err, v)
 		}
@@ -861,7 +847,7 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX kv.Tx, snapshotTo uint64)
 			txNum++
 		}
 		blockNum++
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -874,14 +860,9 @@ func verifyBodiesSnapshot(t *testing.T, bodySnapshotTX kv.Tx, snapshotTo uint64)
 // check headers snapshot data based on GenerateBodyData
 func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX kv.Tx, snapshotTo uint64) {
 	t.Helper()
-	headersCursor, err := headersSnapshotTX.Cursor(kv.Headers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer headersCursor.Close()
 
 	var blockNum uint64
-	err = ethdb.Walk(headersCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err := headersSnapshotTX.ForEach(kv.Headers, nil, func(k, v []byte) error {
 		//fmt.Println(common.Bytes2Hex(k))
 		if binary.BigEndian.Uint64(k[:8]) != blockNum {
 			t.Fatal("incorrect block number", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
@@ -890,7 +871,7 @@ func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX kv.Tx, snapshotTo uin
 			t.Fatal("block is not canonical", blockNum, common.Bytes2Hex(k))
 		}
 		blockNum++
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -902,14 +883,9 @@ func verifyHeadersSnapshot(t *testing.T, headersSnapshotTX kv.Tx, snapshotTo uin
 
 func verifyFullBodiesData(t *testing.T, bodySnapshotTX kv.Tx, dataTo uint64) {
 	t.Helper()
-	bodyCursor, err := bodySnapshotTX.Cursor(kv.BlockBody)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer bodyCursor.Close()
 	var blockNum uint64
 	var numOfDuplicateBlocks uint8
-	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err := bodySnapshotTX.ForEach(kv.BlockBody, nil, func(k, v []byte) error {
 		numOfDuplicateBlocks++
 		if binary.BigEndian.Uint64(k[:8]) != blockNum {
 			t.Fatal("incorrect block number", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
@@ -918,7 +894,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX kv.Tx, dataTo uint64) {
 			t.Fatal("incorrect block hash", blockNum, numOfDuplicateBlocks, common.Bytes2Hex(k))
 		}
 		bfs := types.BodyForStorage{}
-		err = rlp.DecodeBytes(v, &bfs)
+		err := rlp.DecodeBytes(v, &bfs)
 		if err != nil {
 			t.Fatal(err, v)
 		}
@@ -949,7 +925,7 @@ func verifyFullBodiesData(t *testing.T, bodySnapshotTX kv.Tx, dataTo uint64) {
 			numOfDuplicateBlocks = 0
 		}
 
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -968,7 +944,7 @@ func verifyPrunedBlocksData(t *testing.T, tx kv.Tx, dataFrom, dataTo, snapshotTx
 	defer bodyCursor.Close()
 	var blockNum uint64
 	var numOfDuplicateBlocks uint8
-	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err = tx.ForEach(kv.BlockBody, nil, func(k, v []byte) error {
 		numOfDuplicateBlocks++
 		if binary.BigEndian.Uint64(k[:8]) != blockNum {
 			t.Fatal("incorrect block number", blockNum, binary.BigEndian.Uint64(k[:8]), common.Bytes2Hex(k))
@@ -1009,7 +985,7 @@ func verifyPrunedBlocksData(t *testing.T, tx kv.Tx, dataFrom, dataTo, snapshotTx
 			blockNum++
 			numOfDuplicateBlocks = 0
 		}
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1262,13 +1238,9 @@ func TestPruneBlocks(t *testing.T) {
 }
 
 func PrintBodyBuckets(t *testing.T, tx kv.Tx) { //nolint: deadcode
-	bodyCursor, err := tx.Cursor(kv.BlockBody)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = ethdb.Walk(bodyCursor, []byte{}, 0, func(k, v []byte) (bool, error) {
+	err := tx.ForEach(kv.BlockBody, nil, func(k, v []byte) error {
 		bfs := types.BodyForStorage{}
-		err = rlp.DecodeBytes(v, &bfs)
+		err := rlp.DecodeBytes(v, &bfs)
 		if err != nil {
 			t.Fatal(err, v)
 		}
@@ -1281,7 +1253,7 @@ func PrintBodyBuckets(t *testing.T, tx kv.Tx) { //nolint: deadcode
 		for _, transaction := range transactions {
 			fmt.Println("----", transaction.GetTo())
 		}
-		return true, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
