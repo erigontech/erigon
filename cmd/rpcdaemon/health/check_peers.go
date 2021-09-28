@@ -10,12 +10,12 @@ func checkMinPeers(minPeerCount uint, api NetAPI) error {
 		return fmt.Errorf("no connection to the Erigon server")
 	}
 
-	peerCount, err := api.PeerCount(context.TODO())
+	peerCount, err := api.NetPeerCount(context.TODO())
 	if err != nil {
 		return err
 	}
 
-	if uint(peerCount) < minPeerCount {
+	if peerCount < uint64(minPeerCount) {
 		return fmt.Errorf("not enough peers: %d (minimum %d))", peerCount, minPeerCount)
 	}
 

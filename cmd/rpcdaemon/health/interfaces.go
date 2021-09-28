@@ -2,10 +2,8 @@ package health
 
 import (
 	"context"
-
-	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 type NetAPI interface {
-	PeerCount(_ context.Context) (hexutil.Uint, error)
+	NetPeerCount(_ context.Context) (uint64, error)
 }
