@@ -36,7 +36,7 @@ func ProcessHealthcheckIfNeeded(
 		return false
 	}
 
-	netAPI, ethAPI := parseAPI(rpc.API)
+	netAPI, ethAPI := parseAPI(rpcAPI)
 
 	var errMinPeerCount = errCheckDisabled
 	var errMaxTimeLatestSync = errCheckDisabled
@@ -47,21 +47,17 @@ func ProcessHealthcheckIfNeeded(
 
 	if errParse != nil {
 		log.Root().Warn("unable to process healthcheck request", "error", errParse)
-		// we return true because we already decided that that is a healthcheck
-		// no need to go further
 	} else {
 		// 1. net_peerCount
 		if body.MinPeerCount != nil {
 			errMinPeerCount = checkMinPeers(*body.MinPeerCount, netAPI)
 		}
-		// 2. time from the last sync cycle (if possible)
-		if body.MaxTimeLatestSync != nil {
-			errMaxTimeLatestSync = checkMaxTimeLatestSync(*body.MaxTimeLatestSync)
-		}
-		// 3. custom query (shouldn't fail)
+		// 2. custom query (shouldn't fail)
 		if body.BlockNumber != nil {
 			errCheckBlock = checkBlockNumber(*body.BlockNumber, ethAPI)
 		}
+		// TODO
+		// add time from the last sync cycle
 	}
 
 	err := reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCheckBlock, w)
@@ -141,8 +137,4 @@ func errorStringOrOK(err error) string {
 	}
 
 	return fmt.Sprintf("ERROR: %v", err)
-}
-
-func checkMaxTimeLatestSync(maxTimeInSeconds uint) error {
-	return nil
 }

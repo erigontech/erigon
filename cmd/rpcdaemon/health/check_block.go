@@ -11,7 +11,13 @@ func checkBlockNumber(blockNumber rpc.BlockNumber, api EthAPI) error {
 	if api == nil {
 		return fmt.Errorf("no connection to the Erigon server or `eth` namespace isn't enabled")
 	}
-	_, err := api.GetBlockByNumber(context.TODO(), blockNumber, false)
-	// returning error if the block wasn't found
-	return err
+	data, err := api.GetBlockByNumber(context.TODO(), blockNumber, false)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 { // block not found
+		return fmt.Errorf("no known block with number %v (%x hex)", blockNumber, blockNumber)
+	}
+
+	return nil
 }

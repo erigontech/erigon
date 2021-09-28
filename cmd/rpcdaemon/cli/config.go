@@ -230,7 +230,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	return db, eth, txPool, mining, err
 }
 
-func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API, netAPI health.NetAPI) error {
+func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
