@@ -34,19 +34,19 @@ func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	// 1. net_peerCount
-	var errMinPeerCount = nil
+	var errMinPeerCount error
 	if body.MinPeerCount != nil {
 		errMinPeerCount = checkMinPeers(*body.MinPeerCount)
 	}
 
 	// 2. time from the last sync cycle (if possible)
-	var errMaxTimeLatestSync = nil
+	var errMaxTimeLatestSync error
 	if body.MaxTimeLatestSync != nil {
 		errMaxTimeLatestSync = checkMaxTimeLatestSync(*body.MaxTimeLatestSync)
 	}
 
 	// 3. custom query (shouldn't fail)
-	var errCustomQuery = nil
+	var errCustomQuery error
 	if len(strings.TrimSpace(body.Query)) > 0 {
 		errCustomQuery = checkCustomQuery(body.Query)
 	}
@@ -62,7 +62,7 @@ func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request) bool {
 func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 	var body requestBody
 
-	bodyBytes, err := ioutil.ReadAll(r.Body)
+	bodyBytes, err := ioutil.ReadAll(reader)
 	if err != nil {
 		return body, err
 	}
