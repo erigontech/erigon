@@ -268,12 +268,12 @@ func BenchmarkDecodingAccount(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		test := test
-		encodedAccount := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
 				test.acc.Nonce = uint64(i)
 				test.acc.Balance.SetUint64(uint64(i))
+				encodedAccount := make([]byte, test.acc.EncodingLengthForStorage())
 
 				test.acc.EncodeForStorage(encodedAccount)
 

@@ -36,6 +36,7 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion,
 		fixSequences,
 		storageMode,
+		setPruneType,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},

@@ -278,6 +278,7 @@ func testIncarnationWithNoIncarnation(t *testing.T) {
 
 }
 
+
 func testIncarnationWithInvalidEncodedAccount(t *testing.T){
 	a := Account{
 		Initialised: true,

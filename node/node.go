@@ -17,6 +17,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -26,6 +27,8 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -522,6 +525,9 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		if exclusive {
 			opts = opts.Exclusive()
 		}
+		if label == kv.ChainDB {
+			opts.AugumentLimit(config.MdbxAugumentLimit)
+		}
 		return opts.Open()
 	}
 	var err error
@@ -549,6 +555,12 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
+		return params.SetErigonVersion(tx, params.VersionKeyCreated)
+	}); err != nil {
+		return nil, err
 	}
 
 	return db, nil

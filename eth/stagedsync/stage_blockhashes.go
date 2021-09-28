@@ -96,7 +96,7 @@ func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx co
 	}
 
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf(" reset: %v", err)
+		return fmt.Errorf(" reset: %w", err)
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

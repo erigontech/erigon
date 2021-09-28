@@ -159,10 +159,10 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
 
-	endNum := startNum // allows for single param calls
+	endNum := startNum + 1 // allows for single param calls
 	if endNumber != nil {
 		// forces negative numbers to fail (too large) but allows zero
-		endNum = uint64(endNumber.Int64())
+		endNum = uint64(endNumber.Int64()) + 1
 	}
 
 	// is endNum too big?
@@ -193,7 +193,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
 	startNum := startBlock.NumberU64()
-	endNum := startNum // allows for single parameter calls
+	endNum := startNum + 1 // allows for single parameter calls
 
 	if endHash != nil {
 		endBlock, err := rawdb.ReadBlockByHash(tx, *endHash)
@@ -203,7 +203,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		if endBlock == nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-		endNum = endBlock.NumberU64()
+		endNum = endBlock.NumberU64() + 1
 	}
 
 	if startNum > endNum {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/params"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -29,7 +31,7 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, sn
 	}
 }
 
-func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -67,11 +69,19 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if err != nil {
 		return err
 	}
+
+	if initialCycle {
+		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
+			return err
+		}
+	}
+
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -114,12 +124,7 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db kv.RwDB) error {
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
 	notifyTo, err := stages.GetStageProgress(tx, stages.Finish) // because later stages can be disabled
 	if err != nil {
 		return err
