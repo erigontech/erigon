@@ -1,0 +1,76 @@
+package health
+
+import (
+	"encoding/json"
+	"io"
+	"io/ioutil"
+	"net/http"
+	"strings"
+
+	"github.com/ledgerwatch/log/v3"
+)
+
+type requestBody struct {
+	MinPeerCount      *uint  `json:"min_peer_count,omitempty"`
+	MaxTimeLatestSync *uint  `json:"max_time_from_latest_sync"`
+	Query             string `json:"query"`
+}
+
+const HEALTHCHECK_PATH = "/health"
+
+func ProcessHealthcheckIfNeeded(w http.ResponseWriter, r *http.Request) bool {
+	if !strings.EqualFold(r.URL.Path, HEALTHCHECK_PATH) {
+		return false
+	}
+
+	body, err := parseHealthCheckBody(r.Body)
+	defer r.Body.Close()
+
+	if err != nil {
+		log.Root().Warn("unable to process healthcheck request", "error", err)
+		// we return true because we already decided that that is a healthcheck
+		// no need to go further
+		return true
+	}
+
+	// 1. net_peerCount
+	var errMinPeerCount = nil
+	if body.MinPeerCount != nil {
+		errMinPeerCount = checkMinPeers(*body.MinPeerCount)
+	}
+
+	// 2. time from the last sync cycle (if possible)
+	var errMaxTimeLatestSync = nil
+	if body.MaxTimeLatestSync != nil {
+		errMaxTimeLatestSync = checkMaxTimeLatestSync(*body.MaxTimeLatestSync)
+	}
+
+	// 3. custom query (shouldn't fail)
+	var errCustomQuery = nil
+	if len(strings.TrimSpace(body.Query)) > 0 {
+		errCustomQuery = checkCustomQuery(body.Query)
+	}
+
+	err = reportHealth(errMinPeerCount, errMaxTimeLatestSync, errCustomQuery, w)
+	if err != nil {
+		log.Root().Warn("unable to process healthcheck request", "error", err)
+	}
+
+	return true
+}
+
+func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
+	var body requestBody
+
+	bodyBytes, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		return body, err
+	}
+
+	err = json.Unmarshal(bodyBytes, &body)
+	if err != nil {
+		return body, err
+	}
+
+	return body, nil
+}
