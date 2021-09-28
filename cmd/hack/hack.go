@@ -1425,7 +1425,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			}
 			j := i
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
-				if l < 2 {
+				if l < 5 {
 					continue
 				}
 				// Go back
@@ -1446,19 +1446,19 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 						lastK = k
 					}
 				}
-				//if repeats > 1 {
-				score := uint64(repeats * int(l-1))
-				// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
-				dictKey := make([]byte, l)
-				for s := 0; s < l; s++ {
-					dictKey[s] = superstring[(filtered[i]+s)*2+1]
+				if repeats > 128 {
+					score := uint64(repeats * int(l-4))
+					// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
+					dictKey := make([]byte, l)
+					for s := 0; s < l; s++ {
+						dictKey[s] = superstring[(filtered[i]+s)*2+1]
+					}
+					var dictVal [8]byte
+					binary.BigEndian.PutUint64(dictVal[:], score)
+					if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
+						log.Error("processSuperstring", "collect", err)
+					}
 				}
-				var dictVal [8]byte
-				binary.BigEndian.PutUint64(dictVal[:], score)
-				if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
-					log.Error("processSuperstring", "collect", err)
-				}
-				//}
 			}
 		}
 	}
@@ -1764,18 +1764,18 @@ func reduceDictWorker(inputCh chan []byte, dict map[string]int64, usedDict map[s
 					lastS = lastCompressed
 				}
 				// Now try to apply compression, if possible
-				if dictScore, ok := dict[string(input[j:k])]; ok {
+				if dictScore, ok := dict[string(input[j:k])]; ok && (k-j) > 4 {
 					words = append(append([][]byte{}, words...), input[j:k])
 					lastCompressed = k
 					if (cc.compression == sc.compression && cc.scores > sc.scores) || cc.compression > sc.compression {
-						compression = cc.compression + (k - j) - 3
+						compression = cc.compression + (k - j) - 4
 						scores = cc.scores + dictScore
 					} else {
-						compression = sc.compression + (k - j) - 3
+						compression = sc.compression + (k - j) - 4
 						scores = sc.scores + dictScore
 					}
 				}
-				if j == 0 || compression > maxC {
+				if j == 0 || (compression == maxC && scores > scoresC) || compression > maxC {
 					maxC = compression
 					wordsC = words
 					scoresC = scores
@@ -1787,12 +1787,12 @@ func reduceDictWorker(inputCh chan []byte, dict map[string]int64, usedDict map[s
 		}
 		if (compressedEnd[l].compression == simpleEnd[l].compression && compressedEnd[l].scores > simpleEnd[l].scores) || compressedEnd[l].compression > simpleEnd[l].compression {
 			atomic.AddUint64(totalCompression, uint64(compressedEnd[l].compression))
-			for _, word := range compressedEnd[int(l)].words {
+			for _, word := range compressedEnd[l].words {
 				usedDict[string(word)]++
 			}
 		} else {
 			atomic.AddUint64(totalCompression, uint64(simpleEnd[l].compression))
-			for _, word := range simpleEnd[int(l)].words {
+			for _, word := range simpleEnd[l].words {
 				usedDict[string(word)]++
 			}
 		}
@@ -1962,6 +1962,23 @@ func truecompress() error {
 				code2wordTerm[string(codeTerm)] = word
 				word2codeTerm[string(word)] = codeTerm
 				lastw--
+			}
+		}
+	}
+	// Four byte codewords
+	for c1 := 0; c1 < 32 && lastw >= 0; c1++ {
+		for c2 := 0; c2 < 128 && lastw >= 0; c2++ {
+			for c3 := 0; c3 < 128 && lastw >= 0; c3++ {
+				for c4 := 0; c4 < 128 && lastw >= 0; c4++ {
+					code := []byte{0x40 | byte(c1), byte(c2), byte(c3), 0x80 | byte(c4)} // 0x40 is "dictionary encoded" flag, and 0x20 is flag meaning "last term of the key or value", 0x80 means "last byte of codeword"
+					codeTerm := []byte{0x40 | 0x20 | byte(c1), byte(c2), byte(c3), 0x80 | byte(c4)}
+					word := db.items[lastw].word
+					code2word[string(code)] = word
+					word2code[string(word)] = code
+					code2wordTerm[string(codeTerm)] = word
+					word2codeTerm[string(word)] = codeTerm
+					lastw--
+				}
 			}
 		}
 	}
