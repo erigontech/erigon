@@ -325,7 +325,15 @@ func RecvTxMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("RecvTxMessage: Handling incoming message", "error", err)
+			s, ok := status.FromError(err)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+			if doLog {
+				if rlp.IsDecodeError(err) {
+					log.Debug("[RecvTxMessage] Handling incoming message", "error", err)
+				} else {
+					log.Warn("[RecvTxMessage] Handling incoming message", "error", err)
+				}
+			}
 		}
 		if wg != nil {
 			wg.Done()

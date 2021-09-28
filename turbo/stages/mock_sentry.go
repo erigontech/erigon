@@ -162,7 +162,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		Key:         key,
 		Notifications: &stagedsync.Notifications{
 			Events:               privateapi.NewEvents(),
-			Accumulator:          &shards.Accumulator{},
+			Accumulator:          shards.NewAccumulator(gspec.Config),
 			StateChangesConsumer: nil,
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
@@ -275,7 +275,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.ChainConfig,
 				mock.Engine,
 				&vm.Config{},
-				&shards.Accumulator{},
+				mock.Notifications.Accumulator,
 				cfg.StateStream,
 				mock.tmpdir,
 			),

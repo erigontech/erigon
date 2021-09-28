@@ -22,7 +22,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1630649706745,
+  "iteration": 1632101487032,
   "links": [],
   "panels": [
     {
@@ -1463,7 +1463,7 @@
               }
             ]
           },
-          "unit": "short"
+          "unit": "cps"
         },
         "overrides": []
       },
@@ -1498,7 +1498,7 @@
       ],
       "timeFrom": null,
       "timeShift": null,
-      "title": "go_cgo_calls_count",
+      "title": "cgo calls",
       "type": "timeseries"
     },
     {
@@ -2388,7 +2388,32 @@
           },
           "unit": "s"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "pool_write_to_db: turbogeth16c.weblogix.it:6060"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -2415,7 +2440,7 @@
           "exemplar": true,
           "expr": "pool_process_remote_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "pool_process_remote_txs: {{ instance }}",
+          "legendFormat": "process_remote_txs: {{ instance }}",
           "refId": "A"
         },
         {
@@ -2423,7 +2448,7 @@
           "expr": "pool_add_remote_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "pool_add_remote_txs: {{ instance }}",
+          "legendFormat": "add_remote_txs: {{ instance }}",
           "refId": "B"
         },
         {
@@ -2431,7 +2456,7 @@
           "expr": "pool_new_block{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "pool_new_block: {{ instance }}",
+          "legendFormat": "new_block: {{ instance }}",
           "refId": "C"
         },
         {
@@ -2439,8 +2464,24 @@
           "expr": "pool_write_to_db{quantile=\"$quantile\",instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "pool_write_to_db: {{ instance }}",
+          "legendFormat": "write_to_db: {{ instance }}",
           "refId": "D"
+        },
+        {
+          "exemplar": true,
+          "expr": "pool_propagate_to_new_peer{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "propagate_to_new_peer: {{ instance }}",
+          "refId": "E"
+        },
+        {
+          "exemplar": true,
+          "expr": "pool_propagate_new_txs{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "propagate_new_txs: {{ instance }}",
+          "refId": "F"
         }
       ],
       "title": "Timings",
@@ -2498,7 +2539,32 @@
           },
           "unit": "reqps"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "pool_add_remote_txs_count: turbogeth16c.weblogix.it:6060"
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -2612,7 +2678,7 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 7,
+        "w": 8,
         "x": 0,
         "y": 67
       },
@@ -2633,100 +2699,14 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(delta(pool_cache_total{result=\"hit\",instance=~\"$instance\"}[1m]))/sum(delta(pool_cache_total{instance=~\"$instance\"}[1m])) ",
+          "expr": "sum(delta(cache_total{result=\"hit\",name=\"txpool\",instance=~\"$instance\"}[1m]))/sum(delta(cache_total{name=\"txpool\",instance=~\"$instance\"}[1m])) ",
           "hide": false,
           "interval": "",
           "legendFormat": "hit rate: {{ instance }} ",
           "refId": "A"
         }
       ],
-      "title": "Cache",
-      "type": "timeseries"
-    },
-    {
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "decbytes"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 7,
-        "y": 67
-      },
-      "id": 178,
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "last"
-          ],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "rate(pool_write_to_db_bytes{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "pool_write_to_db_bytes: {{ instance }}",
-          "refId": "A"
-        }
-      ],
-      "title": "DB",
+      "title": "Cache hit-rate",
       "type": "timeseries"
     },
     {
@@ -2779,15 +2759,40 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "__systemRef": "hideSeriesFrom",
+            "matcher": {
+              "id": "byNames",
+              "options": {
+                "mode": "exclude",
+                "names": [
+                  "hit: turbogeth16c.weblogix.it:6060 "
+                ],
+                "prefix": "All except:",
+                "readOnly": true
+              }
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": true
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 6,
-        "w": 9,
-        "x": 15,
+        "w": 8,
+        "x": 8,
         "y": 67
       },
-      "id": 179,
+      "id": 180,
       "options": {
         "legend": {
           "calcs": [
@@ -2804,14 +2809,202 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(pool_senders_evicted{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(cache_total{name=\"txpool\",instance=~\"$instance\"}[1m])",
           "hide": false,
           "interval": "",
-          "legendFormat": "pool_senders_evicted: {{ instance }}",
+          "legendFormat": "{{ result }}: {{ instance }} ",
+          "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(cache_timeout_total{name=\"txpool\",instance=~\"$instance\"}[1m])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "timeout: {{ instance }} ",
+          "refId": "B"
+        }
+      ],
+      "title": "Cache rps",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 67
+      },
+      "id": 181,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "cache_keys_total{name=\"txpool\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "keys: {{ instance }} ",
+          "refId": "A"
+        },
+        {
+          "exemplar": true,
+          "expr": "cache_list_total{name=\"txpool\",instance=~\"$instance\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "list: {{ instance }} ",
+          "refId": "B"
+        }
+      ],
+      "title": "Cache keys",
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "binBps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 73
+      },
+      "id": 178,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(pool_write_to_db_bytes{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pool_write_to_db_bytes: {{ instance }}",
           "refId": "A"
         }
       ],
-      "title": "Senders",
+      "title": "DB",
       "type": "timeseries"
     },
     {
@@ -2821,7 +3014,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 79
       },
       "id": 146,
       "panels": [
@@ -3520,7 +3713,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 80
       },
       "id": 75,
       "panels": [],
@@ -3584,7 +3777,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 75
+        "y": 81
       },
       "id": 96,
       "links": [],
@@ -3687,7 +3880,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 75
+        "y": 81
       },
       "id": 77,
       "links": [],
@@ -3745,7 +3938,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 87
       },
       "id": 4,
       "panels": [],
@@ -3789,7 +3982,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 82
+        "y": 88
       },
       "id": 108,
       "interval": null,
@@ -3868,7 +4061,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 82
+        "y": 88
       },
       "id": 111,
       "interval": null,
@@ -3948,7 +4141,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 82
+        "y": 88
       },
       "id": 109,
       "interval": null,
@@ -4028,7 +4221,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 82
+        "y": 88
       },
       "id": 113,
       "interval": null,
@@ -4107,7 +4300,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 82
+        "y": 88
       },
       "id": 114,
       "interval": null,
@@ -4186,7 +4379,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 82
+        "y": 88
       },
       "id": 115,
       "interval": null,
@@ -4286,7 +4479,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 85
+        "y": 91
       },
       "id": 110,
       "links": [],
@@ -4390,7 +4583,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 85
+        "y": 91
       },
       "id": 116,
       "links": [],
@@ -4494,7 +4687,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 91
+        "y": 97
       },
       "id": 117,
       "links": [],
@@ -4622,7 +4815,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 98
+        "y": 104
       },
       "id": 138,
       "panels": [
@@ -4732,7 +4925,7 @@
       "type": "row"
     }
   ],
-  "refresh": "",
+  "refresh": "30s",
   "schemaVersion": 30,
   "style": "dark",
   "tags": [],
@@ -4788,12 +4981,8 @@
         "allValue": null,
         "current": {
           "selected": false,
-          "text": [
-            "turbogeth16c.weblogix.it:6060"
-          ],
-          "value": [
-            "turbogeth16c.weblogix.it:6060"
-          ]
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": "Prometheus",
         "definition": "go_goroutines",
@@ -4898,7 +5087,7 @@
     ]
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-12h",
     "to": "now"
   },
   "timepicker": {
@@ -4928,5 +5117,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 28
+  "version": 40
 }

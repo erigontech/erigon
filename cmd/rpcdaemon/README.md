@@ -2,6 +2,7 @@
 - [Getting Started](#getting-started)
     * [Running locally](#running-locally)
     * [Running remotely](#running-remotely)
+    * [Healthcheck](#healthcheck)
     * [Testing](#testing)
 - [FAQ](#faq)
     * [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
@@ -41,7 +42,7 @@ it's much faster than TCP access. Provide both `--datadir` and `--private.api.ad
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 Note that we've also specified which RPC namespaces to enable in the above command by `--http.api` flag.
@@ -54,7 +55,7 @@ To start the daemon remotely - just don't set `--datadir` flag:
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=0.0.0.0:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 The daemon should respond with something like:
@@ -62,6 +63,44 @@ The daemon should respond with something like:
 ```[bash]
 INFO [date-time] HTTP endpoint opened url=localhost:8545...
 ```
+
+### Healthcheck
+
+Running the daemon also opens an endpoint `/health` that provides a basic
+health check.
+
+If the health check is successful it returns 200 OK.
+
+If the health check fails it returns 500 Internal Server Error.
+
+Configuration of the health check is sent as POST body of the method.
+
+```
+{
+   "min_peer_count": <minimal number of the node peers>,
+   "known_block": <number_of_block_that_node_should_know>
+}
+```
+
+Not adding a check disables that.
+
+**`min_peer_count`** -- checks for mimimum of healthy node peers. Requires
+`net` namespace to be listed in `http.api`.
+
+**`known_block`** -- sets up the block that node has to know about. Requires
+`eth` namespace to be listed in `http.api`.
+
+Example request 
+```http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'```
+Example response
+```
+{
+    "check_block": "HEALTHY",
+    "healthcheck_query": "HEALTHY",
+    "min_peer_count": "HEALTHY"
+}
+```
+
 
 ### Testing
 
@@ -121,7 +160,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | net_version                                | Yes     | `remote`.                                  |
 |                                            |         |                                            |
 | eth_blockNumber                            | Yes     |                                            |
-| eth_chainID                                | Yes     |                                            |
+| eth_chainID/eth_chainId                    | Yes     |                                            |
 | eth_protocolVersion                        | Yes     |                                            |
 | eth_syncing                                | Yes     |                                            |
 | eth_gasPrice                               | Yes     |                                            |
@@ -211,17 +250,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | db_getString                               | No      | deprecated                                 |
 | db_putHex                                  | No      | deprecated                                 |
 | db_getHex                                  | No      | deprecated                                 |
-|                                            |         |                                            |
-| shh_post                                   | No      | deprecated                                 |
-| shh_version                                | No      | deprecated                                 |
-| shh_newIdentity                            | No      | deprecated                                 |
-| shh_hasIdentity                            | No      | deprecated                                 |
-| shh_newGroup                               | No      | deprecated                                 |
-| shh_addToGroup                             | No      | deprecated                                 |
-| shh_newFilter                              | No      | deprecated                                 |
-| shh_uninstallFilter                        | No      | deprecated                                 |
-| shh_getFilterChanges                       | No      | deprecated                                 |
-| shh_getMessages                            | No      | deprecated                                 |
 |                                            |         |                                            |
 | erigon_getHeaderByHash                     | Yes     | Erigon only                                |
 | erigon_getHeaderByNumber                   | Yes     | Erigon only                                |

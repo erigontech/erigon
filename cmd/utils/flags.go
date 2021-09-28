@@ -96,6 +96,11 @@ var (
 		Usage: "Data directory for the databases",
 		Value: DirectoryString(paths.DefaultDataDir()),
 	}
+	MdbxAugmentLimitFlag = DirectoryFlag{
+		Name:  "mdbx.augment.limit",
+		Usage: "Data directory for the databases",
+		Value: DirectoryString(paths.DefaultDataDir()),
+	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
@@ -594,6 +599,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
+		case params.KovanChainName:
+			urls = params.KovanBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -634,6 +641,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
+		case params.KovanChainName:
+			urls = params.KovanBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -864,6 +873,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case params.SokolChainName:
 		return filepath.Join(datadir, "sokol")
+	case params.KovanChainName:
+		return filepath.Join(datadir, "kovan")
 	default:
 		return datadir
 	}
@@ -876,6 +887,10 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
 	} else {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(MdbxAugmentLimitFlag.Name) {
+		cfg.MdbxAugumentLimit = ctx.GlobalUint64(MdbxAugmentLimitFlag.Name)
 	}
 }
 
@@ -1233,6 +1248,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 77
 		}
 		cfg.Genesis = core.DefaultSokolGenesisBlock()
+	case params.KovanChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 42
+		}
+		cfg.Genesis = core.DefaultKovanGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1306,6 +1326,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultErigonGenesisBlock()
 	case params.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
+	case params.KovanChainName:
+		genesis = core.DefaultKovanGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

@@ -214,7 +214,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
 			var err error
-			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), chainConfig.Aura.Etherbase, consensusconfig.Sokol)
+			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), chainConfig.Aura.Etherbase, consensusconfig.GetConfigByChain(chainConfig.ChainName))
 			if err != nil {
 				panic(err)
 			}

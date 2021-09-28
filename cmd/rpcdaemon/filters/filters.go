@@ -384,12 +384,13 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	defer ff.mu.RUnlock()
 
 	txs := make([]types.Transaction, len(reply.RplTxs))
-	for i, rplTx := range reply.RplTxs {
+	for i, rlpTx := range reply.RplTxs {
 		var decodeErr error
-		txs[i], decodeErr = types.UnmarshalTransactionFromBinary(rplTx)
+		s := rlp.NewStream(bytes.NewReader(rlpTx), uint64(len(rlpTx)))
+		txs[i], decodeErr = types.DecodeTransaction(s)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr)
+			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", fmt.Sprintf("%x", rlpTx))
 			break
 		}
 	}
