@@ -1066,7 +1066,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	}
 	var stateReader state.StateReader
 	if num, ok := parentNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		cacheView, err := api.stateCache.View(ctx, dbtx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, dbtx)
 	} else {
 		stateReader = state.NewPlainState(dbtx, blockNumber)
 	}

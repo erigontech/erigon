@@ -98,7 +98,7 @@ var rootCmd = &cobra.Command{
 		cfg.LogEvery = 30 * time.Second
 		cfg.CommitEvery = 30 * time.Second
 
-		cacheConfig := kvcache.DefaultCoherentCacheConfig
+		cacheConfig := kvcache.DefaultCoherentConfig
 		cacheConfig.MetricsLabel = "txpool"
 
 		newTxs := make(chan txpool.Hashes, 1024)
