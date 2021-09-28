@@ -169,11 +169,9 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 		To:   &to,
 	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false), nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
-			/*
-			Not sure. Here https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md it is not explicitly said that
-			eth_call should only work with canonical blocks.
-			But since there is no point in changing the state of non-canonical block, it ignores RequireCanonical.
-			*/
+			/* Not sure. Here https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md it is not explicitly said that
+			   eth_call should only work with canonical blocks.
+			   But since there is no point in changing the state of non-canonical block, it ignores RequireCanonical. */
 			t.Errorf("wrong error: %v", err)
 		}
 	} else {
