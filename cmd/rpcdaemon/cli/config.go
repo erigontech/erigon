@@ -180,7 +180,6 @@ func subscribeToStateChanges(ctx context.Context, client StateChangesClient, cac
 			return nil
 		}
 
-		log.Info("on new block", "n", req.ChangeBatch[0].BlockHeight)
 		cache.OnNewBlock(req)
 	}
 }
