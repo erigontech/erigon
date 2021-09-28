@@ -25,6 +25,7 @@ func NewCachedReader2(cache kvcache.CacheView, tx kv.Tx) *CachedReader2 {
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader2) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	panic(1)
 	enc, err := r.cache.Get(address.Bytes())
 	if err != nil {
 		return nil, err
