@@ -14,9 +14,8 @@ import (
 )
 
 type requestBody struct {
-	MinPeerCount      *uint            `json:"min_peer_count"`
-	MaxTimeLatestSync *uint            `json:"max_time_from_latest_sync"`
-	BlockNumber       *rpc.BlockNumber `json:"known_block"`
+	MinPeerCount *uint            `json:"min_peer_count"`
+	BlockNumber  *rpc.BlockNumber `json:"known_block"`
 }
 
 const (
@@ -39,7 +38,6 @@ func ProcessHealthcheckIfNeeded(
 	netAPI, ethAPI := parseAPI(rpcAPI)
 
 	var errMinPeerCount = errCheckDisabled
-	var errMaxTimeLatestSync = errCheckDisabled
 	var errCheckBlock = errCheckDisabled
 
 	body, errParse := parseHealthCheckBody(r.Body)
@@ -56,11 +54,10 @@ func ProcessHealthcheckIfNeeded(
 		if body.BlockNumber != nil {
 			errCheckBlock = checkBlockNumber(*body.BlockNumber, ethAPI)
 		}
-		// TODO
-		// add time from the last sync cycle
+		// TODO add time from the last sync cycle
 	}
 
-	err := reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCheckBlock, w)
+	err := reportHealth(errParse, errMinPeerCount, errCheckBlock, w)
 	if err != nil {
 		log.Root().Warn("unable to process healthcheck request", "error", err)
 	}
@@ -84,7 +81,7 @@ func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 	return body, nil
 }
 
-func reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCheckBlock error, w http.ResponseWriter) error {
+func reportHealth(errParse, errMinPeerCount, errCheckBlock error, w http.ResponseWriter) error {
 	statusCode := http.StatusOK
 	errors := make(map[string]string)
 
@@ -97,11 +94,6 @@ func reportHealth(errParse, errMinPeerCount, errMaxTimeLatestSync, errCheckBlock
 		statusCode = http.StatusInternalServerError
 	}
 	errors["min_peer_count"] = errorStringOrOK(errMinPeerCount)
-
-	if shouldChangeStatusCode(errMaxTimeLatestSync) {
-		statusCode = http.StatusInternalServerError
-	}
-	errors["min_time_latest_sync"] = errorStringOrOK(errMaxTimeLatestSync)
 
 	if shouldChangeStatusCode(errCheckBlock) {
 		statusCode = http.StatusInternalServerError
