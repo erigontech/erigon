@@ -112,7 +112,8 @@ func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode boo
 	if !singleNodeMode {
 		blocksLRU, _ = lru.New(256)
 	}
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU}
+	_ = blocksLRU
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: nil}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
