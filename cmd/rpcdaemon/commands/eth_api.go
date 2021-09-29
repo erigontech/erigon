@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -97,14 +98,15 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
+	stateCache   kvcache.Cache
 	filters      *filters.Filters
 	_chainConfig *params.ChainConfig
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 }
 
-func NewBaseApi(f *filters.Filters) *BaseAPI {
-	return &BaseAPI{filters: f}
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache) *BaseAPI {
+	return &BaseAPI{filters: f, stateCache: stateCache}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {

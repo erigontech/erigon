@@ -98,7 +98,7 @@ var rootCmd = &cobra.Command{
 		cfg.LogEvery = 30 * time.Second
 		cfg.CommitEvery = 30 * time.Second
 
-		cacheConfig := kvcache.DefaultCoherentCacheConfig
+		cacheConfig := kvcache.DefaultCoherentConfig
 		cacheConfig.MetricsLabel = "txpool"
 
 		newTxs := make(chan txpool.Hashes, 1024)
@@ -113,7 +113,7 @@ var rootCmd = &cobra.Command{
 
 		/*
 			var ethashApi *ethash.API
-			if casted, ok := backend.engine.(*ethash.Ethash); ok {
+			sif casted, ok := backend.engine.(*ethash.Ethash); ok {
 				ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 			}
 		*/

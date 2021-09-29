@@ -85,7 +85,11 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		cacheView, err := api.stateCache.View(ctx, dbtx)
+		if err != nil {
+			return err
+		}
+		stateReader = state.NewCachedReader2(cacheView, dbtx)
 	} else {
 		stateReader = state.NewPlainState(dbtx, blockNumber)
 	}
