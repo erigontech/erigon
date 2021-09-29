@@ -21,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -1575,6 +1574,9 @@ func (ms MatchSorter) Len() int {
 }
 
 func (ms MatchSorter) Less(i, j int) bool {
+	if ms[i].Pos() == ms[j].Pos() {
+		return len(ms[i].Match()) > len(ms[j].Match())
+	}
 	return ms[i].Pos() < ms[j].Pos()
 }
 
@@ -1729,9 +1731,10 @@ type CompressInput struct {
 }
 
 type CompressOutput struct {
-	worker int    // Worker where the output came from
-	count  int    // Counter to order the outputs (in the incremementing order of the counts)
-	output []byte // Actual output
+	count       int    // Counter to order the outputs (in the incremementing order of the counts)
+	output      []byte // Actual output
+	compression uint64
+	matchCount  int
 }
 
 type OutputHeap []CompressOutput
@@ -1760,83 +1763,100 @@ func (oh *OutputHeap) Pop() interface{} {
 	return x
 }
 
-func reduceDictWorker(workerId int, inputCh chan CompressInput, outputCh chan CompressOutput, dict map[string]int64, usedDict map[string]int, totalCompression *uint64, completion *sync.WaitGroup) {
+func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, trie *ahocorasick.Trie, usedDict map[string]int) {
 	for ci := range inputCh {
 		input := ci.input
-		l := len(input)
-		// Dynamic programming. We use 2 programs - one always ending with a compressed word (if possible), another - without
-		compressedEnd := make(map[int]DynamicCell)
-		simpleEnd := make(map[int]DynamicCell)
-		compressedEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
-		simpleEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
-		for k := 1; k <= l; k++ {
-			var maxC, maxS int
-			var wordsC, wordsS [][]byte
-			var scoresC, scoresS int64
-			var lastC, lastS int
-			for j := 0; j < k; j++ {
-				cc := compressedEnd[j]
-				sc := simpleEnd[j]
-				// First assume we are not compressing slice [j:k]
-				ccCompression := ((j - cc.lastCompressed + 63) / 64) - ((k - cc.lastCompressed + 63) / 64) + cc.compression
-				scCompression := ((j - sc.lastCompressed + 63) / 64) - ((k - sc.lastCompressed + 63) / 64) + sc.compression
-				var compression int
-				var words [][]byte
-				var scores int64
-				var lastCompressed int
-				if (ccCompression == scCompression && cc.scores > sc.scores) || ccCompression > scCompression {
-					compression = ccCompression
-					words = cc.words
-					scores = cc.scores
-					lastCompressed = cc.lastCompressed
-				} else {
-					compression = scCompression
-					words = sc.words
-					scores = sc.scores
-					lastCompressed = sc.lastCompressed
+		matches := MatchSorter(trie.Match(input))
+		sort.Sort(&matches)
+		var filteredMatches int
+		if matches.Len() > 0 {
+			lastMatch := matches[0]
+			for j := 1; j < matches.Len(); j++ {
+				match := matches[j]
+				// check non-containment
+				if int(match.Pos())+len(match.Match()) > int(lastMatch.Pos())+len(lastMatch.Match()) {
+					filteredMatches++
+					lastMatch = match
 				}
-				if j == 0 || (compression == maxS && scores > scoresS) || compression > maxS {
-					maxS = compression
-					wordsS = words
-					scoresS = scores
-					lastS = lastCompressed
-				}
-				// Now try to apply compression, if possible
-				if dictScore, ok := dict[string(input[j:k])]; ok && (k-j) > 4 {
-					words = append(append([][]byte{}, words...), input[j:k])
-					lastCompressed = k
-					if (cc.compression == sc.compression && cc.scores > sc.scores) || cc.compression > sc.compression {
-						compression = cc.compression + (k - j) - 4
-						scores = cc.scores + dictScore
+			}
+			filteredMatches++
+		}
+		co := CompressOutput{count: ci.count, matchCount: filteredMatches}
+		/*
+			l := len(input)
+			// Dynamic programming. We use 2 programs - one always ending with a compressed word (if possible), another - without
+			compressedEnd := make(map[int]DynamicCell)
+			simpleEnd := make(map[int]DynamicCell)
+			compressedEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
+			simpleEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
+			for k := 1; k <= l; k++ {
+				var maxC, maxS int
+				var wordsC, wordsS [][]byte
+				var scoresC, scoresS int64
+				var lastC, lastS int
+				for j := 0; j < k; j++ {
+					cc := compressedEnd[j]
+					sc := simpleEnd[j]
+					// First assume we are not compressing slice [j:k]
+					ccCompression := ((j - cc.lastCompressed + 63) / 64) - ((k - cc.lastCompressed + 63) / 64) + cc.compression
+					scCompression := ((j - sc.lastCompressed + 63) / 64) - ((k - sc.lastCompressed + 63) / 64) + sc.compression
+					var compression int
+					var words [][]byte
+					var scores int64
+					var lastCompressed int
+					if (ccCompression == scCompression && cc.scores > sc.scores) || ccCompression > scCompression {
+						compression = ccCompression
+						words = cc.words
+						scores = cc.scores
+						lastCompressed = cc.lastCompressed
 					} else {
-						compression = sc.compression + (k - j) - 4
-						scores = sc.scores + dictScore
+						compression = scCompression
+						words = sc.words
+						scores = sc.scores
+						lastCompressed = sc.lastCompressed
+					}
+					if j == 0 || (compression == maxS && scores > scoresS) || compression > maxS {
+						maxS = compression
+						wordsS = words
+						scoresS = scores
+						lastS = lastCompressed
+					}
+					// Now try to apply compression, if possible
+					if dictScore, ok := dict[string(input[j:k])]; ok && (k-j) > 4 {
+						words = append(append([][]byte{}, words...), input[j:k])
+						lastCompressed = k
+						if (cc.compression == sc.compression && cc.scores > sc.scores) || cc.compression > sc.compression {
+							compression = cc.compression + (k - j) - 4
+							scores = cc.scores + dictScore
+						} else {
+							compression = sc.compression + (k - j) - 4
+							scores = sc.scores + dictScore
+						}
+					}
+					if j == 0 || (compression == maxC && scores > scoresC) || compression > maxC {
+						maxC = compression
+						wordsC = words
+						scoresC = scores
+						lastC = lastCompressed
 					}
 				}
-				if j == 0 || (compression == maxC && scores > scoresC) || compression > maxC {
-					maxC = compression
-					wordsC = words
-					scoresC = scores
-					lastC = lastCompressed
+				compressedEnd[k] = DynamicCell{scores: scoresC, compression: maxC, lastCompressed: lastC, words: wordsC}
+				simpleEnd[k] = DynamicCell{scores: scoresS, compression: maxS, lastCompressed: lastS, words: wordsS}
+			}
+			if (compressedEnd[l].compression == simpleEnd[l].compression && compressedEnd[l].scores > simpleEnd[l].scores) || compressedEnd[l].compression > simpleEnd[l].compression {
+				co.compression += uint64(compressedEnd[l].compression)
+				for _, word := range compressedEnd[l].words {
+					usedDict[string(word)]++
+				}
+			} else {
+				co.compression += uint64(simpleEnd[l].compression)
+				for _, word := range simpleEnd[l].words {
+					usedDict[string(word)]++
 				}
 			}
-			compressedEnd[k] = DynamicCell{scores: scoresC, compression: maxC, lastCompressed: lastC, words: wordsC}
-			simpleEnd[k] = DynamicCell{scores: scoresS, compression: maxS, lastCompressed: lastS, words: wordsS}
-		}
-		if (compressedEnd[l].compression == simpleEnd[l].compression && compressedEnd[l].scores > simpleEnd[l].scores) || compressedEnd[l].compression > simpleEnd[l].compression {
-			atomic.AddUint64(totalCompression, uint64(compressedEnd[l].compression))
-			for _, word := range compressedEnd[l].words {
-				usedDict[string(word)]++
-			}
-		} else {
-			atomic.AddUint64(totalCompression, uint64(simpleEnd[l].compression))
-			for _, word := range simpleEnd[l].words {
-				usedDict[string(word)]++
-			}
-		}
-
+		*/
+		outputCh <- co
 	}
-	completion.Done()
 }
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
@@ -1848,6 +1868,7 @@ func reducedict() error {
 	}
 	defer df.Close()
 	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
+	trieBuilder := ahocorasick.NewTrieBuilder()
 	dict := make(map[string]int64)
 	ds := bufio.NewScanner(df)
 	for ds.Scan() {
@@ -1861,8 +1882,10 @@ func reducedict() error {
 			return err
 		}
 		dict[string(word)] = score
+		trieBuilder.AddPattern(word)
 	}
 	df.Close()
+	trie := trieBuilder.Build()
 	log.Info("dictionary file parsed", "entries", len(dict))
 	statefile := "statedump.dat"
 	f, err := os.Open(statefile)
@@ -1876,47 +1899,95 @@ func reducedict() error {
 
 	var usedDicts []map[string]int
 	var totalCompression uint64
+	var maxMatchCount int
 	inputCh := make(chan CompressInput, 10000)
 	outputCh := make(chan CompressOutput)
-	var completion sync.WaitGroup
 	for p := 0; p < runtime.NumCPU(); p++ {
 		usedDict := make(map[string]int)
 		usedDicts = append(usedDicts, usedDict)
-		completion.Add(1)
-		go reduceDictWorker(p, inputCh, outputCh, dict, usedDict, &totalCompression, &completion)
+		go reduceDictWorker(inputCh, outputCh, trie, usedDict)
 	}
+	var outputs OutputHeap
+	heap.Init(&outputs)
 	r := bufio.NewReader(f)
 	var buf [256]byte
 	l, e := r.ReadByte()
 	i := 0
+	nextOutputCount := 0
 	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
 		nextInput := CompressInput{count: i, input: common.CopyBytes(buf[:l])}
-		select {
-		case inputCh <- nextInput:
-		case nextOutput := <-outputCh:
-
+		inputSent := false
+		for !inputSent {
+			// Control the size of output heap
+			for outputs.Len() > 100_000 {
+				for outputs[0].count > nextOutputCount {
+					nextOutput := <-outputCh
+					heap.Push(&outputs, nextOutput)
+				}
+				for outputs.Len() > 0 && outputs[0].count == nextOutputCount {
+					output := heap.Pop(&outputs).(CompressOutput)
+					nextOutputCount++
+					totalCompression += output.compression
+					if output.matchCount > maxMatchCount {
+						maxMatchCount = output.matchCount
+					}
+					if output.count%2_000_000 == 0 {
+						log.Info("1 Replacement preprocessing", "key/value pairs", output.count/2, "estimated saving", common.StorageSize(totalCompression), "max matches", maxMatchCount)
+					}
+				}
+			}
+			select {
+			case inputCh <- nextInput:
+				inputSent = true
+			case nextOutput := <-outputCh:
+				heap.Push(&outputs, nextOutput)
+				for outputs.Len() > 0 && outputs[0].count == nextOutputCount {
+					output := heap.Pop(&outputs).(CompressOutput)
+					nextOutputCount++
+					totalCompression += output.compression
+					if output.matchCount > maxMatchCount {
+						maxMatchCount = output.matchCount
+					}
+					if output.count%2_000_000 == 0 {
+						log.Info("2 Replacement preprocessing", "key/value pairs", output.count/2, "estimated saving", common.StorageSize(totalCompression), "max matches", maxMatchCount)
+					}
+				}
+			}
 		}
 		i++
-		if i%2_000_000 == 0 {
-			log.Info("Replacement preprocessing", "key/value pairs", i/2, "estimated saving", common.StorageSize(atomic.LoadUint64(&totalCompression)))
-		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
-
 	close(inputCh)
-	completion.Wait()
+	// Wait for all outputs to be received
+	for nextOutputCount < i {
+		for outputs.Len() == 0 || outputs[0].count > nextOutputCount {
+			nextOutput := <-outputCh
+			heap.Push(&outputs, nextOutput)
+		}
+		for outputs.Len() > 0 && outputs[0].count == nextOutputCount {
+			output := heap.Pop(&outputs).(CompressOutput)
+			nextOutputCount++
+			totalCompression += output.compression
+			if output.matchCount > maxMatchCount {
+				maxMatchCount = output.matchCount
+			}
+			if output.count%2_000_000 == 0 {
+				log.Info("3 Replacement preprocessing", "key/value pairs", output.count/2, "estimated saving", common.StorageSize(totalCompression), "max matches", maxMatchCount)
+			}
+		}
+	}
 	usedDict := make(map[string]int)
 	for _, d := range usedDicts {
 		for word, r := range d {
 			usedDict[word] += r
 		}
 	}
-	log.Info("Done", "estimated saving", common.StorageSize(totalCompression), "effective dict size", len(usedDict))
+	log.Info("Done", "estimated saving", common.StorageSize(totalCompression), "effective dict size", len(usedDict), "max matches", maxMatchCount)
 	var rf *os.File
 	rf, err = os.Create("reduced_dictionary.txt")
 	if err != nil {
