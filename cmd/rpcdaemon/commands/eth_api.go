@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"sync"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -98,15 +99,20 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	stateCache   kvcache.Cache
+	stateCache   kvcache.Cache // thread-safe
+	blocksLRU    *lru.Cache    // thread-safe
 	filters      *filters.Filters
 	_chainConfig *params.ChainConfig
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache) *BaseAPI {
-	return &BaseAPI{filters: f, stateCache: stateCache}
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode bool) *BaseAPI {
+	var blocksLRU *lru.Cache
+	if !singleNodeMode {
+		blocksLRU, _ = lru.New(256)
+	}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
@@ -118,6 +124,42 @@ func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
 func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
+}
+
+func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {
+	hash, hashErr := rawdb.ReadCanonicalHash(tx, number)
+	if hashErr != nil {
+		return nil, hashErr
+	}
+	return api.blockWithSenders(tx, hash, number)
+}
+func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.(*types.Block), nil
+		}
+	}
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, nil
+	}
+	return api.blockWithSenders(tx, hash, *number)
+}
+func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.(*types.Block), nil
+		}
+	}
+	block, _, err := rawdb.ReadBlockWithSenders(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+
+	if api.blocksLRU != nil {
+		api.blocksLRU.Add(hash, block)
+	}
+	return block, nil
 }
 
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {
@@ -149,7 +191,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
+func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil
 	}
@@ -159,7 +201,7 @@ func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 		return nil, err
 	}
 
-	block, _, err := rawdb.ReadBlockByNumberWithSenders(tx, n)
+	block, err := api.blockByNumberWithSenders(tx, n)
 	return block, err
 }
 

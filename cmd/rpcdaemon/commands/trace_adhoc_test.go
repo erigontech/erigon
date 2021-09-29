@@ -19,7 +19,7 @@ import (
 func TestEmptyQuery(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewTraceAPI(NewBaseApi(nil, stateCache), db, &cli.Flags{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, false), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
@@ -36,7 +36,7 @@ func TestEmptyQuery(t *testing.T) {
 func TestCoinbaseBalance(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewTraceAPI(NewBaseApi(nil, stateCache), db, &cli.Flags{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, false), db, &cli.Flags{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
@@ -63,7 +63,7 @@ func TestCoinbaseBalance(t *testing.T) {
 func TestReplayTransaction(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewTraceAPI(NewBaseApi(nil, stateCache), db, &cli.Flags{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, false), db, &cli.Flags{})
 	var txnHash common.Hash
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		b, err := rawdb.ReadBlockByNumber(tx, 6)
@@ -91,7 +91,7 @@ func TestReplayTransaction(t *testing.T) {
 func TestReplayBlockTransactions(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewTraceAPI(NewBaseApi(nil, stateCache), db, &cli.Flags{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, false), db, &cli.Flags{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
 	n := rpc.BlockNumber(6)

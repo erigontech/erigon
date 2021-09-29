@@ -14,11 +14,12 @@ import (
 
 // APIList describes the list of available RPC apis
 func APIList(ctx context.Context, db kv.RoDB,
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters, stateCache kvcache.Cache,
+	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
+	stateCache kvcache.Cache,
 	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
-	base := NewBaseApi(filters, stateCache)
+	base := NewBaseApi(filters, stateCache, cfg.SingleNodeMode)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
