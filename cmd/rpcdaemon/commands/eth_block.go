@@ -168,13 +168,11 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 // GetBlockByNumber implements eth_getBlockByNumber. Returns information about a block given the block's number.
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	defer func(t time.Time) { fmt.Printf("eth_block.go:171: %s\n", time.Since(t)) }(time.Now())
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	defer func(t time.Time) { fmt.Printf("eth_block.go:177: %s\n", time.Since(t)) }(time.Now())
 	b, err := api.blockByRPCNumber(number, tx)
 	if err != nil {
 		return nil, err
@@ -183,7 +181,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, nil
 	}
 	additionalFields := make(map[string]interface{})
-	defer func(t time.Time) { fmt.Printf("eth_block.go:186: %s\n", time.Since(t)) }(time.Now())
 	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
 	if err != nil {
 		return nil, err
