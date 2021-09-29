@@ -202,12 +202,15 @@ func TestIncarnationForEmptyAccount(t *testing.T) {
 
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
 	a.EncodeForStorage(encodedAccount)
-	var decodedIncarnation uint64
+
 	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, _ = DecodeIncarnationFromStorage(encodedAccount)
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
 }
@@ -218,12 +221,14 @@ func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
 	a.EncodeForStorage(encodedAccount)
 
-	var decodedIncarnation uint64
 	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, _ = DecodeIncarnationFromStorage(encodedAccount)
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
 
@@ -242,12 +247,14 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
 	a.EncodeForStorage(encodedAccount)
 
-	var decodedIncarnation uint64
 	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, _ = DecodeIncarnationFromStorage(encodedAccount)
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
 
@@ -266,12 +273,14 @@ func TestIncarnationWithNoIncarnation(t *testing.T) {
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
 	a.EncodeForStorage(encodedAccount)
 
-	var decodedIncarnation uint64
 	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
 		t.Fatal("Can't decode the incarnation", err, encodedAccount)
 	}
 
-	decodedIncarnation, _ = DecodeIncarnationFromStorage(encodedAccount)
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
 
