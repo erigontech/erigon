@@ -1723,8 +1723,46 @@ type DynamicCell struct {
 	words          [][]byte // dictionary words used for this cell
 }
 
-func reduceDictWorker(inputCh chan []byte, dict map[string]int64, usedDict map[string]int, totalCompression *uint64, completion *sync.WaitGroup) {
-	for input := range inputCh {
+type CompressInput struct {
+	count int
+	input []byte
+}
+
+type CompressOutput struct {
+	worker int    // Worker where the output came from
+	count  int    // Counter to order the outputs (in the incremementing order of the counts)
+	output []byte // Actual output
+}
+
+type OutputHeap []CompressOutput
+
+func (oh OutputHeap) Len() int {
+	return len(oh)
+}
+
+func (oh OutputHeap) Less(i, j int) bool {
+	return oh[i].count < oh[j].count
+}
+
+func (oh *OutputHeap) Swap(i, j int) {
+	(*oh)[i], (*oh)[j] = (*oh)[j], (*oh)[i]
+}
+
+func (oh *OutputHeap) Push(x interface{}) {
+	*oh = append(*oh, x.(CompressOutput))
+}
+
+func (oh *OutputHeap) Pop() interface{} {
+	old := *oh
+	n := len(old)
+	x := old[n-1]
+	*oh = old[0 : n-1]
+	return x
+}
+
+func reduceDictWorker(workerId int, inputCh chan CompressInput, outputCh chan CompressOutput, dict map[string]int64, usedDict map[string]int, totalCompression *uint64, completion *sync.WaitGroup) {
+	for ci := range inputCh {
+		input := ci.input
 		l := len(input)
 		// Dynamic programming. We use 2 programs - one always ending with a compressed word (if possible), another - without
 		compressedEnd := make(map[int]DynamicCell)
@@ -1838,13 +1876,14 @@ func reducedict() error {
 
 	var usedDicts []map[string]int
 	var totalCompression uint64
-	inputCh := make(chan []byte, 10000)
+	inputCh := make(chan CompressInput, 10000)
+	outputCh := make(chan CompressOutput)
 	var completion sync.WaitGroup
 	for p := 0; p < runtime.NumCPU(); p++ {
 		usedDict := make(map[string]int)
 		usedDicts = append(usedDicts, usedDict)
 		completion.Add(1)
-		go reduceDictWorker(inputCh, dict, usedDict, &totalCompression, &completion)
+		go reduceDictWorker(p, inputCh, outputCh, dict, usedDict, &totalCompression, &completion)
 	}
 	r := bufio.NewReader(f)
 	var buf [256]byte
@@ -1854,7 +1893,12 @@ func reducedict() error {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		inputCh <- common.CopyBytes(buf[:l])
+		nextInput := CompressInput{count: i, input: common.CopyBytes(buf[:l])}
+		select {
+		case inputCh <- nextInput:
+		case nextOutput := <-outputCh:
+
+		}
 		i++
 		if i%2_000_000 == 0 {
 			log.Info("Replacement preprocessing", "key/value pairs", i/2, "estimated saving", common.StorageSize(atomic.LoadUint64(&totalCompression)))
@@ -1863,6 +1907,7 @@ func reducedict() error {
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
+
 	close(inputCh)
 	completion.Wait()
 	usedDict := make(map[string]int)
