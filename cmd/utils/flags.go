@@ -198,7 +198,7 @@ var (
 		Value: ethconfig.Defaults.TxPool.GlobalSlots,
 	}
 	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
-		Name:  "txpool.basefeeeslots",
+		Name:  "txpool.globalbasefeeeslots",
 		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
 		Value: ethconfig.Defaults.TxPool.GlobalQueue,
 	}
