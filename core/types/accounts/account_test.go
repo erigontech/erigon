@@ -1,7 +1,6 @@
 package accounts
 
 import (
-	"math/bits"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -191,7 +190,7 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 	}
 }
 
-func testIncarnationForEmptyAccount(t *testing.T) {
+func TestIncarnationForEmptyAccount(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       100,
@@ -213,7 +212,7 @@ func testIncarnationForEmptyAccount(t *testing.T) {
 	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
 }
 
-func testEmptyIncarnationForEmptyAccount2(t *testing.T) {
+func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 	a := Account{}
 
 	encodedAccount := make([]byte, a.EncodingLengthForStorage())
@@ -230,7 +229,7 @@ func testEmptyIncarnationForEmptyAccount2(t *testing.T) {
 
 }
 
-func testIncarnationWithNonEmptyAccount(t *testing.T) {
+func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
@@ -254,7 +253,7 @@ func testIncarnationWithNonEmptyAccount(t *testing.T) {
 
 }
 
-func testIncarnationWithNoIncarnation(t *testing.T) {
+func TestIncarnationWithNoIncarnation(t *testing.T) {
 	a := Account{
 		Initialised: true,
 		Nonce:       2,
@@ -278,29 +277,12 @@ func testIncarnationWithNoIncarnation(t *testing.T) {
 
 }
 
-func testIncarnationWithInvalidEncodedAccount(t *testing.T) {
-	a := Account{
-		Initialised: true,
-		Nonce:       2,
-		Balance:     *new(uint256.Int).SetUint64(1000),
-		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-		Incarnation: 4,
-	}
+func TestIncarnationWithInvalidEncodedAccount(t *testing.T) {
 
-	encodedAccount := make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(encodedAccount)
+	var failingSlice = []byte{1, 12}
 
-	pos := 1
-	nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
-
-	pos += nonceBytes + 1 //gets the exact positions of the balance account, since we know there is a balance
-
-	balanceBytes := a.Balance.ByteLen() - 2
-	a.Balance.WriteToSlice(encodedAccount[pos : pos+balanceBytes])
-
-	if _, err := DecodeIncarnationFromStorage(encodedAccount); err == nil {
-		t.Fatal("decoded the incarnation", err, encodedAccount)
+	if incarnation, err := DecodeIncarnationFromStorage(failingSlice); err == nil {
+		t.Fatal("decoded the incarnation", incarnation, failingSlice)
 	}
 
 }
