@@ -58,6 +58,17 @@ var (
 	}
 )
 
+func IsDecodeError(err error) bool {
+	return errors.Is(err, ErrExpectedString) ||
+		errors.Is(err, ErrExpectedList) ||
+		errors.Is(err, ErrCanonInt) ||
+		errors.Is(err, ErrCanonInt) ||
+		errors.Is(err, ErrCanonSize) ||
+		errors.Is(err, ErrElemTooLarge) ||
+		errors.Is(err, ErrValueTooLarge) ||
+		errors.Is(err, ErrMoreThanOneValue)
+}
+
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode
 // into private fields.
 //

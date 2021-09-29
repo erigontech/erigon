@@ -143,12 +143,9 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 	collectorUpdates := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorUpdates.Close(logPrefix)
 
-	if err := changeset.Walk(tx, changesetBucket, dbutils.EncodeBlockNumber(start), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if blockN >= stop {
-			return false, nil
-		}
+	if err := changeset.ForRange(tx, changesetBucket, start, stop, func(blockN uint64, k, v []byte) error {
 		if err := libcommon.Stopped(quit); err != nil {
-			return false, err
+			return err
 		}
 
 		k = dbutils.CompositeKeyWithoutIncarnation(k)
@@ -162,7 +159,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		case <-checkFlushEvery.C:
 			if needFlush64(updates, cfg.bufLimit) {
 				if err := flushBitmaps64(collectorUpdates, updates); err != nil {
-					return false, err
+					return err
 				}
 				updates = map[string]*roaring64.Bitmap{}
 			}
@@ -175,7 +172,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		}
 		m.Add(blockN)
 
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -290,19 +287,19 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 	defer logEvery.Stop()
 
 	updates := map[string]struct{}{}
-	if err := changeset.Walk(db, csBucket, dbutils.EncodeBlockNumber(to), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.ForEach(db, csBucket, dbutils.EncodeBlockNumber(to), func(blockN uint64, k, v []byte) error {
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-quitCh:
-			return false, libcommon.ErrStopped
+			return libcommon.ErrStopped
 		default:
 		}
 		k = dbutils.CompositeKeyWithoutIncarnation(k)
 		updates[string(k)] = struct{}{}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -422,14 +419,8 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	collector := etl.NewCollector(tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer collector.Close(logPrefix)
 
-	if err := changeset.Walk(tx, csTable, nil, 0, func(blockNum uint64, k, _ []byte) (bool, error) {
-		if blockNum >= pruneTo {
-			return false, nil
-		}
-		if err := collector.Collect(k, nil); err != nil {
-			return false, err
-		}
-		return true, nil
+	if err := changeset.ForRange(tx, csTable, 0, pruneTo, func(blockNum uint64, k, _ []byte) error {
+		return collector.Collect(k, nil)
 	}); err != nil {
 		return err
 	}

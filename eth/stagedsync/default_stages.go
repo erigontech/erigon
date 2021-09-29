@@ -271,7 +271,7 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
-				return FinishForward(s, tx, finish)
+				return FinishForward(s, tx, finish, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindFinish(u, tx, finish, ctx)

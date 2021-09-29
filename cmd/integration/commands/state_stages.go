@@ -534,11 +534,11 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
 	i := 0
 	sort.Sort(expectedAccountChanges)
-	err := changeset.Walk(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err := changeset.ForPrefix(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedAccountChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
-			return true, nil
+			return nil
 		}
 
 		fmt.Printf("Unexpected account changes in block %d\n", blockNum)
@@ -546,7 +546,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 		fmt.Printf("0x%x: %x\n", k, v)
 		fmt.Printf("Expected: ==========================\n")
 		fmt.Printf("0x%x %x\n", c.Key, c.Value)
-		return false, fmt.Errorf("check change set failed")
+		return fmt.Errorf("check change set failed")
 	})
 	if err != nil {
 		return err
@@ -560,11 +560,11 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 
 	i = 0
 	sort.Sort(expectedStorageChanges)
-	err = changeset.Walk(db, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), 8*8, func(blockN uint64, k, v []byte) (bool, error) {
+	err = changeset.ForPrefix(db, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedStorageChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
-			return true, nil
+			return nil
 		}
 
 		fmt.Printf("Unexpected storage changes in block %d\n", blockNum)
@@ -572,7 +572,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 		fmt.Printf("0x%x: %x\n", k, v)
 		fmt.Printf("Expected: ==========================\n")
 		fmt.Printf("0x%x %x\n", c.Key, c.Value)
-		return false, fmt.Errorf("check change set failed")
+		return fmt.Errorf("check change set failed")
 	})
 	if err != nil {
 		return err
@@ -587,7 +587,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 func checkHistory(tx kv.Tx, changeSetBucket string, blockNum uint64) error {
 	indexBucket := changeset.Mapper[changeSetBucket].IndexBucket
 	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
-	if err := changeset.Walk(tx, changeSetBucket, blockNumBytes, 0, func(blockN uint64, address, v []byte) (bool, error) {
+	if err := changeset.ForEach(tx, changeSetBucket, blockNumBytes, func(blockN uint64, address, v []byte) error {
 		k := dbutils.CompositeKeyWithoutIncarnation(address)
 		from := blockN
 		if from > 0 {
@@ -595,12 +595,12 @@ func checkHistory(tx kv.Tx, changeSetBucket string, blockNum uint64) error {
 		}
 		bm, innerErr := bitmapdb.Get64(tx, indexBucket, k, from, blockN+1)
 		if innerErr != nil {
-			return false, innerErr
+			return innerErr
 		}
 		if !bm.Contains(blockN) {
-			return false, fmt.Errorf("checkHistory failed: bucket=%s,block=%d,addr=%x", changeSetBucket, blockN, k)
+			return fmt.Errorf("checkHistory failed: bucket=%s,block=%d,addr=%x", changeSetBucket, blockN, k)
 		}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}

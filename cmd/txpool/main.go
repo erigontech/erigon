@@ -13,11 +13,13 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/ethdb/remotedbserver"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -32,6 +34,10 @@ var (
 	TLSCertfile string
 	TLSCACert   string
 	TLSKeyFile  string
+
+	pendingPoolLimit int
+	baseFeePoolLimit int
+	queuedPoolLimit  int
 )
 
 func init() {
@@ -47,6 +53,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake")
 
+	rootCmd.PersistentFlags().IntVar(&pendingPoolLimit, "txpool.globalslots", txpool.DefaultConfig.PendingSubPoolLimit, "Maximum number of executable transaction slots for all accounts")
+	rootCmd.PersistentFlags().IntVar(&baseFeePoolLimit, "txpool.globalbasefeeeslots", txpool.DefaultConfig.BaseFeeSubPoolLimit, "Maximum number of non-executable transactions where only not enough baseFee")
+	rootCmd.PersistentFlags().IntVar(&queuedPoolLimit, "txpool.globalqueue", txpool.DefaultConfig.QueuedSubPoolLimit, "Maximum number of non-executable transaction slots for all accounts")
 }
 
 var rootCmd = &cobra.Command{
@@ -93,10 +102,13 @@ var rootCmd = &cobra.Command{
 
 		cfg := txpool.DefaultConfig
 		cfg.DBDir = path.Join(datadir, "txpool")
-		cfg.LogEvery = 5 * time.Minute
-		cfg.CommitEvery = 5 * time.Minute
+		cfg.LogEvery = 30 * time.Second
+		cfg.CommitEvery = 30 * time.Second
+		cfg.PendingSubPoolLimit = pendingPoolLimit
+		cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
+		cfg.QueuedSubPoolLimit = queuedPoolLimit
 
-		cacheConfig := kvcache.DefaultCoherentCacheConfig
+		cacheConfig := kvcache.DefaultCoherentConfig
 		cacheConfig.MetricsLabel = "txpool"
 
 		newTxs := make(chan txpool.Hashes, 1024)
@@ -111,13 +123,13 @@ var rootCmd = &cobra.Command{
 
 		/*
 			var ethashApi *ethash.API
-			if casted, ok := backend.engine.(*ethash.Ethash); ok {
+			sif casted, ok := backend.engine.(*ethash.Ethash); ok {
 				ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 			}
-			miningGrpcServer := privateapi.NewMiningServer(cmd.Context(), &rpcdaemontest.IsMiningMock{}, ethashApi)
 		*/
+		miningGrpcServer := privateapi.NewMiningServer(cmd.Context(), &rpcdaemontest.IsMiningMock{}, nil)
 
-		grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, nil, txpoolApiAddr, nil)
+		grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil)
 		if err != nil {
 			return err
 		}

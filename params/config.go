@@ -33,6 +33,8 @@ const (
 	DevChainName     = "dev"
 	ErigonMineName   = "erigonmine"
 	SokolChainName   = "sokol"
+	KovanChainName   = "kovan"
+	FermionChainName = "fermion"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -43,6 +45,8 @@ var (
 	GoerliGenesisHash  = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	ErigonGenesisHash  = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
+	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
+	FermionGenesisHash = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
 )
 
 var (
@@ -50,7 +54,9 @@ var (
 )
 
 var (
-	SokolGenesisStateRoot = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
+	SokolGenesisStateRoot   = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
+	KovanGenesisStateRoot   = common.HexToHash("0x2480155b48a1cea17d67dbfdfaafe821c1d19cdd478c5358e8ec56dec24502b2")
+	FermionGenesisStateRoot = common.HexToHash("0x2480155b48a1cea17d67dbfdfaafe821c1d19cdd478c5358e8ec56dec24502b2")
 )
 
 var (
@@ -221,7 +227,48 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(21050600),
 		//LondonBlock:         big.NewInt(21050600),
-		Aura: &AuRaConfig{},
+		CatalystBlock: nil,
+		Aura:          &AuRaConfig{},
+	}
+
+	KovanChainConfig = &ChainConfig{
+		ChainName:           KovanChainName,
+		ChainID:             big.NewInt(42),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(5067000),
+		ConstantinopleBlock: big.NewInt(9200000),
+		PetersburgBlock:     big.NewInt(10255201),
+		IstanbulBlock:       big.NewInt(14111141),
+		MuirGlacierBlock:    nil,
+		BerlinBlock:         big.NewInt(24770900),
+		LondonBlock:         big.NewInt(26741100),
+		CatalystBlock:       nil,
+		Aura:                &AuRaConfig{},
+	}
+
+	FermionChainConfig = &ChainConfig{
+		ChainName:           FermionChainName,
+		ChainID:             big.NewInt(102),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(5067000),
+		ConstantinopleBlock: big.NewInt(9200000),
+		PetersburgBlock:     big.NewInt(10255201),
+		IstanbulBlock:       big.NewInt(14111141),
+		MuirGlacierBlock:    nil,
+		BerlinBlock:         big.NewInt(24770900),
+		LondonBlock:         big.NewInt(26741100),
+		CatalystBlock:       nil,
+		Aura:                &AuRaConfig{},
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -245,6 +292,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
+		CatalystBlock:       nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
@@ -270,6 +318,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
+		CatalystBlock:       nil,
 		Ethash:              nil,
 		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
 	}
@@ -292,6 +341,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
+		CatalystBlock:       nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
@@ -327,6 +377,7 @@ type ChainConfig struct {
 	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
+	CatalystBlock       *big.Int `json:"catalystBlock,omitempty"`       // Catalyst switch block (nil = no fork, 0 = already on catalyst)
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
@@ -474,6 +525,11 @@ func (c *ChainConfig) IsBerlin(num uint64) bool {
 // IsLondon returns whether num is either equal to the London fork block or greater.
 func (c *ChainConfig) IsLondon(num uint64) bool {
 	return isForked(c.LondonBlock, num)
+}
+
+// IsCatalyst returns whether num is either equal to the Merge fork block or greater.
+func (c *ChainConfig) IsCatalyst(num uint64) bool {
+	return isForked(c.CatalystBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -655,7 +711,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon                                      bool
+	IsBerlin, IsLondon, IsCatalyst                          bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -676,5 +732,6 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsIstanbul:       c.IsIstanbul(num),
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
+		IsCatalyst:       c.IsCatalyst(num),
 	}
 }

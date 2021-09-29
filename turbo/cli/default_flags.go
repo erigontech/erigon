@@ -9,6 +9,7 @@ import (
 // DefaultFlags contains all flags that are used and supported by Erigon binary.
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
+	utils.MdbxAugmentLimitFlag,
 	utils.EthashDatasetDirFlag,
 	utils.TxPoolV2Flag,
 	utils.TxPoolDisableFlag,
@@ -20,6 +21,7 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolPriceBumpFlag,
 	utils.TxPoolAccountSlotsFlag,
 	utils.TxPoolGlobalSlotsFlag,
+	utils.TxPoolGlobalBaseFeeSlotsFlag,
 	utils.TxPoolAccountQueueFlag,
 	utils.TxPoolGlobalQueueFlag,
 	utils.TxPoolLifetimeFlag,
@@ -28,6 +30,10 @@ var DefaultFlags = []cli.Flag{
 	PruneReceiptFlag,
 	PruneTxIndexFlag,
 	PruneCallTracesFlag,
+	PruneHistoryBeforeFlag,
+	PruneReceiptBeforeFlag,
+	PruneTxIndexBeforeFlag,
+	PruneCallTracesBeforeFlag,
 	SnapshotModeFlag,
 	SeedSnapshotsFlag,
 	SnapshotDatabaseLayoutFlag,
