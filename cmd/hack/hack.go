@@ -1733,7 +1733,7 @@ type CompressInput struct {
 type CompressOutput struct {
 	count       int    // Counter to order the outputs (in the incremementing order of the counts)
 	output      []byte // Actual output
-	compression uint64
+	compression int
 	matchCount  int
 }
 
@@ -1763,98 +1763,82 @@ func (oh *OutputHeap) Pop() interface{} {
 	return x
 }
 
-func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, trie *ahocorasick.Trie, usedDict map[string]int) {
+type DictEntry struct {
+	score uint64
+	code  uint64
+}
+
+func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, trie *ahocorasick.Trie, dict map[string]DictEntry, usedDict map[string]int) {
 	for ci := range inputCh {
 		input := ci.input
 		matches := MatchSorter(trie.Match(input))
 		sort.Sort(&matches)
-		var filteredMatches int
+		var filtered [][]int
+		var filteredWords []string
+		compression := 0
+		var scores uint64
 		if matches.Len() > 0 {
 			lastMatch := matches[0]
 			for j := 1; j < matches.Len(); j++ {
 				match := matches[j]
-				// check non-containment
 				if int(match.Pos())+len(match.Match()) > int(lastMatch.Pos())+len(lastMatch.Match()) {
-					filteredMatches++
+					// new match overlaps with the lastMatch but is not contained in it
+					filtered = append(filtered, []int{int(lastMatch.Pos()), int(lastMatch.Pos()) + len(lastMatch.Match())})
+					filteredWords = append(filteredWords, lastMatch.MatchString())
 					lastMatch = match
 				}
 			}
-			filteredMatches++
-		}
-		co := CompressOutput{count: ci.count, matchCount: filteredMatches}
-		/*
-			l := len(input)
-			// Dynamic programming. We use 2 programs - one always ending with a compressed word (if possible), another - without
-			compressedEnd := make(map[int]DynamicCell)
-			simpleEnd := make(map[int]DynamicCell)
-			compressedEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
-			simpleEnd[0] = DynamicCell{scores: 0, compression: 0, lastCompressed: 0, words: nil}
-			for k := 1; k <= l; k++ {
-				var maxC, maxS int
-				var wordsC, wordsS [][]byte
-				var scoresC, scoresS int64
-				var lastC, lastS int
-				for j := 0; j < k; j++ {
-					cc := compressedEnd[j]
-					sc := simpleEnd[j]
-					// First assume we are not compressing slice [j:k]
-					ccCompression := ((j - cc.lastCompressed + 63) / 64) - ((k - cc.lastCompressed + 63) / 64) + cc.compression
-					scCompression := ((j - sc.lastCompressed + 63) / 64) - ((k - sc.lastCompressed + 63) / 64) + sc.compression
-					var compression int
-					var words [][]byte
-					var scores int64
-					var lastCompressed int
-					if (ccCompression == scCompression && cc.scores > sc.scores) || ccCompression > scCompression {
-						compression = ccCompression
-						words = cc.words
-						scores = cc.scores
-						lastCompressed = cc.lastCompressed
-					} else {
-						compression = scCompression
-						words = sc.words
-						scores = sc.scores
-						lastCompressed = sc.lastCompressed
+			filtered = append(filtered, []int{int(lastMatch.Pos()), int(lastMatch.Pos()) + len(lastMatch.Match())})
+			filteredWords = append(filteredWords, lastMatch.MatchString())
+			cover := make([]int, len(input)) // cover[i] tells us how many pattern cover certain character in the input
+			var covered int                  // How many characters are covered by at least one pattern
+			var patternCoding int            // How many byte are spent on coding the patterns
+			var patternScores uint64         // Sum of scores of all patterns
+			n := len(filtered)               // Number of pattens
+			a := make([]bool, n)             // a[i] == 1 if the pattern is used
+			optimal := make([]bool, n)
+			f := make([]int, n+1) // focus pointer for Gray code generation
+			for i := 0; i <= n; i++ {
+				f[i] = i
+			}
+			for {
+				if covered > patternCoding {
+					if (covered-patternCoding == compression && patternScores > scores) || covered-patternCoding > compression {
+						compression = covered - patternCoding
+						scores = patternScores
+						copy(optimal, a)
 					}
-					if j == 0 || (compression == maxS && scores > scoresS) || compression > maxS {
-						maxS = compression
-						wordsS = words
-						scoresS = scores
-						lastS = lastCompressed
-					}
-					// Now try to apply compression, if possible
-					if dictScore, ok := dict[string(input[j:k])]; ok && (k-j) > 4 {
-						words = append(append([][]byte{}, words...), input[j:k])
-						lastCompressed = k
-						if (cc.compression == sc.compression && cc.scores > sc.scores) || cc.compression > sc.compression {
-							compression = cc.compression + (k - j) - 4
-							scores = cc.scores + dictScore
-						} else {
-							compression = sc.compression + (k - j) - 4
-							scores = sc.scores + dictScore
+				}
+				j := f[0]
+				f[0] = 0
+				if j == n {
+					break
+				}
+				f[j] = f[j+1]
+				f[j+1] = j + 1
+				// Invert a[j]
+				if a[j] {
+					patternCoding -= 4
+					for i := filtered[j][0]; i < filtered[j][1]; i++ {
+						cover[i]--
+						if cover[i] == 0 {
+							covered--
 						}
 					}
-					if j == 0 || (compression == maxC && scores > scoresC) || compression > maxC {
-						maxC = compression
-						wordsC = words
-						scoresC = scores
-						lastC = lastCompressed
+					a[j] = false
+				} else {
+					patternCoding += 4
+					for i := filtered[j][0]; i < filtered[j][1]; i++ {
+						if cover[i] == 0 {
+							covered++
+						}
+						cover[i]++
 					}
-				}
-				compressedEnd[k] = DynamicCell{scores: scoresC, compression: maxC, lastCompressed: lastC, words: wordsC}
-				simpleEnd[k] = DynamicCell{scores: scoresS, compression: maxS, lastCompressed: lastS, words: wordsS}
-			}
-			if (compressedEnd[l].compression == simpleEnd[l].compression && compressedEnd[l].scores > simpleEnd[l].scores) || compressedEnd[l].compression > simpleEnd[l].compression {
-				co.compression += uint64(compressedEnd[l].compression)
-				for _, word := range compressedEnd[l].words {
-					usedDict[string(word)]++
-				}
-			} else {
-				co.compression += uint64(simpleEnd[l].compression)
-				for _, word := range simpleEnd[l].words {
-					usedDict[string(word)]++
+					a[j] = true
 				}
 			}
-		*/
+		}
+		co := CompressOutput{count: ci.count, matchCount: len(filtered), compression: compression}
 		outputCh <- co
 	}
 }
@@ -1869,7 +1853,7 @@ func reducedict() error {
 	defer df.Close()
 	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
 	trieBuilder := ahocorasick.NewTrieBuilder()
-	dict := make(map[string]int64)
+	dict := make(map[string]DictEntry)
 	ds := bufio.NewScanner(df)
 	for ds.Scan() {
 		tokens := strings.Split(ds.Text(), " ")
@@ -1881,8 +1865,8 @@ func reducedict() error {
 		if word, err = hex.DecodeString(tokens[1]); err != nil {
 			return err
 		}
-		dict[string(word)] = score
 		trieBuilder.AddPattern(word)
+		dict[string(word)] = DictEntry{score: uint64(score), code: uint64(len(dict))}
 	}
 	df.Close()
 	trie := trieBuilder.Build()
@@ -1898,14 +1882,14 @@ func reducedict() error {
 	}
 
 	var usedDicts []map[string]int
-	var totalCompression uint64
+	var totalCompression int
 	var maxMatchCount int
 	inputCh := make(chan CompressInput, 10000)
 	outputCh := make(chan CompressOutput)
 	for p := 0; p < runtime.NumCPU(); p++ {
 		usedDict := make(map[string]int)
 		usedDicts = append(usedDicts, usedDict)
-		go reduceDictWorker(inputCh, outputCh, trie, usedDict)
+		go reduceDictWorker(inputCh, outputCh, trie, dict, usedDict)
 	}
 	var outputs OutputHeap
 	heap.Init(&outputs)
