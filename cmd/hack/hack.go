@@ -1769,10 +1769,10 @@ type DictEntry struct {
 }
 
 func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, trie *ahocorasick.Trie, dict map[string]DictEntry, usedDict map[string]int) {
+	buf := make([]byte, binary.MaxVarintLen64)
 	for ci := range inputCh {
 		input := ci.input
 		var output []byte
-		buf := make([]byte, binary.MaxVarintLen64)
 		// Write length of the string
 		p := binary.PutUvarint(buf, uint64(len(input)))
 		output = append(output, buf[:p]...)
@@ -1863,10 +1863,27 @@ func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, 
 					usedDict[filteredWords[i]]++
 				}
 			}
+			// Add uncoded input
+			for i := 0; i < len(cover); i++ {
+				cover[i] = 0
+			}
+			for i := 0; i < n; i++ {
+				if a[i] {
+					for j := filtered[i][0]; j < filtered[i][1]; j++ {
+						cover[j]++
+					}
+				}
+			}
+			for i := 0; i < len(cover); i++ {
+				if cover[i] > 0 {
+					output = append(output, input[i])
+				}
+			}
 		} else {
 			if len(input) > 0 {
 				p := binary.PutUvarint(buf, 0)
 				output = append(output, buf[:p]...)
+				output = append(output, input...)
 			}
 		}
 
