@@ -1428,8 +1428,13 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					continue
 				}
 				// Go back
+				var new bool
 				for j > 0 && int(lcp[j-1]) >= l {
 					j--
+					new = true
+				}
+				if !new {
+					break
 				}
 				window := i - j + 2
 				for len(b) < window {
@@ -2109,6 +2114,9 @@ func reducedict() error {
 	}
 	sort.Sort(&db)
 	for i := len(db.items); i > 0; i-- {
+		if db.items[i-1].score < 128 {
+			break
+		}
 		fmt.Fprintf(rw, "%d %x\n", db.items[i-1].score, db.items[i-1].word)
 	}
 	if err = rw.Flush(); err != nil {
