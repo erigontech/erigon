@@ -146,7 +146,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 		notifier.OnNewHeader(header)
 	}
 
-	log.Info("Update current block for the RPC API", "from", notifyFrom, "to", notifyTo)
+	log.Info("Updated current block for the RPC API", "from", notifyFrom, "to", notifyTo)
 
 	return nil
 }
