@@ -1838,6 +1838,7 @@ func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, 
 				}
 			}
 		}
+
 		co := CompressOutput{count: ci.count, matchCount: len(filtered), compression: compression}
 		outputCh <- co
 	}
