@@ -42,13 +42,14 @@ Will add this part soon [tbd]
 [x] Grafana board
 [x] Non-mainnet support
 [x] DevNet - doesn't send mined block notification on first mined block (because initialCycle = true)
-[] Add cli options to manage pool limits
-[] Add way for simple introspection - where is tx and why
 [x] DiscardReasons - user must understand clearly why tx were rejected
 [x] Notify about new pending transactions - we sending more than need
+[x] Handle "NewBlock" message with 200K transactions re-calculation - in under 50ms
+[x] Add --txpool.globalslots, --txpool.globalqueue,--txpool.globalbasefeeeslots
+[] Add --txpool.accountslots
+[] Add --txpool.pricelimit
+[] Add way for simple introspection - where is tx and why
 [] Hard-forks support (now rules are parsed ones on txPool start)
 [] Add pool to docker-compose
 [] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
 [] Save history of local transactions - with 1 day expiration
-[] Miner - recheck if miner has all EIP-1559 patches
-[] Remote Miner - to work on state cache

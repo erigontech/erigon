@@ -189,3 +189,115 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 		t.Fatal("cant decode the account Version", src.Incarnation, dst.Incarnation)
 	}
 }
+
+func TestIncarnationForEmptyAccount(t *testing.T) {
+	a := Account{
+		Initialised: true,
+		Nonce:       100,
+		Balance:     *new(uint256.Int),
+		Root:        emptyRoot,
+		CodeHash:    emptyCodeHash,
+		Incarnation: 4,
+	}
+
+	encodedAccount := make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount)
+
+	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+}
+
+func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
+	a := Account{}
+
+	encodedAccount := make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount)
+
+	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+
+}
+
+func TestIncarnationWithNonEmptyAccount(t *testing.T) {
+	a := Account{
+		Initialised: true,
+		Nonce:       2,
+		Balance:     *new(uint256.Int).SetUint64(1000),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Incarnation: 4,
+	}
+
+	encodedAccount := make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount)
+
+	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+
+}
+
+func TestIncarnationWithNoIncarnation(t *testing.T) {
+	a := Account{
+		Initialised: true,
+		Nonce:       2,
+		Balance:     *new(uint256.Int).SetUint64(1000),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Incarnation: 0,
+	}
+
+	encodedAccount := make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount)
+
+	if _, err := DecodeIncarnationFromStorage(encodedAccount); err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	decodedIncarnation, err := DecodeIncarnationFromStorage(encodedAccount)
+	if err != nil {
+		t.Fatal("Can't decode the incarnation", err, encodedAccount)
+	}
+
+	isIncarnationEqual(t, a.Incarnation, decodedIncarnation)
+
+}
+
+func TestIncarnationWithInvalidEncodedAccount(t *testing.T) {
+
+	var failingSlice = []byte{1, 12}
+
+	if incarnation, err := DecodeIncarnationFromStorage(failingSlice); err == nil {
+		t.Fatal("decoded the incarnation", incarnation, failingSlice)
+	}
+
+}
+
+func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnation uint64) {
+	if initialIncarnation != decodedIncarnation {
+		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
+	}
+}

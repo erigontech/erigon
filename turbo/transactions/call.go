@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -24,7 +25,9 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters, contractHasTEVM func(hash common.Hash) (bool, error)) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash,
+	overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig,
+	filters *filters.Filters, stateCache kvcache.Cache, contractHasTEVM func(hash common.Hash) (bool, error)) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -32,14 +35,17 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 			return state, block.Header(), nil
 		}
 	*/
-	blockNrOrHash.RequireCanonical = true // DoCall cannot be executed on non-canonical blocks
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, filters)
+	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(tx)
+		cacheView, err := stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
 		stateReader = state.NewPlainState(tx, blockNumber)
 	}

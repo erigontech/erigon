@@ -158,6 +158,8 @@ type Config struct {
 	AllowUnprotectedTxs bool `toml:",omitempty"`
 	TLSKeyFile          string
 	TLSCACert           string
+
+	MdbxAugumentLimit uint64
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into

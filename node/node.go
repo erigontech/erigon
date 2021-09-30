@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/params"
 	"net"
 	"net/http"
 	"os"
@@ -28,6 +27,8 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -523,6 +524,9 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
+		}
+		if label == kv.ChainDB {
+			opts.AugumentLimit(config.MdbxAugumentLimit)
 		}
 		return opts.Open()
 	}

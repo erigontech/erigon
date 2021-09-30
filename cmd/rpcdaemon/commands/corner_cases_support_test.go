@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -16,7 +17,8 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require := require.New(t)
 	db := rpcdaemontest.CreateTestKV(t)
 	defer db.Close()
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)

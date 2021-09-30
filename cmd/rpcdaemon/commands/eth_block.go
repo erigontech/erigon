@@ -60,7 +60,11 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	var stateReader state.StateReader
 	if num, ok := stateBlockNumberOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(tx)
+		cacheView, err := api.stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
 		stateReader = state.NewPlainState(tx, stateBlockNumber)
 	}
@@ -169,7 +173,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
-	b, err := api.getBlockByNumber(number, tx)
+	b, err := api.blockByRPCNumber(number, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +181,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, nil
 	}
 	additionalFields := make(map[string]interface{})
-
 	td, err := rawdb.ReadTd(tx, b.Hash(), b.NumberU64())
 	if err != nil {
 		return nil, err
@@ -215,7 +218,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	additionalFields := make(map[string]interface{})
 
-	block, _, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	block, err := api.blockByHashWithSenders(tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +251,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	}
 	defer tx.Rollback()
 	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.getBlockByNumber(blockNr, tx)
+		b, err := api.blockByRPCNumber(blockNr, tx)
 		if err != nil {
 			return nil, err
 		}

@@ -122,6 +122,10 @@ func makeP2PServer(
 		urls = params.RinkebyBootnodes
 	case params.SokolGenesisHash:
 		urls = params.SokolBootnodes
+	case params.KovanGenesisHash:
+		urls = params.KovanBootnodes
+	case params.FermionGenesisHash:
+		urls = params.FermionBootnodes
 	}
 	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {

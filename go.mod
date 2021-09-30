@@ -3,6 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.16
 
 require (
+	github.com/BobuSumisu/aho-corasick v1.0.3
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.6.0
 	github.com/VictoriaMetrics/metrics v1.18.0
@@ -20,11 +21,12 @@ require (
 	github.com/emicklei/dot v0.16.0
 	github.com/fatih/color v1.12.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
+	github.com/flanglet/kanzi-go v1.9.0
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.7.4
 	github.com/gofrs/flock v0.8.1
 	github.com/golang/protobuf v1.5.2
-	github.com/golang/snappy v0.0.3
+	github.com/golang/snappy v0.0.4
 	github.com/google/btree v1.0.1
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/gorilla/websocket v1.4.2
@@ -36,7 +38,7 @@ require (
 	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20210922103429-7740382188a6
+	github.com/ledgerwatch/erigon-lib v0.0.0-20210930024651-a59261cb3242
 	github.com/ledgerwatch/log/v3 v3.3.1
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
@@ -48,7 +50,7 @@ require (
 	github.com/spf13/cobra v1.2.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.0
-	github.com/torquem-ch/mdbx-go v0.18.1
+	github.com/torquem-ch/mdbx-go v0.19.2
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.5
