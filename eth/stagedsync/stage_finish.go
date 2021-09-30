@@ -129,7 +129,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 	if err != nil {
 		return err
 	}
-	notifyFrom := finishStageBeforeSync + 1
+	notifyFrom := finishStageBeforeSync
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo + 1
 	}
