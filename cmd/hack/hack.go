@@ -1771,6 +1771,11 @@ type DictEntry struct {
 func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, trie *ahocorasick.Trie, dict map[string]DictEntry, usedDict map[string]int) {
 	for ci := range inputCh {
 		input := ci.input
+		var output []byte
+		buf := make([]byte, binary.MaxVarintLen64)
+		// Write length of the string
+		p := binary.PutUvarint(buf, uint64(len(input)))
+		output = append(output, buf[:p]...)
 		matches := MatchSorter(trie.Match(input))
 		sort.Sort(&matches)
 		var filtered [][]int
@@ -1837,9 +1842,35 @@ func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, 
 					a[j] = true
 				}
 			}
+			var patternCount uint64
+			for i := 0; i < n; i++ {
+				if a[i] {
+					patternCount++
+				}
+			}
+			// Output number of patterns used
+			p := binary.PutUvarint(buf, patternCount)
+			output = append(output, buf[:p]...)
+			// Encode each pattern as a pair - starting position and the code
+			for i := 0; i < n; i++ {
+				if a[i] {
+					// Starting position
+					p := binary.PutUvarint(buf, uint64(filtered[i][0]))
+					output = append(output, buf[:p]...)
+					// Code
+					p = binary.PutUvarint(buf, uint64(dict[filteredWords[i]].code))
+					output = append(output, buf[:p]...)
+					usedDict[filteredWords[i]]++
+				}
+			}
+		} else {
+			if len(input) > 0 {
+				p := binary.PutUvarint(buf, 0)
+				output = append(output, buf[:p]...)
+			}
 		}
 
-		co := CompressOutput{count: ci.count, matchCount: len(filtered), compression: compression}
+		co := CompressOutput{count: ci.count, matchCount: len(filtered), compression: compression, output: output}
 		outputCh <- co
 	}
 }
@@ -1883,7 +1914,7 @@ func reducedict() error {
 	}
 
 	var usedDicts []map[string]int
-	var totalCompression int
+	var outputSize int
 	var maxMatchCount int
 	inputCh := make(chan CompressInput, 10000)
 	outputCh := make(chan CompressOutput)
@@ -1915,12 +1946,12 @@ func reducedict() error {
 				for outputs.Len() > 0 && outputs[0].count == nextOutputCount {
 					output := heap.Pop(&outputs).(CompressOutput)
 					nextOutputCount++
-					totalCompression += output.compression
+					outputSize += len(output.output)
 					if output.matchCount > maxMatchCount {
 						maxMatchCount = output.matchCount
 					}
 					if output.count%2_000_000 == 0 {
-						log.Info("1 Replacement preprocessing", "key/value pairs", output.count/2, "estimated saving", common.StorageSize(totalCompression), "max matches", maxMatchCount)
+						log.Info("1 Replacement preprocessing", "key/value pairs", output.count/2, "output", common.StorageSize(outputSize), "max matches", maxMatchCount)
 					}
 				}
 			}
@@ -1932,12 +1963,12 @@ func reducedict() error {
 				for outputs.Len() > 0 && outputs[0].count == nextOutputCount {
 					output := heap.Pop(&outputs).(CompressOutput)
 					nextOutputCount++
-					totalCompression += output.compression
+					outputSize += len(output.output)
 					if output.matchCount > maxMatchCount {
 						maxMatchCount = output.matchCount
 					}
 					if output.count%2_000_000 == 0 {
-						log.Info("2 Replacement preprocessing", "key/value pairs", output.count/2, "estimated saving", common.StorageSize(totalCompression), "max matches", maxMatchCount)
+						log.Info("2 Replacement preprocessing", "key/value pairs", output.count/2, "output", common.StorageSize(outputSize), "max matches", maxMatchCount)
 					}
 				}
 			}
@@ -1957,12 +1988,12 @@ func reducedict() error {
 		for outputs.Len() > 0 && outputs[0].count == nextOutputCount {
 			output := heap.Pop(&outputs).(CompressOutput)
 			nextOutputCount++
-			totalCompression += output.compression
+			outputSize += len(output.output)
 			if output.matchCount > maxMatchCount {
 				maxMatchCount = output.matchCount
 			}
 			if output.count%2_000_000 == 0 {
-				log.Info("3 Replacement preprocessing", "key/value pairs", output.count/2, "estimated saving", common.StorageSize(totalCompression), "max matches", maxMatchCount)
+				log.Info("3 Replacement preprocessing", "key/value pairs", output.count/2, "output", common.StorageSize(outputSize), "max matches", maxMatchCount)
 			}
 		}
 	}
@@ -1972,7 +2003,7 @@ func reducedict() error {
 			usedDict[word] += r
 		}
 	}
-	log.Info("Done", "estimated saving", common.StorageSize(totalCompression), "effective dict size", len(usedDict), "max matches", maxMatchCount)
+	log.Info("Done", "output", common.StorageSize(outputSize), "effective dict size", len(usedDict), "max matches", maxMatchCount)
 	var rf *os.File
 	rf, err = os.Create("reduced_dictionary.txt")
 	if err != nil {
