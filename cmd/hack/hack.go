@@ -1901,10 +1901,52 @@ func decode(output []byte, invDict map[uint64][]byte) ([]byte, error) {
 	return input, nil
 }
 
+func sortdict() error {
+	// Read up the dictionary
+	df, err := os.Open("reduced_dictionary.txt")
+	if err != nil {
+		return err
+	}
+	defer df.Close()
+	var db DictionaryBuilder
+	ds := bufio.NewScanner(df)
+	for ds.Scan() {
+		tokens := strings.Split(ds.Text(), " ")
+		var score int64
+		if score, err = strconv.ParseInt(tokens[0], 10, 64); err != nil {
+			return err
+		}
+		var word []byte
+		if word, err = hex.DecodeString(tokens[1]); err != nil {
+			return err
+		}
+		db.items = append(db.items, DictionaryItem{word: word, score: uint64(score)})
+	}
+	df.Close()
+	sort.Sort(&db)
+	var rf *os.File
+	rf, err = os.Create("reduced_dictionary.txt")
+	if err != nil {
+		return err
+	}
+	rw := bufio.NewWriter(rf)
+	for i := len(db.items); i > 0; i-- {
+		if db.items[i-1].score < 128 {
+			break
+		}
+		fmt.Fprintf(rw, "%d %x\n", db.items[i-1].score, db.items[i-1].word)
+	}
+	if err = rw.Flush(); err != nil {
+		return err
+	}
+	rf.Close()
+	return nil
+}
+
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict() error {
 	// Read up the dictionary
-	df, err := os.Open("dictionary.txt")
+	df, err := os.Open("reduced_dictionary.txt")
 	if err != nil {
 		return err
 	}
@@ -3322,6 +3364,8 @@ func main() {
 		err = reducedict()
 	case "genstate":
 		err = genstate()
+	case "sortdict":
+		err = sortdict()
 	}
 
 	if err != nil {
