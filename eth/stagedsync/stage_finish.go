@@ -129,7 +129,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 	if err != nil {
 		return err
 	}
-	notifyFrom := finishStageBeforeSync + 1
+	notifyFrom := finishStageBeforeSync
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo + 1
 	}
@@ -137,7 +137,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
 		return nil
 	}
-	log.Info("Update current block for the RPC API", "from", notifyFrom, "to", notifyTo)
+
 	for i := notifyFrom; i <= notifyTo; i++ {
 		header := rawdb.ReadHeaderByNumber(tx, i)
 		if header == nil {
@@ -145,5 +145,8 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 		}
 		notifier.OnNewHeader(header)
 	}
+
+	log.Info("Updated current block for the RPC API", "from", notifyFrom, "to", notifyTo)
+
 	return nil
 }
