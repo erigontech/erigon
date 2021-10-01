@@ -553,7 +553,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
 		if contract.UseGas(createDataGas) {
 			evm.IntraBlockState.SetCode(address, ret)
-		} else {
+		} else if evm.ChainRules.IsHomestead {
 			err = ErrCodeStoreOutOfGas
 		}
 	}
