@@ -1,6 +1,10 @@
 package snapshotsync
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
+)
 
 var DefaultSnapshotMode = SnapshotMode{}
 
@@ -28,34 +32,34 @@ func (m SnapshotMode) ToString() string {
 	return mode
 }
 
-func (m SnapshotMode) ToSnapshotTypes() []SnapshotType {
-	var types []SnapshotType
+func (m SnapshotMode) ToSnapshotTypes() []snapshotsync.SnapshotType {
+	var types []snapshotsync.SnapshotType
 	if m.Headers {
-		types = append(types, SnapshotType_headers)
+		types = append(types, snapshotsync.SnapshotType_headers)
 	}
 	if m.Bodies {
-		types = append(types, SnapshotType_bodies)
+		types = append(types, snapshotsync.SnapshotType_bodies)
 	}
 	if m.State {
-		types = append(types, SnapshotType_state)
+		types = append(types, snapshotsync.SnapshotType_state)
 	}
 	if m.Receipts {
-		types = append(types, SnapshotType_receipts)
+		types = append(types, snapshotsync.SnapshotType_receipts)
 	}
 	return types
 }
 
-func FromSnapshotTypes(st []SnapshotType) SnapshotMode {
+func FromSnapshotTypes(st []snapshotsync.SnapshotType) SnapshotMode {
 	var mode SnapshotMode
 	for i := range st {
 		switch st[i] {
-		case SnapshotType_headers:
+		case snapshotsync.SnapshotType_headers:
 			mode.Headers = true
-		case SnapshotType_bodies:
+		case snapshotsync.SnapshotType_bodies:
 			mode.Bodies = true
-		case SnapshotType_state:
+		case snapshotsync.SnapshotType_state:
 			mode.State = true
-		case SnapshotType_receipts:
+		case snapshotsync.SnapshotType_receipts:
 			mode.Receipts = true
 		}
 	}
