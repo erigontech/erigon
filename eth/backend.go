@@ -369,6 +369,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.PendingSubPoolLimit = int(config.TxPool.GlobalSlots)
 		cfg.BaseFeeSubPoolLimit = int(config.TxPool.GlobalBaseFeeQueue)
 		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
+		cfg.MinFeeCap = config.TxPool.PriceLimit
 		cfg.LogEvery = 1 * time.Minute    //5 * time.Minute
 		cfg.CommitEvery = 1 * time.Minute //5 * time.Minute
 
