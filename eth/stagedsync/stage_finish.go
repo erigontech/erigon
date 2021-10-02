@@ -125,6 +125,12 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 }
 
 func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
+
+	if notifier == nil {
+		log.Trace("RPC Daemon notification channel not set. No headers notifications will be issued")
+		return nil
+	}
+
 	notifyTo, err := stages.GetStageProgress(tx, stages.Finish) // because later stages can be disabled
 	if err != nil {
 		return err
@@ -132,10 +138,6 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 	notifyFrom := finishStageBeforeSync
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo + 1
-	}
-	if notifier == nil {
-		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
-		return nil
 	}
 
 	i := notifyFrom
@@ -150,7 +152,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 		notifier.OnNewHeader(header)
 	}
 
-	log.Info("Updated current block for the RPC API", "from", notifyFrom, "to", notifyTo)
+	log.Info("RPC Daemon notified of current headers", "from", notifyFrom, "to", notifyTo)
 
 	return nil
 }
