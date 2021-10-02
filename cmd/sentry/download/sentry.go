@@ -17,15 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
-
-	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
@@ -37,7 +32,9 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
@@ -608,7 +605,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 	return nil
 }
 
-func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
+func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	strId := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	if x, ok := ss.GoodPeers.Load(strId); ok {
@@ -618,20 +615,20 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.Pe
 		}
 	}
 	ss.GoodPeers.Delete(strId)
-	return &empty.Empty{}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*empty.Empty, error) {
+func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	peerID := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	x, _ := ss.GoodPeers.Load(peerID)
 	peerInfo, _ := x.(*PeerInfo)
 	if peerInfo == nil {
-		return &empty.Empty{}, nil
+		return &emptypb.Empty{}, nil
 	}
 	if req.MinBlock > peerInfo.Height() {
 		peerInfo.SetHeight(req.MinBlock)
 	}
-	return &empty.Empty{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) {
