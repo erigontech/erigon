@@ -315,10 +315,6 @@ func FuzzOnNewBlocks(f *testing.F) {
 		if pendingBaseFee == 0 {
 			t.Skip()
 		}
-		if len(senderAddr) < 1+1+1 {
-			t.Skip()
-		}
-
 		senders, senderIDs, txs, ok := poolsFromFuzzBytes(txNonce, values, tips, feeCap, senderAddr)
 		if !ok {
 			t.Skip()
@@ -439,6 +435,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				assert.True(pool.byNonce.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
+				assert.GreaterOrEqual(tx.Tx.feeCap, pool.cfg.MinFeeCap)
 			})
 
 			// all txs in side data structures must be in some queue
@@ -603,22 +600,15 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		check(txs2, TxSlots{}, "fromDB")
 		//checkNotify(txs2, TxSlots{}, "fromDB")
-		//assert.Equal(pool.senders.senderID, p2.senders.senderID)
-		//assert.Equal(pool.senders.blockHeight.Load(), p2.senders.blockHeight.Load())
+		assert.Equal(pool.senders.senderID, p2.senders.senderID)
+		assert.Equal(pool.lastSeenBlock.Load(), p2.lastSeenBlock.Load())
 
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
 		require.Equal(pool.queued.Len(), p2.queued.Len())
 		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
-		assert.Equal(pool.protocolBaseFee.Load(), p2.protocolBaseFee.Load())
 	})
 
-}
-
-func bigEndian(n uint64) []byte {
-	num := [8]byte{}
-	binary.BigEndian.PutUint64(num[:], n)
-	return num[:]
 }
 
 func copyHashes(p *PendingPool) (hashes Hashes) {

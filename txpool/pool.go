@@ -71,6 +71,8 @@ type Config struct {
 	PendingSubPoolLimit int
 	BaseFeeSubPoolLimit int
 	QueuedSubPoolLimit  int
+
+	MinFeeCap uint64
 }
 
 var DefaultConfig = Config{
@@ -82,6 +84,8 @@ var DefaultConfig = Config{
 	PendingSubPoolLimit: 100_000,
 	BaseFeeSubPoolLimit: 200_000,
 	QueuedSubPoolLimit:  200_000,
+
+	MinFeeCap: 1,
 }
 
 // Pool is interface for the transaction pool
@@ -122,20 +126,56 @@ const (
 type DiscardReason uint8
 
 const (
-	//TODO: all below codes are not fixed yet. Need add them to discardLocked func. Need save discard reasons to LRU or DB.
+	NotSet              DiscardReason = 0 // analog of "nil-value", means it will be set in future
 	Success             DiscardReason = 1
 	AlreadyKnown        DiscardReason = 2
 	Mined               DiscardReason = 3
 	ReplacedByHigherTip DiscardReason = 4
 	UnderPriced         DiscardReason = 5
-	FeeTooLow           DiscardReason = 6
-	OversizedData       DiscardReason = 7
-	InvalidSender       DiscardReason = 8
-	NegativeValue       DiscardReason = 9
-	PendingPoolOverflow DiscardReason = 10
-	BaseFeePoolOverflow DiscardReason = 11
-	QueuedPoolOverflow  DiscardReason = 12
+	ReplaceUnderpriced  DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
+	FeeTooLow           DiscardReason = 7
+	OversizedData       DiscardReason = 8
+	InvalidSender       DiscardReason = 9
+	NegativeValue       DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
+	PendingPoolOverflow DiscardReason = 11
+	BaseFeePoolOverflow DiscardReason = 12
+	QueuedPoolOverflow  DiscardReason = 13
 )
+
+func (r DiscardReason) String() string {
+	switch r {
+	case NotSet:
+		return "not set"
+	case Success:
+		return "success"
+	case AlreadyKnown:
+		return "already known"
+	case Mined:
+		return "mined"
+	case ReplacedByHigherTip:
+		return "replaced by transaction with higher tip"
+	case UnderPriced:
+		return "underpriced"
+	case ReplaceUnderpriced:
+		return "replacement transaction underpriced"
+	case FeeTooLow:
+		return "fee too low"
+	case OversizedData:
+		return "oversized data"
+	case InvalidSender:
+		return "invalid sender"
+	case NegativeValue:
+		return "negative value"
+	case PendingPoolOverflow:
+		return "pending sub-pool is full"
+	case BaseFeePoolOverflow:
+		return "baseFee sub-pool is full"
+	case QueuedPoolOverflow:
+		return "queued sub-pool is full"
+	default:
+		panic(fmt.Sprintf("discard reason: %d", r))
+	}
+}
 
 // metaTx holds transaction and some metadata
 type metaTx struct {
@@ -198,10 +238,9 @@ func calcProtocolBaseFee(baseFee uint64) uint64 {
 type TxPool struct {
 	lock *sync.RWMutex
 
-	started         atomic.Bool
-	lastSeenBlock   atomic.Uint64
-	protocolBaseFee atomic.Uint64
-	pendingBaseFee  atomic.Uint64
+	started        atomic.Bool
+	lastSeenBlock  atomic.Uint64
+	pendingBaseFee atomic.Uint64
 
 	// batch processing of remote transactions
 	// handling works fast without batching, but batching allow:
@@ -304,7 +343,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	baseFee := stateChanges.PendingBlockBaseFee
 	p.lastSeenBlock.Store(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight)
 
-	protocolBaseFee, baseFee, baseFeeChanged := p.setBaseFee(baseFee)
+	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	if err := p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs); err != nil {
 		return err
 	}
@@ -329,9 +368,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	//log.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "baseFee", baseFee, "blockHeight", blockHeight)
 
 	p.pending.captureAddedHashes(&p.promoted)
-	if err := addTxsOnNewBlock(p.lastSeenBlock.Load(), cacheView, stateChanges, p.senders, unwindTxs,
-		protocolBaseFee, baseFee, baseFeeChanged, p.pending, p.baseFee, p.queued,
-		p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if err := addTxsOnNewBlock(p.lastSeenBlock.Load(), cacheView, stateChanges, p.senders, unwindTxs, pendingBaseFee, baseFeeChanged, p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
 	p.pending.added = nil
@@ -376,20 +413,18 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	if l == 0 {
 		return nil
 	}
-	newTxs := *p.unprocessedRemoteTxs
-
-	if err := newTxs.Valid(); err != nil {
+	_, newTxs, err := p.validateTxs(*p.unprocessedRemoteTxs)
+	if err != nil {
 		return err
 	}
+
 	err = p.senders.onNewTxs(newTxs)
 	if err != nil {
 		return err
 	}
 
 	p.pending.captureAddedHashes(&p.promoted)
-	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs,
-		p.protocolBaseFee.Load(), p.pendingBaseFee.Load(),
-		p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
 	p.pending.added = nil
@@ -529,8 +564,58 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs TxSlots) {
 		p.unprocessedRemoteTxs.Append(newTxs.txs[i], newTxs.senders.At(i), newTxs.isLocal[i])
 	}
 }
-func (p *TxPool) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error) {
-	if err := newTxs.Valid(); err != nil {
+
+func (p *TxPool) validateTx(txn *TxSlot, isLocal bool) DiscardReason {
+	// Drop non-local transactions under our own minimal accepted gas price or tip
+	if !isLocal && txn.feeCap < p.cfg.MinFeeCap {
+		return UnderPriced
+	}
+	return Success
+}
+
+func (p *TxPool) validateTxs(txs TxSlots) ([]DiscardReason, TxSlots, error) {
+	reasons := make([]DiscardReason, len(txs.txs))
+	newTxs := TxSlots{}
+
+	if err := txs.Valid(); err != nil {
+		return reasons, newTxs, err
+	}
+
+	j := 0
+	for i := range txs.txs {
+		reasons[i] = p.validateTx(txs.txs[i], true)
+		if reasons[i] != Success {
+			continue
+		} else {
+			reasons[i] = NotSet
+		}
+		newTxs.Resize(uint(j + 1))
+		newTxs.txs[j] = txs.txs[i]
+		newTxs.isLocal[j] = true
+		copy(newTxs.senders.At(j), txs.senders.At(i))
+		j++
+	}
+	return reasons, newTxs, nil
+}
+
+func fillDiscardReasons(reasons []DiscardReason, newTxs TxSlots, discardReasonsLRU *simplelru.LRU) []DiscardReason {
+	for i := range reasons {
+		if reasons[i] != NotSet {
+			continue
+		}
+		reason, ok := discardReasonsLRU.Get(string(newTxs.txs[i].idHash[:]))
+		if ok {
+			reasons[i] = reason.(DiscardReason)
+		} else {
+			reasons[i] = Success
+		}
+	}
+	return reasons
+}
+
+func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]DiscardReason, error) {
+	reasons, newTxs, err := p.validateTxs(newTransactions)
+	if err != nil {
 		return nil, err
 	}
 
@@ -557,9 +642,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReas
 	}
 
 	p.pending.captureAddedHashes(&p.promoted)
-	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs,
-		p.protocolBaseFee.Load(), p.pendingBaseFee.Load(),
-		p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return nil, err
 	}
 	p.pending.added = nil
@@ -571,15 +654,9 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReas
 		}
 	}
 
-	reasons := make([]DiscardReason, len(newTxs.txs))
-	for i := range newTxs.txs {
-		reason, ok := p.discardReasonsLRU.Get(string(newTxs.txs[i].idHash[:]))
-		if ok {
-			reasons[i] = reason.(DiscardReason)
-		}
-	}
-	return reasons, nil
+	return fillDiscardReasons(reasons, newTxs, p.discardReasonsLRU), nil
 }
+
 func (p *TxPool) coreDB() kv.RoDB {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -591,10 +668,11 @@ func (p *TxPool) cache() kvcache.Cache {
 	defer p.lock.RUnlock()
 	return p._stateCache
 }
-func addTxs(blockNum uint64, cacheView kvcache.CacheView,
-	senders *sendersBatch, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64,
+func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
+	newTxs TxSlots, pendingBaseFee uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
 	byNonce *ByNonce, byHash map[string]*metaTx, add func(*metaTx) bool, discard func(*metaTx, DiscardReason)) error {
+	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if ASSERT {
 		for i := range newTxs.txs {
 			if newTxs.txs[i].senderID == 0 {
@@ -640,11 +718,11 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView,
 
 	return nil
 }
-func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
-	stateChanges *remote.StateChangeBatch,
-	senders *sendersBatch, newTxs TxSlots, protocolBaseFee, pendingBaseFee uint64, baseFeeChanged bool,
+func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
+	senders *sendersBatch, newTxs TxSlots, pendingBaseFee uint64, baseFeeChanged bool,
 	pending *PendingPool, baseFee, queued *SubPool,
 	byNonce *ByNonce, byHash map[string]*metaTx, add func(*metaTx) bool, discard func(*metaTx, DiscardReason)) error {
+	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if ASSERT {
 		for i := range newTxs.txs {
 			if newTxs.txs[i].senderID == 0 {
@@ -711,14 +789,13 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	return nil
 }
 
-func (p *TxPool) setBaseFee(baseFee uint64) (uint64, uint64, bool) {
+func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 	changed := false
 	if baseFee > 0 {
 		changed = baseFee != p.pendingBaseFee.Load()
-		p.protocolBaseFee.Store(calcProtocolBaseFee(baseFee))
 		p.pendingBaseFee.Store(baseFee)
 	}
-	return p.protocolBaseFee.Load(), p.pendingBaseFee.Load(), changed
+	return p.pendingBaseFee.Load(), changed
 }
 
 func (p *TxPool) addLocked(mt *metaTx) bool {
@@ -1170,12 +1247,11 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		metaTx.Tx.rlp = nil
 	}
 
-	binary.BigEndian.PutUint64(encID, p.protocolBaseFee.Load())
-	if err := tx.Put(kv.PoolInfo, PoolProtocolBaseFeeKey, encID); err != nil {
-		return err
-	}
 	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
 	if err := tx.Put(kv.PoolInfo, PoolPendingBaseFeeKey, encID); err != nil {
+		return err
+	}
+	if err := PutLastSeenBlock(tx, p.lastSeenBlock.Load(), encID); err != nil {
 		return err
 	}
 
@@ -1211,15 +1287,13 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	i := 0
 	if err := tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
 		addr, txRlp := v[:20], v[20:]
-		txs.Resize(uint(i + 1))
-		txs.txs[i] = &TxSlot{}
+		txn := &TxSlot{}
 
-		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.txs[i], nil)
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txn, nil)
 		if err != nil {
 			return fmt.Errorf("err: %w, rlp: %x\n", err, txRlp)
 		}
-		txs.txs[i].rlp = nil // means that we don't need store it in db anymore
-		copy(txs.senders.At(i), addr)
+		txn.rlp = nil // means that we don't need store it in db anymore
 
 		id, ok := p.senders.senderIDs[string(addr)]
 		if !ok {
@@ -1228,27 +1302,25 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 			p.senders.senderIDs[string(addr)] = id
 			p.senders.senderID2Addr[id] = string(addr)
 		}
-		txs.txs[i].senderID = id
+		txn.senderID = id
 		binary.BigEndian.Uint64(v)
 
 		isLocalTx := p.isLocalLRU.Contains(string(k))
+
+		if reason := p.validateTx(txn, isLocalTx); reason != NotSet && reason != Success {
+			return nil
+		}
+		txs.Resize(uint(i + 1))
+		txs.txs[i] = txn
 		txs.isLocal[i] = isLocalTx
+		copy(txs.senders.At(i), addr)
 		i++
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	var protocolBaseFee, pendingBaseFee uint64
-	{
-		v, err := tx.GetOne(kv.PoolInfo, PoolProtocolBaseFeeKey)
-		if err != nil {
-			return err
-		}
-		if len(v) > 0 {
-			protocolBaseFee = binary.BigEndian.Uint64(v)
-		}
-	}
+	var pendingBaseFee uint64
 	{
 		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
 		if err != nil {
@@ -1262,13 +1334,10 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, txs,
-		protocolBaseFee, pendingBaseFee,
-		p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, txs, pendingBaseFee, p.pending, p.baseFee, p.queued, p.byNonce, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
-	p.protocolBaseFee.Store(protocolBaseFee)
 
 	return nil
 }
@@ -1420,10 +1489,9 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte,
 	return nil
 }
 
-var PoolChainConfigKey = []byte("pending_chain_config")
-var PoolLastSeenBlockKey = []byte("pending_last_seen_block")
+var PoolChainConfigKey = []byte("chain_config")
+var PoolLastSeenBlockKey = []byte("last_seen_block")
 var PoolPendingBaseFeeKey = []byte("pending_base_fee")
-var PoolProtocolBaseFeeKey = []byte("protocol_base_fee")
 
 // recentlyConnectedPeers does buffer IDs of recently connected good peers
 // then sync of pooled Transaction can happen to all of then at once
