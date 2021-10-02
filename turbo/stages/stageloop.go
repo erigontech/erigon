@@ -178,10 +178,11 @@ func StageLoopStep(
 			if header == nil {
 				return nil
 			}
+
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
 
-			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, tx)
+			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
 
 		}); err != nil {
 			return err

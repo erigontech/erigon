@@ -1,14 +1,18 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
-	"fmt"
+	"encoding/binary"
+	"reflect"
 
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -124,35 +128,44 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
 
 	if notifier == nil {
-		log.Trace("RPC Daemon notification channel not set. No headers notifications will be issued")
+		log.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
 	}
 
-	notifyTo, err := stages.GetStageProgress(tx, stages.Finish) // because later stages can be disabled
-	if err != nil {
-		return err
-	}
+	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	notifyFrom := finishStageBeforeSync
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
-		notifyFrom = *unwindTo + 1
+		notifyFrom = *unwindTo
+	} else {
+		heightSpan := finishStageAfterSync - finishStageBeforeSync
+		if heightSpan > 1024 {
+			heightSpan = 1024
+		}
+		notifyFrom = finishStageAfterSync - heightSpan
 	}
 
-	i := notifyFrom
-	if notifyTo-notifyFrom > 1024 {
-		i = notifyTo
-	}
-	for ; i <= notifyTo; i++ {
-		header := rawdb.ReadHeaderByNumber(tx, i)
-		if header == nil {
-			return fmt.Errorf("could not find canonical header for number: %d", i)
+	startKey := make([]byte, reflect.TypeOf(notifyFrom).Size()+32)
+	binary.BigEndian.PutUint64(startKey, notifyFrom)
+	if err := tx.ForEach(kv.Headers, startKey, func(k, headerRLP []byte) error {
+		if len(headerRLP) == 0 {
+			return nil
+		}
+		header := new(types.Header)
+		if err := rlp.Decode(bytes.NewReader(headerRLP), header); err != nil {
+			log.Error("Invalid block header RLP", "err", err)
+			return err
 		}
 		notifier.OnNewHeader(header)
+		return libcommon.Stopped(ctx.Done())
+	}); err != nil {
+		log.Error("RPC Daemon notification failed", "error", err)
+		return err
 	}
 
-	log.Info("RPC Daemon notified of current headers", "from", notifyFrom, "to", notifyTo)
-
+	log.Info("RPC Daemon notified of new headers", "from", notifyFrom)
 	return nil
+
 }
