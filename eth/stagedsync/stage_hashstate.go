@@ -305,7 +305,7 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 			return nil
 		}
 
-		incarnation, err := accounts.DecodeIncarnationFromStorage(value); 
+		incarnation, err := accounts.DecodeIncarnationFromStorage(value)
 		if err != nil {
 			return err
 		}
@@ -384,7 +384,7 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 			codeHash []byte
 			err      error
 		)
-		incarnation, err := accounts.DecodeIncarnationFromStorage(v); 
+		incarnation, err := accounts.DecodeIncarnationFromStorage(v)
 		if err != nil {
 			return err
 		}
