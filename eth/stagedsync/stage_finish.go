@@ -138,11 +138,17 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 		return nil
 	}
 
-	header := rawdb.ReadHeaderByNumber(tx, notifyTo)
-	if header == nil {
-		return fmt.Errorf("could not find canonical header for number: %d", notifyTo)
+	i := notifyFrom
+	if notifyTo-notifyFrom > 1024 {
+		i = notifyTo
 	}
-	notifier.OnNewHeader(header)
+	for ; i <= notifyTo; i++ {
+		header := rawdb.ReadHeaderByNumber(tx, i)
+		if header == nil {
+			return fmt.Errorf("could not find canonical header for number: %d", i)
+		}
+		notifier.OnNewHeader(header)
+	}
 
 	log.Info("Updated current block for the RPC API", "from", notifyFrom, "to", notifyTo)
 
