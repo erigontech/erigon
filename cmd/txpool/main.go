@@ -58,7 +58,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&pendingPoolLimit, "txpool.globalslots", txpool.DefaultConfig.PendingSubPoolLimit, "Maximum number of executable transaction slots for all accounts")
 	rootCmd.PersistentFlags().IntVar(&baseFeePoolLimit, "txpool.globalbasefeeeslots", txpool.DefaultConfig.BaseFeeSubPoolLimit, "Maximum number of non-executable transactions where only not enough baseFee")
 	rootCmd.PersistentFlags().IntVar(&queuedPoolLimit, "txpool.globalqueue", txpool.DefaultConfig.QueuedSubPoolLimit, "Maximum number of non-executable transaction slots for all accounts")
-	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.gaslimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
+	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 }
 
 var rootCmd = &cobra.Command{
