@@ -172,7 +172,7 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	if notifications.Accumulator != nil {
+	if notifications != nil && notifications.Accumulator != nil {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			header := rawdb.ReadCurrentHeader(tx)
 			if header == nil {
