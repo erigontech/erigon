@@ -136,7 +136,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
-	notifyFrom := finishStageBeforeSync
+	var notifyFrom uint64
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo
 	} else {
