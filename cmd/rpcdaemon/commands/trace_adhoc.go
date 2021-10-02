@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -706,7 +707,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Extract transactions from block
-	block, _, bErr := rawdb.ReadBlockByNumberWithSenders(tx, *blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -790,7 +791,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		parentNr -= 1
 	}
 	// Extract transactions from block
-	block, _, bErr := rawdb.ReadBlockByNumberWithSenders(tx, blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -863,7 +864,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(tx)
+		cacheView, err := api.stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
 		stateReader = state.NewPlainState(tx, blockNumber)
 	}
@@ -1061,7 +1066,11 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	}
 	var stateReader state.StateReader
 	if num, ok := parentNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		cacheView, err := api.stateCache.View(ctx, dbtx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, dbtx)
 	} else {
 		stateReader = state.NewPlainState(dbtx, blockNumber)
 	}
@@ -1095,7 +1104,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		useParent = true
 	}
 	for txIndex, msg := range msgs {
-		if err := common.Stopped(ctx.Done()); err != nil {
+		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, err
 		}
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}

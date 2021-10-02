@@ -11,6 +11,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	trnt "github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -62,7 +63,7 @@ func Seed(ctx context.Context, datadir string) error {
 		}
 		tt := time.Now()
 		if common.IsCanceled(ctx) {
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		}
 		info, err := trnt.BuildInfoBytesForSnapshot(v, trnt.MdbxFilename)
 		if err != nil {
@@ -91,7 +92,7 @@ func Seed(ctx context.Context, datadir string) error {
 		}
 
 		if common.IsCanceled(ctx) {
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		}
 	}
 

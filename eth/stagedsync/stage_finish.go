@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/params"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -29,7 +31,7 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, sn
 	}
 }
 
-func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -67,11 +69,19 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if err != nil {
 		return err
 	}
+
+	if initialCycle {
+		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
+			return err
+		}
+	}
+
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -114,17 +124,12 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 	return nil
 }
 
-func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, db kv.RwDB) error {
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
 	notifyTo, err := stages.GetStageProgress(tx, stages.Finish) // because later stages can be disabled
 	if err != nil {
 		return err
 	}
-	notifyFrom := finishStageBeforeSync + 1
+	notifyFrom := finishStageBeforeSync
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo + 1
 	}
@@ -132,7 +137,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 		log.Warn("rpc notifier is not set, rpc daemon won't be updated about headers")
 		return nil
 	}
-	log.Info("Update current block for the RPC API", "from", notifyFrom, "to", notifyTo)
+
 	for i := notifyFrom; i <= notifyTo; i++ {
 		header := rawdb.ReadHeaderByNumber(tx, i)
 		if header == nil {
@@ -140,5 +145,8 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, unwindT
 		}
 		notifier.OnNewHeader(header)
 	}
+
+	log.Info("Updated current block for the RPC API", "from", notifyFrom, "to", notifyTo)
+
 	return nil
 }

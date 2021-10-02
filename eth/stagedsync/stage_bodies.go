@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -212,7 +213,7 @@ Loop:
 		}
 	}
 	if stopped {
-		return common.ErrStopped
+		return libcommon.ErrStopped
 	}
 	if bodyProgress > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
@@ -226,7 +227,7 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
-		"block number", committed,
+		"block_num", committed,
 		"delivery/sec", common.StorageSize(speed),
 		"wasted/sec", common.StorageSize(wastedSpeed),
 		"alloc", common.StorageSize(m.Alloc),

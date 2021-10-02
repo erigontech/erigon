@@ -96,6 +96,11 @@ var (
 		Usage: "Data directory for the databases",
 		Value: DirectoryString(paths.DefaultDataDir()),
 	}
+	MdbxAugmentLimitFlag = DirectoryFlag{
+		Name:  "mdbx.augment.limit",
+		Usage: "Data directory for the databases",
+		Value: DirectoryString(paths.DefaultDataDir()),
+	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
@@ -148,6 +153,10 @@ var (
 	// Transaction pool settings
 	TxPoolV2Flag = cli.BoolFlag{
 		Name:  "txpool.v2",
+		Usage: "experimental internal pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+	}
+	TxPoolDisableFlag = cli.BoolFlag{
+		Name:  "txpool.disable",
 		Usage: "experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
 	}
 	TxPoolLocalsFlag = cli.StringFlag{
@@ -187,6 +196,11 @@ var (
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
 		Value: ethconfig.Defaults.TxPool.GlobalSlots,
+	}
+	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
+		Name:  "txpool.globalbasefeeeslots",
+		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
+		Value: ethconfig.Defaults.TxPool.GlobalQueue,
 	}
 	TxPoolAccountQueueFlag = cli.Uint64Flag{
 		Name:  "txpool.accountqueue",
@@ -590,6 +604,10 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
+		case params.KovanChainName:
+			urls = params.KovanBootnodes
+		case params.FermionChainName:
+			urls = params.FermionBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -630,6 +648,10 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case params.SokolChainName:
 			urls = params.SokolBootnodes
+		case params.KovanChainName:
+			urls = params.KovanBootnodes
+		case params.FermionChainName:
+			urls = params.FermionBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -860,6 +882,10 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case params.SokolChainName:
 		return filepath.Join(datadir, "sokol")
+	case params.KovanChainName:
+		return filepath.Join(datadir, "kovan")
+	case params.FermionChainName:
+		return filepath.Join(datadir, "fermion")
 	default:
 		return datadir
 	}
@@ -872,6 +898,10 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
 	} else {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
+	}
+
+	if ctx.GlobalIsSet(MdbxAugmentLimitFlag.Name) {
+		cfg.MdbxAugumentLimit = ctx.GlobalUint64(MdbxAugmentLimitFlag.Name)
 	}
 }
 
@@ -920,6 +950,9 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	if ctx.GlobalIsSet(TxPoolV2Flag.Name) {
 		cfg.V2 = true
 	}
+	if ctx.GlobalIsSet(TxPoolDisableFlag.Name) {
+		cfg.Disable = true
+	}
 	if ctx.GlobalIsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.GlobalString(TxPoolLocalsFlag.Name), ",")
 		for _, account := range locals {
@@ -956,6 +989,9 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 	if ctx.GlobalIsSet(TxPoolGlobalQueueFlag.Name) {
 		cfg.GlobalQueue = ctx.GlobalUint64(TxPoolGlobalQueueFlag.Name)
+	}
+	if ctx.GlobalIsSet(TxPoolGlobalBaseFeeSlotsFlag.Name) {
+		cfg.GlobalBaseFeeQueue = ctx.GlobalUint64(TxPoolGlobalBaseFeeSlotsFlag.Name)
 	}
 	if ctx.GlobalIsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.GlobalDuration(TxPoolLifetimeFlag.Name)
@@ -1226,6 +1262,16 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 77
 		}
 		cfg.Genesis = core.DefaultSokolGenesisBlock()
+	case params.KovanChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 42
+		}
+		cfg.Genesis = core.DefaultKovanGenesisBlock()
+	case params.FermionChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 102
+		}
+		cfg.Genesis = core.DefaultFermionGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1299,6 +1345,10 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultErigonGenesisBlock()
 	case params.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
+	case params.KovanChainName:
+		genesis = core.DefaultKovanGenesisBlock()
+	case params.FermionChainName:
+		genesis = core.DefaultFermionGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

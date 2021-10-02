@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/RoaringBitmap/roaring"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -136,7 +137,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = common.Stopped(ctx.Done()); err != nil {
+		if err = libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, err
 		}
 
@@ -166,7 +167,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 
 		if len(blockLogs) > 0 {
-			b, err := rawdb.ReadBlockByNumber(tx, blockNToMatch)
+			b, err := api.blockByNumberWithSenders(tx, blockNToMatch)
 			if err != nil {
 				return nil, err
 			}
@@ -240,7 +241,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 
 	// Extract transactions from block
-	block, senders, bErr := rawdb.ReadBlockByNumberWithSenders(tx, *blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -259,7 +260,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, cc, block, senders)
+	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}
@@ -281,7 +282,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	block, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +293,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, chainConfig, block, senders)
+	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %v", err)
 	}

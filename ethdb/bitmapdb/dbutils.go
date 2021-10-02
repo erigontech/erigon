@@ -130,19 +130,21 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 		return nil, err
 	}
 	defer c.Close()
-	if err := ethdb.Walk(c, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
-		bm := roaring.New()
-		_, err := bm.ReadFrom(bytes.NewReader(v))
+	for k, v, err := c.Seek(fromKey); k != nil; k, v, err = c.Next() {
 		if err != nil {
-			return false, err
+			return nil, err
+		}
+		if !bytes.HasPrefix(k, key) {
+			break
+		}
+		bm := roaring.New()
+		if _, err := bm.ReadFrom(bytes.NewReader(v)); err != nil {
+			return nil, err
 		}
 		chunks = append(chunks, bm)
 		if binary.BigEndian.Uint32(k[len(k)-4:]) >= to {
-			return false, nil
+			break
 		}
-		return true, nil
-	}); err != nil {
-		return nil, err
 	}
 
 	if len(chunks) == 0 {
@@ -283,19 +285,22 @@ func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bit
 		return nil, err
 	}
 	defer c.Close()
-	if err := ethdb.Walk(c, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
+	for k, v, err := c.Seek(fromKey); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.HasPrefix(k, key) {
+			break
+		}
 		bm := roaring64.New()
 		_, err := bm.ReadFrom(bytes.NewReader(v))
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		chunks = append(chunks, bm)
 		if binary.BigEndian.Uint64(k[len(k)-8:]) >= to {
-			return false, nil
+			break
 		}
-		return true, nil
-	}); err != nil {
-		return nil, err
 	}
 
 	if len(chunks) == 0 {

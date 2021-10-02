@@ -5,10 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
@@ -96,7 +96,7 @@ func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx co
 	}
 
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf(" reset: %v", err)
+		return fmt.Errorf(" reset: %w", err)
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

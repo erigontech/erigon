@@ -3,46 +3,52 @@ package shards
 import (
 	"context"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // Accumulator collects state changes in a form that can then be delivered to the RPC daemon
 type Accumulator struct {
-	changes            []remote.StateChange
+	viewID             uint64 // mdbx's txID
+	chainConfig        *params.ChainConfig
+	changes            []*remote.StateChange
 	latestChange       *remote.StateChange
 	accountChangeIndex map[common.Address]int // For the latest changes, allows finding account change by account's address
 	storageChangeIndex map[common.Address]map[common.Hash]int
 }
 
-type StateChangeConsumer interface {
-	SendStateChanges(sc *remote.StateChange)
+func NewAccumulator(chainConfig *params.ChainConfig) *Accumulator {
+	return &Accumulator{chainConfig: chainConfig}
 }
 
-func (a *Accumulator) Reset() {
+type StateChangeConsumer interface {
+	SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch)
+}
+
+func (a *Accumulator) Reset(viewID uint64) {
 	a.changes = nil
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil
+	a.viewID = viewID
 }
-func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer) {
+func (a *Accumulator) ChainConfig() *params.ChainConfig { return a.chainConfig }
+func (a *Accumulator) SendAndReset(ctx context.Context, c StateChangeConsumer, pendingBaseFee uint64) {
 	if a == nil || c == nil || len(a.changes) == 0 {
 		return
 	}
-	for i := range a.changes {
-		if err := common.Stopped(ctx.Done()); err != nil {
-			return
-		}
-		c.SendStateChanges(&a.changes[i])
-	}
-	a.Reset()
+	sc := &remote.StateChangeBatch{DatabaseViewID: a.viewID, ChangeBatch: a.changes, PendingBlockBaseFee: pendingBaseFee}
+	c.SendStateChanges(ctx, sc)
+	a.Reset(0) // reset here for GC, but there will be another Reset with correct viewID
 }
 
 // StartChange begins accumulation of changes for a new block
-func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs [][]byte, protocolBaseFee uint64, unwind bool) {
-	a.changes = append(a.changes, remote.StateChange{})
-	a.latestChange = &a.changes[len(a.changes)-1]
+func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs [][]byte, unwind bool) {
+	a.changes = append(a.changes, &remote.StateChange{})
+	a.latestChange = a.changes[len(a.changes)-1]
 	a.latestChange.BlockHeight = blockHeight
 	a.latestChange.BlockHash = gointerfaces.ConvertHashToH256(blockHash)
 	if unwind {
@@ -55,10 +61,9 @@ func (a *Accumulator) StartChange(blockHeight uint64, blockHash common.Hash, txs
 	if txs != nil {
 		a.latestChange.Txs = make([][]byte, len(txs))
 		for i := range txs {
-			a.latestChange.Txs[i] = common.CopyBytes(txs[i])
+			a.latestChange.Txs[i] = libcommon.Copy(txs[i])
 		}
 	}
-	a.latestChange.ProtocolBaseFee = protocolBaseFee
 }
 
 // ChangeAccount adds modification of account balance or nonce (or both) to the latest change

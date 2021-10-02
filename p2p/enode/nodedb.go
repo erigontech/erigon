@@ -362,7 +362,7 @@ func (db *DB) Node(id ID) *Node {
 func mustDecodeNode(id, data []byte) *Node {
 	node := new(Node)
 	if err := rlp.DecodeBytes(data, &node.r); err != nil {
-		panic(fmt.Errorf("p2p/enode: can't decode node %x in DB: %v", id, err))
+		panic(fmt.Errorf("p2p/enode: can't decode node %x in DB: %w", id, err))
 	}
 	// Restore node id cache.
 	copy(node.id[:], id)
@@ -766,11 +766,15 @@ func (db *DB) commitCache(logit bool) {
 
 // close flushes and closes the database files.
 func (db *DB) Close() {
+	select {
+	case <-db.quit:
+		return // means closed already
+	default:
+	}
 	if db.quit == nil {
 		return
 	}
 	close(db.quit)
-	db.quit = nil
 	db.kvCacheLock.Lock()
 	defer db.kvCacheLock.Unlock()
 	db.commitCache(true /* logit */)

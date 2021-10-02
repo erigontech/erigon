@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -67,14 +69,10 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 }
 
 func (pi *PeerInfo) Height() uint64 {
-	pi.lock.RLock()
-	defer pi.lock.RUnlock()
-	return pi.height
+	return atomic.LoadUint64(&pi.height)
 }
 func (pi *PeerInfo) SetHeight(h uint64) {
-	pi.lock.Lock()
-	pi.height = h
-	pi.lock.Unlock()
+	atomic.StoreUint64(&pi.height, h)
 }
 
 // ClearDeadlines goes through the deadlines of
@@ -125,6 +123,10 @@ func makeP2PServer(
 		urls = params.RinkebyBootnodes
 	case params.SokolGenesisHash:
 		urls = params.SokolBootnodes
+	case params.KovanGenesisHash:
+		urls = params.KovanBootnodes
+	case params.FermionGenesisHash:
+		urls = params.FermionBootnodes
 	}
 	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {
@@ -174,7 +176,9 @@ func handShake(
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
 	var readStatus = func() error {
-		forkFilter := forkid.NewFilterFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock)
+		forks := make([]uint64, len(status.ForkData.Forks)) // copy because forkid.NewFilterFromForks will write into this slice
+		copy(forks, status.ForkData.Forks)
+		forkFilter := forkid.NewFilterFromForks(forks, genesisHash, status.MaxBlock)
 		networkID := status.NetworkId
 		// Read handshake message
 		msg, err1 := rw.ReadMsg()
@@ -194,7 +198,7 @@ func handShake(
 		var reply eth.StatusPacket
 		if err1 = msg.Decode(&reply); err1 != nil {
 			msg.Discard()
-			return fmt.Errorf("decode message %v: %v", msg, err1)
+			return fmt.Errorf("decode message %v: %w", msg, err1)
 		}
 		msg.Discard()
 		if reply.NetworkID != networkID {
@@ -210,7 +214,7 @@ func handShake(
 			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 		}
 		if err1 = forkFilter(reply.ForkID); err1 != nil {
-			return fmt.Errorf("%v", err1)
+			return fmt.Errorf("%w", err1)
 		}
 
 		td, overflow := uint256.FromBig(reply.TD)
@@ -280,7 +284,7 @@ func runPeer(
 				peerPrinted = true
 			}
 		}
-		if err := common.Stopped(ctx.Done()); err != nil {
+		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return err
 		}
 		if peerInfo.Removed() {
@@ -288,7 +292,7 @@ func runPeer(
 		}
 		msg, err := rw.ReadMsg()
 		if err != nil {
-			return fmt.Errorf("reading message: %v", err)
+			return fmt.Errorf("reading message: %w", err)
 		}
 		if msg.Size > eth.ProtocolMaxMsgSize {
 			msg.Discard()
@@ -492,7 +496,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				return ss.startSync(ctx, bestHash, peerID)
 			})
 			if err != nil {
-				return fmt.Errorf("handshake to peer %s: %v", peerID, err)
+				return fmt.Errorf("handshake to peer %s: %w", peerID, err)
 			}
 			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
@@ -532,12 +536,12 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	}
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
+	sentryServer.discoveryDNS = discoveryDNS
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer)
 	if err != nil {
 		return err
 	}
-	sentryServer.discoveryDNS = discoveryDNS
 
 	<-ctx.Done()
 	grpcServer.GracefulStop()
@@ -572,7 +576,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 			Origin:  eth.HashOrNumber{Hash: bestHash},
 		})
 		if err != nil {
-			return fmt.Errorf("startSync encode packet failed: %v", err)
+			return fmt.Errorf("startSync encode packet failed: %w", err)
 		}
 
 		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
@@ -596,7 +600,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("startSync encode packet failed: %v", err)
+			return fmt.Errorf("startSync encode packet failed: %w", err)
 		}
 		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
 			PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
@@ -686,7 +690,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 			}
 		}
 		ss.GoodPeers.Delete(peerID)
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %v", peerID, err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerID, err)
 	}
 	peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
@@ -725,7 +729,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 			}
 		}
 		ss.GoodPeers.Delete(peerID)
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %v", peerID, err)
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %w", peerID, err)
 	}
 	if strings.Contains(peerInfo.peer.Fullname(), "alex") && msgcode < 6 && msgcode != 2 {
 		log.Warn("send by id, done", "msg id", msgcode, "peerID", fmt.Sprintf("%s",gointerfaces.ConvertH512ToBytes(inreq.PeerId)), "data.len", len(inreq.Data.Data), "name", peerInfo.peer.Fullname())

@@ -6,11 +6,10 @@ import (
 	"errors"
 	"sort"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 const (
@@ -18,8 +17,7 @@ const (
 )
 
 var (
-	ErrNotFound  = errors.New("not found")
-	ErrFindValue = errors.New("find value error")
+	ErrNotFound = errors.New("not found")
 )
 
 func NewStorageChangeSet() *ChangeSet {
@@ -99,22 +97,13 @@ func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collec
 }
 
 func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
-	c, err := db.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	return ethdb.Walk(c, dbutils.EncodeBlockNumber(timestampDst), 0, func(dbKey, dbValue []byte) (bool, error) {
-		if err := common.Stopped(quit); err != nil {
-			return false, err
+	return ForRange(db, bucket, timestampDst, timestampSrc+1, func(_ uint64, k, v []byte) error {
+		if err := libcommon.Stopped(quit); err != nil {
+			return err
 		}
-		timestamp, k, v := Mapper[bucket].Decode(dbKey, dbValue)
-		if timestamp > timestampSrc {
-			return false, nil
+		if innerErr := collectorFunc(libcommon.Copy(k), libcommon.Copy(v)); innerErr != nil {
+			return innerErr
 		}
-		if innerErr := collectorFunc(common.CopyBytes(k), common.CopyBytes(v)); innerErr != nil {
-			return false, innerErr
-		}
-		return true, nil
+		return nil
 	})
 }
