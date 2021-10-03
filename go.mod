@@ -1,9 +1,6 @@
 module github.com/ledgerwatch/erigon
 
 go 1.16
-replace (
-	github.com/ledgerwatch/erigon-lib => ./../erigon-lib
-)
 
 require (
 	github.com/BobuSumisu/aho-corasick v1.0.3
@@ -40,7 +37,7 @@ require (
 	github.com/json-iterator/go v1.1.11
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20211002074005-c2d44c4777eb
+	github.com/ledgerwatch/erigon-lib v0.0.0-20211003012318-66a2824e00a5
 	github.com/ledgerwatch/log/v3 v3.3.1
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
