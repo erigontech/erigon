@@ -1,6 +1,9 @@
 module github.com/ledgerwatch/erigon
 
 go 1.16
+replace (
+	github.com/ledgerwatch/erigon-lib => ./../erigon-lib
+)
 
 require (
 	github.com/BobuSumisu/aho-corasick v1.0.3
