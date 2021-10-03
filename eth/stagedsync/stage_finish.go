@@ -148,6 +148,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 
 	startKey := make([]byte, reflect.TypeOf(notifyFrom).Size()+32)
+	var notifyTo uint64
 	binary.BigEndian.PutUint64(startKey, notifyFrom)
 	if err := tx.ForEach(kv.Headers, startKey, func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
@@ -158,6 +159,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			log.Error("Invalid block header RLP", "err", err)
 			return err
 		}
+		notifyTo = header.Number.Uint64()
 		notifier.OnNewHeader(header)
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
@@ -165,7 +167,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		return err
 	}
 
-	log.Info("RPC Daemon notified of new headers", "from", notifyFrom)
+	log.Info("RPC Daemon notified of new headers", "from", notifyFrom, "to", notifyTo)
 	return nil
 
 }
