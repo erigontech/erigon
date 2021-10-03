@@ -707,7 +707,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Extract transactions from block
-	block, _, bErr := rawdb.ReadBlockByNumberWithSenders(tx, *blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -791,7 +791,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		parentNr -= 1
 	}
 	// Extract transactions from block
-	block, _, bErr := rawdb.ReadBlockByNumberWithSenders(tx, blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -864,7 +864,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(tx)
+		cacheView, err := api.stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
 		stateReader = state.NewPlainState(tx, blockNumber)
 	}
@@ -1062,11 +1066,15 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	}
 	var stateReader state.StateReader
 	if num, ok := parentNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(dbtx)
+		cacheView, err := api.stateCache.View(ctx, dbtx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, dbtx) // this cache stays between RPC calls
 	} else {
 		stateReader = state.NewPlainState(dbtx, blockNumber)
 	}
-	stateCache := shards.NewStateCache(32, 0 /* no limit */)
+	stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)

@@ -41,7 +41,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 
 	contractHasTEVM := ethdb.GetHasTEVM(tx)
 
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.filters, contractHasTEVM)
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
-		stateReader := state.NewPlainStateReader(dbtx)
+		cacheView, err := api.stateCache.View(ctx, dbtx)
+		if err != nil {
+			return 0, err
+		}
+		stateReader := state.NewCachedReader2(cacheView, dbtx)
 		state := state.New(stateReader)
 		if state == nil {
 			return 0, fmt.Errorf("can't get the current state")
@@ -172,7 +176,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.filters, contractHasTEVM)
+		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil,
+			api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

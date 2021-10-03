@@ -2,6 +2,7 @@
 - [Getting Started](#getting-started)
     * [Running locally](#running-locally)
     * [Running remotely](#running-remotely)
+    * [Healthcheck](#healthcheck)
     * [Testing](#testing)
 - [FAQ](#faq)
     * [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
@@ -62,6 +63,44 @@ The daemon should respond with something like:
 ```[bash]
 INFO [date-time] HTTP endpoint opened url=localhost:8545...
 ```
+
+### Healthcheck
+
+Running the daemon also opens an endpoint `/health` that provides a basic
+health check.
+
+If the health check is successful it returns 200 OK.
+
+If the health check fails it returns 500 Internal Server Error.
+
+Configuration of the health check is sent as POST body of the method.
+
+```
+{
+   "min_peer_count": <minimal number of the node peers>,
+   "known_block": <number_of_block_that_node_should_know>
+}
+```
+
+Not adding a check disables that.
+
+**`min_peer_count`** -- checks for mimimum of healthy node peers. Requires
+`net` namespace to be listed in `http.api`.
+
+**`known_block`** -- sets up the block that node has to know about. Requires
+`eth` namespace to be listed in `http.api`.
+
+Example request 
+```http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'```
+Example response
+```
+{
+    "check_block": "HEALTHY",
+    "healthcheck_query": "HEALTHY",
+    "min_peer_count": "HEALTHY"
+}
+```
+
 
 ### Testing
 

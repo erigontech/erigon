@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -14,15 +15,15 @@ import (
 )
 
 var (
-	BucketConfigs = map[SnapshotType]kv.TableCfg{
-		SnapshotType_bodies: {
+	BucketConfigs = map[snapshotsync.SnapshotType]kv.TableCfg{
+		snapshotsync.SnapshotType_bodies: {
 			kv.BlockBody: kv.TableCfgItem{},
 			kv.EthTx:     kv.TableCfgItem{},
 		},
-		SnapshotType_headers: {
+		snapshotsync.SnapshotType_headers: {
 			kv.Headers: kv.TableCfgItem{},
 		},
-		SnapshotType_state: {
+		snapshotsync.SnapshotType_state: {
 			kv.PlainState: kv.TableCfgItem{
 				Flags:                     kv.DupSort,
 				AutoDupSortKeysConversion: true,
@@ -41,7 +42,7 @@ func WrapBySnapshotsFromDir(kv kv.RwDB, snapshotDir string, mode SnapshotMode) (
 	return nil, errors.New("deprecated") //nolint
 }
 
-func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*SnapshotsInfo) (kv.RwDB, error) {
+func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo) (kv.RwDB, error) {
 	snKV := snapshotdb.NewSnapshotKV().DB(db)
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)
@@ -55,11 +56,11 @@ func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[SnapshotType]*Snaps
 			return nil, err
 		} else { //nolint
 			switch k {
-			case SnapshotType_headers:
+			case snapshotsync.SnapshotType_headers:
 				snKV = snKV.HeadersSnapshot(snapshotKV)
-			case SnapshotType_bodies:
+			case snapshotsync.SnapshotType_bodies:
 				snKV = snKV.BodiesSnapshot(snapshotKV)
-			case SnapshotType_state:
+			case snapshotsync.SnapshotType_state:
 				snKV = snKV.StateSnapshot(snapshotKV)
 			}
 		}
@@ -97,7 +98,7 @@ func WrapSnapshots(chainDb kv.RwDB, snapshotsDir string) (kv.RwDB, error) {
 }
 
 func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr string, networkID uint64, snapshotMode SnapshotMode, chainDb ethdb.Database) error {
-	var downloadedSnapshots map[SnapshotType]*SnapshotsInfo
+	var downloadedSnapshots map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo
 	if ExternalSnapshotDownloaderAddr != "" {
 		cli, cl, innerErr := NewClient(ExternalSnapshotDownloaderAddr)
 		if innerErr != nil {
@@ -105,7 +106,7 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 		}
 		defer cl() //nolint
 
-		_, innerErr = cli.Download(context.Background(), &DownloadSnapshotRequest{
+		_, innerErr = cli.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
 			NetworkId: networkID,
 			Type:      snapshotMode.ToSnapshotTypes(),
 		})
@@ -113,8 +114,8 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 			return innerErr
 		}
 
-		waitDownload := func() (map[SnapshotType]*SnapshotsInfo, error) {
-			snapshotReadinessCheck := func(mp map[SnapshotType]*SnapshotsInfo, tp SnapshotType) bool {
+		waitDownload := func() (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
+			snapshotReadinessCheck := func(mp map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, tp snapshotsync.SnapshotType) bool {
 				if mp[tp].Readiness != int32(100) {
 					log.Info("Downloading", "snapshot", tp, "%", mp[tp].Readiness)
 					return false
@@ -122,8 +123,8 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 				return true
 			}
 			for {
-				downloadedSnapshots = make(map[SnapshotType]*SnapshotsInfo)
-				snapshots, err1 := cli.Snapshots(context.Background(), &SnapshotsRequest{NetworkId: networkID})
+				downloadedSnapshots = make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
+				snapshots, err1 := cli.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{NetworkId: networkID})
 				if err1 != nil {
 					return nil, err1
 				}
@@ -135,22 +136,22 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 
 				downloaded := true
 				if snapshotMode.Headers {
-					if !snapshotReadinessCheck(downloadedSnapshots, SnapshotType_headers) {
+					if !snapshotReadinessCheck(downloadedSnapshots, snapshotsync.SnapshotType_headers) {
 						downloaded = false
 					}
 				}
 				if snapshotMode.Bodies {
-					if !snapshotReadinessCheck(downloadedSnapshots, SnapshotType_bodies) {
+					if !snapshotReadinessCheck(downloadedSnapshots, snapshotsync.SnapshotType_bodies) {
 						downloaded = false
 					}
 				}
 				if snapshotMode.State {
-					if !snapshotReadinessCheck(downloadedSnapshots, SnapshotType_state) {
+					if !snapshotReadinessCheck(downloadedSnapshots, snapshotsync.SnapshotType_state) {
 						downloaded = false
 					}
 				}
 				if snapshotMode.Receipts {
-					if !snapshotReadinessCheck(downloadedSnapshots, SnapshotType_receipts) {
+					if !snapshotReadinessCheck(downloadedSnapshots, snapshotsync.SnapshotType_receipts) {
 						downloaded = false
 					}
 				}
@@ -188,7 +189,7 @@ func DownloadSnapshots(torrentClient *Client, ExternalSnapshotDownloaderAddr str
 		} else {
 			torrentClient.Download()
 			var innerErr error
-			var downloadedSnapshots map[SnapshotType]*SnapshotsInfo
+			var downloadedSnapshots map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo
 			if err := chainDb.RwKV().View(context.Background(), func(tx kv.Tx) (err error) {
 				downloadedSnapshots, err = torrentClient.GetSnapshots(tx, networkID)
 				if err != nil {

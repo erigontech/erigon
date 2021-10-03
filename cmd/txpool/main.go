@@ -34,6 +34,12 @@ var (
 	TLSCertfile string
 	TLSCACert   string
 	TLSKeyFile  string
+
+	pendingPoolLimit int
+	baseFeePoolLimit int
+	queuedPoolLimit  int
+
+	priceLimit uint64
 )
 
 func init() {
@@ -49,6 +55,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake")
 
+	rootCmd.PersistentFlags().IntVar(&pendingPoolLimit, "txpool.globalslots", txpool.DefaultConfig.PendingSubPoolLimit, "Maximum number of executable transaction slots for all accounts")
+	rootCmd.PersistentFlags().IntVar(&baseFeePoolLimit, "txpool.globalbasefeeeslots", txpool.DefaultConfig.BaseFeeSubPoolLimit, "Maximum number of non-executable transactions where only not enough baseFee")
+	rootCmd.PersistentFlags().IntVar(&queuedPoolLimit, "txpool.globalqueue", txpool.DefaultConfig.QueuedSubPoolLimit, "Maximum number of non-executable transaction slots for all accounts")
+	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
+	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.accountslots", txpool.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 }
 
 var rootCmd = &cobra.Command{
@@ -97,8 +108,12 @@ var rootCmd = &cobra.Command{
 		cfg.DBDir = path.Join(datadir, "txpool")
 		cfg.LogEvery = 30 * time.Second
 		cfg.CommitEvery = 30 * time.Second
+		cfg.PendingSubPoolLimit = pendingPoolLimit
+		cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
+		cfg.QueuedSubPoolLimit = queuedPoolLimit
+		cfg.MinFeeCap = priceLimit
 
-		cacheConfig := kvcache.DefaultCoherentCacheConfig
+		cacheConfig := kvcache.DefaultCoherentConfig
 		cacheConfig.MetricsLabel = "txpool"
 
 		newTxs := make(chan txpool.Hashes, 1024)
@@ -113,7 +128,7 @@ var rootCmd = &cobra.Command{
 
 		/*
 			var ethashApi *ethash.API
-			if casted, ok := backend.engine.(*ethash.Ethash); ok {
+			sif casted, ok := backend.engine.(*ethash.Ethash); ok {
 				ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 			}
 		*/

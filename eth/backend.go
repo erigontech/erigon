@@ -366,6 +366,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if config.TxPool.V2 {
 		cfg := txpool2.DefaultConfig
 		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
+		cfg.PendingSubPoolLimit = int(config.TxPool.GlobalSlots)
+		cfg.BaseFeeSubPoolLimit = int(config.TxPool.GlobalBaseFeeQueue)
+		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
+		cfg.MinFeeCap = config.TxPool.PriceLimit
+		cfg.AccountSlots = config.TxPool.AccountSlots
 		cfg.LogEvery = 1 * time.Minute    //5 * time.Minute
 		cfg.CommitEvery = 1 * time.Minute //5 * time.Minute
 

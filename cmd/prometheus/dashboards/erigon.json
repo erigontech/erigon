@@ -22,7 +22,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 1,
-  "iteration": 1632101487032,
+  "iteration": 1632801657282,
   "links": [],
   "panels": [
     {
@@ -3008,13 +3008,198 @@
       "type": "timeseries"
     },
     {
-      "collapsed": true,
+      "collapsed": false,
       "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 79
+      },
+      "id": 183,
+      "panels": [],
+      "title": "RPC",
+      "type": "row"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "id": 185,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rpc_duration_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "rpc_duration_seconds: {{ method }} {{ instance }}",
+          "refId": "A"
+        }
+      ],
+      "title": "Timings",
+      "transformations": [],
+      "type": "timeseries"
+    },
+    {
+      "datasource": null,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 80
+      },
+      "id": 184,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum(delta(cache_total{result=\"hit\",name=\"rpc\",instance=~\"$instance\"}[1m]))/sum(delta(cache_total{name=\"rpc\",instance=~\"$instance\"}[1m])) ",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "hit rate: {{ instance }} ",
+          "refId": "A"
+        }
+      ],
+      "title": "Cache hit-rate",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": true,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 88
       },
       "id": 146,
       "panels": [
@@ -3713,7 +3898,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 80
+        "y": 89
       },
       "id": 75,
       "panels": [],
@@ -3777,7 +3962,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 81
+        "y": 90
       },
       "id": 96,
       "links": [],
@@ -3880,7 +4065,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 81
+        "y": 90
       },
       "id": 77,
       "links": [],
@@ -3938,7 +4123,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 96
       },
       "id": 4,
       "panels": [],
@@ -3982,7 +4167,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 88
+        "y": 97
       },
       "id": 108,
       "interval": null,
@@ -4061,7 +4246,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 88
+        "y": 97
       },
       "id": 111,
       "interval": null,
@@ -4141,7 +4326,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 88
+        "y": 97
       },
       "id": 109,
       "interval": null,
@@ -4221,7 +4406,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 88
+        "y": 97
       },
       "id": 113,
       "interval": null,
@@ -4300,7 +4485,7 @@
         "h": 3,
         "w": 4,
         "x": 16,
-        "y": 88
+        "y": 97
       },
       "id": 114,
       "interval": null,
@@ -4379,7 +4564,7 @@
         "h": 3,
         "w": 4,
         "x": 20,
-        "y": 88
+        "y": 97
       },
       "id": 115,
       "interval": null,
@@ -4479,7 +4664,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 91
+        "y": 100
       },
       "id": 110,
       "links": [],
@@ -4583,7 +4768,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 91
+        "y": 100
       },
       "id": 116,
       "links": [],
@@ -4687,7 +4872,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 97
+        "y": 106
       },
       "id": 117,
       "links": [],
@@ -4815,7 +5000,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 104
+        "y": 113
       },
       "id": 138,
       "panels": [
@@ -4980,9 +5165,15 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
-          "text": "All",
-          "value": "$__all"
+          "selected": true,
+          "text": [
+            "turbogeth16c.weblogix.it:6060",
+            "turbogeth16c.weblogix.it:6061"
+          ],
+          "value": [
+            "turbogeth16c.weblogix.it:6060",
+            "turbogeth16c.weblogix.it:6061"
+          ]
         },
         "datasource": "Prometheus",
         "definition": "go_goroutines",
@@ -5087,7 +5278,7 @@
     ]
   },
   "time": {
-    "from": "now-12h",
+    "from": "now-2m",
     "to": "now"
   },
   "timepicker": {
@@ -5117,5 +5308,5 @@
   "timezone": "",
   "title": "Erigon Prometheus",
   "uid": "FPpjH6Hik",
-  "version": 40
+  "version": 45
 }

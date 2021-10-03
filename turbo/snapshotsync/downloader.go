@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/bencode"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	lg "github.com/anacrolix/log"
@@ -117,7 +118,7 @@ func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Has
 	return t, err
 }
 
-func (cli *Client) AddTorrent(ctx context.Context, db kv.RwTx, snapshotType SnapshotType, networkID uint64) error { //nolint: interfacer
+func (cli *Client) AddTorrent(ctx context.Context, db kv.RwTx, snapshotType snapshotsync.SnapshotType, networkID uint64) error { //nolint: interfacer
 	infoHashBytes, infoBytes, err := getTorrentSpec(db, snapshotType.String(), networkID)
 	if err != nil {
 		return err
@@ -185,25 +186,25 @@ func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db kv.RwTx, network
 
 	if mode.Headers {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, SnapshotType_headers, networkId)
+			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_headers, networkId)
 		})
 	}
 
 	if mode.Bodies {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, SnapshotType_bodies, networkId)
+			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_bodies, networkId)
 		})
 	}
 
 	if mode.State {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, SnapshotType_state, networkId)
+			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_state, networkId)
 		})
 	}
 
 	if mode.Receipts {
 		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, SnapshotType_receipts, networkId)
+			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_receipts, networkId)
 		})
 	}
 	err := eg.Wait()
@@ -256,8 +257,8 @@ func (cli *Client) Download() {
 	}
 }
 
-func (cli *Client) GetSnapshots(tx kv.Tx, networkID uint64) (map[SnapshotType]*SnapshotsInfo, error) {
-	mp := make(map[SnapshotType]*SnapshotsInfo)
+func (cli *Client) GetSnapshots(tx kv.Tx, networkID uint64) (map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo, error) {
+	mp := make(map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo)
 	networkIDBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(networkIDBytes, networkID)
 	err := tx.ForPrefix(kv.SnapshotInfo, append(networkIDBytes, []byte(SnapshotInfoHashPrefix)...), func(k, v []byte) error {
@@ -281,19 +282,19 @@ func (cli *Client) GetSnapshots(tx kv.Tx, networkID uint64) (map[SnapshotType]*S
 		}
 
 		_, tpStr := ParseInfoHashKey(k)
-		tp, ok := SnapshotType_value[tpStr]
+		tp, ok := snapshotsync.SnapshotType_value[tpStr]
 		if !ok {
 			return fmt.Errorf("incorrect type: %v", tpStr)
 		}
 
-		val := &SnapshotsInfo{
-			Type:          SnapshotType(tp),
+		val := &snapshotsync.SnapshotsInfo{
+			Type:          snapshotsync.SnapshotType(tp),
 			GotInfoByte:   gotInfo,
 			Readiness:     readiness,
 			SnapshotBlock: SnapshotBlock,
 			Dbpath:        filepath.Join(cli.snapshotsDir, t.Files()[0].Path()),
 		}
-		mp[SnapshotType(tp)] = val
+		mp[snapshotsync.SnapshotType(tp)] = val
 		return nil
 	})
 	if err != nil {

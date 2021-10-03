@@ -927,6 +927,9 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.KovanChainName:
 		chainConfig = params.KovanChainConfig
 		genesis = core.DefaultKovanGenesisBlock()
+	case params.FermionChainName:
+		chainConfig = params.FermionChainConfig
+		genesis = core.DefaultFermionGenesisBlock()
 	}
 	return genesis, chainConfig
 }
@@ -956,7 +959,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	var engine consensus.Engine
 	engine = ethash.NewFaker()
 	switch chain {
-	case params.SokolChainName, params.KovanChainName:
+	case params.SokolChainName, params.KovanChainName, params.FermionChainName:
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
 	}
 

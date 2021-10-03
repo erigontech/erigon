@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -18,7 +19,8 @@ func TestPendingBlock(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
-	api := NewEthAPI(NewBaseApi(ff), nil, nil, nil, mining, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, false), nil, nil, nil, mining, 5000000)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)

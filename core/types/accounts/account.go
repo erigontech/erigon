@@ -528,7 +528,6 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 }
 
 func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
-
 	if len(enc) == 0 {
 		return 0, nil
 	}
