@@ -346,8 +346,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		ctx.isProtected = true
 		ctx.chainId.Set(&ctx.cfg.chainID)
 	}
-	if ctx.chainId != ctx.cfg.chainID {
-		return 0, fmt.Errorf("%s: %s", ParseTransactionErrorPrefix, "invalid chainID")
+	if ctx.chainId.Cmp(&ctx.cfg.chainID) != 0 {
+		return 0, fmt.Errorf("%s: %s, %d (expected %d)", ParseTransactionErrorPrefix, "invalid chainID", ctx.chainId.Uint64(), ctx.cfg.chainID.Uint64())
 	}
 
 	// Next follows R of the signature

@@ -367,7 +367,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				}
 
 				// side data structures must have all txs
-				assert.True(pool.byNonce.has(tx), msg)
+				assert.True(pool.all.has(tx), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok)
 
@@ -405,7 +405,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(pool.byNonce.has(tx), msg)
+				assert.True(pool.all.has(tx), msg)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
 			})
@@ -432,7 +432,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(pool.byNonce.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
+				assert.True(pool.all.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.idHash)
 				_, ok = pool.byHash[string(i.idHash[:])]
 				assert.True(ok, msg)
 				assert.GreaterOrEqual(tx.Tx.feeCap, pool.cfg.MinFeeCap)
@@ -444,8 +444,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 				assert.True(txn.worstIndex >= 0, msg)
 			}
 			for id := range senders {
-				//assert.True(senders[i].byNonce.Len() > 0)
-				pool.byNonce.ascend(id, func(mt *metaTx) bool {
+				//assert.True(senders[i].all.Len() > 0)
+				pool.all.ascend(id, func(mt *metaTx) bool {
 					require.True(mt.worstIndex >= 0, msg)
 					assert.True(mt.bestIndex >= 0, msg)
 					return true
