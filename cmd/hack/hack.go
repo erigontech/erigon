@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/wcharczuk/go-chart/v2"
 
-	ahocorasick "github.com/BobuSumisu/aho-corasick"
 	"github.com/flanglet/kanzi-go/transform"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
@@ -1572,17 +1572,17 @@ func (da *DictAggregator) finish() error {
 }
 
 // MatchSorter is helper type to sort matches by their end position
-type MatchSorter []*ahocorasick.Match
+type MatchSorter []patricia.Match
 
 func (ms MatchSorter) Len() int {
 	return len(ms)
 }
 
 func (ms MatchSorter) Less(i, j int) bool {
-	if ms[i].Pos() == ms[j].Pos() {
-		return len(ms[i].Match()) > len(ms[j].Match())
+	if ms[i].Pos == ms[j].Pos {
+		return len(ms[i].Slice) > len(ms[j].Slice)
 	}
-	return ms[i].Pos() < ms[j].Pos()
+	return ms[i].Pos < ms[j].Pos
 }
 
 func (ms *MatchSorter) Swap(i, j int) {
@@ -1744,7 +1744,7 @@ type DictEntry struct {
 	code  uint64
 }
 
-func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, trie *ahocorasick.Trie, dict map[string]DictEntry, usedDict map[string]int) {
+func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, trie patricia.PatriciaTree, dict map[string]DictEntry, usedDict map[string]int) {
 	buf := make([]byte, binary.MaxVarintLen64)
 	for ci := range inputCh {
 		input := ci.input
@@ -1752,25 +1752,28 @@ func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, 
 		// Write length of the string
 		p := binary.PutUvarint(buf, uint64(len(input)))
 		output = append(output, buf[:p]...)
-		matches := MatchSorter(trie.Match(input))
+		matches := MatchSorter(trie.FindMatches(input))
 		sort.Sort(&matches)
 		var filtered [][]int
 		var filteredWords []string
+		var filteredScores []uint64
 		compression := 0
 		var scores uint64
 		if matches.Len() > 0 {
 			lastMatch := matches[0]
 			for j := 1; j < matches.Len(); j++ {
 				match := matches[j]
-				if int(match.Pos())+len(match.Match()) > int(lastMatch.Pos())+len(lastMatch.Match()) {
+				if match.Pos+len(match.Slice) > lastMatch.Pos+len(lastMatch.Slice) {
 					// new match overlaps with the lastMatch but is not contained in it
-					filtered = append(filtered, []int{int(lastMatch.Pos()), int(lastMatch.Pos()) + len(lastMatch.Match())})
-					filteredWords = append(filteredWords, lastMatch.MatchString())
+					filtered = append(filtered, []int{lastMatch.Pos, lastMatch.Pos + len(lastMatch.Slice)})
+					filteredWords = append(filteredWords, string(lastMatch.Slice))
+					filteredScores = append(filteredScores, binary.BigEndian.Uint64(lastMatch.Vals[0]))
 					lastMatch = match
 				}
 			}
-			filtered = append(filtered, []int{int(lastMatch.Pos()), int(lastMatch.Pos()) + len(lastMatch.Match())})
-			filteredWords = append(filteredWords, lastMatch.MatchString())
+			filtered = append(filtered, []int{lastMatch.Pos, lastMatch.Pos + len(lastMatch.Slice)})
+			filteredWords = append(filteredWords, string(lastMatch.Slice))
+			filteredScores = append(filteredScores, binary.BigEndian.Uint64(lastMatch.Vals[0]))
 			cover := make([]int, len(input)) // cover[i] tells us how many pattern cover certain character in the input
 			var covered int                  // How many characters are covered by at least one pattern
 			var patternCoding int            // How many byte are spent on coding the patterns
@@ -1806,6 +1809,7 @@ func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, 
 							covered--
 						}
 					}
+					patternScores -= filteredScores[j]
 					a[j] = false
 				} else {
 					patternCoding += 4
@@ -1815,6 +1819,7 @@ func reduceDictWorker(inputCh chan CompressInput, outputCh chan CompressOutput, 
 						}
 						cover[i]++
 					}
+					patternScores += filteredScores[j]
 					a[j] = true
 				}
 			}
@@ -1957,7 +1962,7 @@ func reducedict() error {
 	}
 	defer df.Close()
 	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
-	trieBuilder := ahocorasick.NewTrieBuilder()
+	var pt patricia.PatriciaTree
 	dict := make(map[string]DictEntry)
 	invDict := make(map[uint64][]byte)
 	ds := bufio.NewScanner(df)
@@ -1971,13 +1976,14 @@ func reducedict() error {
 		if word, err = hex.DecodeString(tokens[1]); err != nil {
 			return err
 		}
-		trieBuilder.AddPattern(word)
+		var scoreBuf [8]byte
+		binary.BigEndian.PutUint64(scoreBuf[:], uint64(score))
+		pt.Insert(word, scoreBuf[:])
 		code := uint64(uint64(len(dict)))
 		dict[string(word)] = DictEntry{score: uint64(score), code: code}
 		invDict[code] = word
 	}
 	df.Close()
-	trie := trieBuilder.Build()
 	log.Info("dictionary file parsed", "entries", len(dict))
 	statefile := "statedump.dat"
 	f, err := os.Open(statefile)
@@ -1997,7 +2003,7 @@ func reducedict() error {
 	for p := 0; p < runtime.NumCPU(); p++ {
 		usedDict := make(map[string]int)
 		usedDicts = append(usedDicts, usedDict)
-		go reduceDictWorker(inputCh, outputCh, trie, dict, usedDict)
+		go reduceDictWorker(inputCh, outputCh, pt, dict, usedDict)
 	}
 	var outputs OutputHeap
 	heap.Init(&outputs)
