@@ -216,7 +216,7 @@ Loop:
 	if stopped {
 		return libcommon.ErrStopped
 	}
-	// We do not print the followin line if the stage was interrupted
+	// We do not print the following line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	return nil
 }

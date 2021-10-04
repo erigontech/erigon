@@ -419,7 +419,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}
 			// remove all canonical markers from this point
 			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress), func(k, v []byte) error {
-				return tx.Delete(kv.Headers, k, nil)
+				return tx.Delete(kv.HeaderCanonical, k, nil)
 			}); err != nil {
 				return err
 			}
