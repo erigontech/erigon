@@ -172,20 +172,18 @@ func StageLoopStep(
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	if notifications.Accumulator != nil {
+	if notifications != nil && notifications.Accumulator != nil {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			header := rawdb.ReadCurrentHeader(tx)
 			if header == nil {
 				return nil
 			}
+
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
 
-			err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
+
 		}); err != nil {
 			return err
 		}
