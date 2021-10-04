@@ -55,7 +55,7 @@ func TestStreamKind(t *testing.T) {
 		s := NewStream(newPlainReader(unhex(test.input)), 0)
 		kind, len, err := s.Kind()
 		if err != nil {
-			t.Errorf("test %d: Kind returned error: %w", i, err)
+			t.Errorf("test %d: Kind returned error: %v", i, err)
 			continue
 		}
 		if kind != test.wantKind {
@@ -70,18 +70,18 @@ func TestStreamKind(t *testing.T) {
 func TestNewListStream(t *testing.T) {
 	ls := NewListStream(bytes.NewReader(unhex("0101010101")), 3)
 	if k, size, err := ls.Kind(); k != List || size != 3 || err != nil {
-		t.Errorf("Kind() returned (%v, %d, %w), expected (List, 3, nil)", k, size, err)
+		t.Errorf("Kind() returned (%v, %d, %v), expected (List, 3, nil)", k, size, err)
 	}
 	if size, err := ls.List(); size != 3 || err != nil {
-		t.Errorf("List() returned (%d, %w), expected (3, nil)", size, err)
+		t.Errorf("List() returned (%d, %v), expected (3, nil)", size, err)
 	}
 	for i := 0; i < 3; i++ {
 		if val, err := ls.Uint(); val != 1 || err != nil {
-			t.Errorf("Uint() returned (%d, %w), expected (1, nil)", val, err)
+			t.Errorf("Uint() returned (%d, %v), expected (1, nil)", val, err)
 		}
 	}
 	if err := ls.ListEnd(); err != nil {
-		t.Errorf("ListEnd() returned %w, expected (3, nil)", err)
+		t.Errorf("ListEnd() returned %v, expected (3, nil)", err)
 	}
 }
 
@@ -246,7 +246,7 @@ func TestStreamList(t *testing.T) {
 	}
 
 	if _, err := s.Uint(); err != EOL {
-		t.Errorf("Uint error mismatch, got %w, want %v", err, EOL)
+		t.Errorf("Uint error mismatch, got %v, want %v", err, EOL)
 	}
 	if err := s.ListEnd(); err != nil {
 		t.Fatalf("ListEnd error: %v", err)
@@ -799,14 +799,14 @@ func (bd byteDecoder) called() bool {
 func TestDecoderInByteSlice(t *testing.T) {
 	var slice []byteDecoder
 	if err := Decode(bytes.NewReader(unhex("C101")), &slice); err != nil {
-		t.Errorf("unexpected Decode error %w", err)
+		t.Errorf("unexpected Decode error %v", err)
 	} else if !slice[0].called() {
 		t.Errorf("DecodeRLP not called for slice element")
 	}
 
 	var array [1]byteDecoder
 	if err := Decode(bytes.NewReader(unhex("C101")), &array); err != nil {
-		t.Errorf("unexpected Decode error %w", err)
+		t.Errorf("unexpected Decode error %v", err)
 	} else if !array[0].called() {
 		t.Errorf("DecodeRLP not called for array element")
 	}
