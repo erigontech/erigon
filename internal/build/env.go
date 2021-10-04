@@ -138,7 +138,7 @@ func getDate(commit string) string {
 	}
 	date, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 	if err != nil {
-		panic(fmt.Sprintf("failed to parse git commit date: %w", err))
+		panic(fmt.Sprintf("failed to parse git commit date: %v", err))
 	}
 	return time.Unix(date, 0).Format("20060102")
 }
