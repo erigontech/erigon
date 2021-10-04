@@ -453,6 +453,10 @@ func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash
 func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
 	// Drain persistedLinksQueue and remove links
 	for hd.persistedLinkQueue.Len() > 0 {
 		link := heap.Pop(hd.persistedLinkQueue).(*Link)
@@ -473,6 +477,11 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 				return err
 			}
 			hd.addHeaderAsLink(&h, true /* persisted */)
+
+			select {
+			case <-logEvery.C:
+				log.Info("recover headers from db after error", "current_block", h.Number.Uint64())
+			}
 		}
 		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {

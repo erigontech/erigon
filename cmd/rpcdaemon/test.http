@@ -4,21 +4,46 @@
 POST localhost:8545
 Content-Type: application/json
 
-{ "jsonrpc": "2.0", "method": "eth_syncing", "params": [], "id":1}
+{
+  "jsonrpc": "2.0",
+  "method": "eth_syncing",
+  "params": [],
+  "id": 1
+}
 
 ###
 
 POST localhost:8545
 Content-Type: application/json
 
-{"jsonrpc":"2.0","method":"eth_getBalance","params": ["0xfffa4763f94f7ad191b366a343092a5d1a47ed08", "0xde84"],"id":1}
+{
+  "jsonrpc": "2.0",
+  "method": "eth_getBalance",
+  "params": [
+    "0xfffa4763f94f7ad191b366a343092a5d1a47ed08",
+    "0xde84"
+  ],
+  "id": 1
+}
 
 ###
 
 POST localhost:8545
 Content-Type: application/json
 
-{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1e8480", "", 256, false, false, false], "id":1}
+{
+  "jsonrpc": "2.0",
+  "method": "debug_accountRange",
+  "params": [
+    "0x1e8480",
+    "",
+    256,
+    false,
+    false,
+    false
+  ],
+  "id": 1
+}
 
 ###
 
@@ -30,7 +55,7 @@ Content-Type: application/json
   "jsonrpc": "2.0",
   "method": "eth_getBlockByNumber",
   "params": [
-    "0x1b4",
+    "0x0",
     true
   ],
   "id": 1
@@ -54,7 +79,15 @@ Content-Type: application/json
 POST localhost:8545
 Content-Type: application/json
 
-{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0xf4240",true],"id":2}
+{
+  "jsonrpc": "2.0",
+  "method": "eth_getBlockByNumber",
+  "params": [
+    "0xf4240",
+    true
+  ],
+  "id": 2
+}
 
 ###
 
@@ -73,6 +106,7 @@ Content-Type: application/json
   ],
   "id": 537758
 }
+
 ### > 60
 
 ### >20
