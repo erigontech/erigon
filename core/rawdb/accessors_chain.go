@@ -779,7 +779,7 @@ func ReadBlockWithSenders(db kv.Tx, hash common.Hash, number uint64) (*types.Blo
 		return nil, nil, err
 	}
 	if len(senders) != block.Transactions().Len() {
-		return nil, nil, nil
+		return block, senders, nil
 	}
 	block.SendersToTxs(senders)
 	return block, senders, nil
