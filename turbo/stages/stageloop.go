@@ -148,7 +148,7 @@ func StageLoopStep(
 	var headTd *big.Int
 	var head uint64
 	var headHash common.Hash
-	if head, err = stages.GetStageProgress(rotx, stages.Finish); err != nil {
+	if head, err = stages.GetStageProgress(rotx, stages.Headers); err != nil {
 		return err
 	}
 	if headHash, err = rawdb.ReadCanonicalHash(rotx, head); err != nil {
@@ -165,8 +165,8 @@ func StageLoopStep(
 		}
 	}
 	rotx.Rollback()
-	headTd256 := new(uint256.Int)
-	overflow := headTd256.SetFromBig(headTd)
+
+	headTd256, overflow := uint256.FromBig(headTd)
 	if overflow {
 		return fmt.Errorf("headTds higher than 2^256-1")
 	}
