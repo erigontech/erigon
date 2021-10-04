@@ -122,7 +122,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		return nil, err
 	}
 	if len(b) != 1 {
-		return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+		return nil, fmt.Errorf("%w, got %d bytes", rlp.ErrWrongTxTypePrefix, len(b))
 	}
 	var tx Transaction
 	switch b[0] {
