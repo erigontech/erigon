@@ -150,7 +150,7 @@ func (t *rlpxTransport) doProtoHandshake(our *protoHandshake) (their *protoHands
 		return nil, err
 	}
 	if err := <-werr; err != nil {
-		return nil, fmt.Errorf("write error: %v", err)
+		return nil, fmt.Errorf("write error: %w", err)
 	}
 	// If the protocol version supports Snappy encoding, upgrade immediately
 	t.conn.SetSnappy(their.Version >= snappyProtocolVersion)

@@ -77,7 +77,7 @@ func HeaderSnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath
 
 		hash, err = rawdb.ReadCanonicalHash(tx, i)
 		if err != nil {
-			return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
+			return fmt.Errorf("getting canonical hash for block %d: %w", i, err)
 		}
 		header = rawdb.ReadHeaderRLP(tx, hash, i)
 		if len(header) == 0 {

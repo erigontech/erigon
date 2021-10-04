@@ -188,7 +188,7 @@ func (tab *Table) close() {
 func (tab *Table) setFallbackNodes(nodes []*enode.Node) error {
 	for _, n := range nodes {
 		if err := n.ValidateComplete(); err != nil {
-			return fmt.Errorf("bad bootstrap node %q: %v", n, err)
+			return fmt.Errorf("bad bootstrap node %q: %w", n, err)
 		}
 	}
 	tab.nursery = wrapNodes(nodes)

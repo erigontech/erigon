@@ -154,11 +154,11 @@ func ecdh(privkey *ecdsa.PrivateKey, pubkey *ecdsa.PublicKey) []byte {
 func encryptGCM(dest, key, nonce, plaintext, authData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(fmt.Errorf("can't create block cipher: %v", err))
+		panic(fmt.Errorf("can't create block cipher: %w", err))
 	}
 	aesgcm, err := cipher.NewGCMWithNonceSize(block, gcmNonceSize)
 	if err != nil {
-		panic(fmt.Errorf("can't create GCM: %v", err))
+		panic(fmt.Errorf("can't create GCM: %w", err))
 	}
 	return aesgcm.Seal(dest, nonce, plaintext, authData), nil
 }

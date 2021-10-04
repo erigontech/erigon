@@ -91,7 +91,7 @@ func TestWaitDeployed(t *testing.T) {
 
 			// Send and mine the transaction.
 			if err = backend.SendTransaction(ctx, tx); err != nil {
-				t.Fatalf("test %q: failed to set tx: %v", name, err)
+				t.Fatalf("test %q: failed to set tx: %w", name, err)
 			}
 			backend.Commit()
 
@@ -129,7 +129,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := backend.SendTransaction(ctx, tx); err != nil {
-		t.Errorf("error when sending tx: %v", err)
+		t.Errorf("error when sending tx: %w", err)
 	}
 	backend.Commit()
 	notContentCreation := errors.New("tx is not contract creation")
@@ -152,7 +152,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	}()
 
 	if err := backend.SendTransaction(ctx, tx); err != nil {
-		t.Errorf("error when sending tx: %v", err)
+		t.Errorf("error when sending tx: %w", err)
 	}
 	cancel()
 	<-done

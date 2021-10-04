@@ -103,7 +103,7 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			typ.Elem = &embeddedType
 			typ.Size, err = strconv.Atoi(intz[0])
 			if err != nil {
-				return Type{}, fmt.Errorf("abi: error parsing variable size: %v", err)
+				return Type{}, fmt.Errorf("abi: error parsing variable size: %w", err)
 			}
 			typ.stringKind = embeddedType.stringKind + sliced
 		} else {
@@ -124,7 +124,7 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 		var err error
 		varSize, err = strconv.Atoi(parsedType[2])
 		if err != nil {
-			return Type{}, fmt.Errorf("abi: error parsing variable size: %v", err)
+			return Type{}, fmt.Errorf("abi: error parsing variable size: %w", err)
 		}
 	} else {
 		if parsedType[0] == "uint" || parsedType[0] == "int" {

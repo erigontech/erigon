@@ -17,7 +17,7 @@ import (
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
-		return nil, fmt.Errorf("getBalance cannot open tx: %v", err1)
+		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
@@ -27,7 +27,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 
 	acc, err := rpchelper.GetAccount(tx, blockNumber, address)
 	if err != nil {
-		return nil, fmt.Errorf("cant get a balance for account %q for block %v", address.String(), blockNumber)
+		return nil, fmt.Errorf("cant get a balance for account %q for block %w", address.String(), blockNumber)
 	}
 	if acc == nil {
 		// Special case - non-existent account is assumed to have zero balance
@@ -41,7 +41,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
-		return nil, fmt.Errorf("getTransactionCount cannot open tx: %v", err1)
+		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
@@ -61,7 +61,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
-		return nil, fmt.Errorf("getCode cannot open tx: %v", err1)
+		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
 	blockNumber, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)

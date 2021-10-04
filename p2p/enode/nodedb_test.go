@@ -97,7 +97,7 @@ func TestDBInt64(t *testing.T) {
 	for i := 0; i < len(tests); i++ {
 		// Insert the next value
 		if err := db.storeInt64(tests[i].key, tests[i].value); err != nil {
-			t.Errorf("test %d: failed to store value: %v", i, err)
+			t.Errorf("test %d: failed to store value: %w", i, err)
 		}
 		// Check all existing and non existing values
 		for j := 0; j < len(tests); j++ {
@@ -133,7 +133,7 @@ func TestDBFetchStore(t *testing.T) {
 		t.Errorf("ping: non-existing object: %v", stored)
 	}
 	if err := db.UpdateLastPingReceived(node.ID(), node.IP(), inst); err != nil {
-		t.Errorf("ping: failed to update: %v", err)
+		t.Errorf("ping: failed to update: %w", err)
 	}
 	if stored := db.LastPingReceived(node.ID(), node.IP()); stored.Unix() != inst.Unix() {
 		t.Errorf("ping: value mismatch: have %v, want %v", stored, inst)
@@ -143,7 +143,7 @@ func TestDBFetchStore(t *testing.T) {
 		t.Errorf("pong: non-existing object: %v", stored)
 	}
 	if err := db.UpdateLastPongReceived(node.ID(), node.IP(), inst); err != nil {
-		t.Errorf("pong: failed to update: %v", err)
+		t.Errorf("pong: failed to update: %w", err)
 	}
 	if stored := db.LastPongReceived(node.ID(), node.IP()); stored.Unix() != inst.Unix() {
 		t.Errorf("pong: value mismatch: have %v, want %v", stored, inst)
@@ -163,7 +163,7 @@ func TestDBFetchStore(t *testing.T) {
 		t.Errorf("node: non-existing object: %v", stored)
 	}
 	if err := db.UpdateNode(node); err != nil {
-		t.Errorf("node: failed to update: %v", err)
+		t.Errorf("node: failed to update: %w", err)
 	}
 	if stored := db.Node(node.ID()); stored == nil {
 		t.Errorf("node: not found")
@@ -273,10 +273,10 @@ func testSeedQuery() error {
 	// Insert a batch of nodes for querying
 	for i, seed := range nodeDBSeedQueryNodes {
 		if err := db.UpdateNode(seed.node); err != nil {
-			return fmt.Errorf("node %d: failed to insert: %v", i, err)
+			return fmt.Errorf("node %d: failed to insert: %w", i, err)
 		}
 		if err := db.UpdateLastPongReceived(seed.node.ID(), seed.node.IP(), seed.pong); err != nil {
-			return fmt.Errorf("node %d: failed to insert bondTime: %v", i, err)
+			return fmt.Errorf("node %d: failed to insert bondTime: %w", i, err)
 		}
 	}
 

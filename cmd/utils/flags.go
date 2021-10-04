@@ -732,7 +732,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	}
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
-		return nil, fmt.Errorf("invalid nat option %s: %v", natSetting, err)
+		return nil, fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 	cfg.NAT = natif
 	return cfg, nil

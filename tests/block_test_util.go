@@ -128,7 +128,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 
 	tx, err1 := m.DB.BeginRo(context.Background())
 	if err1 != nil {
-		return fmt.Errorf("blockTest create tx: %v", err1)
+		return fmt.Errorf("blockTest create tx: %w", err1)
 	}
 	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
@@ -137,7 +137,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	}
 	newDB := state.New(state.NewPlainStateReader(tx))
 	if err = t.validatePostState(newDB); err != nil {
-		return fmt.Errorf("post state validation failed: %v", err)
+		return fmt.Errorf("post state validation failed: %w", err)
 	}
 	return t.validateImportedHeaders(tx, validBlocks)
 }
@@ -180,7 +180,7 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
-				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %v", err)
+				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
@@ -189,7 +189,7 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
-				return nil, fmt.Errorf("block #%v insertion into chain failed: %v", cb.Number(), err1)
+				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
 			if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -210,7 +210,7 @@ func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 		}
 		// validate RLP decoding by checking all values against test file JSON
 		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {
-			return nil, fmt.Errorf("deserialised block header validation failed: %v", err)
+			return nil, fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
 		validBlocks = append(validBlocks, b)
 	}
@@ -305,7 +305,7 @@ func (t *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) err
 	// be part of the longest chain until last block is imported.
 	for b := rawdb.ReadCurrentBlock(tx); b != nil && b.NumberU64() != 0; {
 		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
-			return fmt.Errorf("imported block header validation failed: %v", err)
+			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
 		b, _ = rawdb.ReadBlockByHash(tx, b.Header().ParentHash)
 	}

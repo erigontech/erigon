@@ -46,7 +46,7 @@ func TestUnpack(t *testing.T) {
 			}
 			out, err := abi.Unpack("method", encb)
 			if err != nil {
-				t.Errorf("test %d (%v) failed: %v", i, test.def, err)
+				t.Errorf("test %d (%v) failed: %w", i, test.def, err)
 				return
 			}
 			if !reflect.DeepEqual(test.unpacked, ConvertType(out[0], test.unpacked)) {
@@ -66,9 +66,9 @@ type unpackTest struct {
 func (test unpackTest) checkError(err error) error {
 	if err != nil {
 		if len(test.err) == 0 {
-			return fmt.Errorf("expected no err but got: %v", err)
+			return fmt.Errorf("expected no err but got: %w", err)
 		} else if err.Error() != test.err {
-			return fmt.Errorf("expected err: '%v' got err: %q", test.err, err)
+			return fmt.Errorf("expected err: '%v' got err: %w", test.err, err)
 		}
 	} else if len(test.err) > 0 {
 		return fmt.Errorf("expected err: %v but got none", test.err)
@@ -237,7 +237,7 @@ func TestLocalUnpackTests(t *testing.T) {
 			outptr := reflect.New(reflect.TypeOf(test.want))
 			err = abi.UnpackIntoInterface(outptr.Interface(), "method", encb)
 			if err := test.checkError(err); err != nil {
-				t.Errorf("test %d (%v) failed: %v", i, test.def, err)
+				t.Errorf("test %d (%v) failed: %w", i, test.def, err)
 				return
 			}
 			out := outptr.Elem().Interface()

@@ -240,7 +240,7 @@ func Bind(types []string, abis []string, bytecodes []string, fsigs []map[string]
 	if lang == LangGo {
 		code, err := format.Source(buffer.Bytes())
 		if err != nil {
-			return "", fmt.Errorf("%v\n%s", err, buffer)
+			return "", fmt.Errorf("%w\n%s", err, buffer)
 		}
 		return string(code), nil
 	}

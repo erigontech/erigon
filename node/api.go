@@ -72,7 +72,7 @@ func (api *privateAdminAPI) AddPeer(url string) (bool, error) {
 	// Try to add the url as a static peer and return
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.AddPeer(node)
 	return true, nil
@@ -88,7 +88,7 @@ func (api *privateAdminAPI) RemovePeer(url string) (bool, error) {
 	// Try to remove the url as a static peer and return
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.RemovePeer(node)
 	return true, nil
@@ -103,7 +103,7 @@ func (api *privateAdminAPI) AddTrustedPeer(url string) (bool, error) {
 	}
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.AddTrustedPeer(node)
 	return true, nil
@@ -119,7 +119,7 @@ func (api *privateAdminAPI) RemoveTrustedPeer(url string) (bool, error) {
 	}
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.RemoveTrustedPeer(node)
 	return true, nil

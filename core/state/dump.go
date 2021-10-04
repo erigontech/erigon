@@ -155,7 +155,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 			return true, nil
 		}
 		if e := acc.DecodeForStorage(v); e != nil {
-			return false, fmt.Errorf("decoding %x for %x: %v", v, k, e)
+			return false, fmt.Errorf("decoding %x for %x: %w", v, k, e)
 		}
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
@@ -181,7 +181,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if incarnation > 0 {
 			codeHash, err := d.db.GetOne(kv.PlainContractCode, storagePrefix)
 			if err != nil {
-				return nil, fmt.Errorf("getting code hash for %x: %v", addr, err)
+				return nil, fmt.Errorf("getting code hash for %x: %w", addr, err)
 			}
 			if codeHash != nil {
 				account.CodeHash = codeHash
@@ -211,7 +211,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 					t.Update(h.Bytes(), common.CopyBytes(vs))
 					return true, nil
 				}); err != nil {
-				return nil, fmt.Errorf("walking over storage for %x: %v", addr, err)
+				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 			}
 			account.Root = t.Hash().Bytes()
 		}

@@ -90,7 +90,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 	var hash1, hash2 common.Hash
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 		if hash1, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
-			t.Fatalf("Failed to read canonical hash: %v", err)
+			t.Fatalf("Failed to read canonical hash: %w", err)
 		}
 		if block1 := rawdb.ReadBlock(tx, hash1, uint64(i)); block1 == nil {
 			t.Fatalf("Did not find canonical block")
@@ -101,7 +101,7 @@ func testFork(t *testing.T, m *stages.MockSentry, i, n int, comparator func(td1,
 
 	canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
 		if hash2, err = rawdb.ReadCanonicalHash(tx, uint64(i)); err != nil {
-			t.Fatalf("Failed to read canonical hash 2: %v", err)
+			t.Fatalf("Failed to read canonical hash 2: %w", err)
 		}
 		if block2 := rawdb.ReadBlock(tx, hash2, uint64(i)); block2 == nil {
 			t.Fatalf("Did not find canonical block 2")
@@ -733,7 +733,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		}
 	}, false /* intemediateHashes */)
 	if err != nil {
-		return fmt.Errorf("generate blocks: %v", err)
+		return fmt.Errorf("generate blocks: %w", err)
 	}
 
 	if err = m.InsertChain(chain); err != nil {
@@ -835,7 +835,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 func runWithModesPermuations(t *testing.T, testFunc func(*testing.T, prune.Mode) error) {
 	err := runPermutation(t, testFunc, 0, prune.DefaultMode)
 	if err != nil {
-		t.Errorf("error while testing stuff: %v", err)
+		t.Errorf("error while testing stuff: %w", err)
 	}
 }
 

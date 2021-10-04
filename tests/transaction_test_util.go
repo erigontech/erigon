@@ -92,7 +92,7 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 		}
 		// Should resolve the right address
 		if err != nil {
-			return fmt.Errorf("got error, expected none: %v", err)
+			return fmt.Errorf("got error, expected none: %w", err)
 		}
 		if sender == nil {
 			return fmt.Errorf("sender was nil, should be %x", common.Address(testcase.fork.Sender))

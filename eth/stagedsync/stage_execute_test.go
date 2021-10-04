@@ -61,13 +61,13 @@ func TestUnwindExecutionStagePlainWithCodeChanges(t *testing.T) {
 
 	err := stages.SaveStageProgress(tx2, stages.Execution, 100)
 	if err != nil {
-		t.Errorf("error while saving progress: %v", err)
+		t.Errorf("error while saving progress: %w", err)
 	}
 	u := &UnwindState{ID: stages.Execution, UnwindPoint: 50}
 	s := &StageState{ID: stages.Execution, BlockNumber: 100}
 	err = UnwindExecutionStage(u, s, tx2, ctx, ExecuteBlockCfg{}, false)
 	if err != nil {
-		t.Errorf("error while unwinding state: %v", err)
+		t.Errorf("error while unwinding state: %w", err)
 	}
 
 	compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)

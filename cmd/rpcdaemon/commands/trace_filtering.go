@@ -199,7 +199,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
 		stream.WriteNil()
-		return fmt.Errorf("traceFilter cannot open tx: %v", err1)
+		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
 	defer dbtx.Rollback()
 

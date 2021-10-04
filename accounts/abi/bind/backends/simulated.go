@@ -673,7 +673,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
-		return fmt.Errorf("invalid transaction: %v", senderErr)
+		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
 	if tx.GetNonce() != nonce {

@@ -429,13 +429,13 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
 	if err := statedb.CommitBlock(params.Rules{}, blockWriter); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 	if err := blockWriter.WriteChangeSets(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
 	}
 	if err := blockWriter.WriteHistory(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write history: %w", err)
 	}
 	return block, statedb, nil
 }

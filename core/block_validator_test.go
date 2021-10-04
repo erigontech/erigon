@@ -53,12 +53,12 @@ func TestHeaderVerification(t *testing.T) {
 				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
 			}
 			if (err == nil) != valid {
-				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
+				t.Errorf("test %d.%d: validity mismatch: have %w, want %v", i, j, err, valid)
 			}
 		}
 
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
-			t.Fatalf("test %d: error inserting the block: %v", i, err)
+			t.Fatalf("test %d: error inserting the block: %w", i, err)
 		}
 
 		engine.Close()

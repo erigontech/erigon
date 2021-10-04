@@ -71,7 +71,7 @@ func (t *RLPTest) Run() error {
 	in := translateJSON(t.In)
 	b, err := rlp.EncodeToBytes(in)
 	if err != nil {
-		return fmt.Errorf("encode failed: %v", err)
+		return fmt.Errorf("encode failed: %w", err)
 	}
 	if !bytes.Equal(b, outb) {
 		return fmt.Errorf("encode produced %x, want %x", b, outb)
@@ -85,7 +85,7 @@ func checkDecodeInterface(b []byte, isValid bool) error {
 	err := rlp.DecodeBytes(b, new(interface{}))
 	switch {
 	case isValid && err != nil:
-		return fmt.Errorf("decoding failed: %v", err)
+		return fmt.Errorf("decoding failed: %w", err)
 	case !isValid && err == nil:
 		return fmt.Errorf("decoding of invalid value succeeded")
 	}

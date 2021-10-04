@@ -139,7 +139,7 @@ func (c *Conn) Read() (code uint64, data []byte, wireSize int, err error) {
 	}
 	code, data, err = rlp.SplitUint64(frame)
 	if err != nil {
-		return 0, nil, 0, fmt.Errorf("invalid message code: %v", err)
+		return 0, nil, 0, fmt.Errorf("invalid message code: %w", err)
 	}
 	wireSize = len(data)
 

@@ -262,7 +262,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
@@ -295,7 +295,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	}
 	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
