@@ -139,7 +139,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		}
 		tx = t
 	default:
-		return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
+		return nil, fmt.Errorf("%w, got: %d", rlp.ErrUnknownTxTypePrefix, b[0])
 	}
 	if kind == rlp.String {
 		if err = s.ListEnd(); err != nil {

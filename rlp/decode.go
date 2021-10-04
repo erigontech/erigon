@@ -38,14 +38,15 @@ import (
 var EOL = errors.New("rlp: end of list")
 
 var (
-	ErrExpectedString    = errors.New("rlp: expected String or Byte")
-	ErrExpectedList      = errors.New("rlp: expected List")
-	ErrCanonInt          = errors.New("rlp: non-canonical integer format")
-	ErrCanonSize         = errors.New("rlp: non-canonical size information")
-	ErrElemTooLarge      = errors.New("rlp: element is larger than containing list")
-	ErrValueTooLarge     = errors.New("rlp: value size exceeds available input length")
-	ErrMoreThanOneValue  = errors.New("rlp: input contains more than one value")
-	ErrWrongTxTypePrefix = errors.New("rlp: only 1-byte tx type prefix is supported")
+	ErrExpectedString      = errors.New("rlp: expected String or Byte")
+	ErrExpectedList        = errors.New("rlp: expected List")
+	ErrCanonInt            = errors.New("rlp: non-canonical integer format")
+	ErrCanonSize           = errors.New("rlp: non-canonical size information")
+	ErrElemTooLarge        = errors.New("rlp: element is larger than containing list")
+	ErrValueTooLarge       = errors.New("rlp: value size exceeds available input length")
+	ErrMoreThanOneValue    = errors.New("rlp: input contains more than one value")
+	ErrWrongTxTypePrefix   = errors.New("rlp: only 1-byte tx type prefix is supported")
+	ErrUnknownTxTypePrefix = errors.New("rlp: unknown tx type prefix")
 
 	// internal errors
 	errNotInList     = errors.New("rlp: call of ListEnd outside of any list")
@@ -68,7 +69,8 @@ func IsDecodeError(err error) bool {
 		errors.Is(err, ErrElemTooLarge) ||
 		errors.Is(err, ErrValueTooLarge) ||
 		errors.Is(err, ErrMoreThanOneValue) ||
-		errors.Is(err, ErrWrongTxTypePrefix)
+		errors.Is(err, ErrWrongTxTypePrefix) ||
+		errors.Is(err, ErrUnknownTxTypePrefix)
 }
 
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode
