@@ -58,7 +58,7 @@ func TestHeaderVerification(t *testing.T) {
 		}
 
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
-			t.Fatalf("test %d: error inserting the block: %w", i, err)
+			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
 
 		engine.Close()

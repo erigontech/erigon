@@ -38,8 +38,6 @@ var (
 	receiptStatusSuccessfulRLP = []byte{0x01}
 )
 
-var errEmptyTypedReceipt = errors.New("empty typed receipt bytes")
-
 const (
 	// ReceiptStatusFailed is the status code of a transaction if execution failed.
 	ReceiptStatusFailed = uint64(0)

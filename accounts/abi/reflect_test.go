@@ -175,11 +175,11 @@ func TestReflectNameToStruct(t *testing.T) {
 			m, err := mapArgNamesToStructFields(test.args, reflect.ValueOf(test.struc))
 			if len(test.err) > 0 {
 				if err == nil || err.Error() != test.err {
-					t.Fatalf("Invalid error: expected %v, got %w", test.err, err)
+					t.Fatalf("Invalid error: expected %v, got %v", test.err, err)
 				}
 			} else {
 				if err != nil {
-					t.Fatalf("Unexpected error: %w", err)
+					t.Fatalf("Unexpected error: %v", err)
 				}
 				for fname := range test.want {
 					if m[fname] != test.want[fname] {
