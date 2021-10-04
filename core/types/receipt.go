@@ -38,8 +38,6 @@ var (
 	receiptStatusSuccessfulRLP = []byte{0x01}
 )
 
-var errEmptyTypedReceipt = errors.New("empty typed receipt bytes")
-
 const (
 	// ReceiptStatusFailed is the status code of a transaction if execution failed.
 	ReceiptStatusFailed = uint64(0)
@@ -244,7 +242,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read TxType: %w", err)
 		}
 		if len(b) != 1 {
-			return fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes: %w", len(b), errEmptyTypedReceipt)
+			return fmt.Errorf("%w, got %d bytes", rlp.ErrWrongTxTypePrefix, len(b))
 		}
 		r.Type = b[0]
 		switch r.Type {

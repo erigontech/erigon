@@ -154,7 +154,7 @@ func UploadSFTP(identityFile, host, dir string, files []string) error {
 
 	stdin, err := sftp.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("can't create stdin pipe for sftp: %v", err)
+		return fmt.Errorf("can't create stdin pipe for sftp: %w", err)
 	}
 	if err := sftp.Start(); err != nil {
 		return err

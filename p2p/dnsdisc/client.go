@@ -105,7 +105,7 @@ func NewClient(cfg Config) *Client {
 func (c *Client) SyncTree(url string) (*Tree, error) {
 	le, err := parseLink(url)
 	if err != nil {
-		return nil, fmt.Errorf("invalid enrtree URL: %v", err)
+		return nil, fmt.Errorf("invalid enrtree URL: %w", err)
 	}
 	ct := newClientTree(c, new(linkCache), le)
 	t := &Tree{entries: make(map[string]entry)}
@@ -258,7 +258,7 @@ func (it *randomIterator) Next() bool {
 func (it *randomIterator) addTree(url string) error {
 	le, err := parseLink(url)
 	if err != nil {
-		return fmt.Errorf("invalid enrtree URL: %v", err)
+		return fmt.Errorf("invalid enrtree URL: %w", err)
 	}
 	it.lc.addLink("", le.str)
 	return nil

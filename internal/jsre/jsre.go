@@ -295,11 +295,11 @@ func (re *JSRE) loadScript(call Call) (goja.Value, error) {
 	file = common.AbsolutePath(re.assetPath, file)
 	source, err := ioutil.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("could not read file %s: %v", file, err)
+		return nil, fmt.Errorf("could not read file %s: %w", file, err)
 	}
 	value, err := compileAndRun(re.vm, file, string(source))
 	if err != nil {
-		return nil, fmt.Errorf("error while compiling or running script: %v", err)
+		return nil, fmt.Errorf("error while compiling or running script: %w", err)
 	}
 	return value, nil
 }

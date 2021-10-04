@@ -61,7 +61,7 @@ func BodySnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath s
 
 			hash, err = rawdb.ReadCanonicalHash(tx, i)
 			if err != nil {
-				return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
+				return fmt.Errorf("getting canonical hash for block %d: %w", i, err)
 			}
 			body := rawdb.ReadBodyRLP(tx, hash, i)
 			if err = sntx.Put(kv.BlockBody, dbutils.BlockBodyKey(i, hash), body); err != nil {

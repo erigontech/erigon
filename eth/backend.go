@@ -663,12 +663,12 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	eb, err := s.Etherbase()
 	if err != nil {
 		log.Error("Cannot start mining without etherbase", "err", err)
-		return fmt.Errorf("etherbase missing: %v", err)
+		return fmt.Errorf("etherbase missing: %w", err)
 	}
 	if clique, ok := s.engine.(*clique.Clique); ok {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
-			return fmt.Errorf("signer missing: %v", err)
+			return fmt.Errorf("signer missing: %w", err)
 		}
 
 		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {

@@ -199,12 +199,12 @@ func (net *Network) startWithSnapshots(id enode.ID, snapshots map[string][]byte)
 	// subscribe to peer events
 	client, err := node.Client()
 	if err != nil {
-		return fmt.Errorf("error getting rpc client  for node %v: %s", id, err)
+		return fmt.Errorf("error getting rpc client  for node %v: %w", id, err)
 	}
 	events := make(chan *p2p.PeerEvent)
 	sub, err := client.Subscribe(context.Background(), "admin", events, "peerEvents")
 	if err != nil {
-		return fmt.Errorf("error getting peer events for node %v: %s", id, err)
+		return fmt.Errorf("error getting peer events for node %v: %w", id, err)
 	}
 	go net.watchPeerEvents(id, events, sub)
 	return nil

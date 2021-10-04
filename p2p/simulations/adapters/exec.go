@@ -224,7 +224,7 @@ func (n *ExecNode) Start(snapshots map[string][]byte) error {
 	}
 	client, err := rpc.DialWebsocket(ctx, status.WSEndpoint, "")
 	if err != nil {
-		return fmt.Errorf("can't connect to RPC server: %v", err)
+		return fmt.Errorf("can't connect to RPC server: %w", err)
 	}
 
 	// Node ready :)
@@ -472,7 +472,7 @@ func startExecNodeStack() (*node.Node, error) {
 	}
 	var conf execNodeConfig
 	if err := json.Unmarshal([]byte(confEnv), &conf); err != nil {
-		return nil, fmt.Errorf("error decoding %s: %v", envNodeConfig, err)
+		return nil, fmt.Errorf("error decoding %s: %w", envNodeConfig, err)
 	}
 
 	// create enode record
@@ -487,7 +487,7 @@ func startExecNodeStack() (*node.Node, error) {
 	// initialize the devp2p stack
 	stack, err := node.New(&conf.Stack)
 	if err != nil {
-		return nil, fmt.Errorf("error creating node stack: %v", err)
+		return nil, fmt.Errorf("error creating node stack: %w", err)
 	}
 
 	// Register the services, collecting them into a map so they can
@@ -520,7 +520,7 @@ func startExecNodeStack() (*node.Node, error) {
 	}})
 
 	if err = stack.Start(); err != nil {
-		err = fmt.Errorf("error starting stack: %v", err)
+		err = fmt.Errorf("error starting stack: %w", err)
 	}
 	return stack, err
 }

@@ -343,7 +343,7 @@ func ParseRequest(r *http.Request) (AnnounceReq, error) {
 	}
 	port, err := strconv.Atoi(q.Get("port"))
 	if err != nil {
-		return AnnounceReq{}, fmt.Errorf("port: %v -  %w", q.Get("port"), err)
+		return AnnounceReq{}, fmt.Errorf("port: %v - %w", q.Get("port"), err)
 	}
 
 	res := AnnounceReq{

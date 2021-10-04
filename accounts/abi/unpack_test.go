@@ -66,9 +66,9 @@ type unpackTest struct {
 func (test unpackTest) checkError(err error) error {
 	if err != nil {
 		if len(test.err) == 0 {
-			return fmt.Errorf("expected no err but got: %v", err)
+			return fmt.Errorf("expected no err but got: %w", err)
 		} else if err.Error() != test.err {
-			return fmt.Errorf("expected err: '%v' got err: %q", test.err, err)
+			return fmt.Errorf("expected err: '%v' got err: %w", test.err, err)
 		}
 	} else if len(test.err) > 0 {
 		return fmt.Errorf("expected err: %v but got none", test.err)

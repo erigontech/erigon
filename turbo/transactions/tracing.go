@@ -62,7 +62,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		vmenv.Reset(TxContext, statedb)
 		// Not yet the searched for transaction, execute on top of the current state
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
-			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
+			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
@@ -140,7 +140,7 @@ func TraceTx(
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
 		}
-		return fmt.Errorf("tracing failed: %v", err)
+		return fmt.Errorf("tracing failed: %w", err)
 	}
 	// Depending on the tracer type, format and return the output
 	if streaming {

@@ -1296,7 +1296,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	intraBlockState.SetCode(contract, oldCode)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	_, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)

@@ -733,7 +733,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		}
 	}, false /* intemediateHashes */)
 	if err != nil {
-		return fmt.Errorf("generate blocks: %v", err)
+		return fmt.Errorf("generate blocks: %w", err)
 	}
 
 	if err = m.InsertChain(chain); err != nil {

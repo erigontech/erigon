@@ -223,7 +223,7 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
 					oeRespFile.Write(resg.Response)                        //nolint:errcheck
 					oeRespFile.Close()                                     //nolint:errcheck
-					return fmt.Errorf("different results for method %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
+					return fmt.Errorf("different results for method %s, errCtx %s: %w\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
 				}
 			}
 		}
