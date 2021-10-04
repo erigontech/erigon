@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -415,6 +416,12 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			progress, err = stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return fmt.Errorf("re-read Bodies progress: %w", err)
+			}
+			// remove canonical markers
+			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress), func(k, v []byte) error {
+				return tx.Delete(kv.Headers, k, nil)
+			}); err != nil {
+				return err
 			}
 			log.Info("Progress", "headers", progress)
 			return nil
