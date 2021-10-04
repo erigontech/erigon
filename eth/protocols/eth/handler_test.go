@@ -290,7 +290,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 			t.Fatal(err)
 		}
 		if err := p2p.ExpectMsg(peer.app, eth.BlockHeadersMsg, headers); err != nil {
-			t.Errorf("test %d: headers mismatch: %w", i, err)
+			t.Errorf("test %d: headers mismatch: %v", i, err)
 		}
 		// If the test used number origins, repeat with hashes as the too
 		if tt.query.Origin.Hash == (common.Hash{}) {
@@ -301,7 +301,7 @@ func testGetBlockHeaders(t *testing.T, protocol uint) {
 					t.Fatal(err)
 				}
 				if err := p2p.ExpectMsg(peer.app, eth.BlockHeadersMsg, headers); err != nil {
-					t.Errorf("test %d: headers mismatch: %w", i, err)
+					t.Errorf("test %d: headers mismatch: %v", i, err)
 				}
 			}
 		}
@@ -387,7 +387,7 @@ func testGetBlockBodies(t *testing.T, protocol uint) {
 			t.Fatal(err)
 		}
 		if err := p2p.ExpectMsg(peer.app, eth.BlockBodiesMsg, bodies); err != nil {
-			t.Errorf("test %d: bodies mismatch: %w", i, err)
+			t.Errorf("test %d: bodies mismatch: %v", i, err)
 		}
 	}
 }

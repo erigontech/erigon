@@ -150,7 +150,7 @@ func TestHalt(t *testing.T) {
 	}()
 
 	if _, err = runTrace(tracer, vmctx); err.Error() != "stahp    in server-side tracer function 'step'" {
-		t.Errorf("Expected timeout error, got %w", err)
+		t.Errorf("Expected timeout error, got %v", err)
 	}
 }
 
@@ -172,6 +172,6 @@ func TestHaltBetweenSteps(t *testing.T) {
 	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
 
 	if _, err := tracer.GetResult(); err.Error() != timeout.Error() {
-		t.Errorf("Expected timeout error, got %w", err)
+		t.Errorf("Expected timeout error, got %v", err)
 	}
 }

@@ -45,7 +45,7 @@ func confirmRequestValidationCode(t *testing.T, method, contentType, body string
 	code, err := validateRequest(request)
 	if code == 0 {
 		if err != nil {
-			t.Errorf("validation: got error %w, expected nil", err)
+			t.Errorf("validation: got error %v, expected nil", err)
 		}
 	} else if err == nil {
 		t.Errorf("validation: code %d: got nil, expected error", code)

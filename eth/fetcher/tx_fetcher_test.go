@@ -1269,7 +1269,7 @@ func testTransactionFetcher(t *testing.T, tt txFetcherTest) {
 		switch step := step.(type) {
 		case doTxNotify:
 			if err := fetcher.Notify(step.peer, step.hashes); err != nil {
-				t.Errorf("step %d: %w", i, err)
+				t.Errorf("step %d: %v", i, err)
 			}
 			<-wait // Fetcher needs to process this, wait until it's done
 			select {
@@ -1280,7 +1280,7 @@ func testTransactionFetcher(t *testing.T, tt txFetcherTest) {
 
 		case doTxEnqueue:
 			if err := fetcher.Enqueue(step.peer, step.txs, step.direct); err != nil {
-				t.Errorf("step %d: %w", i, err)
+				t.Errorf("step %d: %v", i, err)
 			}
 			<-wait // Fetcher needs to process this, wait until it's done
 
@@ -1292,7 +1292,7 @@ func testTransactionFetcher(t *testing.T, tt txFetcherTest) {
 
 		case doDrop:
 			if err := fetcher.Drop(string(step)); err != nil {
-				t.Errorf("step %d: %w", i, err)
+				t.Errorf("step %d: %v", i, err)
 			}
 			<-wait // Fetcher needs to process this, wait until it's done
 

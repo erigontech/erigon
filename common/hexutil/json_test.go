@@ -110,7 +110,7 @@ func TestMarshalBytes(t *testing.T) {
 		in := test.input.([]byte)
 		out, err := json.Marshal(Bytes(in))
 		if err != nil {
-			t.Errorf("%x: %w", in, err)
+			t.Errorf("%x: %v", in, err)
 			continue
 		}
 		if want := `"` + test.want + `"`; string(out) != want {
@@ -191,7 +191,7 @@ func TestMarshalBig(t *testing.T) {
 		in := test.input.(*big.Int)
 		out, err := json.Marshal((*Big)(in))
 		if err != nil {
-			t.Errorf("%d: %w", in, err)
+			t.Errorf("%d: %v", in, err)
 			continue
 		}
 		if want := `"` + test.want + `"`; string(out) != want {
@@ -255,7 +255,7 @@ func TestMarshalUint64(t *testing.T) {
 		in := test.input.(uint64)
 		out, err := json.Marshal(Uint64(in))
 		if err != nil {
-			t.Errorf("%d: %w", in, err)
+			t.Errorf("%d: %v", in, err)
 			continue
 		}
 		if want := `"` + test.want + `"`; string(out) != want {
@@ -274,7 +274,7 @@ func TestMarshalUint(t *testing.T) {
 		in := test.input.(uint)
 		out, err := json.Marshal(Uint(in))
 		if err != nil {
-			t.Errorf("%d: %w", in, err)
+			t.Errorf("%d: %v", in, err)
 			continue
 		}
 		if want := `"` + test.want + `"`; string(out) != want {

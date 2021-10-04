@@ -123,7 +123,7 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	config.Debug, config.Tracer = true, tracer
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {
-		t.Errorf("different error for second run: %w", err2)
+		t.Errorf("different error for second run: %v", err2)
 	}
 	w.Flush()
 	if buf.Len() == 0 {

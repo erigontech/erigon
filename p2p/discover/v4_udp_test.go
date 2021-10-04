@@ -358,7 +358,7 @@ func TestUDPv4_findnodeMultiReply(t *testing.T) {
 			t.Errorf("neighbors mismatch:\n  got:  %v\n  want: %v", result, want)
 		}
 	case err := <-errc:
-		t.Errorf("findnode error: %w", err)
+		t.Errorf("findnode error: %v", err)
 	case <-time.After(5 * time.Second):
 		t.Error("findnode did not return within 5 seconds")
 	}

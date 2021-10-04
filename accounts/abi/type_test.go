@@ -108,7 +108,7 @@ func TestTypeRegexp(t *testing.T) {
 	for _, tt := range tests {
 		typ, err := NewType(tt.blob, "", tt.components)
 		if err != nil {
-			t.Errorf("type %q: failed to parse type string: %w", tt.blob, err)
+			t.Errorf("type %q: failed to parse type string: %v", tt.blob, err)
 		}
 		if !reflect.DeepEqual(typ, tt.kind) {
 			t.Errorf("type %q: parsed type mismatch:\nGOT %s\nWANT %s ", tt.blob, spew.Sdump(typeWithoutStringer(typ)), spew.Sdump(typeWithoutStringer(tt.kind)))
@@ -286,14 +286,14 @@ func TestTypeCheck(t *testing.T) {
 			t.Fatal("unexpected parse error:", err)
 		} else if err != nil && len(test.err) != 0 {
 			if err.Error() != test.err {
-				t.Errorf("%d failed. Expected err: '%v' got err: '%w'", i, test.err, err)
+				t.Errorf("%d failed. Expected err: '%v' got err: '%v'", i, test.err, err)
 			}
 			continue
 		}
 
 		err = typeCheck(typ, reflect.ValueOf(test.input))
 		if err != nil && len(test.err) == 0 {
-			t.Errorf("%d failed. Expected no err but got: %w", i, err)
+			t.Errorf("%d failed. Expected no err but got: %v", i, err)
 			continue
 		}
 		if err == nil && len(test.err) != 0 {
@@ -302,7 +302,7 @@ func TestTypeCheck(t *testing.T) {
 		}
 
 		if err != nil && len(test.err) != 0 && err.Error() != test.err {
-			t.Errorf("%d failed. Expected err: '%v' got err: '%w'", i, test.err, err)
+			t.Errorf("%d failed. Expected err: '%v' got err: '%v'", i, test.err, err)
 		}
 	}
 }
@@ -324,7 +324,7 @@ func TestInternalType(t *testing.T) {
 	blob := "tuple"
 	typ, err := NewType(blob, internalType, components)
 	if err != nil {
-		t.Errorf("type %q: failed to parse type string: %w", blob, err)
+		t.Errorf("type %q: failed to parse type string: %v", blob, err)
 	}
 	if !reflect.DeepEqual(typ, kind) {
 		t.Errorf("type %q: parsed type mismatch:\nGOT %s\nWANT %s ", blob, spew.Sdump(typeWithoutStringer(typ)), spew.Sdump(typeWithoutStringer(kind)))

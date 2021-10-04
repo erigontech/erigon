@@ -630,7 +630,7 @@ func TestUDPv5_LocalNode(t *testing.T) {
 	// retrieve the value from self to make sure it matches.
 	outputVal := [4]byte{}
 	if err := node.Self().Load(enr.WithEntry("testing", &outputVal)); err != nil {
-		t.Errorf("Could not load value from record: %w", err)
+		t.Errorf("Could not load value from record: %v", err)
 	}
 	if testVal != outputVal {
 		t.Errorf("Wanted %#x to be retrieved from the record but instead got %#x", testVal, outputVal)

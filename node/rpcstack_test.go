@@ -153,7 +153,7 @@ func TestWebsocketOrigins(t *testing.T) {
 		url := fmt.Sprintf("ws://%v", srv.listenAddr())
 		for _, origin := range tc.expOk {
 			if err := wsRequest(t, url, origin); err != nil {
-				t.Errorf("spec '%v', origin '%v': expected ok, got %w", tc.spec, origin, err)
+				t.Errorf("spec '%v', origin '%v': expected ok, got %v", tc.spec, origin, err)
 			}
 		}
 		for _, origin := range tc.expFail {

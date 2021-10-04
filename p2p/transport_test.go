@@ -52,7 +52,7 @@ func TestProtocolHandshake(t *testing.T) {
 		frame := newRLPX(fd0, &prv1.PublicKey)
 		rpubkey, err := frame.doEncHandshake(prv0)
 		if err != nil {
-			t.Errorf("dial side enc handshake failed: %w", err)
+			t.Errorf("dial side enc handshake failed: %v", err)
 			return
 		}
 		if !reflect.DeepEqual(rpubkey, &prv1.PublicKey) {
@@ -62,7 +62,7 @@ func TestProtocolHandshake(t *testing.T) {
 
 		phs, err := frame.doProtoHandshake(hs0)
 		if err != nil {
-			t.Errorf("dial side proto handshake error: %w", err)
+			t.Errorf("dial side proto handshake error: %v", err)
 			return
 		}
 		phs.Rest = nil
@@ -78,7 +78,7 @@ func TestProtocolHandshake(t *testing.T) {
 		rlpx := newRLPX(fd1, nil)
 		rpubkey, err := rlpx.doEncHandshake(prv1)
 		if err != nil {
-			t.Errorf("listen side enc handshake failed: %w", err)
+			t.Errorf("listen side enc handshake failed: %v", err)
 			return
 		}
 		if !reflect.DeepEqual(rpubkey, &prv0.PublicKey) {
@@ -88,7 +88,7 @@ func TestProtocolHandshake(t *testing.T) {
 
 		phs, err := rlpx.doProtoHandshake(hs1)
 		if err != nil {
-			t.Errorf("listen side proto handshake error: %w", err)
+			t.Errorf("listen side proto handshake error: %v", err)
 			return
 		}
 		phs.Rest = nil
@@ -98,7 +98,7 @@ func TestProtocolHandshake(t *testing.T) {
 		}
 
 		if err := ExpectMsg(rlpx, discMsg, []DiscReason{DiscQuitting}); err != nil {
-			t.Errorf("error receiving disconnect: %w", err)
+			t.Errorf("error receiving disconnect: %v", err)
 		}
 	}()
 	wg.Wait()

@@ -21,7 +21,7 @@ func TestSplitIntoSegments(t *testing.T) {
 			t.Errorf("expected no chainSegments, got %d", len(chainSegments))
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 
 	// Single header
@@ -35,7 +35,7 @@ func TestSplitIntoSegments(t *testing.T) {
 			t.Errorf("expected 1 chainSegments, got %d", len(chainSegments))
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 
 	// Same header repeated twice
@@ -47,7 +47,7 @@ func TestSplitIntoSegments(t *testing.T) {
 			t.Errorf("expected no chainSegments, got %d", len(chainSegments))
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 
 	// Single header with a bad hash
@@ -84,7 +84,7 @@ func TestSplitIntoSegments(t *testing.T) {
 			t.Errorf("expected h2 to be the root")
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 
 	// Two connected headers with wrong numbers
@@ -97,7 +97,7 @@ func TestSplitIntoSegments(t *testing.T) {
 			t.Errorf("expected no chainSegments, got %d", len(chainSegments))
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 
 	// Two connected headers with wrong difficulty
@@ -127,7 +127,7 @@ func TestSplitIntoSegments(t *testing.T) {
 			t.Errorf("expected h1 to be the root")
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 
 	// Two headers not connected to each other
@@ -139,7 +139,7 @@ func TestSplitIntoSegments(t *testing.T) {
 			t.Errorf("expected 2 chainSegments, got %d", len(chainSegments))
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 			t.Errorf("expected h to be the root")
 		}
 	} else {
-		t.Errorf("handle header msg: %w", err)
+		t.Errorf("handle header msg: %v", err)
 	}
 
 	// Same header with a bad hash
@@ -175,6 +175,6 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 			t.Errorf("expected no chainSegments, got %d", len(chainSegments))
 		}
 	} else {
-		t.Errorf("handle newBlock msg: %w", err)
+		t.Errorf("handle newBlock msg: %v", err)
 	}
 }

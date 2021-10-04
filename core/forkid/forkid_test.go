@@ -216,7 +216,7 @@ func TestValidation(t *testing.T) {
 		h := tt.head
 		filter := newFilter(forks, params.MainnetGenesisHash, func() uint64 { return h })
 		if err := filter(tt.id); err != tt.err {
-			t.Errorf("test %d: validation error mismatch: have %w, want %v", i, err, tt.err)
+			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}
 	}
 }

@@ -900,25 +900,25 @@ func TestReproduceCrash(t *testing.T) {
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 2nd transaction
 	intraBlockState.SetState(contract, &storageKey1, *value1)
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
 	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 }
 func TestEip2200Gas(t *testing.T) {
@@ -1296,7 +1296,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	intraBlockState.SetCode(contract, oldCode)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	_, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
@@ -1309,7 +1309,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	intraBlockState.SetCode(contract, newCode)
 
 	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
 	newCodeHash := common.BytesToHash(crypto.Keccak256(newCode))
@@ -1334,10 +1334,10 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(params.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	if err := intraBlockState.CommitBlock(params.Rules{}, w); err != nil {
-		t.Errorf("error committing block: %w", err)
+		t.Errorf("error committing block: %v", err)
 	}
 
 	codeHash := common.BytesToHash(crypto.Keccak256(code))
@@ -1367,10 +1367,10 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	if err := intraBlockState.FinalizeTx(params.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	if err := intraBlockState.CommitBlock(params.Rules{}, w); err != nil {
-		t.Errorf("error committing block: %w", err)
+		t.Errorf("error committing block: %v", err)
 	}
 
 	r2, err := trie.CalcRoot("test", tx)

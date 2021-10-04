@@ -68,7 +68,7 @@ func TestHeadersGenerateIndex(t *testing.T) {
 		td = td.Add(td, header.Difficulty)
 		canonical, err1 := rawdb.ReadCanonicalHash(snTx, header.Number.Uint64())
 		if err1 != nil {
-			t.Errorf("reading canonical hash for block %d: %w", header.Number.Uint64(), err1)
+			t.Errorf("reading canonical hash for block %d: %v", header.Number.Uint64(), err1)
 		}
 		if canonical != header.Hash() {
 			t.Error(i, "canonical not correct", canonical)

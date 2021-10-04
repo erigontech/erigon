@@ -38,12 +38,12 @@ func doTestWithByte(t *testing.T, b byte, iterations int) {
 
 		buffDouble := new(bytes.Buffer)
 		if err := RlpSerializableBytes(source).ToDoubleRLP(buffDouble, prefixBuf[:]); err != nil {
-			t.Errorf("test failed, err = %w", err)
+			t.Errorf("test failed, err = %v", err)
 		}
 
 		buffSingle := new(bytes.Buffer)
 		if err := RlpEncodedBytes(encSingle).ToDoubleRLP(buffSingle, prefixBuf[:]); err != nil {
-			t.Errorf("test failed, err = %w", err)
+			t.Errorf("test failed, err = %v", err)
 		}
 
 		if !bytes.Equal(buffDouble.Bytes(), encDouble) {

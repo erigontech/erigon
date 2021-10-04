@@ -92,7 +92,7 @@ func TestEOFSignal(t *testing.T) {
 	eof := make(chan struct{}, 1)
 	sig := &eofSignal{new(bytes.Buffer), 0, eof}
 	if n, err := sig.Read(rb); n != 0 || err != io.EOF {
-		t.Errorf("Read returned unexpected values: (%v, %w)", n, err)
+		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
 	select {
 	case <-eof:
@@ -104,7 +104,7 @@ func TestEOFSignal(t *testing.T) {
 	eof = make(chan struct{}, 1)
 	sig = &eofSignal{bytes.NewBufferString("aaaaaaaa"), 4, eof}
 	if n, err := sig.Read(rb); n != 4 || err != nil {
-		t.Errorf("Read returned unexpected values: (%v, %w)", n, err)
+		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
 	select {
 	case <-eof:
@@ -116,10 +116,10 @@ func TestEOFSignal(t *testing.T) {
 	eof = make(chan struct{}, 1)
 	sig = &eofSignal{bytes.NewBufferString("aaaa"), 999, eof}
 	if n, err := sig.Read(rb); n != 4 || err != nil {
-		t.Errorf("Read returned unexpected values: (%v, %w)", n, err)
+		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
 	if n, err := sig.Read(rb); n != 0 || err != io.EOF {
-		t.Errorf("Read returned unexpected values: (%v, %w)", n, err)
+		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
 	select {
 	case <-eof:
@@ -131,7 +131,7 @@ func TestEOFSignal(t *testing.T) {
 	eof = make(chan struct{}, 1)
 	sig = &eofSignal{bytes.NewBufferString("aaaaaaaaaaaaaaaaaaaaa"), 999, eof}
 	if n, err := sig.Read(rb); n != 10 || err != nil {
-		t.Errorf("Read returned unexpected values: (%v, %w)", n, err)
+		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
 	select {
 	case <-eof:

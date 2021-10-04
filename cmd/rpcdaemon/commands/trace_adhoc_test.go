@@ -24,7 +24,7 @@ func TestEmptyQuery(t *testing.T) {
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
 	if err != nil {
-		t.Errorf("calling CallMany: %w", err)
+		t.Errorf("calling CallMany: %v", err)
 	}
 	if results == nil {
 		t.Errorf("expected empty array, got nil")
@@ -46,7 +46,7 @@ func TestCoinbaseBalance(t *testing.T) {
 ]
 `), &rpc.BlockNumberOrHash{BlockNumber: &latest})
 	if err != nil {
-		t.Errorf("calling CallMany: %w", err)
+		t.Errorf("calling CallMany: %v", err)
 	}
 	if results == nil {
 		t.Errorf("expected empty array, got nil")
@@ -79,7 +79,7 @@ func TestReplayTransaction(t *testing.T) {
 	// Call GetTransactionReceipt for transaction which is not in the database
 	results, err := api.ReplayTransaction(context.Background(), txnHash, []string{"stateDiff"})
 	if err != nil {
-		t.Errorf("calling ReplayTransaction: %w", err)
+		t.Errorf("calling ReplayTransaction: %v", err)
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results.StateDiff)
@@ -97,7 +97,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 	n := rpc.BlockNumber(6)
 	results, err := api.ReplayBlockTransactions(context.Background(), rpc.BlockNumberOrHash{BlockNumber: &n}, []string{"stateDiff"})
 	if err != nil {
-		t.Errorf("calling ReplayBlockTransactions: %w", err)
+		t.Errorf("calling ReplayBlockTransactions: %v", err)
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)

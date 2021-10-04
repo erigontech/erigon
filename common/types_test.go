@@ -110,7 +110,7 @@ func TestAddressUnmarshalJSON(t *testing.T) {
 		var v Address
 		err := json.Unmarshal([]byte(test.Input), &v)
 		if err != nil && !test.ShouldErr {
-			t.Errorf("test #%d: unexpected error: %w", i, err)
+			t.Errorf("test #%d: unexpected error: %v", i, err)
 		}
 		if err == nil {
 			if test.ShouldErr {
@@ -235,7 +235,7 @@ func TestHash_Scan(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := &Hash{}
 			if err := h.Scan(tt.args.src); (err != nil) != tt.wantErr {
-				t.Errorf("Hash.Scan() error = %w, wantErr %v", err, tt.wantErr)
+				t.Errorf("Hash.Scan() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			if !tt.wantErr {
@@ -278,7 +278,7 @@ func TestHash_Value(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.h.Value()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Hash.Value() error = %w, wantErr %v", err, tt.wantErr)
+				t.Errorf("Hash.Value() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -323,7 +323,7 @@ func TestAddress_Scan(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &Address{}
 			if err := a.Scan(tt.args.src); (err != nil) != tt.wantErr {
-				t.Errorf("Address.Scan() error = %w, wantErr %v", err, tt.wantErr)
+				t.Errorf("Address.Scan() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			if !tt.wantErr {
@@ -364,7 +364,7 @@ func TestAddress_Value(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := tt.a.Value()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Address.Value() error = %w, wantErr %v", err, tt.wantErr)
+				t.Errorf("Address.Value() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {

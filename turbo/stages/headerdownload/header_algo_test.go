@@ -18,6 +18,6 @@ func TestInserter1(t *testing.T) {
 	}
 	hi := NewHeaderInserter("headers", big.NewInt(0), 0)
 	if err := hi.FeedHeader(tx, &types.Header{Number: big.NewInt(5), Difficulty: big.NewInt(1)}, 5); err != nil {
-		t.Errorf("feed empty header: %w", err)
+		t.Errorf("feed empty header: %v", err)
 	}
 }

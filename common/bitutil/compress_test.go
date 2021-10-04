@@ -52,7 +52,7 @@ func TestEncodingCycle(t *testing.T) {
 
 		proc, err := bitsetDecodeBytes(bitsetEncodeBytes(data), len(data))
 		if err != nil {
-			t.Errorf("test %d: failed to decompress compressed data: %w", i, err)
+			t.Errorf("test %d: failed to decompress compressed data: %v", i, err)
 			continue
 		}
 		if !bytes.Equal(data, proc) {
@@ -103,7 +103,7 @@ func TestDecodingCycle(t *testing.T) {
 
 		orig, err := bitsetDecodeBytes(data, tt.size)
 		if err != tt.fail {
-			t.Errorf("test %d: failure mismatch: have %w, want %v", i, err, tt.fail)
+			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.fail)
 		}
 		if err != nil {
 			continue
@@ -125,7 +125,7 @@ func TestCompression(t *testing.T) {
 		t.Errorf("encoding mismatch for sparse data: have %x, want %x", data, out)
 	}
 	if data, err := DecompressBytes(out, len(in)); err != nil || !bytes.Equal(data, in) {
-		t.Errorf("decoding mismatch for sparse data: have %x, want %x, error %w", data, in, err)
+		t.Errorf("decoding mismatch for sparse data: have %x, want %x, error %v", data, in, err)
 	}
 	// Check the compression returns the input if the bitset encoding is longer
 	in = hexutil.MustDecode("0xdf7070533534333636313639343638373532313536346c1bc33339343837313070706336343035336336346c65fefb3930393233383838ac2f65fefb")
@@ -135,11 +135,11 @@ func TestCompression(t *testing.T) {
 		t.Errorf("encoding mismatch for dense data: have %x, want %x", data, out)
 	}
 	if data, err := DecompressBytes(out, len(in)); err != nil || !bytes.Equal(data, in) {
-		t.Errorf("decoding mismatch for dense data: have %x, want %x, error %w", data, in, err)
+		t.Errorf("decoding mismatch for dense data: have %x, want %x, error %v", data, in, err)
 	}
 	// Check that decompressing a longer input than the target fails
 	if _, err := DecompressBytes([]byte{0xc0, 0x01, 0x01}, 2); err != errExceededTarget {
-		t.Errorf("decoding error mismatch for long data: have %w, want %v", err, errExceededTarget)
+		t.Errorf("decoding error mismatch for long data: have %v, want %v", err, errExceededTarget)
 	}
 }
 

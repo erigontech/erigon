@@ -840,7 +840,7 @@ var bindTests = []struct {
 
 			// Verify that underscored return values correctly parse into structs
 			if res, err := underscorer.UnderscoredOutput(nil); err != nil {
-				t.Errorf("Failed to call constant function: %w", err)
+				t.Errorf("Failed to call constant function: %v", err)
 			} else if res.Int.Cmp(big.NewInt(314)) != 0 || res.String != "pi" {
 				t.Errorf("Invalid result, want: {314, \"pi\"}, got: %+v", res)
 			}

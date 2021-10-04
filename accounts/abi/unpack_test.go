@@ -46,7 +46,7 @@ func TestUnpack(t *testing.T) {
 			}
 			out, err := abi.Unpack("method", encb)
 			if err != nil {
-				t.Errorf("test %d (%v) failed: %w", i, test.def, err)
+				t.Errorf("test %d (%v) failed: %v", i, test.def, err)
 				return
 			}
 			if !reflect.DeepEqual(test.unpacked, ConvertType(out[0], test.unpacked)) {
@@ -237,7 +237,7 @@ func TestLocalUnpackTests(t *testing.T) {
 			outptr := reflect.New(reflect.TypeOf(test.want))
 			err = abi.UnpackIntoInterface(outptr.Interface(), "method", encb)
 			if err := test.checkError(err); err != nil {
-				t.Errorf("test %d (%v) failed: %w", i, test.def, err)
+				t.Errorf("test %d (%v) failed: %v", i, test.def, err)
 				return
 			}
 			out := outptr.Elem().Interface()

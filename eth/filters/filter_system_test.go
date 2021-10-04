@@ -167,7 +167,7 @@ func TestLogFilterCreation(t *testing.T) {
 	for i, test := range testCases {
 		_, err := api.NewFilter(test.crit)
 		if test.success && err != nil {
-			t.Errorf("expected filter creation for case %d to success, got %w", i, err)
+			t.Errorf("expected filter creation for case %d to success, got %v", i, err)
 		}
 		if !test.success && err == nil {
 			t.Errorf("expected testcase %d to fail with an error", i)

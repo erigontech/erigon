@@ -135,7 +135,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}
 	tx, err1 := sim.DB().BeginRo(context.Background())
 	if err1 != nil {
-		t.Errorf("TestNewSimulatedBackend create tx: %w", err1)
+		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
 	}
 	defer tx.Rollback()
 
@@ -179,7 +179,7 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 	sim.SendTransaction(context.Background(), signedTx) //nolint:errcheck
 	// AdjustTime should fail on non-empty block
@@ -202,7 +202,7 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	var tx2 types.Transaction = types.NewTransaction(1, testAddr, amount2, params.TxGas, gasPrice2, nil)
 	signedTx2, err := types.SignTx(tx2, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 	sim.SendTransaction(context.Background(), signedTx2) //nolint:errcheck
 	sim.Commit()
@@ -236,11 +236,11 @@ func TestSimulatedBackend_BlockByHash(t *testing.T) {
 
 	block, err := sim.BlockByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get recent block: %w", err)
+		t.Errorf("could not get recent block: %v", err)
 	}
 	blockByHash, err := sim.BlockByHash(bgCtx, block.Hash())
 	if err != nil {
-		t.Errorf("could not get recent block: %w", err)
+		t.Errorf("could not get recent block: %v", err)
 	}
 
 	if block.Hash() != blockByHash.Hash() {
@@ -256,7 +256,7 @@ func TestSimulatedBackend_BlockByNumber(t *testing.T) {
 
 	block, err := sim.BlockByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get recent block: %w", err)
+		t.Errorf("could not get recent block: %v", err)
 	}
 	if block.NumberU64() != 0 {
 		t.Errorf("did not get most recent block, instead got block number %v", block.NumberU64())
@@ -267,7 +267,7 @@ func TestSimulatedBackend_BlockByNumber(t *testing.T) {
 
 	block, err = sim.BlockByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get recent block: %w", err)
+		t.Errorf("could not get recent block: %v", err)
 	}
 	if block.NumberU64() != 1 {
 		t.Errorf("did not get most recent block, instead got block number %v", block.NumberU64())
@@ -275,7 +275,7 @@ func TestSimulatedBackend_BlockByNumber(t *testing.T) {
 
 	blockByNumber, err := sim.BlockByNumber(bgCtx, big.NewInt(1))
 	if err != nil {
-		t.Errorf("could not get block by number: %w", err)
+		t.Errorf("could not get block by number: %v", err)
 	}
 	if blockByNumber.Hash() != block.Hash() {
 		t.Errorf("did not get the same block with height of 1 as before")
@@ -290,7 +290,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 
 	nonce, err := sim.NonceAt(bgCtx, testAddr, big.NewInt(0))
 	if err != nil {
-		t.Errorf("could not get nonce for test addr: %w", err)
+		t.Errorf("could not get nonce for test addr: %v", err)
 	}
 
 	if nonce != uint64(0) {
@@ -302,19 +302,19 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 
 	// send tx to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %w", err)
+		t.Errorf("could not add tx to pending block: %v", err)
 	}
 	sim.Commit()
 
 	newNonce, err := sim.NonceAt(bgCtx, testAddr, big.NewInt(1))
 	if err != nil {
-		t.Errorf("could not get nonce for test addr: %w", err)
+		t.Errorf("could not get nonce for test addr: %v", err)
 	}
 
 	if newNonce != nonce+uint64(1) {
@@ -343,19 +343,19 @@ func TestSimulatedBackend_SendTransaction(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 
 	// send tx to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %w", err)
+		t.Errorf("could not add tx to pending block: %v", err)
 	}
 	sim.Commit()
 
 	block, err := sim.BlockByNumber(bgCtx, big.NewInt(1))
 	if err != nil {
-		t.Errorf("could not get block at height 1: %w", err)
+		t.Errorf("could not get block at height 1: %v", err)
 	}
 
 	if signedTx.Hash() != block.Transactions()[0].Hash() {
@@ -377,19 +377,19 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 
 	// send tx to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %w", err)
+		t.Errorf("could not add tx to pending block: %v", err)
 	}
 
 	// ensure tx is committed pending
 	receivedTx, pending, err := sim.TransactionByHash(bgCtx, signedTx.Hash())
 	if err != nil {
-		t.Errorf("could not get transaction by hash %v: %w", signedTx.Hash(), err)
+		t.Errorf("could not get transaction by hash %v: %v", signedTx.Hash(), err)
 	}
 	if !pending {
 		t.Errorf("expected transaction to be in pending state")
@@ -403,7 +403,7 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 	// ensure tx is not and committed pending
 	receivedTx, pending, err = sim.TransactionByHash(bgCtx, signedTx.Hash())
 	if err != nil {
-		t.Errorf("could not get transaction by hash %v: %w", signedTx.Hash(), err)
+		t.Errorf("could not get transaction by hash %v: %v", signedTx.Hash(), err)
 	}
 	if pending {
 		t.Errorf("expected transaction to not be in pending state")
@@ -604,11 +604,11 @@ func TestSimulatedBackend_HeaderByHash(t *testing.T) {
 
 	header, err := sim.HeaderByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get recent block: %w", err)
+		t.Errorf("could not get recent block: %v", err)
 	}
 	headerByHash, err := sim.HeaderByHash(bgCtx, header.Hash())
 	if err != nil {
-		t.Errorf("could not get recent block: %w", err)
+		t.Errorf("could not get recent block: %v", err)
 	}
 
 	if header.Hash() != headerByHash.Hash() {
@@ -624,7 +624,7 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 
 	latestBlockHeader, err := sim.HeaderByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get header for tip of chain: %w", err)
+		t.Errorf("could not get header for tip of chain: %v", err)
 	}
 	if latestBlockHeader == nil {
 		t.Errorf("received a nil block header")
@@ -636,12 +636,12 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 
 	latestBlockHeader, err = sim.HeaderByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get header for blockheight of 1: %w", err)
+		t.Errorf("could not get header for blockheight of 1: %v", err)
 	}
 
 	blockHeader, err := sim.HeaderByNumber(bgCtx, big.NewInt(1))
 	if err != nil {
-		t.Errorf("could not get header for blockheight of 1: %w", err)
+		t.Errorf("could not get header for blockheight of 1: %v", err)
 	}
 
 	if blockHeader.Hash() != latestBlockHeader.Hash() {
@@ -653,7 +653,7 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 
 	block, err := sim.BlockByNumber(bgCtx, big.NewInt(1))
 	if err != nil {
-		t.Errorf("could not get block for blockheight of 1: %w", err)
+		t.Errorf("could not get block for blockheight of 1: %v", err)
 	}
 
 	if block.Hash() != blockHeader.Hash() {
@@ -685,20 +685,20 @@ func TestSimulatedBackend_TransactionCount(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 
 	// send tx to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %w", err)
+		t.Errorf("could not add tx to pending block: %v", err)
 	}
 
 	sim.Commit()
 
 	lastBlock, err := sim.BlockByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get header for tip of chain: %w", err)
+		t.Errorf("could not get header for tip of chain: %v", err)
 	}
 
 	count, err = sim.TransactionCount(bgCtx, lastBlock.Hash())
@@ -719,7 +719,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 
 	transaction, err := sim.TransactionInBlock(bgCtx, sim.pendingBlock.Hash(), uint(0))
 	if err == nil && err != errTransactionDoesNotExist {
-		t.Errorf("expected a transaction does not exist error to be received but received %w", err)
+		t.Errorf("expected a transaction does not exist error to be received but received %v", err)
 	}
 	if transaction != nil {
 		t.Errorf("expected transaction to be nil but received %v", transaction)
@@ -728,7 +728,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 	// expect pending nonce to be 0 since account has not been used
 	pendingNonce, err := sim.PendingNonceAt(bgCtx, testAddr)
 	if err != nil {
-		t.Errorf("did not get the pending nonce: %w", err)
+		t.Errorf("did not get the pending nonce: %v", err)
 	}
 
 	if pendingNonce != uint64(0) {
@@ -740,25 +740,25 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 
 	// send tx to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %w", err)
+		t.Errorf("could not add tx to pending block: %v", err)
 	}
 
 	sim.Commit()
 
 	lastBlock, err := sim.BlockByNumber(bgCtx, nil)
 	if err != nil {
-		t.Errorf("could not get header for tip of chain: %w", err)
+		t.Errorf("could not get header for tip of chain: %v", err)
 	}
 
 	transaction, err = sim.TransactionInBlock(bgCtx, lastBlock.Hash(), uint(1))
 	if err == nil && err != errTransactionDoesNotExist {
-		t.Errorf("expected a transaction does not exist error to be received but received %w", err)
+		t.Errorf("expected a transaction does not exist error to be received but received %v", err)
 	}
 	if transaction != nil {
 		t.Errorf("expected transaction to be nil but received %v", transaction)
@@ -766,7 +766,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 
 	transaction, err = sim.TransactionInBlock(bgCtx, lastBlock.Hash(), uint(0))
 	if err != nil {
-		t.Errorf("could not get transaction in the lastest block with hash %v: %w", lastBlock.Hash().String(), err)
+		t.Errorf("could not get transaction in the lastest block with hash %v: %v", lastBlock.Hash().String(), err)
 	}
 
 	if signedTx.Hash().String() != transaction.Hash().String() {
@@ -783,7 +783,7 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	// expect pending nonce to be 0 since account has not been used
 	pendingNonce, err := sim.PendingNonceAt(bgCtx, testAddr)
 	if err != nil {
-		t.Errorf("did not get the pending nonce: %w", err)
+		t.Errorf("did not get the pending nonce: %v", err)
 	}
 
 	if pendingNonce != uint64(0) {
@@ -795,40 +795,40 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 
 	// send tx to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %w", err)
+		t.Errorf("could not add tx to pending block: %v", err)
 	}
 
 	// expect pending nonce to be 1 since account has submitted one transaction
 	pendingNonce, err = sim.PendingNonceAt(bgCtx, testAddr)
 	if err != nil {
-		t.Errorf("did not get the pending nonce: %w", err)
+		t.Errorf("did not get the pending nonce: %v", err)
 	}
 
 	if pendingNonce != uint64(1) {
-		t.Errorf("expected pending nonce of 1 got %w", pendingNonce)
+		t.Errorf("expected pending nonce of 1 got %v", pendingNonce)
 	}
 
 	// make a new transaction with a nonce of 1
 	tx = types.NewTransaction(uint64(1), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err = types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not send tx: %w", err)
+		t.Errorf("could not send tx: %v", err)
 	}
 
 	// expect pending nonce to be 2 since account now has two transactions
 	pendingNonce, err = sim.PendingNonceAt(bgCtx, testAddr)
 	if err != nil {
-		t.Errorf("did not get the pending nonce: %w", err)
+		t.Errorf("did not get the pending nonce: %v", err)
 	}
 
 	if pendingNonce != uint64(2) {
@@ -847,19 +847,19 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 	var tx types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(tx, *signer, testKey)
 	if err != nil {
-		t.Errorf("could not sign tx: %w", err)
+		t.Errorf("could not sign tx: %v", err)
 	}
 
 	// send tx to simulated backend
 	err = sim.SendTransaction(bgCtx, signedTx)
 	if err != nil {
-		t.Errorf("could not add tx to pending block: %w", err)
+		t.Errorf("could not add tx to pending block: %v", err)
 	}
 	sim.Commit()
 
 	receipt, err := sim.TransactionReceipt(bgCtx, signedTx.Hash())
 	if err != nil {
-		t.Errorf("could not get transaction receipt: %w", err)
+		t.Errorf("could not get transaction receipt: %v", err)
 	}
 
 	if receipt.ContractAddress != testAddr && receipt.TxHash != signedTx.Hash() {
@@ -875,7 +875,7 @@ func TestSimulatedBackend_SuggestGasPrice(t *testing.T) {
 	bgCtx := context.Background()
 	gasPrice, err := sim.SuggestGasPrice(bgCtx)
 	if err != nil {
-		t.Errorf("could not get gas price: %w", err)
+		t.Errorf("could not get gas price: %v", err)
 	}
 	if gasPrice.Uint64() != uint64(1) {
 		t.Errorf("gas price was not expected value of 1. actual: %v", gasPrice.Uint64())
@@ -888,7 +888,7 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 	bgCtx := context.Background()
 	code, err := sim.CodeAt(bgCtx, testAddr, nil)
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	if len(code) != 0 {
 		t.Errorf("got code for account that does not have contract code")
@@ -896,17 +896,17 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 
 	parsed, err := abi.JSON(strings.NewReader(abiJSON))
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
 	contractAddr, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
-		t.Errorf("could not deploy contract: %w tx: %v contract: %v", err, tx, contract)
+		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, tx, contract)
 	}
 
 	code, err = sim.PendingCodeAt(bgCtx, contractAddr)
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	if len(code) == 0 {
 		t.Errorf("did not get code for account that has contract code")
@@ -923,7 +923,7 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 	bgCtx := context.Background()
 	code, err := sim.CodeAt(bgCtx, testAddr, nil)
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	if len(code) != 0 {
 		t.Errorf("got code for account that does not have contract code")
@@ -931,18 +931,18 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 
 	parsed, err := abi.JSON(strings.NewReader(abiJSON))
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
 	contractAddr, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
-		t.Errorf("could not deploy contract: %w tx: %v contract: %v", err, tx, contract)
+		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, tx, contract)
 	}
 
 	sim.Commit()
 	code, err = sim.CodeAt(bgCtx, contractAddr, nil)
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	if len(code) == 0 {
 		t.Errorf("did not get code for account that has contract code")
@@ -962,17 +962,17 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 
 	parsed, err := abi.JSON(strings.NewReader(abiJSON))
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
 	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
-		t.Errorf("could not deploy contract: %w", err)
+		t.Errorf("could not deploy contract: %v", err)
 	}
 
 	input, err := parsed.Pack("receive", []byte("X"))
 	if err != nil {
-		t.Errorf("could not pack receive function on contract: %w", err)
+		t.Errorf("could not pack receive function on contract: %v", err)
 	}
 
 	// make sure you can call the contract in pending state
@@ -982,7 +982,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 		Data: input,
 	})
 	if err != nil {
-		t.Errorf("could not call receive method on contract: %w", err)
+		t.Errorf("could not call receive method on contract: %v", err)
 	}
 	if len(res) == 0 {
 		t.Errorf("result of contract call was empty: %v", res)
@@ -1002,7 +1002,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 		Data: input,
 	}, nil)
 	if err != nil {
-		t.Errorf("could not call receive method on contract: %w", err)
+		t.Errorf("could not call receive method on contract: %v", err)
 	}
 	if len(res) == 0 {
 		t.Errorf("result of contract call was empty: %v", res)
@@ -1048,12 +1048,12 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 
 	parsed, err := abi.JSON(strings.NewReader(reverterABI))
 	if err != nil {
-		t.Errorf("could not get code at test addr: %w", err)
+		t.Errorf("could not get code at test addr: %v", err)
 	}
 	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
 	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(reverterBin), sim)
 	if err != nil {
-		t.Errorf("could not deploy contract: %w", err)
+		t.Errorf("could not deploy contract: %v", err)
 	}
 
 	inputs := make(map[string]interface{}, 3)
@@ -1082,7 +1082,7 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 		for key, val := range inputs {
 			input, err := parsed.Pack(key)
 			if err != nil {
-				t.Errorf("could not pack %v function on contract: %w", key, err)
+				t.Errorf("could not pack %v function on contract: %v", key, err)
 			}
 
 			res, err := cl(input)
@@ -1103,13 +1103,13 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 			} else {
 				// revert(0x0,0x0)
 				if err.Error() != "execution reverted" {
-					t.Errorf("error was malformed: got %w want %v", err, "execution reverted")
+					t.Errorf("error was malformed: got %v want %v", err, "execution reverted")
 				}
 			}
 		}
 		input, err := parsed.Pack("noRevert")
 		if err != nil {
-			t.Errorf("could not pack noRevert function on contract: %w", err)
+			t.Errorf("could not pack noRevert function on contract: %v", err)
 		}
 		res, err := cl(input)
 		if err != nil {

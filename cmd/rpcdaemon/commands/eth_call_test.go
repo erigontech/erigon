@@ -22,7 +22,7 @@ func TestEstimateGas(t *testing.T) {
 		From: &from,
 		To:   &to,
 	}, nil); err != nil {
-		t.Errorf("calling EstimateGas: %w", err)
+		t.Errorf("calling EstimateGas: %v", err)
 	}
 }
 
@@ -37,7 +37,7 @@ func TestEthCallNonCanonical(t *testing.T) {
 		To:   &to,
 	}, rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
 		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
-			t.Errorf("wrong error: %w", err)
+			t.Errorf("wrong error: %v", err)
 		}
 	}
 }

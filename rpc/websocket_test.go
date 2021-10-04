@@ -205,7 +205,7 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Errorf("server WS upgrade error: %w", err)
+			t.Errorf("server WS upgrade error: %v", err)
 			return
 		}
 		defer conn.Close()
@@ -233,11 +233,11 @@ func wsPingTestHandler(t *testing.T, conn *websocket.Conn, shutdown, sendPing <-
 
 	// Handle subscribe request.
 	if _, _, err := conn.ReadMessage(); err != nil {
-		t.Errorf("server read error: %w", err)
+		t.Errorf("server read error: %v", err)
 		return
 	}
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(subResp)); err != nil {
-		t.Errorf("server write error: %w", err)
+		t.Errorf("server write error: %v", err)
 		return
 	}
 

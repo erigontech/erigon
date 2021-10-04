@@ -127,7 +127,7 @@ func TestForwardCompatibility(t *testing.T) {
 		}
 		packet, nodekey, _, err := Decode(input)
 		if err != nil {
-			t.Errorf("did not accept packet %s\n%w", test.input, err)
+			t.Errorf("did not accept packet %s\n%v", test.input, err)
 			continue
 		}
 		if !reflect.DeepEqual(packet, test.wantPacket) {

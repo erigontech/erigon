@@ -44,7 +44,7 @@ func TestHashWithModificationsEmpty(t *testing.T) {
 		false,
 	)
 	if err != nil {
-		t.Errorf("Could not compute hash with modification: %w", err)
+		t.Errorf("Could not compute hash with modification: %v", err)
 	}
 	if rootHash != EmptyRoot {
 		t.Errorf("Expected empty root, got: %x", rootHash)
@@ -102,7 +102,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 		false,
 	)
 	if err != nil {
-		t.Errorf("Could not compute hash with modification: %w", err)
+		t.Errorf("Could not compute hash with modification: %v", err)
 	}
 	if rootHash != expectedHash {
 		t.Errorf("Expected %x, got: %x", expectedHash, rootHash)
@@ -170,7 +170,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 		false,
 	)
 	if err != nil {
-		t.Errorf("Could not compute hash with modification: %w", err)
+		t.Errorf("Could not compute hash with modification: %v", err)
 	}
 	tr.UpdateAccount(insertKey[:], &insertA)
 	expectedHash := tr.Hash()

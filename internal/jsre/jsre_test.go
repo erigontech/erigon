@@ -57,14 +57,14 @@ func TestExec(t *testing.T) {
 
 	err := jsre.Exec("test.js")
 	if err != nil {
-		t.Errorf("expected no error, got %w", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 	val, err := jsre.Run("msg")
 	if err != nil {
-		t.Errorf("expected no error, got %w", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 	if val.ExportType().Kind() != reflect.String {
-		t.Errorf("expected string value, got %w", val)
+		t.Errorf("expected string value, got %v", val)
 	}
 	exp := "testMsg"
 	got := val.ToString().String()
@@ -80,12 +80,12 @@ func TestNatto(t *testing.T) {
 
 	err := jsre.Exec("test.js")
 	if err != nil {
-		t.Errorf("expected no error, got %w", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
 	val, err := jsre.Run("msg")
 	if err != nil {
-		t.Errorf("expected no error, got %w", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 	if val.ExportType().Kind() != reflect.String {
 		t.Errorf("expected string value, got %v", val)
@@ -103,12 +103,12 @@ func TestBind(t *testing.T) {
 	defer jsre.Stop(false)
 
 	if err := jsre.Set("no", &testNativeObjectBinding{vm: jsre.vm}); err != nil {
-		t.Errorf("error=%w", err)
+		t.Errorf("error=%v", err)
 	}
 
 	_, err := jsre.Run(`no.TestMethod("testMsg")`)
 	if err != nil {
-		t.Errorf("expected no error, got %w", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 }
 
@@ -118,11 +118,11 @@ func TestLoadScript(t *testing.T) {
 
 	_, err := jsre.Run(`loadScript("test.js")`)
 	if err != nil {
-		t.Errorf("expected no error, got %w", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 	val, err := jsre.Run("msg")
 	if err != nil {
-		t.Errorf("expected no error, got %w", err)
+		t.Errorf("expected no error, got %v", err)
 	}
 	if val.ExportType().Kind() != reflect.String {
 		t.Errorf("expected string value, got %v", val)

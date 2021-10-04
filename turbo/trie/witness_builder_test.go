@@ -24,12 +24,12 @@ func TestBlockWitness(t *testing.T) {
 	var w *Witness
 	var err error
 	if w, err = bwb.Build(&MerklePathLimiter{rl, hr.hash}); err != nil {
-		t.Errorf("Could not make block witness: %w", err)
+		t.Errorf("Could not make block witness: %v", err)
 	}
 
 	tr1, err := BuildTrieFromWitness(w, false)
 	if err != nil {
-		t.Errorf("Could not restore trie from the block witness: %w", err)
+		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
 	if tr.Hash() != tr1.Hash() {
 		t.Errorf("Reconstructed block witness has different root hash than source trie")
@@ -61,12 +61,12 @@ func TestBlockWitnessAccount(t *testing.T) {
 	var w *Witness
 	var err error
 	if w, err = bwb.Build(&MerklePathLimiter{rl, hr.hash}); err != nil {
-		t.Errorf("Could not make block witness: %w", err)
+		t.Errorf("Could not make block witness: %v", err)
 	}
 
 	trBin1, err := BuildTrieFromWitness(w, false)
 	if err != nil {
-		t.Errorf("Could not restore trie from the block witness: %w", err)
+		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
 	if tr.Hash() != trBin1.Hash() {
 		t.Errorf("Reconstructed block witness has different root hash than source trie")

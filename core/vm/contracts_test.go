@@ -120,7 +120,7 @@ func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
 		_, _, err := RunPrecompiledContract(p, in, gas)
 		if err.Error() != "out of gas" {
-			t.Errorf("Expected error [out of gas], got [%w]", err)
+			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
 		// Verify that the precompile did not touch the input buffer
 		exp := common.Hex2Bytes(test.Input)
@@ -137,7 +137,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	t.Run(test.Name, func(t *testing.T) {
 		_, _, err := RunPrecompiledContract(p, in, gas)
 		if err.Error() != test.ExpectedError {
-			t.Errorf("Expected error [%v], got [%w]", test.ExpectedError, err)
+			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
 		// Verify that the precompile did not touch the input buffer
 		exp := common.Hex2Bytes(test.Input)

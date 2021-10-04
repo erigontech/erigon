@@ -99,14 +99,14 @@ func doHandshake(t *testing.T, peer1, peer2 *Conn, key1, key2 *ecdsa.PrivateKey)
 	go func() {
 		pubKey, err := peer2.Handshake(key2)
 		if err != nil {
-			t.Errorf("peer2 could not do handshake: %w", err)
+			t.Errorf("peer2 could not do handshake: %v", err)
 		}
 		keyChan <- pubKey
 	}()
 
 	pubKey2, err := peer1.Handshake(key1)
 	if err != nil {
-		t.Errorf("peer1 could not do handshake: %w", err)
+		t.Errorf("peer1 could not do handshake: %v", err)
 	}
 	pubKey1 := <-keyChan
 
@@ -301,7 +301,7 @@ func TestHandshakeForwardCompatibility(t *testing.T) {
 		msg := new(authMsgV4)
 		ciphertext, err := h.readMsg(msg, keyB, r)
 		if err != nil {
-			t.Errorf("error for input %x:\n  %w", unhex(test.input), err)
+			t.Errorf("error for input %x:\n  %v", unhex(test.input), err)
 			continue
 		}
 		if !bytes.Equal(ciphertext, unhex(test.input)) {
@@ -321,7 +321,7 @@ func TestHandshakeForwardCompatibility(t *testing.T) {
 		msg := new(authRespV4)
 		ciphertext, err := h.readMsg(msg, keyA, r)
 		if err != nil {
-			t.Errorf("error for input %x:\n  %w", input, err)
+			t.Errorf("error for input %x:\n  %v", input, err)
 			continue
 		}
 		if !bytes.Equal(ciphertext, input) {

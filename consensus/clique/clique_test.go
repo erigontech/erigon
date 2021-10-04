@@ -109,7 +109,7 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
-			t.Errorf("could not read chain head: %w", err1)
+			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 2 {
 			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 2)
 		}
@@ -126,7 +126,7 @@ func TestReimportMirroredState(t *testing.T) {
 	}
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		if head, err1 := rawdb.ReadBlockByHash(tx, rawdb.ReadHeadHeaderHash(tx)); err1 != nil {
-			t.Errorf("could not read chain head: %w", err1)
+			t.Errorf("could not read chain head: %v", err1)
 		} else if head.NumberU64() != 3 {
 			t.Errorf("chain head mismatch: have %d, want %d", head.NumberU64(), 3)
 		}

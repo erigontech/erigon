@@ -21,7 +21,7 @@ func TestGetTransactionReceipt(t *testing.T) {
 	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {
-		t.Errorf("calling GetTransactionReceipt with empty hash: %w", err)
+		t.Errorf("calling GetTransactionReceipt with empty hash: %v", err)
 	}
 }
 
@@ -31,7 +31,7 @@ func TestGetTransactionReceiptUnprotected(t *testing.T) {
 	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	// Call GetTransactionReceipt for un-protected transaction
 	if _, err := api.GetTransactionReceipt(context.Background(), common.HexToHash("0x3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea")); err != nil {
-		t.Errorf("calling GetTransactionReceipt for unprotected tx: %w", err)
+		t.Errorf("calling GetTransactionReceipt for unprotected tx: %v", err)
 	}
 }
 
@@ -46,7 +46,7 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
 	if err != nil {
-		t.Errorf("calling GetStorageAt: %w", err)
+		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
@@ -62,7 +62,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
 	if err != nil {
-		t.Errorf("calling GetStorageAt: %w", err)
+		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
@@ -78,7 +78,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
 	if err != nil {
-		t.Errorf("calling GetStorageAt: %w", err)
+		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
@@ -100,7 +100,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 
 	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
-			t.Errorf("wrong error: %w", err)
+			t.Errorf("wrong error: %v", err)
 		}
 	} else {
 		t.Error("error expected")
@@ -123,7 +123,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 
 	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
-			t.Errorf("wrong error: %w", err)
+			t.Errorf("wrong error: %v", err)
 		}
 	} else {
 		t.Error("error expected")
@@ -142,7 +142,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
 	if err != nil {
-		t.Errorf("calling GetStorageAt: %w", err)
+		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)
@@ -159,7 +159,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 
 	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
-			t.Errorf("wrong error: %w", err)
+			t.Errorf("wrong error: %v", err)
 		}
 	} else {
 		t.Error("error expected")
@@ -184,7 +184,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 			/* Not sure. Here https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1898.md it is not explicitly said that
 			   eth_call should only work with canonical blocks.
 			   But since there is no point in changing the state of non-canonical block, it ignores RequireCanonical. */
-			t.Errorf("wrong error: %w", err)
+			t.Errorf("wrong error: %v", err)
 		}
 	} else {
 		t.Error("error expected")
@@ -206,7 +206,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 		To:   &to,
 	}, rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true), nil); err != nil {
 		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
-			t.Errorf("wrong error: %w", err)
+			t.Errorf("wrong error: %v", err)
 		}
 	} else {
 		t.Error("error expected")

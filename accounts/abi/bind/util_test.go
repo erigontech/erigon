@@ -129,7 +129,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := backend.SendTransaction(ctx, tx); err != nil {
-		t.Errorf("error when sending tx: %w", err)
+		t.Errorf("error when sending tx: %v", err)
 	}
 	backend.Commit()
 	notContentCreation := errors.New("tx is not contract creation")
@@ -152,7 +152,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	}()
 
 	if err := backend.SendTransaction(ctx, tx); err != nil {
-		t.Errorf("error when sending tx: %w", err)
+		t.Errorf("error when sending tx: %v", err)
 	}
 	cancel()
 	<-done

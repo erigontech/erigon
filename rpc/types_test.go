@@ -57,7 +57,7 @@ func TestBlockNumberJSONUnmarshal(t *testing.T) {
 			continue
 		}
 		if !test.mustFail && err != nil {
-			t.Errorf("Test %d should pass but got err: %w", i, err)
+			t.Errorf("Test %d should pass but got err: %v", i, err)
 			continue
 		}
 		if num != test.expected {
@@ -108,7 +108,7 @@ func TestBlockNumberOrHash_UnmarshalJSON(t *testing.T) {
 			continue
 		}
 		if !test.mustFail && err != nil {
-			t.Errorf("Test %d should pass but got err: %w", i, err)
+			t.Errorf("Test %d should pass but got err: %v", i, err)
 			continue
 		}
 		hash, hashOk := bnh.Hash()

@@ -61,7 +61,7 @@ func TestCompiler(t *testing.T) {
 		c.Feed(ch)
 		output, err := c.Compile()
 		if len(err) != 0 {
-			t.Errorf("compile error: %w\ninput: %s", err, test.input)
+			t.Errorf("compile error: %v\ninput: %s", err, test.input)
 			continue
 		}
 		if output != test.output {

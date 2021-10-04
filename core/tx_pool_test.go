@@ -401,10 +401,10 @@ func TestTransactionDoubleNonce(t *testing.T) {
 
 	// Add the first two transaction, ensure higher priced stays only
 	if replace, err := pool.add(tx1, false); err != nil || replace {
-		t.Errorf("first transaction insert failed (%w) or reported replacement (%v)", err, replace)
+		t.Errorf("first transaction insert failed (%v) or reported replacement (%v)", err, replace)
 	}
 	if replace, err := pool.add(tx2, false); err != nil || !replace {
-		t.Errorf("second transaction insert failed (%w) or not reported replacement (%v)", err, replace)
+		t.Errorf("second transaction insert failed (%v) or not reported replacement (%v)", err, replace)
 	}
 	<-pool.requestPromoteExecutables(newAccountSet(signer, addr))
 	if pool.pending[addr].Len() != 1 {
@@ -1582,7 +1582,7 @@ func TestTransactionDeduplication(t *testing.T) {
 	}
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("add %d failed: %w", i, err)
+			t.Errorf("add %d failed: %v", i, err)
 		}
 	}
 	pending, queued := pool.Stats()
@@ -1602,7 +1602,7 @@ func TestTransactionDeduplication(t *testing.T) {
 			t.Errorf("add %d succeeded, should have failed as known", i)
 		}
 		if i%2 == 1 && err != nil {
-			t.Errorf("add %d failed: %w", i, err)
+			t.Errorf("add %d failed: %v", i, err)
 		}
 	}
 	pending, queued = pool.Stats()

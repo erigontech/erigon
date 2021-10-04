@@ -178,7 +178,7 @@ func TestParseNode(t *testing.T) {
 			}
 		} else {
 			if err != nil {
-				t.Errorf("test %q:\n  unexpected error: %w", test.input, err)
+				t.Errorf("test %q:\n  unexpected error: %v", test.input, err)
 				continue
 			}
 			if !reflect.DeepEqual(n, test.wantResult) {

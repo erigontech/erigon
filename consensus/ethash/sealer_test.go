@@ -40,11 +40,11 @@ func TestRemoteNotify(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		blob, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			t.Errorf("failed to read miner notification: %w", err)
+			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work [3]string
 		if err := json.Unmarshal(blob, &work); err != nil {
-			t.Errorf("failed to unmarshal miner notification: %w", err)
+			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work
 	}))
@@ -85,11 +85,11 @@ func TestRemoteNotifyFull(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		blob, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			t.Errorf("failed to read miner notification: %w", err)
+			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work map[string]interface{}
 		if err := json.Unmarshal(blob, &work); err != nil {
-			t.Errorf("failed to unmarshal miner notification: %w", err)
+			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work
 	}))
@@ -134,11 +134,11 @@ func TestRemoteMultiNotify(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		blob, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			t.Errorf("failed to read miner notification: %w", err)
+			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work [3]string
 		if err := json.Unmarshal(blob, &work); err != nil {
-			t.Errorf("failed to unmarshal miner notification: %w", err)
+			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work
 	}))
@@ -183,11 +183,11 @@ func TestRemoteMultiNotifyFull(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		blob, err := ioutil.ReadAll(req.Body)
 		if err != nil {
-			t.Errorf("failed to read miner notification: %w", err)
+			t.Errorf("failed to read miner notification: %v", err)
 		}
 		var work map[string]interface{}
 		if err := json.Unmarshal(blob, &work); err != nil {
-			t.Errorf("failed to unmarshal miner notification: %w", err)
+			t.Errorf("failed to unmarshal miner notification: %v", err)
 		}
 		sink <- work
 	}))

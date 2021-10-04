@@ -53,7 +53,7 @@ func TestHeaderVerification(t *testing.T) {
 				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
 			}
 			if (err == nil) != valid {
-				t.Errorf("test %d.%d: validity mismatch: have %w, want %v", i, j, err, valid)
+				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
 			}
 		}
 

@@ -78,7 +78,7 @@ func TestPrintLoad(t *testing.T) {
 		}
 		trLoaded, err := Load(&b)
 		if err != nil {
-			t.Errorf("could not load trie from the buffer: %w", err)
+			t.Errorf("could not load trie from the buffer: %v", err)
 		}
 		loadedHash := trLoaded.Hash()
 		if trace {
