@@ -47,8 +47,8 @@ Will add this part soon [tbd]
 [x] Notify about new pending transactions - we sending more than need
 [x] Handle "NewBlock" message with 200K transactions re-calculation - in under 50ms
 [x] Add --txpool.globalslots, --txpool.globalqueue,--txpool.globalbasefeeeslots
-[] Add --txpool.accountslots
-[] Add --txpool.pricelimit
+[x] Add --txpool.accountslots
+[x] Add --txpool.pricelimit
 [] Add way for simple introspection - where is tx and why
 [] Hard-forks support (now rules are parsed ones on txPool start)
 [] Add pool to docker-compose
