@@ -423,6 +423,11 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}); err != nil {
 				return err
 			}
+			if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(progress), func(k, v []byte) error {
+				return tx.Delete(kv.Headers, k, nil)
+			}); err != nil {
+				return err
+			}
 			log.Info("Progress", "headers", progress)
 			return nil
 		}
