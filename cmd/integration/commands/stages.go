@@ -428,6 +428,19 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}); err != nil {
 				return err
 			}
+			if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress), func(k, v []byte) error {
+				return tx.Delete(kv.HeaderTD, k, nil)
+			}); err != nil {
+				return err
+			}
+			hash, err := rawdb.ReadCanonicalHash(tx, progress)
+			if err != nil {
+				return err
+			}
+			if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
+				log.Error("ReadHeadHeaderHash failed", "err", err)
+			}
+
 			log.Info("Progress", "headers", progress)
 			return nil
 		}
