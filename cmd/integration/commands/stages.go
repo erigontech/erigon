@@ -38,6 +38,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var cmdStageHeaders = &cobra.Command{
+	Use:   "stage_headers",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := utils.RootContext()
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
+		defer db.Close()
+
+		if err := stageHeaders(db, ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
+
 var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
 	Short: "",
@@ -276,6 +293,12 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageSenders)
 
+	withDatadir(cmdStageHeaders)
+	withUnwind(cmdStageHeaders)
+	withChain(cmdStageHeaders)
+
+	rootCmd.AddCommand(cmdStageHeaders)
+
 	withDatadir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
 	withChain(cmdStageBodies)
@@ -374,6 +397,31 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
+}
+
+func stageHeaders(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if unwind > 0 {
+			progress, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return fmt.Errorf("read Bodies progress: %w", err)
+			}
+			if unwind > progress {
+				return fmt.Errorf("cannot unwind past 0")
+			}
+			if err = stages.SaveStageProgress(tx, stages.Headers, progress-unwind); err != nil {
+				return fmt.Errorf("saving Bodies progress failed: %w", err)
+			}
+			progress, err = stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return fmt.Errorf("re-read Bodies progress: %w", err)
+			}
+			log.Info("Progress", "headers", progress)
+			return nil
+		}
+		log.Info("This command only works with --unwind option")
+		return nil
+	})
 }
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {

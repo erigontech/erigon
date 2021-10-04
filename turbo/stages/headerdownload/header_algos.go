@@ -480,7 +480,8 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 
 			select {
 			case <-logEvery.C:
-				log.Info("recover headers from db after error", "current_block", h.Number.Uint64())
+				log.Info("recover headers from db", "left", hd.persistedLinkLimit-hd.persistedLinkQueue.Len())
+			default:
 			}
 		}
 		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
