@@ -169,7 +169,9 @@ func ReadCurrentBlockNumber(db kv.Getter) *uint64 {
 
 func ReadCurrentHeader(db kv.Getter) *types.Header {
 	headHash := ReadHeadHeaderHash(db)
+	fmt.Printf("a: %x\n", headHash)
 	headNumber := ReadHeaderNumber(db, headHash)
+	fmt.Printf("b: %d\n", headNumber)
 	if headNumber == nil {
 		return nil
 	}

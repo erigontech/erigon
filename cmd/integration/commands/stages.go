@@ -418,29 +418,28 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 				return fmt.Errorf("re-read Bodies progress: %w", err)
 			}
 			// remove all canonical markers from this point
-			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress), func(k, v []byte) error {
+			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
 				return tx.Delete(kv.HeaderCanonical, k, nil)
 			}); err != nil {
 				return err
 			}
-			if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(progress), func(k, v []byte) error {
+			if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
 				return tx.Delete(kv.Headers, k, nil)
 			}); err != nil {
 				return err
 			}
-			if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress), func(k, v []byte) error {
+			if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
 				return tx.Delete(kv.HeaderTD, k, nil)
 			}); err != nil {
 				return err
 			}
-			hash, err := rawdb.ReadCanonicalHash(tx, progress)
+			hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
 			if err != nil {
 				return err
 			}
 			if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
 				log.Error("ReadHeadHeaderHash failed", "err", err)
 			}
-
 			log.Info("Progress", "headers", progress)
 			return nil
 		}
