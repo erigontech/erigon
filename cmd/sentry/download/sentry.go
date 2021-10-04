@@ -267,13 +267,13 @@ func runPeer(
 		default:
 		}
 		if peerPrinted {
-			log.Debug("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
+			log.Trace("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
 		}
 	}()
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				log.Debug("Peer stable", "id", peerID, "name", peerInfo.peer.Fullname())
+				log.Trace("Peer stable", "id", peerID, "name", peerInfo.peer.Fullname())
 				peerPrinted = true
 			}
 		}
@@ -469,10 +469,10 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 			peerID := peer.ID().String()
 			if _, ok := ss.GoodPeers.Load(peerID); ok {
-				log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
+				log.Trace(fmt.Sprintf("[%s] Peer already has connection", peerID))
 				return nil
 			}
-			log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
+			log.Trace(fmt.Sprintf("[%s] Start with peer", peerID))
 
 			peerInfo := &PeerInfo{
 				peer: peer,
@@ -488,7 +488,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			if err != nil {
 				return fmt.Errorf("handshake to peer %s: %w", peerID, err)
 			}
-			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+			log.Trace(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 			if err := runPeer(
 				ctx,
@@ -499,7 +499,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				ss.send,
 				ss.hasSubscribers,
 			); err != nil {
-				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
+				log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
 			return nil
 		},
@@ -889,7 +889,7 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
 		if len(ch) > MessagesQueueSize/2 {
-			log.Debug("[sentry] consuming is slow", "msgID", msgID.String())
+			log.Warn("[sentry] consuming is slow", "msgID", msgID.String())
 			// evict old messages from channel
 			for j := 0; j < MessagesQueueSize/4; j++ {
 				select {
@@ -937,7 +937,7 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 
 const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Debug("[Messages] new subscriber", "to", req.Ids)
+	log.Trace("[Messages] new subscriber", "to", req.Ids)
 	ch := make(chan *proto_sentry.InboundMessage, MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)

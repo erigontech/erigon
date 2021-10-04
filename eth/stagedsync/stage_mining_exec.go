@@ -251,7 +251,7 @@ func addTransactionsToMiningBlock(current *MiningBlock, chainConfig params.Chain
 		default:
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
-			log.Debug("Transaction failed, account skipped", "hash", txn.Hash(), "err", err)
+			log.Trace("Transaction failed, account skipped", "hash", txn.Hash(), "err", err)
 			txs.Shift()
 		}
 	}

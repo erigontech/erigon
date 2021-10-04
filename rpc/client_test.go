@@ -613,7 +613,7 @@ func (l *flakeyListener) Accept() (net.Conn, error) {
 	if err == nil {
 		timeout := time.Duration(rand.Int63n(int64(l.maxKillTimeout)))
 		time.AfterFunc(timeout, func() {
-			log.Debug(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
+			log.Trace(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
 			c.Close()
 		})
 	}

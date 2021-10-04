@@ -76,18 +76,18 @@ func startStop(net *Network, quit chan struct{}, nodeCount int) {
 			id := nodes[rand.Intn(len(nodes))]
 			log.Info("stopping node", "id", id)
 			if err := net.Stop(id); err != nil {
-				log.Error("error stopping node", "id", id, "err", err)
+				log.Error("Error stopping node", "id", id, "err", err)
 				return
 			}
 
 			select {
 			case <-quit:
-				log.Info("Terminating simulation loop")
+				log.Info("Terminating simulation loop ...")
 				return
 			case <-time.After(3 * time.Second):
 			}
 
-			log.Debug("starting node", "id", id)
+			log.Trace("Starting node ...", "id", id)
 			if err := net.Start(id); err != nil {
 				log.Error("error starting node", "id", id, "err", err)
 				return
@@ -147,7 +147,7 @@ func probabilistic(net *Network, quit chan struct{}, nodeCount int) {
 				return
 			case <-time.After(randWait):
 			}
-			log.Debug(fmt.Sprintf("node %v shutting down", nodes[i]))
+			log.Trace(fmt.Sprintf("Node %v shutting down ...", nodes[i]))
 			err := net.Stop(nodes[i])
 			if err != nil {
 				log.Error("Error stopping node", "node", nodes[i])
@@ -186,7 +186,7 @@ func connectNodesInRing(net *Network, nodeCount int) ([]enode.ID, error) {
 			log.Error("Error starting a node!", "err", err)
 			return nil, err
 		}
-		log.Debug(fmt.Sprintf("node %v starting up", id))
+		log.Trace(fmt.Sprintf("Node %v starting up", id))
 	}
 	for i, id := range ids {
 		peerID := ids[(i+1)%len(ids)]

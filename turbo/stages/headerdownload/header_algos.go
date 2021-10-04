@@ -520,7 +520,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	defer hd.lock.Unlock()
 	var penalties []PenaltyItem
 	if hd.anchorQueue.Len() == 0 {
-		log.Debug("Empty anchor queue")
+		log.Trace("Empty anchor queue")
 		return nil, penalties
 	}
 	for hd.anchorQueue.Len() > 0 {
@@ -559,7 +559,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
+	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
 	if len(hd.anchors) > 16 {
 		return nil // Need to be below anchor threshold to produce skeleton request
 	}
@@ -841,13 +841,13 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 // speeds up visibility of new blocks
 // It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
 func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, peerID string) (requestMore bool, penalties []PenaltyItem) {
-	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
+	log.Trace("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	foundAnchor, start := hd.findAnchors(segment)
 	foundTip, end := hd.findLink(segment, start) // We ignore penalty because we will check it as part of PoW check
 	if end == 0 {
-		log.Debug("Duplicate segment")
+		log.Trace("Duplicate segment")
 		return
 	}
 	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
@@ -868,7 +868,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 				log.Debug("Connect failed", "error", err)
 				return
 			}
-			log.Debug("Connected", "start", startNum, "end", endNum)
+			log.Trace("Connected", "start", startNum, "end", endNum)
 		} else {
 			// ExtendDown
 			var err error
@@ -876,7 +876,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 				log.Debug("ExtendDown failed", "error", err)
 				return
 			}
-			log.Debug("Extended Down", "start", startNum, "end", endNum)
+			log.Trace("Extended Down", "start", startNum, "end", endNum)
 		}
 	} else if foundTip {
 		if end > 0 {
@@ -885,7 +885,7 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 				log.Debug("ExtendUp failed", "error", err)
 				return
 			}
-			log.Debug("Extended Up", "start", startNum, "end", endNum)
+			log.Trace("Extended Up", "start", startNum, "end", endNum)
 		}
 	} else {
 		// NewAnchor
@@ -894,12 +894,12 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 			log.Debug("NewAnchor failed", "error", err)
 			return
 		}
-		log.Debug("NewAnchor", "start", startNum, "end", endNum)
+		log.Trace("NewAnchor", "start", startNum, "end", endNum)
 	}
 	//log.Info(hd.anchorState())
-	log.Debug("Link queue", "size", hd.linkQueue.Len())
+	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
-		log.Debug("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.linkLimit)
+		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.linkLimit)
 	}
 	for hd.linkQueue.Len() > hd.linkLimit {
 		link := heap.Pop(hd.linkQueue).(*Link)

@@ -219,12 +219,12 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		stage := s.stages[s.currentStage]
 
 		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
-			log.Error("STOP_BEFORE_STAGE env flag forced to stop app")
+			log.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
 			os.Exit(1)
 		}
 
 		if stage.Disabled || stage.Forward == nil {
-			log.Debug(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
+			log.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
 
 			s.NextStage()
 			continue
@@ -327,7 +327,7 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, b
 
 func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	t := time.Now()
-	log.Debug("Unwind...", "stage", stage.ID)
+	log.Trace("Unwind...", "stage", stage.ID)
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
 		return err
@@ -360,7 +360,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 
 func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
 	t := time.Now()
-	log.Debug("Prune...", "stage", stage.ID)
+	log.Trace("Prune...", "stage", stage.ID)
 
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {

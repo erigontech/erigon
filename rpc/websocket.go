@@ -57,7 +57,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, compression bool) htt
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Debug("WebSocket upgrade failed", "err", err)
+			log.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
 		codec := newWebsocketCodec(conn)
@@ -87,7 +87,7 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 			origins.Add("http://" + hostname)
 		}
 	}
-	log.Debug(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
+	log.Trace(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
 
 	f := func(req *http.Request) bool {
 		// Skip origin verification if no Origin header is present. The origin check

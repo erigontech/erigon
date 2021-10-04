@@ -115,7 +115,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			log.Info(fmt.Sprintf("[%s] Preload headers", logPrefix), "block_number", binary.BigEndian.Uint64(k))
 		}
 	}
-	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
+	log.Trace(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "amount", len(canonical))
 
 	jobs := make(chan *senderRecoveryJob, cfg.batchSize)
 	out := make(chan *senderRecoveryJob, cfg.batchSize)

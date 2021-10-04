@@ -41,7 +41,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
-		log.Debug("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
+		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
 	uncle := types.NewBlockWithHeader(uncles[index])
@@ -73,7 +73,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
-		log.Debug("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
+		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
 	uncle := types.NewBlockWithHeader(uncles[index])
