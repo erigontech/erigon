@@ -27,7 +27,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 
 	acc, err := rpchelper.GetAccount(tx, blockNumber, address)
 	if err != nil {
-		return nil, fmt.Errorf("cant get a balance for account %q for block %w", address.String(), blockNumber)
+		return nil, fmt.Errorf("cant get a balance for account %q for block %v", address.String(), blockNumber)
 	}
 	if acc == nil {
 		// Special case - non-existent account is assumed to have zero balance

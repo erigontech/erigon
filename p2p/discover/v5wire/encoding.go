@@ -575,7 +575,7 @@ func (c *Codec) decodeHandshakeRecord(local *enode.Node, wantID enode.ID, remote
 				return nil, fmt.Errorf("invalid node record: %w", err)
 			}
 			if n.ID() != wantID {
-				return nil, fmt.Errorf("record in handshake has wrong ID: %w", n.ID())
+				return nil, fmt.Errorf("record in handshake has wrong ID: %v", n.ID())
 			}
 			node = n
 		}
