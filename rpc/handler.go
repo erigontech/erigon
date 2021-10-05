@@ -102,7 +102,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
+func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
