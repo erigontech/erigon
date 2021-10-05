@@ -284,7 +284,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		b := uint64(it.Next())
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
-		panic(1)
 		if hashErr != nil {
 			stream.WriteNil()
 			return hashErr
@@ -357,6 +356,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				stream.WriteNil()
 				return err
 			}
+			stream.WriteNil()
 			if nSeen > after && nExported < count {
 				if first {
 					first = false
