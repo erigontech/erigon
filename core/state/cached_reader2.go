@@ -35,7 +35,7 @@ func (r *CachedReader2) ReadAccountData(address common.Address) (*accounts.Accou
 		return nil, nil
 	}
 	if len(enc) == 1 {
-		log.Warn("debug message", "enc", fmt.Sprintf("%x", enc))
+		log.Warn("debug message", "enc", fmt.Sprintf("%x", enc), "key", fmt.Sprintf("%x", address), "type", fmt.Sprintf("%T", r.cache))
 	}
 	var a accounts.Account
 	if err = a.DecodeForStorage(enc); err != nil {
