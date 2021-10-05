@@ -329,11 +329,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 							first = false
 						} else {
 							stream.WriteMore()
-							panic(1)
 						}
 						stream.Write(b)
 						nExported++
-						panic(1)
 					}
 				}
 			}
@@ -358,7 +356,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				stream.WriteNil()
 				return err
 			}
-			stream.WriteNil()
 			if nSeen > after && nExported < count {
 				if first {
 					first = false
