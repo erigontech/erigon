@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -189,6 +190,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 			stream.Write(json.RawMessage(buffer))
 		}
 		if needWriteStream {
+			fmt.Printf("alex: %s\n", stream.Buffer())
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
 		} else {
 			stream.Write([]byte("\n"))
