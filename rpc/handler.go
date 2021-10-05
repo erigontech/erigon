@@ -102,7 +102,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
+func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
@@ -187,15 +187,43 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
 			buffer, _ := json.Marshal(answer)
-			stream.Write(json.RawMessage(buffer))
-		}
-		if needWriteStream {
-			fmt.Printf("alex: %s\n", stream.Buffer())
-			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+			fmt.Printf("alex3: %s\n", buffer)
+			h.conn.writeJSON(cp.ctx, json.RawMessage(buffer))
+			//stream.Write(json.RawMessage(buffer))
 		} else {
-			fmt.Printf("alex2\n")
-			stream.Write([]byte("\n"))
+			if needWriteStream {
+				fmt.Printf("alex: %s\n", stream.Buffer())
+				h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+			} else {
+				fmt.Printf("alex2\n")
+				stream.Write([]byte("\n"))
+			}
 		}
+		/*
+					buf := bytes.NewBuffer(nil)
+					stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
+					if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
+						answersWithNils[i] = res
+					}
+					_ = stream.Flush()
+					if buf.Len() > 0 && answersWithNils[i] == nil {
+						answersWithNils[i] = json.RawMessage(buf.Bytes())
+					}
+				}(i)
+			}
+			wg.Wait()
+			answers := make([]interface{}, 0, len(msgs))
+			for _, answer := range answersWithNils {
+				if answer != nil {
+					answers = append(answers, answer)
+				}
+			}
+			h.addSubscriptions(cp.notifiers)
+			if len(answers) > 0 {
+				h.conn.writeJSON(cp.ctx, answers)
+			}
+
+		*/
 		for _, n := range cp.notifiers {
 			n.activate()
 		}
