@@ -134,6 +134,7 @@ func TraceTx(
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}
+
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	if err != nil {
 		if streaming {

@@ -284,6 +284,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		b := uint64(it.Next())
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
+		if true {
+			stream.WriteNil()
+			return fmt.Errorf("abcder")
+		}
 		if hashErr != nil {
 			stream.WriteNil()
 			return hashErr
