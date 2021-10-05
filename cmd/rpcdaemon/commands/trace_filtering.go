@@ -288,6 +288,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteNil()
 			return fmt.Errorf("abcder")
 		}
+		panic(1)
 		if hashErr != nil {
 			stream.WriteNil()
 			return hashErr
