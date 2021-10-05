@@ -304,18 +304,19 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		if len(value) == 0 {
 			return nil
 		}
-		var a accounts.Account
-		if err = a.DecodeForStorage(value); err != nil {
+
+		incarnation, err := accounts.DecodeIncarnationFromStorage(value)
+		if err != nil {
 			return err
 		}
-		if a.Incarnation == 0 {
+		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 		var codeHash []byte
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
-			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
+			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, incarnation, err)
 		}
 		if codeHash == nil {
 			return nil
@@ -379,18 +380,18 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 			return nil
 		}
 		var (
-			a        accounts.Account
 			newK     []byte
 			codeHash []byte
 			err      error
 		)
-		if err = a.DecodeForStorage(v); err != nil {
+		incarnation, err := accounts.DecodeIncarnationFromStorage(v)
+		if err != nil {
 			return err
 		}
-		if a.Incarnation == 0 {
+		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)
