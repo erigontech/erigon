@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math/big"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -1702,44 +1703,6 @@ func compress(chaindata string, block uint64) error {
 	return nil
 }
 
-type CompressInput struct {
-	count int
-	input []byte
-}
-
-type CompressOutput struct {
-	input      []byte // Asscociated input (for checking the decoding)
-	count      int    // Counter to order the outputs (in the incremementing order of the counts)
-	output     []byte // Actual output
-	matchCount int
-}
-
-type OutputHeap []CompressOutput
-
-func (oh OutputHeap) Len() int {
-	return len(oh)
-}
-
-func (oh OutputHeap) Less(i, j int) bool {
-	return oh[i].count < oh[j].count
-}
-
-func (oh *OutputHeap) Swap(i, j int) {
-	(*oh)[i], (*oh)[j] = (*oh)[j], (*oh)[i]
-}
-
-func (oh *OutputHeap) Push(x interface{}) {
-	*oh = append(*oh, x.(CompressOutput))
-}
-
-func (oh *OutputHeap) Pop() interface{} {
-	old := *oh
-	n := len(old)
-	x := old[n-1]
-	*oh = old[0 : n-1]
-	return x
-}
-
 type DictEntry struct {
 	score uint64
 	code  uint64
@@ -1754,8 +1717,8 @@ type DynamicCell struct {
 	score       uint64
 }
 
-func optimiseCluster(trace bool, buf []byte, input []byte, inputLen int, filtered [][]int, filteredWords []string, filteredScores []uint64, totalCover []bool,
-	dict map[string]DictEntry, usedDict map[string]int) (uint64, []byte) {
+func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, output []byte, filtered [][]int, filteredWords []string, filteredScores []uint64, totalCover []bool,
+	dict map[string]DictEntry, usedDict map[string]int) []byte {
 	if trace {
 		fmt.Printf("Cluster | input = %x\n", input)
 		fmt.Printf("filteredWords = %x\n", filteredWords)
@@ -1823,10 +1786,11 @@ func optimiseCluster(trace bool, buf []byte, input []byte, inputLen int, filtere
 		}
 	}
 	optimCell := d.Front().Value.(DynamicCell)
-	var output []byte
 	if trace {
 		fmt.Printf("optimal =")
 	}
+	p := binary.PutUvarint(numBuf, uint64(len(optimCell.patterns)))
+	output = append(output, numBuf[:p]...)
 	for _, pattern := range optimCell.patterns {
 		if trace {
 			fmt.Printf(" [%x %d-%d]", filteredWords[pattern], filtered[pattern][0], filtered[pattern][1])
@@ -1835,124 +1799,28 @@ func optimiseCluster(trace bool, buf []byte, input []byte, inputLen int, filtere
 			totalCover[j] = true
 		}
 		// Starting position
-		p := binary.PutUvarint(buf, uint64(filtered[pattern][0]))
-		output = append(output, buf[:p]...)
+		p := binary.PutUvarint(numBuf, uint64(filtered[pattern][0]))
+		output = append(output, numBuf[:p]...)
 		// Code
-		p = binary.PutUvarint(buf, uint64(dict[filteredWords[pattern]].code))
-		output = append(output, buf[:p]...)
+		p = binary.PutUvarint(numBuf, uint64(dict[filteredWords[pattern]].code))
+		output = append(output, numBuf[:p]...)
 		usedDict[filteredWords[pattern]]++
 	}
 	if trace {
 		fmt.Printf("\n\n")
 	}
-	return uint64(len(optimCell.patterns)), output
+	return output
 }
 
-func optimiseCluster1(trace bool, buf []byte, input []byte, inputLen int, filtered [][]int, filteredWords []string, filteredScores []uint64, totalCover []bool,
-	dict map[string]DictEntry, usedDict map[string]int) (uint64, []byte) {
-	if trace {
-		fmt.Printf("Cluster1 | input = %x\n", input)
-		fmt.Printf("filteredWords = %x\n", filteredWords)
-		fmt.Printf("filtered = %d\n", filtered)
-	}
-	cover := make([]int, inputLen) // cover[i] tells us how many pattern cover certain character in the input
-	var covered int                // How many characters are covered by at least one pattern
-	var patternCoding int          // How many byte are spent on coding the patterns
-	var patternScores uint64       // Sum of scores of all patterns
-	compression := 0
-	var scores uint64
-	n := len(filtered)   // Number of pattens
-	a := make([]bool, n) // a[i] == 1 if the pattern is used
-	optimal := make([]bool, n)
-	f := make([]int, n+1) // focus pointer for Gray code generation
-	for i := 0; i <= n; i++ {
-		f[i] = i
-	}
-	for {
-		if covered > patternCoding {
-			if (covered-patternCoding == compression && patternScores > scores) || covered-patternCoding > compression {
-				compression = covered - patternCoding
-				scores = patternScores
-				copy(optimal, a)
-			}
-		}
-		j := f[0]
-		f[0] = 0
-		if j == n {
-			break
-		}
-		f[j] = f[j+1]
-		f[j+1] = j + 1
-		// Invert a[j]
-		if a[j] {
-			patternCoding -= 4
-			for i := filtered[j][0]; i < filtered[j][1]; i++ {
-				cover[i]--
-				if cover[i] == 0 {
-					covered--
-				}
-			}
-			patternScores -= filteredScores[j]
-			a[j] = false
-		} else {
-			patternCoding += 4
-			for i := filtered[j][0]; i < filtered[j][1]; i++ {
-				if cover[i] == 0 {
-					covered++
-				}
-				cover[i]++
-			}
-			patternScores += filteredScores[j]
-			a[j] = true
-		}
-	}
-	var patternCount uint64
-	for i := 0; i < n; i++ {
-		if optimal[i] {
-			patternCount++
-			for j := filtered[i][0]; j < filtered[i][1]; j++ {
-				totalCover[j] = true
-			}
-		}
-	}
-	var output []byte
-	// Encode each pattern as a pair - starting position and the code
-	if trace {
-		fmt.Printf("optimal =")
-	}
-	for i := 0; i < n; i++ {
-		if optimal[i] {
-			if trace {
-				fmt.Printf(" [%x %d-%d]", filteredWords[i], filtered[i][0], filtered[i][1])
-			}
-			// Starting position
-			p := binary.PutUvarint(buf, uint64(filtered[i][0]))
-			output = append(output, buf[:p]...)
-			// Code
-			p = binary.PutUvarint(buf, uint64(dict[filteredWords[i]].code))
-			output = append(output, buf[:p]...)
-			usedDict[filteredWords[i]]++
-		}
-	}
-	if trace {
-		fmt.Printf("\n\n")
-	}
-	return patternCount, output
-}
-
-func reduceDictWorker(input []byte, trie patricia.PatriciaTree, mf *patricia.MatchFinder, dict map[string]DictEntry, usedDict map[string]int) []byte {
-	buf := make([]byte, binary.MaxVarintLen64)
-	var output []byte
+func reduceDictWorker(numBuf []byte, input []byte, output []byte, trie patricia.PatriciaTree, mf *patricia.MatchFinder, dict map[string]DictEntry, usedDict map[string]int) []byte {
 	// Write length of the string
-	p := binary.PutUvarint(buf, uint64(len(input)))
-	output = append(output, buf[:p]...)
-	matches := MatchSorter(mf.FindMatches(trie, input))
+	p := binary.PutUvarint(numBuf, uint64(len(input)))
+	output = append(output, numBuf[:p]...)
+	matches := MatchSorter(mf.FindLongestMatches(trie, input))
 	sort.Sort(&matches)
 	var filtered [][]int
 	var filteredWords []string
 	var filteredScores []uint64
-	var patternCount uint64
-	var patterns [][]byte
 	if matches.Len() > 0 {
 		totalCover := make([]bool, len(input))
 		lastMatch := matches[0]
@@ -1964,19 +1832,15 @@ func reduceDictWorker(input []byte, trie patricia.PatriciaTree, mf *patricia.Mat
 				filteredWords = append(filteredWords, string(lastMatch.Slice))
 				filteredScores = append(filteredScores, binary.BigEndian.Uint64(lastMatch.Vals[0]))
 				lastMatch = match
+			} else {
+				fmt.Printf("Unexpected\n")
 			}
 		}
 		filtered = append(filtered, []int{lastMatch.Pos, lastMatch.Pos + len(lastMatch.Slice)})
 		filteredWords = append(filteredWords, string(lastMatch.Slice))
 		filteredScores = append(filteredScores, binary.BigEndian.Uint64(lastMatch.Vals[0]))
-		pc, pattern := optimiseCluster(false, buf, input, len(input), filtered, filteredWords, filteredScores, totalCover, dict, usedDict)
-		patternCount += pc
-		patterns = append(patterns, pattern)
-		p := binary.PutUvarint(buf, patternCount)
-		output = append(output, buf[:p]...)
-		for _, pattern := range patterns {
-			output = append(output, pattern...)
-		}
+
+		output = optimiseCluster(false, numBuf, input, len(input), output, filtered, filteredWords, filteredScores, totalCover, dict, usedDict)
 		// Add uncoded input
 		for i := 0; i < len(totalCover); i++ {
 			if !totalCover[i] {
@@ -1985,8 +1849,8 @@ func reduceDictWorker(input []byte, trie patricia.PatriciaTree, mf *patricia.Mat
 		}
 	} else {
 		if len(input) > 0 {
-			p := binary.PutUvarint(buf, 0)
-			output = append(output, buf[:p]...)
+			p := binary.PutUvarint(numBuf, 0)
+			output = append(output, numBuf[:p]...)
 			output = append(output, input...)
 		}
 	}
@@ -2038,6 +1902,11 @@ func decode(output []byte, invDict map[uint64][]byte) ([]byte, error) {
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict(block int) error {
+	go func() {
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			log.Error("Failure in running pprof server", "err", err)
+		}
+	}()
 	// Read up the dictionary
 	df, err := os.Open("reduced_dictionary.txt")
 	if err != nil {
@@ -2081,10 +1950,10 @@ func reducedict(block int) error {
 	usedDict := make(map[string]int)
 	var inputSize int
 	var outputSize int
-	var outputs OutputHeap
-	heap.Init(&outputs)
 	r := bufio.NewReader(f)
 	var buf [256]byte
+	var output []byte = make([]byte, 0, 256)
+	numBuf := make([]byte, binary.MaxVarintLen64)
 	l, e := r.ReadByte()
 	i := 0
 	var mf patricia.MatchFinder
@@ -2092,7 +1961,7 @@ func reducedict(block int) error {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		output := reduceDictWorker(buf[:l], pt, &mf, dict, usedDict)
+		output = reduceDictWorker(numBuf, buf[:l], output[:0], pt, &mf, dict, usedDict)
 		var input []byte
 		if input, err = decode(output, invDict); err != nil {
 			return fmt.Errorf("decoding compression output %x for input %x: %v", output, buf[:l], err)
