@@ -101,7 +101,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 }
 
 // handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
+func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
@@ -172,26 +172,19 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage, stream *jsoniter.Stream) {
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
+func (h *handler) handleMsg(msg *jsonrpcMessage) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		needWriteStream := false
-		if stream == nil {
-			stream = jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
-			needWriteStream = true
-		}
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			buffer, _ := json.Marshal(answer)
-			stream.Write(json.RawMessage(buffer))
-		}
-		if needWriteStream {
-			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
+			h.conn.writeJSON(cp.ctx, answer)
 		} else {
-			stream.Write([]byte("\n"))
+			_ = stream.Flush()
+			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
 		}
 		for _, n := range cp.notifiers {
 			n.activate()

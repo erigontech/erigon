@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 
 	mapset "github.com/deckarep/golang-set"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -100,7 +99,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
 // is used to serve HTTP connections. Subscriptions and reverse calls are not allowed in
 // this mode.
-func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream *jsoniter.Stream) {
+func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 	// Don't serve if server is stopped.
 	if atomic.LoadInt32(&s.run) == 0 {
 		return
@@ -118,9 +117,9 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return
 	}
 	if batch {
-		h.handleBatch(reqs, stream)
+		h.handleBatch(reqs)
 	} else {
-		h.handleMsg(reqs[0], stream)
+		h.handleMsg(reqs[0])
 	}
 }
 
