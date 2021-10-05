@@ -329,7 +329,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 							first = false
 						} else {
 							stream.WriteMore()
-							panic(1)
+							return fmt.Errorf("adfsdf")
 						}
 						stream.Write(b)
 						nExported++
