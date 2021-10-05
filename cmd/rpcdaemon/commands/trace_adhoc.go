@@ -13,6 +13,8 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -867,6 +869,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		cacheView, err := api.stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
+		}
+		if txpool.ASSERT {
+			if _, err := kvcache.AssertCheckValues(ctx, tx, api.stateCache); err != nil {
+				log.Error("AssertCheckValues", "err", err)
+			}
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
