@@ -118,7 +118,7 @@ OUTER:
 				checkIds[ev.Conn.One] = append(checkIds[ev.Conn.One], ev.Conn.Other)
 				checkIds[ev.Conn.Other] = append(checkIds[ev.Conn.Other], ev.Conn.One)
 				connEventCount--
-				log.Debug("ev", "count", connEventCount)
+				log.Trace("ev", "count", connEventCount)
 				if connEventCount == 0 {
 					break OUTER
 				}
@@ -135,7 +135,7 @@ OUTER:
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Debug("snapshot taken", "nodes", len(snap.Nodes), "conns", len(snap.Conns), "json", string(j))
+	log.Trace("snapshot taken", "nodes", len(snap.Nodes), "conns", len(snap.Conns), "json", string(j))
 
 	// verify that the snap element numbers check out
 	if len(checkIds) != len(snap.Conns) || len(checkIds) != len(snap.Nodes) {
@@ -214,11 +214,11 @@ OuterTwo:
 				if !ev.Conn.Up {
 					t.Fatalf("unexpected disconnect: %v -> %v", ev.Conn.One, ev.Conn.Other)
 				}
-				log.Debug("conn", "on", ev.Conn.One, "other", ev.Conn.Other)
+				log.Trace("conn", "on", ev.Conn.One, "other", ev.Conn.Other)
 				checkIds[ev.Conn.One] = append(checkIds[ev.Conn.One], ev.Conn.Other)
 				checkIds[ev.Conn.Other] = append(checkIds[ev.Conn.Other], ev.Conn.One)
 				connEventCount--
-				log.Debug("ev", "count", connEventCount)
+				log.Trace("ev", "count", connEventCount)
 				if connEventCount == 0 {
 					break OuterTwo
 				}
@@ -760,7 +760,7 @@ func benchmarkMinimalServiceTmp(b *testing.B) {
 		defer cancel()
 		for nodid, peers := range protoCMap {
 			for peerid, peerC := range peers {
-				log.Debug("getting ", "node", nodid, "peer", peerid)
+				log.Trace("getting ", "node", nodid, "peer", peerid)
 				select {
 				case <-ctx.Done():
 					b.Fatal(ctx.Err())

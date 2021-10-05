@@ -168,8 +168,8 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 	defer func() {
 		elapsed := time.Since(start)
 
-		logFn := logger.Debug
-		if elapsed > 3*time.Second {
+		logFn := logger.Trace
+		if elapsed > 5*time.Second {
 			logFn = logger.Info
 		}
 		logFn("Generated ethash verification cache", "elapsed", common.PrettyDuration(elapsed))
