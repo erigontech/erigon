@@ -120,7 +120,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	if batch {
 		h.handleBatch(reqs, stream)
 	} else {
-		h.handleMsg(reqs[0], stream)
+		h.handleMsg(reqs[0], nil)
 	}
 }
 
