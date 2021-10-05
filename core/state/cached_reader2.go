@@ -3,12 +3,14 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // CachedReader2 is a wrapper for an instance of type StateReader
@@ -31,6 +33,9 @@ func (r *CachedReader2) ReadAccountData(address common.Address) (*accounts.Accou
 	}
 	if len(enc) == 0 {
 		return nil, nil
+	}
+	if len(enc) == 1 {
+		log.Warn("debug message", "enc", fmt.Sprintf("%x", enc))
 	}
 	var a accounts.Account
 	if err = a.DecodeForStorage(enc); err != nil {
