@@ -17,7 +17,6 @@
 package rpc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -123,6 +122,16 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
+		streams := make([]*jsoniter.Stream, len(msgs))
+		for i := range streams {
+			streams[i] = jsoniter.ConfigDefault.BorrowStream(nil)
+		}
+		defer func() {
+			for i := range streams {
+				jsoniter.ConfigDefault.ReturnStream(streams[i])
+			}
+		}()
+
 		answersWithNils := make([]interface{}, len(msgs))
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
 		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
@@ -143,14 +152,13 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				default:
 				}
 
-				buf := bytes.NewBuffer(nil)
-				stream := jsoniter.NewStream(jsoniter.ConfigDefault, buf, 4096)
+				stream := streams[i]
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
 					answersWithNils[i] = res
 				}
 				_ = stream.Flush()
-				if buf.Len() > 0 && answersWithNils[i] == nil {
-					answersWithNils[i] = json.RawMessage(buf.Bytes())
+				if len(stream.Buffer()) > 0 && answersWithNils[i] == nil {
+					answersWithNils[i] = json.RawMessage(stream.Buffer())
 				}
 			}(i)
 		}
@@ -177,8 +185,8 @@ func (h *handler) handleMsg(msg *jsonrpcMessage) {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		jsoniter.ConfigDefault.BorrowStream(nil)
-		stream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
+		stream := jsoniter.ConfigDefault.BorrowStream(nil)
+		defer jsoniter.ConfigDefault.ReturnStream(stream)
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
