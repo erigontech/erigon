@@ -86,7 +86,6 @@ type Coherent struct {
 	keys, evict         *metrics.Counter
 	latestView          *CoherentRoot
 	evictList           *List
-	search              *Element // pre-allocated object used for search in b-tree
 	roots               map[ViewID]*CoherentRoot
 	lock                sync.RWMutex
 	cfg                 CoherentConfig
@@ -141,7 +140,6 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:     map[ViewID]*CoherentRoot{},
 		evictList: NewList(),
 		cfg:       cfg,
-		search:    &Element{},
 		miss:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
 		timeout:   metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
@@ -270,20 +268,30 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 	return &CoherentView{viewID: ViewID(tx.ViewID()), tx: tx, cache: c}, nil
 }
 
-func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
+func (c *Coherent) getFromCache(k []byte, id ViewID) (btree.Item, *CoherentRoot, bool, error) {
 	c.lock.RLock()
+	defer c.lock.RUnlock()
 
 	isLatest := c.latestViewID == id
+
 	r, ok := c.roots[id]
 	if !ok {
-		return nil, fmt.Errorf("too old ViewID: %d, latestViewID=%d", id, c.latestViewID)
+		return nil, r, isLatest, fmt.Errorf("too old ViewID: %d, latestViewID=%d", id, c.latestViewID)
 	}
-	c.search.K = k
-	it := r.cache.Get(c.search)
-	c.lock.RUnlock()
+
+	it := r.cache.Get(&Element{K: k})
+	return it, r, isLatest, nil
+}
+
+func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
+	it, r, isLatest, err := c.getFromCache(k, id)
+	if err != nil {
+		return nil, err
+	}
 
 	if it != nil {
 		c.hits.Inc()
+
 		if isLatest {
 			c.evictList.MoveToFront(it.(*Element))
 		}
@@ -299,8 +307,8 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	//fmt.Printf("from db: %#x,%x\n", k, v)
 
 	c.lock.Lock()
+	defer c.lock.Unlock()
 	v = c.add(common.Copy(k), common.Copy(v), r, id).V
-	c.lock.Unlock()
 	return v, nil
 }
 
