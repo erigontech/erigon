@@ -12,6 +12,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	proto_snap "github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
@@ -159,7 +160,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	if mainNetPreDownload {
 		log.Info("Predownload mainnet snapshots")
 		go func() {
-			_, err := bittorrentServer.Download(context.Background(), &snapshotsync.DownloadSnapshotRequest{
+			_, err := bittorrentServer.Download(context.Background(), &proto_snap.DownloadSnapshotRequest{
 				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
 				Type:      snapshotsync.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
 			})
@@ -176,7 +177,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 			default:
 			}
 
-			snapshots, err := bittorrentServer.Snapshots(context.Background(), &snapshotsync.SnapshotsRequest{
+			snapshots, err := bittorrentServer.Snapshots(context.Background(), &proto_snap.SnapshotsRequest{
 				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
 			})
 			if err != nil {
@@ -191,7 +192,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 			time.Sleep(time.Minute)
 		}
 	}()
-	snapshotsync.RegisterDownloaderServer(grpcServer, bittorrentServer)
+	proto_snap.RegisterDownloaderServer(grpcServer, bittorrentServer)
 	go func() {
 		log.Info("Starting grpc")
 		err := grpcServer.Serve(lis)

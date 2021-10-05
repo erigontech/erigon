@@ -210,7 +210,7 @@ func RecvUploadHeadersMessage(ctx context.Context,
 			if rlp.IsDecodeError(err) {
 				log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
 			} else {
-				log.Error("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
+				log.Warn("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
 			}
 		}
 		if wg != nil {
@@ -312,7 +312,7 @@ func RecvMessage(
 			if rlp.IsDecodeError(err) {
 				log.Debug("[RecvMessage] Handling incoming message", "error", err)
 			} else {
-				log.Error("[RecvMessage] Handling incoming message", "error", err)
+				log.Warn("[RecvMessage] Handling incoming message", "error", err)
 			}
 		}
 
@@ -519,7 +519,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 				if req != nil {
 					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
 						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
-						log.Debug("Sent request", "height", req.Number)
+						log.Trace("Sent request", "height", req.Number)
 					}
 				}
 				cs.Penalize(ctx, penalties)
@@ -594,7 +594,7 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 				if req != nil {
 					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
 						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
-						log.Debug("Sent request", "height", req.Number)
+						log.Trace("Sent request", "height", req.Number)
 					}
 				}
 				cs.Penalize(ctx, penalties)
@@ -673,7 +673,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Debug(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }
 

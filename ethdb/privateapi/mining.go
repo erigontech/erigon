@@ -166,7 +166,7 @@ func (s *MinedBlockStreams) Broadcast(reply *proto_txpool.OnMinedBlockReply) {
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Debug("failed send to mined block stream", "err", err)
+			log.Trace("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
@@ -211,7 +211,7 @@ func (s *PendingBlockStreams) Broadcast(reply *proto_txpool.OnPendingBlockReply)
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Debug("failed send to mined block stream", "err", err)
+			log.Trace("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)
@@ -256,7 +256,7 @@ func (s *PendingLogsStreams) Broadcast(reply *proto_txpool.OnPendingLogsReply) {
 	for id, stream := range s.chans {
 		err := stream.Send(reply)
 		if err != nil {
-			log.Debug("failed send to mined block stream", "err", err)
+			log.Trace("failed send to mined block stream", "err", err)
 			select {
 			case <-stream.Context().Done():
 				delete(s.chans, id)

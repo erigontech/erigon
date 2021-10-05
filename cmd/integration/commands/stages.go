@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -37,6 +38,23 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 )
+
+var cmdStageHeaders = &cobra.Command{
+	Use:   "stage_headers",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := utils.RootContext()
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
+		defer db.Close()
+
+		if err := stageHeaders(db, ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
 
 var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
@@ -276,6 +294,12 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageSenders)
 
+	withDatadir(cmdStageHeaders)
+	withUnwind(cmdStageHeaders)
+	withChain(cmdStageHeaders)
+
+	rootCmd.AddCommand(cmdStageHeaders)
+
 	withDatadir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
 	withChain(cmdStageBodies)
@@ -374,6 +398,54 @@ func init() {
 	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
+}
+
+func stageHeaders(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if unwind > 0 {
+			progress, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return fmt.Errorf("read Bodies progress: %w", err)
+			}
+			if unwind > progress {
+				return fmt.Errorf("cannot unwind past 0")
+			}
+			if err = stages.SaveStageProgress(tx, stages.Headers, progress-unwind); err != nil {
+				return fmt.Errorf("saving Bodies progress failed: %w", err)
+			}
+			progress, err = stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return fmt.Errorf("re-read Bodies progress: %w", err)
+			}
+			// remove all canonical markers from this point
+			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+				return tx.Delete(kv.HeaderCanonical, k, nil)
+			}); err != nil {
+				return err
+			}
+			if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+				return tx.Delete(kv.Headers, k, nil)
+			}); err != nil {
+				return err
+			}
+			if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+				return tx.Delete(kv.HeaderTD, k, nil)
+			}); err != nil {
+				return err
+			}
+			hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
+			if err != nil {
+				return err
+			}
+			if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
+				log.Error("ReadHeadHeaderHash failed", "err", err)
+			}
+			log.Info("Progress", "headers", progress)
+			return nil
+		}
+		log.Info("This command only works with --unwind option")
+		return nil
+	})
 }
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {

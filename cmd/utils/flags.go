@@ -179,7 +179,7 @@ var (
 	}
 	TxPoolPriceLimitFlag = cli.Uint64Flag{
 		Name:  "txpool.pricelimit",
-		Usage: "Minimum gas price limit to enforce for acceptance into the pool",
+		Usage: "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
 		Value: ethconfig.Defaults.TxPool.PriceLimit,
 	}
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
@@ -732,7 +732,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	}
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
-		return nil, fmt.Errorf("invalid nat option %s: %v", natSetting, err)
+		return nil, fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 	cfg.NAT = natif
 	return cfg, nil

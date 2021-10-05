@@ -71,7 +71,7 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 }
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
-	log.Debug("establishing event subscription channel with the RPC daemon")
+	log.Trace("Establishing event subscription channel with the RPC daemon ...")
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		select {
 		case <-s.ctx.Done():

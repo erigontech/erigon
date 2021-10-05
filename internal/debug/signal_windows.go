@@ -9,12 +9,11 @@ import (
 
 	_debug "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sys/windows"
 )
 
 func ListenSignals(stack io.Closer) {
 	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, windows.SIGINT, windows.SIGTERM)
+	signal.Notify(sigc, os.Interrupt)
 	_debug.GetSigC(&sigc)
 	defer signal.Stop(sigc)
 

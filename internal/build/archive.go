@@ -122,13 +122,13 @@ func (a *ZipArchive) Directory(name string) error {
 func (a *ZipArchive) Header(fi os.FileInfo) (io.Writer, error) {
 	head, err := zip.FileInfoHeader(fi)
 	if err != nil {
-		return nil, fmt.Errorf("can't make zip header: %v", err)
+		return nil, fmt.Errorf("can't make zip header: %w", err)
 	}
 	head.Name = a.dir + head.Name
 	head.Method = zip.Deflate
 	w, err := a.zipw.CreateHeader(head)
 	if err != nil {
-		return nil, fmt.Errorf("can't add zip header: %v", err)
+		return nil, fmt.Errorf("can't add zip header: %w", err)
 	}
 	return w, nil
 }
@@ -165,11 +165,11 @@ func (a *TarballArchive) Directory(name string) error {
 func (a *TarballArchive) Header(fi os.FileInfo) (io.Writer, error) {
 	head, err := tar.FileInfoHeader(fi, "")
 	if err != nil {
-		return nil, fmt.Errorf("can't make tar header: %v", err)
+		return nil, fmt.Errorf("can't make tar header: %w", err)
 	}
 	head.Name = a.dir + head.Name
 	if err := a.tarw.WriteHeader(head); err != nil {
-		return nil, fmt.Errorf("can't add tar header: %v", err)
+		return nil, fmt.Errorf("can't add tar header: %w", err)
 	}
 	return a.tarw, nil
 }
@@ -226,7 +226,7 @@ func extractTarball(ar io.Reader, dest string) error {
 			armode := header.FileInfo().Mode()
 			err := extractFile(header.Name, armode, tr, dest)
 			if err != nil {
-				return fmt.Errorf("extract %s: %v", header.Name, err)
+				return fmt.Errorf("extract %s: %w", header.Name, err)
 			}
 		}
 	}
@@ -255,7 +255,7 @@ func extractZip(ar *os.File, dest string) error {
 		err = extractFile(zf.Name, zf.Mode(), data, dest)
 		data.Close()
 		if err != nil {
-			return fmt.Errorf("extract %s: %v", zf.Name, err)
+			return fmt.Errorf("extract %s: %w", zf.Name, err)
 		}
 	}
 	return nil

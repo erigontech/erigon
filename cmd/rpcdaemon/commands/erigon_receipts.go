@@ -30,7 +30,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	}
 	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
 	logs := make([][]*types.Log, len(receipts))
@@ -55,7 +55,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 
 // 	receipts, err := getReceipts(ctx, tx, *number, hash)
 // 	if err != nil {
-// 		return nil, fmt.Errorf("getReceipts error: %v", err)
+// 		return nil, fmt.Errorf("getReceipts error: %w", err)
 // 	}
 
 // 	logs := make([][]*types.Log, len(receipts))
