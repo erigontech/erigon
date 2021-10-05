@@ -710,7 +710,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	changedSenders := map[uint64]struct{}{}
+	sendersWithChangedState := map[uint64]struct{}{}
 	for i, txn := range newTxs.txs {
 		if _, ok := byHash[string(txn.idHash[:])]; ok {
 			continue
@@ -719,15 +719,15 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 		if !add(mt) {
 			continue
 		}
-		changedSenders[mt.Tx.senderID] = struct{}{}
+		sendersWithChangedState[mt.Tx.senderID] = struct{}{}
 	}
 
-	for senderID := range changedSenders {
+	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return err
 		}
-		onSenderChange(senderID, nonce, balance, byNonce, protocolBaseFee, pendingBaseFee, pending, baseFee, queued, false)
+		onSenderStateChange(senderID, nonce, balance, byNonce, protocolBaseFee, pendingBaseFee, pending, baseFee, queued, false)
 	}
 
 	//pending.EnforceWorstInvariants()
@@ -760,7 +760,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 	// they effective lose their priority over the "remote" transactions. In order to prevent that,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
-	changedSenders := map[uint64]struct{}{}
+	sendersWithChangedState := map[uint64]struct{}{}
 	for i, txn := range newTxs.txs {
 		if _, ok := byHash[string(txn.idHash[:])]; ok {
 			continue
@@ -769,9 +769,9 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 		if !add(mt) {
 			continue
 		}
-		changedSenders[mt.Tx.senderID] = struct{}{}
+		sendersWithChangedState[mt.Tx.senderID] = struct{}{}
 	}
-	// add senders changed in state to `changedSenders` list
+	// add senders changed in state to `sendersWithChangedState` list
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
@@ -784,7 +784,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 				if !ok {
 					continue
 				}
-				changedSenders[id] = struct{}{}
+				sendersWithChangedState[id] = struct{}{}
 			}
 		}
 	}
@@ -793,12 +793,12 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 		onBaseFeeChange(byNonce, pendingBaseFee) // re-calc all fields depending on pendingBaseFee
 	}
 
-	for senderID := range changedSenders {
+	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return err
 		}
-		onSenderChange(senderID, nonce, balance, byNonce, protocolBaseFee, pendingBaseFee, pending, baseFee, queued, true)
+		onSenderStateChange(senderID, nonce, balance, byNonce, protocolBaseFee, pendingBaseFee, pending, baseFee, queued, true)
 	}
 	pending.EnforceWorstInvariants()
 	baseFee.EnforceInvariants()
@@ -942,7 +942,7 @@ func onBaseFeeChange(byNonce *BySenderAndNonce, pendingBaseFee uint64) {
 	})
 }
 
-func onSenderChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, byNonce *BySenderAndNonce, protocolBaseFee, pendingBaseFee uint64, pending *PendingPool, baseFee, queued *SubPool, unsafe bool) {
+func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, byNonce *BySenderAndNonce, protocolBaseFee, pendingBaseFee uint64, pending *PendingPool, baseFee, queued *SubPool, unsafe bool) {
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint64(math.MaxUint64)
@@ -1929,11 +1929,11 @@ func (mt *metaTx) Less(than *metaTx) bool {
 	if mt.subPool != than.subPool {
 		return mt.subPool < than.subPool
 	}
-	if mt.Tx.nonce != than.Tx.nonce {
-		return mt.Tx.nonce < than.Tx.nonce
-	}
 	if mt.effectiveTip != than.effectiveTip {
 		return mt.effectiveTip < than.effectiveTip
+	}
+	if mt.Tx.nonce != than.Tx.nonce {
+		return mt.Tx.nonce < than.Tx.nonce
 	}
 	return mt.timestamp < than.timestamp
 }

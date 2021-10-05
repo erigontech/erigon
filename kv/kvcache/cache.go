@@ -37,7 +37,6 @@ type Cache interface {
 	// View - returns CacheView consistent with givent kv.Tx
 	View(ctx context.Context, tx kv.Tx) (CacheView, error)
 	OnNewBlock(sc *remote.StateChangeBatch)
-	//Evict() int
 	Len() int
 }
 type CacheView interface {
@@ -84,7 +83,7 @@ type CacheView interface {
 //  - changes in Non-Canonical View SHOULD NOT reflect in evictList
 type Coherent struct {
 	hits, miss, timeout *metrics.Counter
-	keys, keys2         *metrics.Counter
+	keys, evict         *metrics.Counter
 	latestView          *CoherentRoot
 	evictList           *List
 	search              *Element // pre-allocated object used for search in b-tree
@@ -147,7 +146,7 @@ func New(cfg CoherentConfig) *Coherent {
 		hits:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
 		timeout:   metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
 		keys:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		keys2:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
+		evict:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -201,7 +200,7 @@ func (c *Coherent) advanceRoot(viewID ViewID) (r *CoherentRoot) {
 	c.latestView = r
 
 	c.keys.Set(uint64(c.latestView.cache.Len()))
-	c.keys2.Set(uint64(c.evictList.Len()))
+	c.evict.Set(uint64(c.evictList.Len()))
 	return r
 }
 
@@ -274,7 +273,6 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	c.lock.RLock()
 
-	//t := time.Now()
 	isLatest := c.latestViewID == id
 	r, ok := c.roots[id]
 	if !ok {
@@ -289,7 +287,6 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 		if isLatest {
 			c.evictList.MoveToFront(it.(*Element))
 		}
-		//fmt.Printf("i: %d,%s\n", i, time.Since(t))
 		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		return it.(*Element).V, nil
 	}

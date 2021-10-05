@@ -184,11 +184,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		}
 	}
 
-	err = env.Open(opts.path, opts.flags, 0664)
-	if err != nil {
-		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), callers(10))
-	}
-
 	defaultDirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
 	if err != nil {
 		return nil, err
@@ -222,6 +217,11 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		return nil, err
 	}
 
+	err = env.Open(opts.path, opts.flags, 0664)
+	if err != nil {
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), callers(10))
+	}
+
 	db := &MdbxKV{
 		opts:    opts,
 		env:     env,
@@ -236,38 +236,8 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	buckets := bucketSlice(db.buckets)
-	// Open or create buckets
-	if opts.flags&mdbx.Readonly != 0 {
-		tx, innerErr := db.BeginRo(context.Background())
-		if innerErr != nil {
-			return nil, innerErr
-		}
-		for _, name := range buckets {
-			if db.buckets[name].IsDeprecated {
-				continue
-			}
-			if err = tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
-				return nil, err
-			}
-		}
-		err = tx.Commit()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			for _, name := range buckets {
-				if db.buckets[name].IsDeprecated {
-					continue
-				}
-				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+	if err := db.openDBIs(buckets); err != nil {
+		return nil, err
 	}
 
 	// Configure buckets and open deprecated buckets
@@ -322,6 +292,42 @@ type MdbxKV struct {
 	buckets kv.TableCfg
 	opts    MdbxOpts
 	txSize  uint64
+}
+
+// openDBIs - first trying to open existing DBI's in RO transaction
+// otherwise re-try by RW transaction
+// it allow open DB from another process - even if main process holding long RW transaction
+func (db *MdbxKV) openDBIs(buckets []string) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		for _, name := range buckets {
+			if db.buckets[name].IsDeprecated {
+				continue
+			}
+			if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+				return err
+			}
+		}
+		return tx.Commit() // when open db as read-only, commit of this RO transaction is required
+	}); err != nil {
+		if db.opts.flags&mdbx.Readonly != 0 {
+			return err
+		}
+
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			for _, name := range buckets {
+				if db.buckets[name].IsDeprecated {
+					continue
+				}
+				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close closes db

@@ -61,6 +61,9 @@ type TxParseContext struct {
 }
 
 func NewTxParseContext(rules chain.Rules, chainID uint256.Int) *TxParseContext {
+	if chainID.IsZero() {
+		panic("wrong chainID")
+	}
 	ctx := &TxParseContext{
 		withSender: true,
 		keccak1:    sha3.NewLegacyKeccak256(),
