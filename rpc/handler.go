@@ -193,6 +193,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 			fmt.Printf("alex: %s\n", stream.Buffer())
 			h.conn.writeJSON(cp.ctx, json.RawMessage(stream.Buffer()))
 		} else {
+			fmt.Printf("alex2\n")
 			stream.Write([]byte("\n"))
 		}
 		for _, n := range cp.notifiers {
