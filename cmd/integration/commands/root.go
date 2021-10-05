@@ -63,6 +63,7 @@ func openDB(path string, logger log.Logger, applyMigrations bool) kv.RwDB {
 
 func openKV(label kv.Label, logger log.Logger, path string, exclusive bool) kv.RwDB {
 	opts := kv2.NewMDBX(logger).Path(path).Label(label)
+	fmt.Printf("ooooopen: %t\n", exclusive)
 	if exclusive {
 		opts = opts.Exclusive()
 	}
