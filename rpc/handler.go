@@ -186,9 +186,8 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsoniter.Stream) {
 		answer := h.handleCallMsg(cp, msg, stream)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
-			buffer, _ := json.Marshal(answer)
-			fmt.Printf("alex3: %s\n", buffer)
-			h.conn.writeJSON(cp.ctx, json.RawMessage(buffer))
+			fmt.Printf("alex3: %#v\n", answer)
+			h.conn.writeJSON(cp.ctx, answer)
 			//stream.Write(json.RawMessage(buffer))
 		} else {
 			if needWriteStream {
