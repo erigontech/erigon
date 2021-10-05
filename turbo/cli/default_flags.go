@@ -48,7 +48,7 @@ var DefaultFlags = []cli.Flag{
 	TLSCertFlag,
 	TLSKeyFlag,
 	TLSCACertFlag,
-	StateStreamDisableFlag,
+	StateStreamFlag,
 	SyncLoopThrottleFlag,
 	BadBlockFlag,
 	utils.ListenPortFlag,
