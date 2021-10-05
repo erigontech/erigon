@@ -333,6 +333,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						}
 						stream.Write(b)
 						nExported++
+						panic(1)
 					}
 				}
 			}
