@@ -296,7 +296,7 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) b
 	for _, m := range bitmaps {
 		sz += m.GetSizeInBytes() * 2
 	}
-	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
+	const memoryNeedsForKey = 32 * 2 * 2 //  len(key) * (string and bytes) overhead * go's map overhead
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
