@@ -240,6 +240,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		db = rwKv
 		stateCache = kvcache.NewDummy()
 	} else {
+		stateCache = kvcache.New(cfg.StateCache)
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 
@@ -262,7 +263,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		return nil, nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
-	stateCache = kvcache.New(cfg.StateCache)
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
 	remoteEth := services.NewRemoteBackend(conn)
