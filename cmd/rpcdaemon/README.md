@@ -13,7 +13,7 @@
     * [Trace transactions progress](#trace-transactions-progress)
     * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
     * [Server load too high](#server-load-too-high)
-    * [Batch requests](#batch-requests)
+    * [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
     * [Code generation](#code-generation)
 
@@ -448,7 +448,7 @@ Reduce `--private.api.ratelimit`
 
 [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
-### Batch requests
+### Faster Batch requests
 
 Currently batch requests are spawn multiple goroutines and process all sub-requests in parallel. To limit impact of 1
 huge batch to other users - added flag `--rpc.batch.concurrency` (default: 2). Increase it to process large batches
