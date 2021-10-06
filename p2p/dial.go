@@ -240,7 +240,7 @@ loop:
 	for {
 		// Launch new dials if slots are available.
 		slots := d.freeDialSlots()
-		slots -= d.startStaticDials(slots)
+		d.startStaticDials()
 		if slots > 0 {
 			nodesCh = d.nodesIn
 		} else {
@@ -421,14 +421,13 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 }
 
 // startStaticDials starts n static dial tasks.
-func (d *dialScheduler) startStaticDials(n int) (started int) {
-	for started = 0; started < n && len(d.staticPool) > 0; started++ {
+func (d *dialScheduler) startStaticDials() {
+	for len(d.staticPool) > 0 {
 		idx := d.rand.Intn(len(d.staticPool))
 		task := d.staticPool[idx]
 		d.startDial(task)
 		d.removeFromStaticPool(idx)
 	}
-	return started
 }
 
 // updateStaticPool attempts to move the given static dial back into staticPool.
