@@ -3,7 +3,6 @@ module github.com/ledgerwatch/erigon
 go 1.16
 
 require (
-	github.com/BobuSumisu/aho-corasick v1.0.3
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.7.0
 	github.com/VictoriaMetrics/metrics v1.18.0
@@ -37,7 +36,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20211006071738-9376dfdde3ef
+	github.com/ledgerwatch/erigon-lib v0.0.0-20211006142856-240f7f121273
 	github.com/ledgerwatch/log/v3 v3.3.1
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
