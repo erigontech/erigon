@@ -285,7 +285,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 
 	root, err := trie.CalcRoot("", tx)
 	if err != nil {
-		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
+		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %w", err)
 	}
 
 	return statedb, root, nil
@@ -341,7 +341,7 @@ func (tx *stTransaction) toMessage(ps stPostState, baseFee *big.Int) (core.Messa
 	if len(tx.PrivateKey) > 0 {
 		key, err := crypto.ToECDSA(tx.PrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("invalid private key: %v", err)
+			return nil, fmt.Errorf("invalid private key: %w", err)
 		}
 		from = crypto.PubkeyToAddress(key.PublicKey)
 	}
@@ -350,7 +350,7 @@ func (tx *stTransaction) toMessage(ps stPostState, baseFee *big.Int) (core.Messa
 	if tx.To != "" {
 		to = new(common.Address)
 		if err := to.UnmarshalText([]byte(tx.To)); err != nil {
-			return nil, fmt.Errorf("invalid to address: %v", err)
+			return nil, fmt.Errorf("invalid to address: %w", err)
 		}
 	}
 

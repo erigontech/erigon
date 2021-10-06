@@ -13,7 +13,7 @@
     * [Trace transactions progress](#trace-transactions-progress)
     * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
     * [Server load too high](#server-load-too-high)
-    * [Batch requests](#batch-requests)
+    * [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
     * [Code generation](#code-generation)
 
@@ -66,8 +66,7 @@ INFO [date-time] HTTP endpoint opened url=localhost:8545...
 
 ### Healthcheck
 
-Running the daemon also opens an endpoint `/health` that provides a basic
-health check.
+Running the daemon also opens an endpoint `/health` that provides a basic health check.
 
 If the health check is successful it returns 200 OK.
 
@@ -90,9 +89,10 @@ Not adding a check disables that.
 **`known_block`** -- sets up the block that node has to know about. Requires
 `eth` namespace to be listed in `http.api`.
 
-Example request 
+Example request
 ```http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'```
 Example response
+
 ```
 {
     "check_block": "HEALTHY",
@@ -100,7 +100,6 @@ Example response
     "min_peer_count": "HEALTHY"
 }
 ```
-
 
 ### Testing
 
@@ -449,10 +448,10 @@ Reduce `--private.api.ratelimit`
 
 [./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
 
-### Batch requests
+### Faster Batch requests
 
 Currently batch requests are spawn multiple goroutines and process all sub-requests in parallel. To limit impact of 1
-huge batch to other users - added flag `--rpc.batch.concurrency` (default: 50). Increase it to process large batches
+huge batch to other users - added flag `--rpc.batch.concurrency` (default: 2). Increase it to process large batches
 faster.
 
 Known Issue: if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will

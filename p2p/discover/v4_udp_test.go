@@ -102,7 +102,7 @@ func (test *udpTest) packetInFrom(wantError error, key *ecdsa.PrivateKey, addr *
 
 	enc, _, err := v4wire.Encode(key, data)
 	if err != nil {
-		test.t.Errorf("%s encode error: %v", data.Name(), err)
+		test.t.Errorf("%s encode error: %w", data.Name(), err)
 	}
 	test.sent = append(test.sent, enc)
 	if err = test.udp.handlePacket(addr, enc); err != wantError {
@@ -124,7 +124,7 @@ func (test *udpTest) waitPacketOut(validate interface{}) (closed bool) {
 	}
 	p, _, hash, err := v4wire.Decode(dgram.data)
 	if err != nil {
-		test.t.Errorf("sent packet decode error: %v", err)
+		test.t.Errorf("sent packet decode error: %w", err)
 		return false
 	}
 	fn := reflect.ValueOf(validate)

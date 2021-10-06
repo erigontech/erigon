@@ -28,7 +28,7 @@ func getBlockNumber(number rpc.BlockNumber, tx kv.Tx) (uint64, error) {
 func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return 0, fmt.Errorf("getting latest block number: %v", err)
+		return 0, fmt.Errorf("getting latest block number: %w", err)
 	}
 
 	return blockNum, nil

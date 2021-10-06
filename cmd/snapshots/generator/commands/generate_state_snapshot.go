@@ -96,7 +96,7 @@ func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snaps
 
 		var acc accounts.Account
 		if err = acc.DecodeForStorage(v); err != nil {
-			return false, fmt.Errorf("decoding %x for %x: %v", v, k, err)
+			return false, fmt.Errorf("decoding %x for %x: %w", v, k, err)
 		}
 
 		if acc.Incarnation > 0 {
@@ -125,7 +125,7 @@ func GenerateStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snaps
 			if acc.IsEmptyCodeHash() {
 				codeHash, err1 := tx2.GetOne(kv.PlainContractCode, storagePrefix)
 				if err1 != nil && errors.Is(err1, ethdb.ErrKeyNotFound) {
-					return false, fmt.Errorf("getting code hash for %x: %v", k, err1)
+					return false, fmt.Errorf("getting code hash for %x: %w", k, err1)
 				}
 				if len(codeHash) > 0 {
 					code, err1 := tx2.GetOne(kv.Code, codeHash)

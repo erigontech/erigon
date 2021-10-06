@@ -1191,7 +1191,7 @@ func mphf(chaindata string, block uint64) error {
 	statefile := "statedump.dat"
 	if _, err := os.Stat(statefile); err != nil {
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("not sure if statedump.dat exists: %v", err)
+			return fmt.Errorf("not sure if statedump.dat exists: %w", err)
 		}
 		if err = dumpState(chaindata, statefile); err != nil {
 			return err
@@ -1579,7 +1579,7 @@ func compress(chaindata string, block uint64) error {
 	statefile := "statedump.dat"
 	if _, err := os.Stat(statefile); err != nil {
 		if !os.IsNotExist(err) {
-			return fmt.Errorf("not sure if statedump.dat exists: %v", err)
+			return fmt.Errorf("not sure if statedump.dat exists: %w", err)
 		}
 		if err = dumpState(chaindata, statefile); err != nil {
 			return err
@@ -2443,7 +2443,7 @@ func extractHeaders(chaindata string, block uint64) error {
 		blockHash := common.BytesToHash(k[8:])
 		var header types.Header
 		if err = rlp.DecodeBytes(v, &header); err != nil {
-			return fmt.Errorf("decoding header from %x: %v", v, err)
+			return fmt.Errorf("decoding header from %x: %w", v, err)
 		}
 		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x, diff %d\n", blockNumber, blockHash, header.Root, header.ParentHash, header.Difficulty)
 	}
@@ -2617,7 +2617,7 @@ func fixTd(chaindata string) error {
 			fmt.Printf("Missing TD record for %x, fixing\n", k)
 			var header types.Header
 			if err = rlp.DecodeBytes(v, &header); err != nil {
-				return fmt.Errorf("decoding header from %x: %v", v, err)
+				return fmt.Errorf("decoding header from %x: %w", v, err)
 			}
 			if header.Number.Uint64() == 0 {
 				continue
@@ -2627,17 +2627,17 @@ func fixTd(chaindata string) error {
 			copy(parentK[8:], header.ParentHash[:])
 			var parentTdRec []byte
 			if parentTdRec, err = tx.GetOne(kv.HeaderTD, parentK[:]); err != nil {
-				return fmt.Errorf("reading parentTd Rec for %d: %v", header.Number.Uint64(), err)
+				return fmt.Errorf("reading parentTd Rec for %d: %w", header.Number.Uint64(), err)
 			}
 			var parentTd big.Int
 			if err = rlp.DecodeBytes(parentTdRec, &parentTd); err != nil {
-				return fmt.Errorf("decoding parent Td record for block %d, from %x: %v", header.Number.Uint64(), parentTdRec, err)
+				return fmt.Errorf("decoding parent Td record for block %d, from %x: %w", header.Number.Uint64(), parentTdRec, err)
 			}
 			var td big.Int
 			td.Add(&parentTd, header.Difficulty)
 			var newHv []byte
 			if newHv, err = rlp.EncodeToBytes(&td); err != nil {
-				return fmt.Errorf("encoding td record for block %d: %v", header.Number.Uint64(), err)
+				return fmt.Errorf("encoding td record for block %d: %w", header.Number.Uint64(), err)
 			}
 			if err = tx.Put(kv.HeaderTD, k, newHv); err != nil {
 				return err
@@ -2734,7 +2734,7 @@ func fixState(chaindata string) error {
 		}
 		var header types.Header
 		if err = rlp.DecodeBytes(hv, &header); err != nil {
-			return fmt.Errorf("decoding header from %x: %v", v, err)
+			return fmt.Errorf("decoding header from %x: %w", v, err)
 		}
 		if header.Number.Uint64() > 1 {
 			var parentK [40]byte
@@ -3095,10 +3095,10 @@ func scanReceipts(chaindata string, block uint64) error {
 			buf.Reset()
 			err := cbor.Marshal(&buf, receipts1)
 			if err != nil {
-				return fmt.Errorf("encode block receipts for block %d: %v", blockNum, err)
+				return fmt.Errorf("encode block receipts for block %d: %w", blockNum, err)
 			}
 			if err = tx.Put(kv.Receipts, key[:], buf.Bytes()); err != nil {
-				return fmt.Errorf("writing receipts for block %d: %v", blockNum, err)
+				return fmt.Errorf("writing receipts for block %d: %w", blockNum, err)
 			}
 			if _, err = w.Write([]byte(fmt.Sprintf("%d\n", blockNum))); err != nil {
 				return err
@@ -3125,7 +3125,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
+			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 		//fmt.Printf("%d, cumulative gas: %d\n", i, receipt.CumulativeGasUsed)
@@ -3134,11 +3134,11 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
-			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
 		if err := ibs.CommitBlock(rules, blockWriter); err != nil {
-			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+			return nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 		}
 	}
 

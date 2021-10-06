@@ -104,7 +104,7 @@ var rootCmd = &cobra.Command{
 						return true, nil
 					}
 					if time.Since(a.UpdatedAt) > 24*time.Hour {
-						log.Debug("Skipped", "k", common.Bytes2Hex(k), "last updated", a.UpdatedAt)
+						log.Trace("Skipped", "k", common.Bytes2Hex(k), "last updated", a.UpdatedAt)
 						return true, nil
 					}
 					if a.Left == 0 {
@@ -268,7 +268,7 @@ func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 			if time.Since(a.UpdatedAt) > 5*DisconnectInterval {
-				log.Debug("Skipped requset", "peer", common.Bytes2Hex(a.PeerID), "last updated", a.UpdatedAt, "now", time.Now())
+				log.Trace("Skipped requset", "peer", common.Bytes2Hex(a.PeerID), "last updated", a.UpdatedAt, "now", time.Now())
 				return nil
 			}
 			if a.Left == 0 {
@@ -343,7 +343,7 @@ func ParseRequest(r *http.Request) (AnnounceReq, error) {
 	}
 	port, err := strconv.Atoi(q.Get("port"))
 	if err != nil {
-		return AnnounceReq{}, fmt.Errorf("port: %v -  %w", q.Get("port"), err)
+		return AnnounceReq{}, fmt.Errorf("port: %v - %w", q.Get("port"), err)
 	}
 
 	res := AnnounceReq{

@@ -57,6 +57,7 @@ type Flags struct {
 	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolV2             bool
 	TxPoolApiAddr        string
+	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
 }
 
@@ -93,10 +94,11 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", false, "Enable Websocket compression (RFC 7692)")
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
-	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 50, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
+	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 2, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TxPoolV2, "txpool.v2", false, "experimental external txpool")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
+	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -240,6 +242,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		db = rwKv
 		stateCache = kvcache.NewDummy()
 	} else {
+		stateCache = kvcache.New(cfg.StateCache)
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 
@@ -262,7 +265,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		return nil, nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
-	stateCache = kvcache.New(cfg.StateCache)
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
 	remoteEth := services.NewRemoteBackend(conn)

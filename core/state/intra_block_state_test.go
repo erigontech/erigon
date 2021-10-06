@@ -248,7 +248,7 @@ func (test *snapshotTest) run() bool {
 		}
 		state.RevertToSnapshot(snapshotRevs[sindex])
 		if err := test.checkEqual(state, checkstate); err != nil {
-			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%v", sindex, err)
+			test.err = fmt.Errorf("state mismatch after revert to snapshot %d\n%w", sindex, err)
 			return false
 		}
 	}

@@ -36,7 +36,7 @@ func StorageRangeAt(stateReader *state.PlainState, contractAddress common.Addres
 		resultCount++
 		return resultCount <= maxResult
 	}, maxResult+1); err != nil {
-		return StorageRangeResult{}, fmt.Errorf("error walking over storage: %v", err)
+		return StorageRangeResult{}, fmt.Errorf("error walking over storage: %w", err)
 	}
 	return result, nil
 }
