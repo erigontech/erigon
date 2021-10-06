@@ -313,9 +313,9 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 func needFlush64(bitmaps map[string]*roaring64.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSizeInBytes()
+		sz += m.GetSizeInBytes() * 2 // for golang's overhead
 	}
-	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
+	const memoryNeedsForKey = 32 * 2 * 2 //  len(key) * (string and bytes) overhead * go's map overhead
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 

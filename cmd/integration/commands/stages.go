@@ -477,6 +477,8 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	_, _, chainConfig, _, _, sync, _, _ := newSync(ctx, db, nil)
 
+	must(sync.SetCurrentStage(stages.Senders))
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -553,6 +555,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.Execution))
 
 	if reset {
 		genesis, _ := byChain()
@@ -611,6 +614,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	tx, err := db.BeginRw(ctx)
@@ -666,6 +670,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.HashState))
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -719,6 +724,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.LogIndex))
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -773,6 +779,7 @@ func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
+	must(sync.SetCurrentStage(stages.CallTraces))
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -832,6 +839,8 @@ func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 func stageHistory(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -900,6 +909,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.TxLookup))
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
