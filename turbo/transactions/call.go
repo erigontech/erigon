@@ -45,6 +45,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("alex: %T\n", cacheView)
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
 		stateReader = state.NewPlainState(tx, blockNumber)
