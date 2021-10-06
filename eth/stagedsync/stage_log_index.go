@@ -294,7 +294,7 @@ func unwindLogIndex(logPrefix string, db kv.RwTx, to uint64, cfg LogIndexCfg, qu
 func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSizeInBytes() * 2
+		sz += m.GetSizeInBytes() * 2 // for golang's overhead
 	}
 	const memoryNeedsForKey = 32 * 2 * 2 //  len(key) * (string and bytes) overhead * go's map overhead
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
