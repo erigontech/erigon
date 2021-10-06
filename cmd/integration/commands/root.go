@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"fmt"
 	"path"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -41,12 +40,10 @@ func openDB(path string, logger log.Logger, applyMigrations bool) kv.RwDB {
 	label := kv.ChainDB
 	db := openKV(label, logger, path, false)
 	if applyMigrations {
-		fmt.Printf("alex1\n")
 		has, err := migrations.NewMigrator(label).HasPendingMigrations(db)
 		if err != nil {
 			panic(err)
 		}
-		fmt.Printf("alex2: %t\n", has)
 		if has {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
