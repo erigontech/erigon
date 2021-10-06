@@ -14,4 +14,4 @@ jobs:
       - run: git submodule update --init --recursive --force
       - run: docker build . -t local-erigon
       - run: docker run --cidfile cont.id -d local-erigon erigon --datadir data --private.api.addr localhost:9090
-
+      - run: docker exec -d `cat cont.id` rpcdaemon --datadir data --private.api.addr localhost:9090 --http.api eth,net,web3
