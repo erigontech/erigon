@@ -294,7 +294,7 @@ func unwindLogIndex(logPrefix string, db kv.RwTx, to uint64, cfg LogIndexCfg, qu
 func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSizeInBytes()
+		sz += m.GetSizeInBytes() * 2
 	}
 	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
