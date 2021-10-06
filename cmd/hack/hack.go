@@ -1661,7 +1661,7 @@ func compress(chaindata string, block uint64) error {
 	}
 	// Aggregate the dictionary and build Aho-Corassick matcher
 	defer dictCollector.Close(CompressLogPrefix)
-	db := &DictionaryBuilder{limit: 16_000_000} // Only collect 16m words with highest scores
+	db := &DictionaryBuilder{limit: 1_000_000} // Only collect 1m words with highest scores
 	if err = dictCollector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, db.compressLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
@@ -1693,9 +1693,9 @@ type DictEntry struct {
 type DynamicCell struct {
 	optimStart  int
 	coverStart  int
-	patterns    []int
 	compression int
 	score       uint64
+	patternIdx  int // offset of the last element in the pattern slice
 }
 
 type Ring struct {
@@ -1772,21 +1772,24 @@ func (r *Ring) Truncate(i int) {
 	r.tail = (r.head + i) & (len(r.cells) - 1)
 }
 
-func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, output []byte, matches []*patricia.Match, cover []bool, cellRing *Ring, dict map[string]DictEntry, usedDict map[string]int) []byte {
+func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, output []byte, matches []patricia.Match, cover []bool, patterns []int, cellRing *Ring, dict map[string]DictEntry, usedDict map[string]int) ([]byte, []int) {
 	if trace {
 		fmt.Printf("Cluster | input = %x\n", input)
 		for _, match := range matches {
-			fmt.Printf(" [%x %d-%d]", match.Slice, match.Pos, match.Pos+len(match.Slice))
+			fmt.Printf(" [%x %d-%d]", input[match.Start:match.End], match.Start, match.End)
 		}
 	}
 	cellRing.Reset()
+	patterns = patterns[:0]
+	patterns = append(patterns, 0)
+	patterns = append(patterns, 0) // Sentinel entry - no meaning
 	lastF := matches[len(matches)-1]
-	for j := lastF.Pos; j < lastF.Pos+len(lastF.Slice); j++ {
+	for j := lastF.Start; j < lastF.End; j++ {
 		d := cellRing.PushBack()
 		d.optimStart = j + 1
 		d.coverStart = inputLen
 		d.compression = 0
-		d.patterns = nil
+		d.patternIdx = 0
 		d.score = 0
 	}
 	// Starting from the last match
@@ -1798,87 +1801,101 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, outp
 		}
 		maxCompression := firstCell.compression
 		maxScore := firstCell.score
-		maxCell := *firstCell
+		maxCell := firstCell
 		var maxInclude bool
 		for e := 0; e < cellRing.Len(); e++ {
 			cell := cellRing.Get(e)
 			comp := cell.compression - 4
-			if cell.coverStart >= f.Pos+len(f.Slice) {
-				comp += len(f.Slice)
+			if cell.coverStart >= f.End {
+				comp += f.End - f.Start
 			} else {
-				comp += cell.coverStart - f.Pos
+				comp += cell.coverStart - f.Start
 			}
 			score := cell.score + binary.BigEndian.Uint64(f.Vals[0])
 			if comp > maxCompression || (comp == maxCompression && score > maxScore) {
 				maxCompression = comp
 				maxScore = score
 				maxInclude = true
-				maxCell = *cell
+				maxCell = cell
 			}
-			if cell.optimStart > f.Pos+len(f.Slice) {
+			if cell.optimStart > f.End {
 				cellRing.Truncate(e)
 				break
 			}
 		}
+		d := cellRing.PushFront()
+		d.optimStart = f.Start
+		d.score = maxScore
+		d.compression = maxCompression
 		if maxInclude {
 			if trace {
-				fmt.Printf("[include] cell for %d: with patterns", f.Pos)
-				fmt.Printf(" [%x %d-%d]", f.Slice, f.Pos, f.Pos+len(f.Slice))
-				for _, pattern := range maxCell.patterns {
-					fmt.Printf(" [%x %d-%d]", matches[pattern].Slice, matches[pattern].Pos, matches[pattern].Pos+len(matches[pattern].Slice))
+				fmt.Printf("[include] cell for %d: with patterns", f.Start)
+				fmt.Printf(" [%x %d-%d]", input[f.Start:f.End], f.Start, f.End)
+				patternIdx := maxCell.patternIdx
+				for patternIdx != 0 {
+					pattern := patterns[patternIdx]
+					fmt.Printf(" [%x %d-%d]", input[matches[pattern].Start:matches[pattern].End], matches[pattern].Start, matches[pattern].End)
+					patternIdx = patterns[patternIdx+1]
 				}
 				fmt.Printf("\n\n")
 			}
-			d := cellRing.PushFront()
-			d.optimStart = f.Pos
-			d.coverStart = f.Pos
-			d.patterns = append([]int{i - 1}, maxCell.patterns...)
-			d.compression = maxCompression
-			d.score = maxScore
+			d.coverStart = f.Start
+			d.patternIdx = len(patterns)
+			patterns = append(patterns, i-1)
+			patterns = append(patterns, maxCell.patternIdx)
 		} else {
 			if trace {
-				fmt.Printf("cell for %d: with patterns", f.Pos)
-				for _, pattern := range maxCell.patterns {
-					fmt.Printf(" [%x %d-%d]", matches[pattern].Slice, matches[pattern].Pos, matches[pattern].Pos+len(matches[pattern].Slice))
+				fmt.Printf("cell for %d: with patterns", f.Start)
+				patternIdx := maxCell.patternIdx
+				for patternIdx != 0 {
+					pattern := patterns[patternIdx]
+					fmt.Printf(" [%x %d-%d]", input[matches[pattern].Start:matches[pattern].End], matches[pattern].Start, matches[pattern].End)
+					patternIdx = patterns[patternIdx+1]
 				}
 				fmt.Printf("\n\n")
 			}
-			d := cellRing.PushFront()
-			d.optimStart = f.Pos
 			d.coverStart = maxCell.coverStart
-			d.patterns = maxCell.patterns
-			d.compression = maxCompression
-			d.score = maxScore
+			d.patternIdx = maxCell.patternIdx
 		}
 	}
 	optimCell := cellRing.Get(0)
 	if trace {
 		fmt.Printf("optimal =")
 	}
-	p := binary.PutUvarint(numBuf, uint64(len(optimCell.patterns)))
+	// Count number of patterns
+	var patternCount uint64
+	patternIdx := optimCell.patternIdx
+	for patternIdx != 0 {
+		patternCount++
+		patternIdx = patterns[patternIdx+1]
+	}
+	p := binary.PutUvarint(numBuf, patternCount)
 	output = append(output, numBuf[:p]...)
-	for _, pattern := range optimCell.patterns {
+	patternIdx = optimCell.patternIdx
+	for patternIdx != 0 {
+		pattern := patterns[patternIdx]
 		if trace {
-			fmt.Printf(" [%x %d-%d]", matches[pattern].Slice, matches[pattern].Pos, matches[pattern].Pos+len(matches[pattern].Slice))
+			fmt.Printf(" [%x %d-%d]", input[matches[pattern].Start:matches[pattern].End], matches[pattern].Start, matches[pattern].End)
 		}
-		for j := matches[pattern].Pos; j < matches[pattern].Pos+len(matches[pattern].Slice); j++ {
+		for j := matches[pattern].Start; j < matches[pattern].End; j++ {
 			cover[j] = true
 		}
 		// Starting position
-		p := binary.PutUvarint(numBuf, uint64(matches[pattern].Pos))
+		p := binary.PutUvarint(numBuf, uint64(matches[pattern].Start))
 		output = append(output, numBuf[:p]...)
 		// Code
-		p = binary.PutUvarint(numBuf, uint64(dict[string(matches[pattern].Slice)].code))
+		p = binary.PutUvarint(numBuf, uint64(dict[string(input[matches[pattern].Start:matches[pattern].End])].code))
 		output = append(output, numBuf[:p]...)
-		usedDict[string(matches[pattern].Slice)]++
+		usedDict[string(input[matches[pattern].Start:matches[pattern].End])]++
+		patternIdx = patterns[patternIdx+1]
 	}
 	if trace {
 		fmt.Printf("\n\n")
 	}
-	return output
+	return output, patterns
 }
 
-func reduceDictWorker(numBuf []byte, input []byte, output []byte, cover []bool, cellRing *Ring, trie patricia.PatriciaTree, mf *patricia.MatchFinder, dict map[string]DictEntry, usedDict map[string]int) ([]byte, []bool) {
+func reduceDictWorker(numBuf []byte, input []byte, output []byte, cover []bool, patterns []int, cellRing *Ring, trie *patricia.PatriciaTree, mf *patricia.MatchFinder, dict map[string]DictEntry, usedDict map[string]int) ([]byte, []bool, []int) {
 	// Write length of the string
 	p := binary.PutUvarint(numBuf, uint64(len(input)))
 	output = append(output, numBuf[:p]...)
@@ -1891,7 +1908,7 @@ func reduceDictWorker(numBuf []byte, input []byte, output []byte, cover []bool, 
 				cover[i] = false
 			}
 		}
-		output = optimiseCluster(false, numBuf, input, len(input), output, matches, cover, cellRing, dict, usedDict)
+		output, patterns = optimiseCluster(false, numBuf, input, len(input), output, matches, cover, patterns, cellRing, dict, usedDict)
 		// Add uncoded input
 		for i := 0; i < len(input); i++ {
 			if !cover[i] {
@@ -1905,7 +1922,7 @@ func reduceDictWorker(numBuf []byte, input []byte, output []byte, cover []bool, 
 			output = append(output, input...)
 		}
 	}
-	return output, cover
+	return output, cover, patterns
 }
 
 func decode(output []byte, invDict map[uint64][]byte) ([]byte, error) {
@@ -2005,6 +2022,7 @@ func reducedict(block int) error {
 	var buf [256]byte
 	var output []byte = make([]byte, 0, 256)
 	var cover []bool = make([]bool, 256)
+	var patterns []int = make([]int, 0, 256)
 	cellRing := NewRing()
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	l, e := r.ReadByte()
@@ -2014,7 +2032,7 @@ func reducedict(block int) error {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		output, cover = reduceDictWorker(numBuf, buf[:l], output[:0], cover, cellRing, pt, &mf, dict, usedDict)
+		output, cover, patterns = reduceDictWorker(numBuf, buf[:l], output[:0], cover, patterns, cellRing, &pt, &mf, dict, usedDict)
 		/*
 			var input []byte
 			if input, err = decode(output, invDict); err != nil {
