@@ -77,7 +77,8 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	var root common.Hash
-	if s.BlockNumber == 0 {
+	tooBigJump := to > s.BlockNumber && to-s.BlockNumber > 100_000 // RetainList is in-memory structure and it will OOM if jump is too big, such big jump anyway invalidate most of existing Intermediate hashes
+	if s.BlockNumber == 0 || tooBigJump {
 		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -171,7 +172,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	} else {
 		changeSetBucket = kv.AccountChangeSet
 	}
-	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
+	log.Trace(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 

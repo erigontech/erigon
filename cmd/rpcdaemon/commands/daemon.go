@@ -20,6 +20,9 @@ func APIList(ctx context.Context, db kv.RoDB,
 	var defaultAPIList []rpc.API
 
 	base := NewBaseApi(filters, stateCache, cfg.SingleNodeMode)
+	if cfg.TevmEnabled {
+		base.EnableTevmExperiment()
+	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)

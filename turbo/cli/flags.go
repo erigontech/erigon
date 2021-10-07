@@ -158,9 +158,9 @@ var (
 		Usage: "Specify certificate authority",
 		Value: "",
 	}
-	StateStreamFlag = cli.BoolFlag{
-		Name:  "state.stream",
-		Usage: "Enable streaming of state changes from core to RPC daemon",
+	StateStreamDisableFlag = cli.BoolFlag{
+		Name:  "state.stream.disable",
+		Usage: "Disable streaming of state changes from core to RPC daemon",
 	}
 
 	// Throttling Flags
@@ -221,7 +221,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
-	cfg.StateStream = cfg.TxPool.V2 || ctx.GlobalBool(StateStreamFlag.Name)
+	cfg.StateStream = !ctx.GlobalBool(StateStreamDisableFlag.Name)
 	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
 
 	if ctx.GlobalString(SyncLoopThrottleFlag.Name) != "" {
@@ -311,8 +311,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.String(ExternalSnapshotDownloaderAddrFlag.Name, ExternalSnapshotDownloaderAddrFlag.Value, ExternalSnapshotDownloaderAddrFlag.Usage); v != nil {
 		cfg.ExternalSnapshotDownloaderAddr = *v
 	}
-	if v := f.Bool(StateStreamFlag.Name, false, StateStreamFlag.Usage); v != nil {
-		cfg.StateStream = *v
+	cfg.StateStream = true
+	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
+		cfg.StateStream = false
 	}
 }
 

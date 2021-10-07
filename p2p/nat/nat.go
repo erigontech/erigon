@@ -102,7 +102,7 @@ func Map(m Interface, c <-chan struct{}, protocol string, extport, intport int, 
 	refresh := time.NewTimer(mapTimeout)
 	defer func() {
 		refresh.Stop()
-		log.Debug("Deleting port mapping")
+		log.Trace("Deleting port mapping")
 		m.DeleteMapping(protocol, extport, intport)
 	}()
 	if err := m.AddMapping(protocol, extport, intport, name, mapTimeout); err != nil {

@@ -51,7 +51,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		txs = append(txs, txn)
 	}
-	defer func(start time.Time) { log.Debug("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
+	defer func(start time.Time) { log.Trace("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
 	stateBlockNumber, hash, err := rpchelper.GetBlockNumber(stateBlockNumberOrHash, tx, api.filters)
 	if err != nil {
@@ -96,7 +96,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, ethdb.GetHasTEVM(tx))
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
+
+	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, contractHasTEVM)
 	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)

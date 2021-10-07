@@ -945,13 +945,13 @@ func TextInfo(chaindata string, visStream io.Writer) error {
 
 	f, err := os.Open(datafile)
 	if err != nil {
-		return fmt.Errorf("opening %v: %v", MdbxDataFile, err)
+		return fmt.Errorf("opening %v: %w", MdbxDataFile, err)
 	}
 	defer f.Close()
 	var meta [PageSize]byte
 	// Read meta page 0
 	if _, err = f.ReadAt(meta[:], 0*PageSize); err != nil {
-		return fmt.Errorf("reading meta page 0: %v", err)
+		return fmt.Errorf("reading meta page 0: %w", err)
 	}
 
 	header1 := new(header)
@@ -967,12 +967,12 @@ func TextInfo(chaindata string, visStream io.Writer) error {
 	// meta1.print()
 
 	if err != nil {
-		return fmt.Errorf("reading meta page 0: %v", err)
+		return fmt.Errorf("reading meta page 0: %w", err)
 	}
 
 	// Read meta page 1
 	if _, err = f.ReadAt(meta[:], 1*PageSize); err != nil {
-		return fmt.Errorf("reading meta page 1: %v", err)
+		return fmt.Errorf("reading meta page 1: %w", err)
 	}
 
 	header2 := new(header)
@@ -988,7 +988,7 @@ func TextInfo(chaindata string, visStream io.Writer) error {
 	// meta2.print()
 
 	if err != nil {
-		return fmt.Errorf("reading meta page 1: %v", err)
+		return fmt.Errorf("reading meta page 1: %w", err)
 	}
 
 	var freeRoot, mainRoot uint32
@@ -1115,7 +1115,7 @@ func _conditions(f io.ReaderAt, visStream io.Writer, node *mdbx_node, _header *h
 func readPages(f io.ReaderAt, visStream io.Writer, pgno uint32, blockID *int, parentBlock int, level *int) error {
 	var page [PageSize]byte
 	if _, err := f.ReadAt(page[:], int64(pgno*PageSize)); err != nil {
-		return fmt.Errorf("reading page: %v, error: %v", pgno, err)
+		return fmt.Errorf("reading page: %v, error: %w", pgno, err)
 	}
 
 	_header := new(header)
@@ -1193,7 +1193,7 @@ func readPages(f io.ReaderAt, visStream io.Writer, pgno uint32, blockID *int, pa
 func freeDBPages(f io.ReaderAt, visStream io.Writer, freeRoot uint32) error {
 	var page [PageSize]byte
 	if _, err := f.ReadAt(page[:], int64(freeRoot*PageSize)); err != nil {
-		return fmt.Errorf("reading page: %v, error: %v", freeRoot, err)
+		return fmt.Errorf("reading page: %v, error: %w", freeRoot, err)
 	}
 
 	_header := new(header)

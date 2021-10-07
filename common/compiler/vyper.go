@@ -92,7 +92,7 @@ func (s *Vyper) run(cmd *exec.Cmd, source string) (map[string]*Contract, error) 
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("vyper: %v\n%s", err, stderr.Bytes())
+		return nil, fmt.Errorf("vyper: %w\n%s", err, stderr.Bytes())
 	}
 
 	return ParseVyperJSON(stdout.Bytes(), source, s.Version, s.Version, strings.Join(s.makeArgs(), " "))

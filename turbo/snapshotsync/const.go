@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -22,19 +23,19 @@ const (
 )
 
 var (
-	TorrentHashes = map[uint64]map[SnapshotType]metainfo.Hash{
+	TorrentHashes = map[uint64]map[snapshotsync.SnapshotType]metainfo.Hash{
 		params.MainnetChainConfig.ChainID.Uint64(): {
-			SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
-			SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
-			SnapshotType_state:   metainfo.NewHashFromHex(StateSnapshotHash),
+			snapshotsync.SnapshotType_headers: metainfo.NewHashFromHex(HeadersSnapshotHash),
+			snapshotsync.SnapshotType_bodies:  metainfo.NewHashFromHex(BlocksSnapshotHash),
+			snapshotsync.SnapshotType_state:   metainfo.NewHashFromHex(StateSnapshotHash),
 		},
 	}
 	ErrInvalidSnapshot = errors.New("this snapshot for this chainID not supported ")
 )
 
-func GetAvailableSnapshotTypes(chainID uint64) []SnapshotType {
+func GetAvailableSnapshotTypes(chainID uint64) []snapshotsync.SnapshotType {
 	v := TorrentHashes[chainID]
-	res := make([]SnapshotType, 0, len(v))
+	res := make([]snapshotsync.SnapshotType, 0, len(v))
 	for i := range v {
 		res = append(res, i)
 	}

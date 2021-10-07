@@ -558,19 +558,19 @@ func (c *Client) dispatch(codec ServerCodec) {
 		// Read path:
 		case op := <-c.readOp:
 			if op.batch {
-				conn.handler.handleBatch(op.msgs, nil)
+				conn.handler.handleBatch(op.msgs)
 			} else {
-				conn.handler.handleMsg(op.msgs[0], nil)
+				conn.handler.handleMsg(op.msgs[0])
 			}
 
 		case err := <-c.readErr:
-			conn.handler.log.Debug("RPC connection read error", "err", err)
+			conn.handler.log.Trace("RPC connection read error", "err", err)
 			conn.close(err, lastOp)
 			reading = false
 
 		// Reconnect:
 		case newcodec := <-c.reconnected:
-			log.Debug("RPC client reconnected", "reading", reading, "conn", newcodec.remoteAddr())
+			log.Trace("RPC client reconnected", "reading", reading, "conn", newcodec.remoteAddr())
 			if reading {
 				// Wait for the previous read loop to exit. This is a rare case which
 				// happens if this loop isn't notified in time after the connection breaks.

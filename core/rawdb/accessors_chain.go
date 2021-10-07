@@ -641,22 +641,22 @@ func WriteReceipts(tx kv.Putter, number uint64, receipts types.Receipts) error {
 		buf.Reset()
 		err := cbor.Marshal(buf, r.Logs)
 		if err != nil {
-			return fmt.Errorf("encode block logs for block %d: %v", number, err)
+			return fmt.Errorf("encode block logs for block %d: %w", number, err)
 		}
 
 		if err = tx.Put(kv.Log, dbutils.LogKey(number, uint32(txId)), buf.Bytes()); err != nil {
-			return fmt.Errorf("writing logs for block %d: %v", number, err)
+			return fmt.Errorf("writing logs for block %d: %w", number, err)
 		}
 	}
 
 	buf.Reset()
 	err := cbor.Marshal(buf, receipts)
 	if err != nil {
-		return fmt.Errorf("encode block receipts for block %d: %v", number, err)
+		return fmt.Errorf("encode block receipts for block %d: %w", number, err)
 	}
 
 	if err = tx.Put(kv.Receipts, dbutils.EncodeBlockNumber(number), buf.Bytes()); err != nil {
-		return fmt.Errorf("writing receipts for block %d: %v", number, err)
+		return fmt.Errorf("writing receipts for block %d: %w", number, err)
 	}
 	return nil
 }
@@ -673,22 +673,22 @@ func AppendReceipts(tx kv.RwTx, blockNumber uint64, receipts types.Receipts) err
 		buf.Reset()
 		err := cbor.Marshal(buf, r.Logs)
 		if err != nil {
-			return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
+			return fmt.Errorf("encode block receipts for block %d: %w", blockNumber, err)
 		}
 
 		if err = tx.Append(kv.Log, dbutils.LogKey(blockNumber, uint32(txId)), buf.Bytes()); err != nil {
-			return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
+			return fmt.Errorf("writing receipts for block %d: %w", blockNumber, err)
 		}
 	}
 
 	buf.Reset()
 	err := cbor.Marshal(buf, receipts)
 	if err != nil {
-		return fmt.Errorf("encode block receipts for block %d: %v", blockNumber, err)
+		return fmt.Errorf("encode block receipts for block %d: %w", blockNumber, err)
 	}
 
 	if err = tx.Append(kv.Receipts, dbutils.EncodeBlockNumber(blockNumber), buf.Bytes()); err != nil {
-		return fmt.Errorf("writing receipts for block %d: %v", blockNumber, err)
+		return fmt.Errorf("writing receipts for block %d: %w", blockNumber, err)
 	}
 	return nil
 }
@@ -779,7 +779,7 @@ func ReadBlockWithSenders(db kv.Tx, hash common.Hash, number uint64) (*types.Blo
 		return nil, nil, err
 	}
 	if len(senders) != block.Transactions().Len() {
-		return nil, nil, nil
+		return block, senders, nil // no senders is fine - will recover them on the fly
 	}
 	block.SendersToTxs(senders)
 	return block, senders, nil
