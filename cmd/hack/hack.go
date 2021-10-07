@@ -1416,14 +1416,15 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			}
 		*/
 		//log.Info("LCP array checked")
-		b := make([]int, 1000) // Sorting buffer
 		// Walk over LCP array and compute the scores of the strings
+		b := inv
+		j = 0
 		for i := 0; i < n-1; i++ {
 			// Only when there is a drop in LCP value
 			if lcp[i+1] >= lcp[i] {
+				j = i
 				continue
 			}
-			j := i
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
 				if l < 5 {
 					continue
@@ -1438,9 +1439,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					break
 				}
 				window := i - j + 2
-				for len(b) < window {
-					b = append(b, 0)
-				}
 				copy(b, filtered[j:i+2])
 				sort.Ints(b[:window])
 				repeats := 1
@@ -1674,8 +1672,9 @@ func compress(chaindata string, block uint64) error {
 	w := bufio.NewWriter(df)
 	// Sort dictionary builder
 	sort.Sort(db)
-	for _, item := range db.items {
-		fmt.Fprintf(w, "%d %x\n", item.score, item.word)
+
+	for i := len(db.items); i > 0; i-- {
+		fmt.Fprintf(w, "%d %x\n", db.items[i-1].score, db.items[i-1].word)
 	}
 	if err = w.Flush(); err != nil {
 		return err
@@ -1772,7 +1771,20 @@ func (r *Ring) Truncate(i int) {
 	r.tail = (r.head + i) & (len(r.cells) - 1)
 }
 
-func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, output []byte, matches []patricia.Match, cover []bool, patterns []int, cellRing *Ring, dict map[string]DictEntry, usedDict map[string]int) ([]byte, []int) {
+func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.PatriciaTree, mf *patricia.MatchFinder, output []byte, cover []bool, patterns []int, cellRing *Ring) ([]byte, []int) {
+	matches := mf.FindLongestMatches(trie, input)
+	if len(matches) == 0 {
+		n := binary.PutUvarint(numBuf, 0)
+		output = append(output, numBuf[:n]...)
+		return output, patterns
+	}
+	for i := 0; i < len(input); i++ {
+		if i == len(cover) {
+			cover = append(cover, false)
+		} else {
+			cover[i] = false
+		}
+	}
 	if trace {
 		fmt.Printf("Cluster | input = %x\n", input)
 		for _, match := range matches {
@@ -1780,14 +1792,12 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, outp
 		}
 	}
 	cellRing.Reset()
-	patterns = patterns[:0]
-	patterns = append(patterns, 0)
-	patterns = append(patterns, 0) // Sentinel entry - no meaning
+	patterns = append(patterns[:0], 0, 0) // Sentinel entry - no meaning
 	lastF := matches[len(matches)-1]
 	for j := lastF.Start; j < lastF.End; j++ {
 		d := cellRing.PushBack()
 		d.optimStart = j + 1
-		d.coverStart = inputLen
+		d.coverStart = len(input)
 		d.compression = 0
 		d.patternIdx = 0
 		d.score = 0
@@ -1795,6 +1805,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, outp
 	// Starting from the last match
 	for i := len(matches); i > 0; i-- {
 		f := matches[i-1]
+		p := f.Val.(*Pattern)
 		firstCell := cellRing.Get(0)
 		if firstCell == nil {
 			fmt.Printf("cellRing.Len() = %d\n", cellRing.Len())
@@ -1811,7 +1822,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, outp
 			} else {
 				comp += cell.coverStart - f.Start
 			}
-			score := cell.score + binary.BigEndian.Uint64(f.Vals[0])
+			score := cell.score + p.score
 			if comp > maxCompression || (comp == maxCompression && score > maxScore) {
 				maxCompression = comp
 				maxScore = score
@@ -1874,6 +1885,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, outp
 	patternIdx = optimCell.patternIdx
 	for patternIdx != 0 {
 		pattern := patterns[patternIdx]
+		p := matches[pattern].Val.(*Pattern)
 		if trace {
 			fmt.Printf(" [%x %d-%d]", input[matches[pattern].Start:matches[pattern].End], matches[pattern].Start, matches[pattern].End)
 		}
@@ -1881,12 +1893,12 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, outp
 			cover[j] = true
 		}
 		// Starting position
-		p := binary.PutUvarint(numBuf, uint64(matches[pattern].Start))
-		output = append(output, numBuf[:p]...)
+		n := binary.PutUvarint(numBuf, uint64(matches[pattern].Start))
+		output = append(output, numBuf[:n]...)
 		// Code
-		p = binary.PutUvarint(numBuf, uint64(dict[string(input[matches[pattern].Start:matches[pattern].End])].code))
-		output = append(output, numBuf[:p]...)
-		usedDict[string(input[matches[pattern].Start:matches[pattern].End])]++
+		n = binary.PutUvarint(numBuf, p.code)
+		output = append(output, numBuf[:n]...)
+		p.uses++
 		patternIdx = patterns[patternIdx+1]
 	}
 	if trace {
@@ -1895,33 +1907,8 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, inputLen int, outp
 	return output, patterns
 }
 
-func reduceDictWorker(numBuf []byte, input []byte, output []byte, cover []bool, patterns []int, cellRing *Ring, trie *patricia.PatriciaTree, mf *patricia.MatchFinder, dict map[string]DictEntry, usedDict map[string]int) ([]byte, []bool, []int) {
-	// Write length of the string
-	p := binary.PutUvarint(numBuf, uint64(len(input)))
-	output = append(output, numBuf[:p]...)
-	matches := mf.FindLongestMatches(trie, input)
-	if len(matches) > 0 {
-		for i := 0; i < len(input); i++ {
-			if i == len(cover) {
-				cover = append(cover, false)
-			} else {
-				cover[i] = false
-			}
-		}
-		output, patterns = optimiseCluster(false, numBuf, input, len(input), output, matches, cover, patterns, cellRing, dict, usedDict)
-		// Add uncoded input
-		for i := 0; i < len(input); i++ {
-			if !cover[i] {
-				output = append(output, input[i])
-			}
-		}
-	} else {
-		if len(input) > 0 {
-			p := binary.PutUvarint(numBuf, 0)
-			output = append(output, numBuf[:p]...)
-			output = append(output, input...)
-		}
-	}
+func reduceDictWorker(numBuf []byte, input []byte, output []byte, cover []bool, patterns []int, cellRing *Ring, trie *patricia.PatriciaTree, mf *patricia.MatchFinder) ([]byte, []bool, []int) {
+	output, patterns = optimiseCluster(false, numBuf, input, trie, mf, output, cover, patterns, cellRing)
 	return output, cover, patterns
 }
 
@@ -1968,6 +1955,13 @@ func decode(output []byte, invDict map[uint64][]byte) ([]byte, error) {
 	return input, nil
 }
 
+type Pattern struct {
+	score    uint64
+	uses     uint64
+	code     uint64 // Allocated numerical code or huffman code
+	codeBits int    // Number of bits in the code
+}
+
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict(block int) error {
 	go func() {
@@ -1976,15 +1970,14 @@ func reducedict(block int) error {
 		}
 	}()
 	// Read up the dictionary
-	df, err := os.Open("reduced_dictionary.txt")
+	df, err := os.Open("dictionary.txt")
 	if err != nil {
 		return err
 	}
 	defer df.Close()
 	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
 	var pt patricia.PatriciaTree
-	dict := make(map[string]DictEntry)
-	invDict := make(map[uint64][]byte)
+	code2pattern := make([]*Pattern, 0, 256)
 	ds := bufio.NewScanner(df)
 	for ds.Scan() {
 		tokens := strings.Split(ds.Text(), " ")
@@ -1996,15 +1989,17 @@ func reducedict(block int) error {
 		if word, err = hex.DecodeString(tokens[1]); err != nil {
 			return err
 		}
-		var scoreBuf [8]byte
-		binary.BigEndian.PutUint64(scoreBuf[:], uint64(score))
-		pt.Insert(word, scoreBuf[:])
-		code := uint64(uint64(len(dict)))
-		dict[string(word)] = DictEntry{score: uint64(score), code: code}
-		invDict[code] = word
+		p := &Pattern{
+			score:    uint64(score),
+			uses:     0,
+			code:     uint64(len(code2pattern)),
+			codeBits: 0,
+		}
+		pt.Insert(word, p)
+		code2pattern = append(code2pattern, p)
 	}
 	df.Close()
-	log.Info("dictionary file parsed", "entries", len(dict))
+	log.Info("dictionary file parsed", "entries", len(code2pattern))
 	statefile := "statedump.dat"
 	f, err := os.Open(statefile)
 	if err != nil {
@@ -2014,8 +2009,6 @@ func reducedict(block int) error {
 	if _, err = f.Seek(8, 0); err != nil {
 		return err
 	}
-
-	usedDict := make(map[string]int)
 	var inputSize int
 	var outputSize int
 	r := bufio.NewReader(f)
@@ -2027,12 +2020,20 @@ func reducedict(block int) error {
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	l, e := r.ReadByte()
 	i := 0
+	var codeF *os.File
+	if codeF, err = os.Create("codes.dat"); err != nil {
+		return err
+	}
+	codeW := bufio.NewWriter(codeF)
 	var mf patricia.MatchFinder
 	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		output, cover, patterns = reduceDictWorker(numBuf, buf[:l], output[:0], cover, patterns, cellRing, &pt, &mf, dict, usedDict)
+		output, cover, patterns = reduceDictWorker(numBuf, buf[:l], output[:0], cover, patterns, cellRing, &pt, &mf)
+		if _, err = codeW.Write(output); err != nil {
+			return err
+		}
 		/*
 			var input []byte
 			if input, err = decode(output, invDict); err != nil {
@@ -2044,6 +2045,13 @@ func reducedict(block int) error {
 		*/
 		inputSize += 1 + int(l)
 		outputSize += len(output)
+		for j := 0; j < int(l); j++ {
+			if !cover[j] {
+				outputSize++
+			}
+		}
+		n := binary.PutUvarint(numBuf, uint64(l))
+		outputSize += n
 		i++
 		if block > 1 && i == block {
 			break
@@ -2057,32 +2065,15 @@ func reducedict(block int) error {
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
+	if err = codeW.Flush(); err != nil {
+		return err
+	}
+	if err = codeF.Close(); err != nil {
+		return err
+	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info("Done", "output", common.StorageSize(outputSize), "input", common.StorageSize(inputSize), "effective dict size", len(usedDict), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
-	var rf *os.File
-	rf, err = os.Create("reduced_dictionary.txt")
-	if err != nil {
-		return err
-	}
-	rw := bufio.NewWriter(rf)
-	// Optimise the dictionary
-	var db DictionaryBuilder
-	for word, used := range usedDict {
-		db.items = append(db.items, DictionaryItem{word: []byte(word), score: uint64(used)})
-	}
-	sort.Sort(&db)
-	for i := len(db.items); i > 0; i-- {
-		if db.items[i-1].score < 128 {
-			break
-		}
-		fmt.Fprintf(rw, "%d %x\n", db.items[i-1].score, db.items[i-1].word)
-	}
-	if err = rw.Flush(); err != nil {
-		return err
-	}
-	rf.Close()
-
+	log.Info("Done", "output", common.StorageSize(outputSize), "input", common.StorageSize(inputSize), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	return nil
 }
 
