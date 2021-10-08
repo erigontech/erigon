@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/rlp"
@@ -457,13 +458,13 @@ type PeerID *types.H512
 
 type Hashes []byte // flatten list of 32-byte hashes
 
-func (h Hashes) At(i int) []byte { return h[i*32 : (i+1)*32] }
-func (h Hashes) Len() int        { return len(h) / 32 }
+func (h Hashes) At(i int) []byte { return h[i*length.Hash : (i+1)*length.Hash] }
+func (h Hashes) Len() int        { return len(h) / length.Hash }
 
 type Addresses []byte // flatten list of 20-byte addresses
 
-func (h Addresses) At(i int) []byte { return h[i*20 : (i+1)*20] }
-func (h Addresses) Len() int        { return len(h) / 20 }
+func (h Addresses) At(i int) []byte { return h[i*length.Addr : (i+1)*length.Addr] }
+func (h Addresses) Len() int        { return len(h) / length.Addr }
 
 type TxSlots struct {
 	txs     []*TxSlot
@@ -494,7 +495,7 @@ func (s *TxSlots) Resize(targetSize uint) {
 	}
 	//todo: set nil to overflow txs
 	s.txs = s.txs[:targetSize]
-	s.senders = s.senders[:20*targetSize]
+	s.senders = s.senders[:length.Addr*targetSize]
 	s.isLocal = s.isLocal[:targetSize]
 }
 func (s *TxSlots) Append(slot *TxSlot, sender []byte, isLocal bool) {
@@ -524,11 +525,11 @@ func (s *TxsRlp) Resize(targetSize uint) {
 	}
 	//todo: set nil to overflow txs
 	s.Txs = s.Txs[:targetSize]
-	s.Senders = s.Senders[:20*targetSize]
+	s.Senders = s.Senders[:length.Addr*targetSize]
 	s.IsLocal = s.IsLocal[:targetSize]
 }
 
-var addressesGrowth = make([]byte, 20)
+var addressesGrowth = make([]byte, length.Addr)
 
 func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 	var structLength uint = 1 // 1 byte for fieldset

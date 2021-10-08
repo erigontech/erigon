@@ -21,10 +21,11 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 )
 
-type NewPooledTransactionHashesPacket [][32]byte
+type NewPooledTransactionHashesPacket [][length.Hash]byte
 
 // ParseHashesCount looks at the RLP length Prefix for list of 32-byte hashes
 // and returns number of hashes in the list to expect
@@ -44,7 +45,7 @@ func ParseHashesCount(payload []byte, pos int) (count int, dataPos int, err erro
 // there is there is enough capacity.
 // The first returned value is the slice where encodinfg
 func EncodeHashes(hashes []byte, encodeBuf []byte) []byte {
-	hashesLen := len(hashes) / 32 * 33
+	hashesLen := len(hashes) / length.Hash * 33
 	dataLen := hashesLen
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(hashesLen)+dataLen)
 	rlp.EncodeHashes(hashes, encodeBuf)
@@ -57,7 +58,7 @@ func EncodeHashes(hashes []byte, encodeBuf []byte) []byte {
 // The second returned value is the new position in the RLP payload after the extraction
 // of the hash.
 func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
-	hashbuf = common.EnsureEnoughSize(hashbuf, 32)
+	hashbuf = common.EnsureEnoughSize(hashbuf, length.Hash)
 	pos, err := rlp.ParseHash(payload, pos, hashbuf)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s: hash len: %w", rlp.ParseHashErrorPrefix, err)
@@ -68,7 +69,7 @@ func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
 func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []byte) ([]byte, error) {
 	pos := 0
-	hashesLen := len(hashes) / 32 * 33
+	hashesLen := len(hashes) / length.Hash * 33
 	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestId)
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
@@ -94,10 +95,10 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 	if err != nil {
 		return 0, hashes, 0, err
 	}
-	hashes = common.EnsureEnoughSize(hashbuf, 32*hashesCount)
+	hashes = common.EnsureEnoughSize(hashbuf, length.Hash*hashesCount)
 
 	for i := 0; pos < len(payload); i++ {
-		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
+		pos, err = rlp.ParseHash(payload, pos, hashes[i*length.Hash:])
 		if err != nil {
 			return 0, hashes, 0, err
 		}
@@ -111,10 +112,10 @@ func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hash
 	if err != nil {
 		return hashes, 0, err
 	}
-	hashes = common.EnsureEnoughSize(hashbuf, 32*hashesCount)
+	hashes = common.EnsureEnoughSize(hashbuf, length.Hash*hashesCount)
 
 	for i := 0; pos < len(payload); i++ {
-		pos, err = rlp.ParseHash(payload, pos, hashes[i*32:])
+		pos, err = rlp.ParseHash(payload, pos, hashes[i*length.Hash:])
 		if err != nil {
 			return hashes, 0, err
 		}
