@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -121,7 +122,7 @@ func TestLogIndex(t *testing.T) {
 	{
 		total := 0
 		err = tx.ForEach(kv.LogAddressIndex, nil, func(k, v []byte) error {
-			require.True(binary.BigEndian.Uint32(k[common.AddressLength:]) >= 500)
+			require.True(binary.BigEndian.Uint32(k[length.Addr:]) >= 500)
 			total++
 			return nil
 		})
@@ -131,7 +132,7 @@ func TestLogIndex(t *testing.T) {
 	{
 		total := 0
 		err = tx.ForEach(kv.LogTopicIndex, nil, func(k, v []byte) error {
-			require.True(binary.BigEndian.Uint32(k[common.HashLength:]) >= 500)
+			require.True(binary.BigEndian.Uint32(k[length.Hash:]) >= 500)
 			total++
 			return nil
 		})

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
@@ -20,9 +22,9 @@ import (
 func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 	db := mdbx.MustOpen(chaindata)
 	startTime := time.Now()
-	lenOfKey := common.AddressLength
+	lenOfKey := length.Addr
 	if strings.HasPrefix(indexBucket, kv.StorageHistory) {
-		lenOfKey = common.AddressLength + common.HashLength + common.IncarnationLength
+		lenOfKey = length.Addr + length.Hash + length.Incarnation
 	}
 
 	more1index := 0
@@ -53,27 +55,27 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 				added = true
 			}
 			if count > 10 {
-				more10index[string(common.CopyBytes(k[:lenOfKey]))] = count
+				more10index[string(libcommon.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 50 {
-				more50index[string(common.CopyBytes(k[:lenOfKey]))] = count
+				more50index[string(libcommon.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 100 {
-				more100index[string(common.CopyBytes(k[:lenOfKey]))] = count
+				more100index[string(libcommon.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 200 {
-				more200index[string(common.CopyBytes(k[:lenOfKey]))] = count
+				more200index[string(libcommon.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 500 {
-				more500index[string(common.CopyBytes(k[:lenOfKey]))] = count
+				more500index[string(libcommon.Copy(k[:lenOfKey]))] = count
 			}
 			if count > 1000 {
-				more1000index[string(common.CopyBytes(k[:lenOfKey]))] = count
+				more1000index[string(libcommon.Copy(k[:lenOfKey]))] = count
 			}
 		} else {
 			added = false
 			count = 1
-			prevKey = common.CopyBytes(k[:common.AddressLength])
+			prevKey = libcommon.Copy(k[:length.Addr])
 		}
 
 		return nil
@@ -101,7 +103,7 @@ func IndexStats(chaindata string, indexBucket string, statsFile string) error {
 			NumOfIndexes uint64
 		}, 0, len(more10index))
 		for hash, v := range more10index {
-			p := []byte(hash)[:common.AddressLength]
+			p := []byte(hash)[:length.Addr]
 			if len(p) == 0 {
 				p = make([]byte, 20)
 			}
