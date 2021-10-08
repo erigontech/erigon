@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -206,18 +207,18 @@ func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.E
 
 func transformPlainStateKey(key []byte) ([]byte, error) {
 	switch len(key) {
-	case common.AddressLength:
+	case length.Addr:
 		// account
 		hash, err := common.HashData(key)
 		return hash[:], err
-	case common.AddressLength + common.IncarnationLength + common.HashLength:
+	case length.Addr + length.Incarnation + length.Hash:
 		// storage
-		addrHash, err := common.HashData(key[:common.AddressLength])
+		addrHash, err := common.HashData(key[:length.Addr])
 		if err != nil {
 			return nil, err
 		}
-		inc := binary.BigEndian.Uint64(key[common.AddressLength:])
-		secKey, err := common.HashData(key[common.AddressLength+common.IncarnationLength:])
+		inc := binary.BigEndian.Uint64(key[length.Addr:])
+		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +231,7 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 }
 
 func transformContractCodeKey(key []byte) ([]byte, error) {
-	if len(key) != common.AddressLength+common.IncarnationLength {
+	if len(key) != length.Addr+length.Incarnation {
 		return nil, fmt.Errorf("could not convert code key from plain to hashed, unexpected len: %d", len(key))
 	}
 	address, incarnation := dbutils.PlainParseStoragePrefix(key)
