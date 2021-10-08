@@ -10,6 +10,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -302,14 +303,14 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 
 		body := job.body
 		signer := types.MakeSigner(config, job.blockNumber)
-		job.senders = make([]byte, len(body.Transactions)*common.AddressLength)
+		job.senders = make([]byte, len(body.Transactions)*length.Addr)
 		for i, tx := range body.Transactions {
 			from, err := signer.SenderWithContext(cryptoContext, tx)
 			if err != nil {
 				job.err = fmt.Errorf("%s: error recovering sender for tx=%x, %w", logPrefix, tx.Hash(), err)
 				break
 			}
-			copy(job.senders[i*common.AddressLength:], from[:])
+			copy(job.senders[i*length.Addr:], from[:])
 		}
 
 		// prevent sending to close channel
