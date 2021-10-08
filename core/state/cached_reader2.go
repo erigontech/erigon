@@ -14,19 +14,18 @@ import (
 // CachedReader2 is a wrapper for an instance of type StateReader
 // This wrapper only makes calls to the underlying reader if the item is not in the cache
 type CachedReader2 struct {
-	r     StateReader
 	cache kvcache.CacheView
 	db    kv.Tx
 }
 
 // NewCachedReader2 wraps a given state reader into the cached reader
-func NewCachedReader2(r StateReader, cache kvcache.CacheView, tx kv.Tx) *CachedReader2 {
-	return &CachedReader2{r: r, cache: cache, db: tx}
+func NewCachedReader2(cache kvcache.CacheView, tx kv.Tx) *CachedReader2 {
+	return &CachedReader2{cache: cache, db: tx}
 }
 
 // ReadAccountData is called when an account needs to be fetched from the state
-func (cr *CachedReader2) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := cr.cache.Get(address.Bytes())
+func (r *CachedReader2) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, err := r.cache.Get(address.Bytes())
 	if err != nil {
 		return nil, err
 	}

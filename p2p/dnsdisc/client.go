@@ -105,7 +105,7 @@ func NewClient(cfg Config) *Client {
 func (c *Client) SyncTree(url string) (*Tree, error) {
 	le, err := parseLink(url)
 	if err != nil {
-		return nil, fmt.Errorf("invalid enrtree URL: %v", err)
+		return nil, fmt.Errorf("invalid enrtree URL: %w", err)
 	}
 	ct := newClientTree(c, new(linkCache), le)
 	t := &Tree{entries: make(map[string]entry)}
@@ -258,7 +258,7 @@ func (it *randomIterator) Next() bool {
 func (it *randomIterator) addTree(url string) error {
 	le, err := parseLink(url)
 	if err != nil {
-		return fmt.Errorf("invalid enrtree URL: %v", err)
+		return fmt.Errorf("invalid enrtree URL: %w", err)
 	}
 	it.lc.addLink("", le.str)
 	return nil
@@ -276,7 +276,7 @@ func (it *randomIterator) nextNode() *enode.Node {
 			if err == it.ctx.Err() {
 				return nil // context canceled.
 			}
-			it.c.cfg.Logger.Debug("Error in DNS random node sync", "tree", ct.loc.domain, "err", err)
+			it.c.cfg.Logger.Trace("Error in DNS random node sync", "tree", ct.loc.domain, "err", err)
 			continue
 		}
 		if n != nil {
@@ -349,7 +349,7 @@ func (it *randomIterator) waitForRootUpdates(trees []*clientTree) bool {
 	}
 
 	sleep := nextCheck.Sub(it.c.clock.Now())
-	it.c.cfg.Logger.Debug("DNS iterator waiting for root updates", "sleep", sleep, "tree", minTree.loc.domain)
+	it.c.cfg.Logger.Trace("DNS iterator waiting for root updates", "sleep", sleep, "tree", minTree.loc.domain)
 	timeout := it.c.clock.NewTimer(sleep)
 	defer timeout.Stop()
 	select {

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -16,7 +17,7 @@ type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte)
 func NewAccountChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
-		keyLen:  common.AddressLength,
+		keyLen:  length.Addr,
 	}
 }
 
@@ -36,8 +37,8 @@ func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) erro
 
 func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	blockN := binary.BigEndian.Uint64(dbKey)
-	k := dbValue[:common.AddressLength]
-	v := dbValue[common.AddressLength:]
+	k := dbValue[:length.Addr]
+	v := dbValue[length.Addr:]
 
 	return blockN, k, v
 }

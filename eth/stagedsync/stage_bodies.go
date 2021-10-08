@@ -200,7 +200,7 @@ Loop:
 		case <-timer.C:
 			log.Trace("RequestQueueTime (bodies) ticked")
 		case <-cfg.bd.DeliveryNotify:
-			log.Debug("bodyLoop woken up by the incoming request")
+			log.Trace("bodyLoop woken up by the incoming request")
 		}
 		d6 += time.Since(start)
 	}

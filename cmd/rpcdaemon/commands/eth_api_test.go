@@ -3,19 +3,22 @@ package commands
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/assert"
-	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestGetTransactionReceipt(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {
 		t.Errorf("calling GetTransactionReceipt with empty hash: %v", err)
@@ -24,7 +27,8 @@ func TestGetTransactionReceipt(t *testing.T) {
 
 func TestGetTransactionReceiptUnprotected(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	// Call GetTransactionReceipt for un-protected transaction
 	if _, err := api.GetTransactionReceipt(context.Background(), common.HexToHash("0x3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea")); err != nil {
 		t.Errorf("calling GetTransactionReceipt for unprotected tx: %v", err)
@@ -36,7 +40,8 @@ func TestGetTransactionReceiptUnprotected(t *testing.T) {
 func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	assert := assert.New(t)
 	db := rpcdaemontest.CreateTestKV(t)
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
@@ -51,7 +56,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
@@ -66,7 +72,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
@@ -80,7 +87,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
@@ -102,7 +110,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
@@ -125,7 +134,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 	assert := assert.New(t)
 	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
@@ -141,7 +151,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
 	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
@@ -158,7 +169,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testing.T) {
 	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
@@ -182,7 +194,8 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
 	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
 	db := m.DB
-	api := NewEthAPI(NewBaseApi(nil), db, nil, nil, nil, 5000000)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 

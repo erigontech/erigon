@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -22,13 +21,16 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		return nil, err
 	}
 
-	block, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	block, err := api.blockByHashWithSenders(tx, hash)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, chainConfig, block, senders)
+	if block == nil {
+		return nil, nil
+	}
+	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
 	logs := make([][]*types.Log, len(receipts))
@@ -53,7 +55,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 
 // 	receipts, err := getReceipts(ctx, tx, *number, hash)
 // 	if err != nil {
-// 		return nil, fmt.Errorf("getReceipts error: %v", err)
+// 		return nil, fmt.Errorf("getReceipts error: %w", err)
 // 	}
 
 // 	logs := make([][]*types.Log, len(receipts))

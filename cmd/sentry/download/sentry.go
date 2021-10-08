@@ -17,15 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/golang/protobuf/ptypes/empty"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
-
-	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
@@ -37,7 +32,9 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
@@ -124,6 +121,8 @@ func makeP2PServer(
 		urls = params.SokolBootnodes
 	case params.KovanGenesisHash:
 		urls = params.KovanBootnodes
+	case params.FermionGenesisHash:
+		urls = params.FermionBootnodes
 	}
 	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
 	for _, url := range urls {
@@ -268,13 +267,13 @@ func runPeer(
 		default:
 		}
 		if peerPrinted {
-			log.Debug("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
+			log.Trace("Peer disconnected", "id", peerID, "name", peerInfo.peer.Fullname())
 		}
 	}()
 	for {
 		if !peerPrinted {
 			if time.Now().After(printTime) {
-				log.Debug("Peer stable", "id", peerID, "name", peerInfo.peer.Fullname())
+				log.Trace("Peer stable", "id", peerID, "name", peerInfo.peer.Fullname())
 				peerPrinted = true
 			}
 		}
@@ -470,10 +469,10 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 			peerID := peer.ID().String()
 			if _, ok := ss.GoodPeers.Load(peerID); ok {
-				log.Debug(fmt.Sprintf("[%s] Peer already has connection", peerID))
+				log.Trace(fmt.Sprintf("[%s] Peer already has connection", peerID))
 				return nil
 			}
-			log.Debug(fmt.Sprintf("[%s] Start with peer", peerID))
+			log.Trace(fmt.Sprintf("[%s] Start with peer", peerID))
 
 			peerInfo := &PeerInfo{
 				peer: peer,
@@ -489,7 +488,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			if err != nil {
 				return fmt.Errorf("handshake to peer %s: %w", peerID, err)
 			}
-			log.Debug(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
+			log.Trace(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
 			if err := runPeer(
 				ctx,
@@ -500,7 +499,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				ss.send,
 				ss.hasSubscribers,
 			); err != nil {
-				log.Debug(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
+				log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
 			return nil
 		},
@@ -606,7 +605,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 	return nil
 }
 
-func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*empty.Empty, error) {
+func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	strId := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	if x, ok := ss.GoodPeers.Load(strId); ok {
@@ -616,20 +615,20 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.Pe
 		}
 	}
 	ss.GoodPeers.Delete(strId)
-	return &empty.Empty{}, nil
+	return &emptypb.Empty{}, nil
 }
 
-func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*empty.Empty, error) {
+func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	peerID := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
 	x, _ := ss.GoodPeers.Load(peerID)
 	peerInfo, _ := x.(*PeerInfo)
 	if peerInfo == nil {
-		return &empty.Empty{}, nil
+		return &emptypb.Empty{}, nil
 	}
 	if req.MinBlock > peerInfo.Height() {
 		peerInfo.SetHeight(req.MinBlock)
 	}
-	return &empty.Empty{}, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) {
@@ -890,7 +889,7 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
 		if len(ch) > MessagesQueueSize/2 {
-			log.Debug("[sentry] consuming is slow", "msgID", msgID.String())
+			log.Warn("[sentry] consuming is slow", "msgID", msgID.String())
 			// evict old messages from channel
 			for j := 0; j < MessagesQueueSize/4; j++ {
 				select {
@@ -938,7 +937,7 @@ func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch c
 
 const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Debug("[Messages] new subscriber", "to", req.Ids)
+	log.Trace("[Messages] new subscriber", "to", req.Ids)
 	ch := make(chan *proto_sentry.InboundMessage, MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)

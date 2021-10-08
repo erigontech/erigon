@@ -19,7 +19,7 @@ type Cancel struct {
 }
 
 func (c *Cancel) CancelFunc() {
-	log.Debug("cancel mining task", "callers", debug.Callers(10))
+	log.Trace("Cancel mining task", "callers", debug.Callers(10))
 	c.cancel()
 }
 

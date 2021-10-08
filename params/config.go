@@ -34,6 +34,7 @@ const (
 	ErigonMineName   = "erigonmine"
 	SokolChainName   = "sokol"
 	KovanChainName   = "kovan"
+	FermionChainName = "fermion"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -45,6 +46,7 @@ var (
 	ErigonGenesisHash  = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
+	FermionGenesisHash = common.HexToHash("0xcb6399165d4b9460d2462a71f4574984df2a92fe513b1ab64d69573426ecc75f")
 )
 
 var (
@@ -52,8 +54,9 @@ var (
 )
 
 var (
-	SokolGenesisStateRoot = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
-	KovanGenesisStateRoot = common.HexToHash("0x2480155b48a1cea17d67dbfdfaafe821c1d19cdd478c5358e8ec56dec24502b2")
+	SokolGenesisStateRoot   = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
+	KovanGenesisStateRoot   = common.HexToHash("0x2480155b48a1cea17d67dbfdfaafe821c1d19cdd478c5358e8ec56dec24502b2")
+	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
 )
 
 var (
@@ -231,6 +234,26 @@ var (
 	KovanChainConfig = &ChainConfig{
 		ChainName:           KovanChainName,
 		ChainID:             big.NewInt(42),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(5067000),
+		ConstantinopleBlock: big.NewInt(9200000),
+		PetersburgBlock:     big.NewInt(10255201),
+		IstanbulBlock:       big.NewInt(14111141),
+		MuirGlacierBlock:    nil,
+		BerlinBlock:         big.NewInt(24770900),
+		LondonBlock:         big.NewInt(26741100),
+		CatalystBlock:       nil,
+		Aura:                &AuRaConfig{},
+	}
+
+	FermionChainConfig = &ChainConfig{
+		ChainName:           FermionChainName,
+		ChainID:             big.NewInt(102),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,

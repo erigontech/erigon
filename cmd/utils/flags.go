@@ -179,7 +179,7 @@ var (
 	}
 	TxPoolPriceLimitFlag = cli.Uint64Flag{
 		Name:  "txpool.pricelimit",
-		Usage: "Minimum gas price limit to enforce for acceptance into the pool",
+		Usage: "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
 		Value: ethconfig.Defaults.TxPool.PriceLimit,
 	}
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
@@ -196,6 +196,11 @@ var (
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
 		Value: ethconfig.Defaults.TxPool.GlobalSlots,
+	}
+	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
+		Name:  "txpool.globalbasefeeeslots",
+		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
+		Value: ethconfig.Defaults.TxPool.GlobalQueue,
 	}
 	TxPoolAccountQueueFlag = cli.Uint64Flag{
 		Name:  "txpool.accountqueue",
@@ -601,6 +606,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.SokolBootnodes
 		case params.KovanChainName:
 			urls = params.KovanBootnodes
+		case params.FermionChainName:
+			urls = params.FermionBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -643,6 +650,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.SokolBootnodes
 		case params.KovanChainName:
 			urls = params.KovanBootnodes
+		case params.FermionChainName:
+			urls = params.FermionBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -723,7 +732,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	}
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
-		return nil, fmt.Errorf("invalid nat option %s: %v", natSetting, err)
+		return nil, fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 	cfg.NAT = natif
 	return cfg, nil
@@ -875,6 +884,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "sokol")
 	case params.KovanChainName:
 		return filepath.Join(datadir, "kovan")
+	case params.FermionChainName:
+		return filepath.Join(datadir, "fermion")
 	default:
 		return datadir
 	}
@@ -978,6 +989,9 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 	if ctx.GlobalIsSet(TxPoolGlobalQueueFlag.Name) {
 		cfg.GlobalQueue = ctx.GlobalUint64(TxPoolGlobalQueueFlag.Name)
+	}
+	if ctx.GlobalIsSet(TxPoolGlobalBaseFeeSlotsFlag.Name) {
+		cfg.GlobalBaseFeeQueue = ctx.GlobalUint64(TxPoolGlobalBaseFeeSlotsFlag.Name)
 	}
 	if ctx.GlobalIsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.GlobalDuration(TxPoolLifetimeFlag.Name)
@@ -1253,6 +1267,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 42
 		}
 		cfg.Genesis = core.DefaultKovanGenesisBlock()
+	case params.FermionChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 102
+		}
+		cfg.Genesis = core.DefaultFermionGenesisBlock()
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1328,6 +1347,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultSokolGenesisBlock()
 	case params.KovanChainName:
 		genesis = core.DefaultKovanGenesisBlock()
+	case params.FermionChainName:
+		genesis = core.DefaultFermionGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

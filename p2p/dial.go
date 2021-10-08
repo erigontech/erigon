@@ -240,7 +240,7 @@ loop:
 	for {
 		// Launch new dials if slots are available.
 		slots := d.freeDialSlots()
-		slots -= d.startStaticDials(slots)
+		d.startStaticDials()
 		if slots > 0 {
 			nodesCh = d.nodesIn
 		} else {
@@ -421,14 +421,13 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 }
 
 // startStaticDials starts n static dial tasks.
-func (d *dialScheduler) startStaticDials(n int) (started int) {
-	for started = 0; started < n && len(d.staticPool) > 0; started++ {
+func (d *dialScheduler) startStaticDials() {
+	for len(d.staticPool) > 0 {
 		idx := d.rand.Intn(len(d.staticPool))
 		task := d.staticPool[idx]
 		d.startDial(task)
 		d.removeFromStaticPool(idx)
 	}
-	return started
 }
 
 // updateStaticPool attempts to move the given static dial back into staticPool.
@@ -534,13 +533,13 @@ func (t *dialTask) resolve(d *dialScheduler) bool {
 		if t.resolveDelay > maxResolveDelay {
 			t.resolveDelay = maxResolveDelay
 		}
-		d.log.Debug("Resolving node failed", "id", t.dest.ID(), "newdelay", t.resolveDelay)
+		d.log.Warn("Resolving node failed", "id", t.dest.ID(), "newdelay", t.resolveDelay)
 		return false
 	}
 	// The node was found.
 	t.resolveDelay = initialResolveDelay
 	t.dest = resolved
-	d.log.Debug("Resolved node", "id", t.dest.ID(), "addr", &net.TCPAddr{IP: t.dest.IP(), Port: t.dest.TCP()})
+	d.log.Trace("Resolved node", "id", t.dest.ID(), "addr", &net.TCPAddr{IP: t.dest.IP(), Port: t.dest.TCP()})
 	return true
 }
 

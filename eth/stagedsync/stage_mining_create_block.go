@@ -9,11 +9,13 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -117,7 +119,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 				return err
 			}
 			for i := 0; i < len(txSlots.Txs); i++ {
-				txSlots.Txs[i] = common.CopyBytes(txSlots.Txs[i]) // because we need this data outside of tx
+				txSlots.Txs[i] = libcommon.Copy(txSlots.Txs[i]) // because we need this data outside of tx
 			}
 			return nil
 		}); err != nil {
@@ -210,9 +212,17 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil),
 		Extra:      cfg.miner.MiningConfig.ExtraData,
 		Time:       uint64(timestamp),
+	}
+
+	// Set baseFee and GasLimit if we are on an EIP-1559 chain
+	if cfg.chainConfig.IsLondon(header.Number.Uint64()) {
+		header.BaseFee = misc.CalcBaseFee(&cfg.chainConfig, parent)
+		if !cfg.chainConfig.IsLondon(parent.Number.Uint64()) {
+			parentGasLimit := parent.GasLimit * params.ElasticityMultiplier
+			header.GasLimit = core.CalcGasLimit(parent.GasUsed, parentGasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil)
+		}
 	}
 
 	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
@@ -239,7 +249,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		if header.Number.Cmp(daoBlock) >= 0 && header.Number.Cmp(limit) < 0 {
 			// Depending whether we support or oppose the fork, override differently
 			if cfg.chainConfig.DAOForkSupport {
-				header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
+				header.Extra = libcommon.Copy(params.DAOForkBlockExtra)
 			} else if bytes.Equal(header.Extra, params.DAOForkBlockExtra) {
 				header.Extra = []byte{} // If miner opposes, don't let it use the reserved extra-data
 			}
@@ -310,7 +320,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			if err = commitUncle(env, uncle); err != nil {
 				log.Trace("Possible uncle rejected", "hash", hash, "reason", err)
 			} else {
-				log.Debug("Committing new uncle to block", "hash", hash)
+				log.Trace("Committing new uncle to block", "hash", hash)
 				uncles = append(uncles, uncle)
 			}
 		}

@@ -15,7 +15,6 @@ import (
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, oeURL)
 	var client = &http.Client{
@@ -96,14 +95,14 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 				reqGen.reqID++
 				request := reqGen.traceFilterFrom(prevBn, bn, account)
 				errCtx := fmt.Sprintf("traceFilterFrom fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
 					fmt.Println(err)
 					return
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterTo(prevBn, bn, account)
 				errCtx = fmt.Sprintf("traceFilterTo fromBlock %d, toBlock %d, fromAddress %x", prevBn, bn, account)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
 					fmt.Println(err)
 					return
 				}
@@ -114,28 +113,28 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 				reqGen.reqID++
 				request := reqGen.traceFilterUnion(prevBn, bn, from, to)
 				errCtx := fmt.Sprintf("traceFilterUnion fromBlock %d, toBlock %d, fromAddress %x, toAddress %x", prevBn, bn, from, to)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
 					fmt.Println(err)
 					return
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterAfter(prevBn, bn, 1)
 				errCtx = fmt.Sprintf("traceFilterAfter fromBlock %d, toBlock %d, after %x", prevBn, bn, 1)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
 					fmt.Println(err)
 					return
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterCount(prevBn, bn, 1)
 				errCtx = fmt.Sprintf("traceFilterCount fromBlock %d, toBlock %d, count %x", prevBn, bn, 1)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
 					fmt.Println(err)
 					return
 				}
 				reqGen.reqID++
 				request = reqGen.traceFilterCountAfter(prevBn, bn, 1, 1)
 				errCtx = fmt.Sprintf("traceFilterCountAfter fromBlock %d, toBlock %d, count %x, after %x", prevBn, bn, 1, 1)
-				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				if err := requestAndCompare(request, "trace_filter", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
 					fmt.Println(err)
 					return
 				}

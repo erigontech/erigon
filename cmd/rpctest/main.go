@@ -50,6 +50,16 @@ func main() {
 		}
 	}
 
+	var benchEthCallCmd = &cobra.Command{
+		Use:   "benchEthCall",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchEthCall(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+		},
+	}
+	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var bench1Cmd = &cobra.Command{
 		Use:   "bench1",
 		Short: "",
@@ -250,6 +260,7 @@ func main() {
 	rootCmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 
 	rootCmd.AddCommand(
+		benchEthCallCmd,
 		bench1Cmd,
 		bench2Cmd,
 		bench3Cmd,

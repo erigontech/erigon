@@ -13,9 +13,9 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -313,9 +313,9 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 func needFlush64(bitmaps map[string]*roaring64.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSizeInBytes()
+		sz += m.GetSizeInBytes() * 2 // for golang's overhead
 	}
-	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
+	const memoryNeedsForKey = 32 * 2 * 2 //  len(key) * (string and bytes) overhead * go's map overhead
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
@@ -430,9 +430,9 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
 	defer c.Close()
-	prefixLen := common.AddressLength
+	prefixLen := length.Addr
 	if csTable == kv.StorageChangeSet {
-		prefixLen = common.HashLength
+		prefixLen = length.Hash
 	}
 	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {

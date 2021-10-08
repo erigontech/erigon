@@ -199,12 +199,12 @@ func (net *Network) startWithSnapshots(id enode.ID, snapshots map[string][]byte)
 	// subscribe to peer events
 	client, err := node.Client()
 	if err != nil {
-		return fmt.Errorf("error getting rpc client  for node %v: %s", id, err)
+		return fmt.Errorf("error getting rpc client  for node %v: %w", id, err)
 	}
 	events := make(chan *p2p.PeerEvent)
 	sub, err := client.Subscribe(context.Background(), "admin", events, "peerEvents")
 	if err != nil {
-		return fmt.Errorf("error getting peer events for node %v: %s", id, err)
+		return fmt.Errorf("error getting peer events for node %v: %w", id, err)
 	}
 	go net.watchPeerEvents(id, events, sub)
 	return nil
@@ -311,7 +311,7 @@ func (net *Network) Connect(oneID, otherID enode.ID) error {
 }
 
 func (net *Network) connect(oneID, otherID enode.ID) error {
-	log.Debug("Connecting nodes with addPeer", "id", oneID, "other", otherID)
+	log.Trace("Connecting nodes with addPeer", "id", oneID, "other", otherID)
 	conn, err := net.initConn(oneID, otherID)
 	if err != nil {
 		return err
@@ -683,7 +683,7 @@ func (net *Network) initConn(oneID, otherID enode.ID) (*Conn, error) {
 		log.Trace("Nodes not up", "err", err)
 		return nil, fmt.Errorf("nodes not up: %v", err)
 	}
-	log.Debug("Connection initiated", "id", oneID, "other", otherID)
+	log.Trace("Connection initiated", "id", oneID, "other", otherID)
 	conn.initiated = time.Now()
 	return conn, nil
 }
@@ -691,7 +691,7 @@ func (net *Network) initConn(oneID, otherID enode.ID) (*Conn, error) {
 // Shutdown stops all nodes in the network and closes the quit channel
 func (net *Network) Shutdown() {
 	for _, node := range net.Nodes {
-		log.Debug("Stopping node", "id", node.ID())
+		log.Trace("Stopping node", "id", node.ID())
 		if err := node.Stop(); err != nil {
 			log.Warn("Can't stop node", "id", node.ID(), "err", err)
 		}

@@ -6,7 +6,8 @@ Has 2 modes: internal and external
 
 ## Internal mode
 
-Works inside Erigon: add `--txpool.v2` flags to Erigon, and `--txpool.v2` flag to RPCDaemon
+Works inside Erigon: add `--txpool.v2` flags to Erigon, and `--txpool.v2 --txpool.api.addr localhost:9090` flags to
+RPCDaemon
 
 ## External mode
 
@@ -44,8 +45,10 @@ Will add this part soon [tbd]
 [x] DevNet - doesn't send mined block notification on first mined block (because initialCycle = true)
 [x] DiscardReasons - user must understand clearly why tx were rejected
 [x] Notify about new pending transactions - we sending more than need
-[] Add cli options to manage pool limits: --txpool.pricelimit, --txpool.globalslots, --txpool.globalqueue (now each
-sub-pool has limit 200_000, and no pricelimit)
+[x] Handle "NewBlock" message with 200K transactions re-calculation - in under 50ms
+[x] Add --txpool.globalslots, --txpool.globalqueue,--txpool.globalbasefeeeslots
+[x] Add --txpool.accountslots
+[x] Add --txpool.pricelimit
 [] Add way for simple introspection - where is tx and why
 [] Hard-forks support (now rules are parsed ones on txPool start)
 [] Add pool to docker-compose

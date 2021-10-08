@@ -148,7 +148,7 @@ func StageLoopStep(
 	var headTd *big.Int
 	var head uint64
 	var headHash common.Hash
-	if head, err = stages.GetStageProgress(rotx, stages.Finish); err != nil {
+	if head, err = stages.GetStageProgress(rotx, stages.Headers); err != nil {
 		return err
 	}
 	if headHash, err = rawdb.ReadCanonicalHash(rotx, head); err != nil {
@@ -165,27 +165,25 @@ func StageLoopStep(
 		}
 	}
 	rotx.Rollback()
-	headTd256 := new(uint256.Int)
-	overflow := headTd256.SetFromBig(headTd)
+
+	headTd256, overflow := uint256.FromBig(headTd)
 	if overflow {
 		return fmt.Errorf("headTds higher than 2^256-1")
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
-	if notifications.Accumulator != nil {
+	if notifications != nil && notifications.Accumulator != nil {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			header := rawdb.ReadCurrentHeader(tx)
 			if header == nil {
 				return nil
 			}
+
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
 
-			err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, sync.PrevUnwindPoint(), notifications.Events, tx)
-			if err != nil {
-				return err
-			}
-			return nil
+			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
+
 		}); err != nil {
 			return err
 		}

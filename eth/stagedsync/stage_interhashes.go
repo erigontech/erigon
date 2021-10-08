@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -77,7 +78,8 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 	var root common.Hash
-	if s.BlockNumber == 0 {
+	tooBigJump := to > s.BlockNumber && to-s.BlockNumber > 100_000 // RetainList is in-memory structure and it will OOM if jump is too big, such big jump anyway invalidate most of existing Intermediate hashes
+	if s.BlockNumber == 0 || tooBigJump {
 		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -171,7 +173,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	} else {
 		changeSetBucket = kv.AccountChangeSet
 	}
-	log.Debug(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
+	log.Trace(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 
@@ -510,8 +512,8 @@ func accountTrieCollector(collector *etl.Collector) trie.HashCollector2 {
 		if hasState == 0 {
 			return collector.Collect(keyHex, nil)
 		}
-		if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
-			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
+		if bits.OnesCount16(hasHash) != len(hashes)/length.Hash {
+			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/length.Hash))
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
@@ -531,8 +533,8 @@ func storageTrieCollector(collector *etl.Collector) trie.StorageHashCollector2 {
 		if len(keyHex) > 0 && hasHash == 0 && hasTree == 0 {
 			return nil
 		}
-		if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
-			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
+		if bits.OnesCount16(hasHash) != len(hashes)/length.Hash {
+			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/length.Hash))
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)

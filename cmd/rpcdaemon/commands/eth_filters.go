@@ -39,6 +39,9 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index hexutil.Uint64) ([
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
 func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
 	notifier, supported := rpc.NotifierFromContext(ctx)
 	if !supported {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
@@ -71,6 +74,9 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 // NewPendingTransactions send a notification each time a new (header) block is appended to the chain.
 func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscription, error) {
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
 	notifier, supported := rpc.NotifierFromContext(ctx)
 	if !supported {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported

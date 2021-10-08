@@ -38,7 +38,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		return nil, err
 	}
 	if chainConfig.IsLondon(blockNumber) && blockHash != (common.Hash{}) {
-		block, err := rawdb.ReadBlockByHash(tx, blockHash)
+		block, err := api.blockByHashWithSenders(tx, blockHash)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
-	block, _, err := rawdb.ReadBlockByHashWithSenders(tx, blockHash)
+	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockHashAndIndex
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +183,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockNumberAndIndex
-	blockNum, err := getBlockNumber(blockNr, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := api.blockByRPCNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}

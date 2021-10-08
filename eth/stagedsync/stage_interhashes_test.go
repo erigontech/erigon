@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -89,14 +90,14 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	assert.Equal(t, uint16(0b1011), hasState1a)
 	assert.Equal(t, uint16(0b0001), hasTree1a)
 	assert.Equal(t, uint16(0b1001), hasHash1a)
-	assert.Equal(t, 2*common.HashLength, len(hashes1a))
+	assert.Equal(t, 2*length.Hash, len(hashes1a))
 	assert.Equal(t, 0, len(rootHash1a))
 
 	hasState2a, hasTree2a, hasHash2a, hashes2a, rootHash2a := trie.UnmarshalTrieNode(accountTrieA[string(common.FromHex("0B00"))])
 	assert.Equal(t, uint16(0b10001), hasState2a)
 	assert.Equal(t, uint16(0b00000), hasTree2a)
 	assert.Equal(t, uint16(0b10000), hasHash2a)
-	assert.Equal(t, 1*common.HashLength, len(hashes2a))
+	assert.Equal(t, 1*length.Hash, len(hashes2a))
 	assert.Equal(t, 0, len(rootHash2a))
 
 	// ----------------------------------------------------------------
@@ -112,16 +113,16 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	assert.Equal(t, 1, len(storageTrie))
 
-	storageKey := make([]byte, common.HashLength+8)
+	storageKey := make([]byte, length.Hash+8)
 	copy(storageKey, hash3.Bytes())
-	binary.BigEndian.PutUint64(storageKey[common.HashLength:], incarnation)
+	binary.BigEndian.PutUint64(storageKey[length.Hash:], incarnation)
 
 	hasState3, hasTree3, hasHash3, hashes3, rootHash3 := trie.UnmarshalTrieNode(storageTrie[string(storageKey)])
 	assert.Equal(t, uint16(0b1010), hasState3)
 	assert.Equal(t, uint16(0b0000), hasTree3)
 	assert.Equal(t, uint16(0b0010), hasHash3)
-	assert.Equal(t, 1*common.HashLength, len(hashes3))
-	assert.Equal(t, common.HashLength, len(rootHash3))
+	assert.Equal(t, 1*length.Hash, len(hashes3))
+	assert.Equal(t, length.Hash, len(rootHash3))
 
 	// ----------------------------------------------------------------
 	// Incremental trie
@@ -155,7 +156,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	assert.Equal(t, hasState1a, hasState1b)
 	assert.Equal(t, hasTree1a, hasTree1b)
 	assert.Equal(t, uint16(0b1011), hasHash1b)
-	assert.Equal(t, 3*common.HashLength, len(hashes1b))
+	assert.Equal(t, 3*length.Hash, len(hashes1b))
 	assert.Equal(t, rootHash1a, rootHash1b)
 
 	assert.Equal(t, accountTrieA[string(common.FromHex("0B00"))], accountTrieB[string(common.FromHex("0B00"))])
@@ -210,6 +211,6 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	assert.Equal(t, uint16(0b101100000), hasState2)
 	assert.Equal(t, uint16(0b000000000), hasTree2)
 	assert.Equal(t, uint16(0b001000000), hasHash2)
-	assert.Equal(t, common.HashLength, len(hashes2))
+	assert.Equal(t, length.Hash, len(hashes2))
 	assert.Equal(t, 0, len(rootHash2))
 }

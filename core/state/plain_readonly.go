@@ -48,7 +48,6 @@ type PlainState struct {
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
-
 	c1, _ := tx.Cursor(kv.AccountsHistory)
 	c2, _ := tx.Cursor(kv.StorageHistory)
 	c3, _ := tx.CursorDupSort(kv.AccountChangeSet)

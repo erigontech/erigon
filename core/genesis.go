@@ -309,6 +309,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.SokolChainConfig
 	case ghash == params.KovanGenesisHash:
 		return params.KovanChainConfig
+	case ghash == params.FermionGenesisHash:
+		return params.FermionChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -427,13 +429,13 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
 	if err := statedb.CommitBlock(params.Rules{}, blockWriter); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 	if err := blockWriter.WriteChangeSets(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
 	}
 	if err := blockWriter.WriteHistory(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write history: %w", err)
 	}
 	return block, statedb, nil
 }
@@ -618,6 +620,24 @@ func DefaultKovanGenesisBlock() *Genesis {
 		GasLimit:   0x5B8D80,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/kovan.json"),
+	}
+}
+
+func DefaultFermionGenesisBlock() *Genesis {
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &Genesis{
+		Config:     params.FermionChainConfig,
+		Timestamp:  0x0,
+		SealRlp:    sealRlp,
+		GasLimit:   0x5B8D80,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/fermion.json"),
 	}
 }
 

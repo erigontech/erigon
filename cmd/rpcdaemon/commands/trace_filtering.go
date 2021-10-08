@@ -37,7 +37,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	}
 
 	// Extract transactions from block
-	block, _, bErr := rawdb.ReadBlockByNumberWithSenders(tx, *blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -121,17 +121,14 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
-	hash, hashErr := rawdb.ReadCanonicalHash(tx, blockNum)
-	if hashErr != nil {
-		return nil, hashErr
-	}
-	block, _, bErr := rawdb.ReadBlockWithSenders(tx, hash, uint64(bn))
+	block, bErr := api.blockByNumberWithSenders(tx, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
 	if block == nil {
-		return nil, fmt.Errorf("could not find block %x %d", hash, uint64(bn))
+		return nil, fmt.Errorf("could not find block %d", uint64(bn))
 	}
+	hash := block.Hash()
 
 	parentNr := bn
 	if parentNr > 0 {
@@ -202,7 +199,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	dbtx, err1 := api.kv.BeginRo(ctx)
 	if err1 != nil {
 		stream.WriteNil()
-		return fmt.Errorf("traceFilter cannot open tx: %v", err1)
+		return fmt.Errorf("traceFilter cannot open tx: %w", err1)
 	}
 	defer dbtx.Rollback()
 
@@ -292,7 +289,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			return hashErr
 		}
 
-		block, _, bErr := rawdb.ReadBlockWithSenders(dbtx, hash, b)
+		block, bErr := api.blockWithSenders(dbtx, hash, b)
 		if bErr != nil {
 			stream.WriteNil()
 			return bErr

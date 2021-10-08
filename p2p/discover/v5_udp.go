@@ -382,7 +382,7 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 			for _, record := range response.Nodes {
 				node, err := t.verifyResponseNode(c, record, distances, seen)
 				if err != nil {
-					t.log.Debug("Invalid record in "+response.Name(), "id", c.node.ID(), "err", err)
+					t.log.Trace("Invalid record in "+response.Name(), "id", c.node.ID(), "err", err)
 					continue
 				}
 				nodes = append(nodes, node)
@@ -622,12 +622,12 @@ func (t *UDPv5) readLoop() {
 		nbytes, from, err := t.conn.ReadFromUDP(buf)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
-			t.log.Debug("Temporary UDP read error", "err", err)
+			t.log.Trace("Temporary UDP read error", "err", err)
 			continue
 		} else if err != nil {
 			// Shut down the loop for permament errors.
 			if err != io.EOF {
-				t.log.Debug("UDP read error", "err", err)
+				t.log.Trace("UDP read error", "err", err)
 			}
 			return
 		}
@@ -650,7 +650,7 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr *net.UDPAddr) error {
 	addr := fromAddr.String()
 	fromID, fromNode, packet, err := t.codec.Decode(rawpacket, addr)
 	if err != nil {
-		t.log.Debug("Bad discv5 packet", "id", fromID, "addr", addr, "err", err)
+		t.log.Trace("Bad discv5 packet", "id", fromID, "addr", addr, "err", err)
 		return err
 	}
 	if fromNode != nil {
@@ -669,15 +669,15 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr *net.UDPAddr) error {
 func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr *net.UDPAddr, p v5wire.Packet) bool {
 	ac := t.activeCallByNode[fromID]
 	if ac == nil || !bytes.Equal(p.RequestID(), ac.reqid) {
-		t.log.Debug(fmt.Sprintf("Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(fmt.Sprintf("Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if !fromAddr.IP.Equal(ac.node.IP()) || fromAddr.Port != ac.node.UDP() {
-		t.log.Debug(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Debug(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	t.startResponseTimeout(ac)

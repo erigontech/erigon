@@ -273,10 +273,10 @@ func testSeedQuery() error {
 	// Insert a batch of nodes for querying
 	for i, seed := range nodeDBSeedQueryNodes {
 		if err := db.UpdateNode(seed.node); err != nil {
-			return fmt.Errorf("node %d: failed to insert: %v", i, err)
+			return fmt.Errorf("node %d: failed to insert: %w", i, err)
 		}
 		if err := db.UpdateLastPongReceived(seed.node.ID(), seed.node.IP(), seed.pong); err != nil {
-			return fmt.Errorf("node %d: failed to insert bondTime: %v", i, err)
+			return fmt.Errorf("node %d: failed to insert bondTime: %w", i, err)
 		}
 	}
 
