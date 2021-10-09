@@ -804,9 +804,30 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	if etherbase == "" && ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
-		cfg.Miner.SigKey = core.DevnetSignPrivateKey
-		cfg.Miner.Etherbase = core.DevnetEtherbase
+	setSigKey := func(ctx *cli.Context, cfg *ethconfig.Config) {
+		if ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
+			signingKeyFileName := ctx.GlobalString(MinerSigningKeyFileFlag.Name)
+			key, err := crypto.LoadECDSA(signingKeyFileName)
+			if err != nil {
+				panic(err)
+			}
+			cfg.Miner.SigKey = key
+		}
+	}
+
+	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+		if etherbase == "" {
+			cfg.Miner.SigKey = core.DevnetSignPrivateKey
+			cfg.Miner.Etherbase = core.DevnetEtherbase
+		}
+		setSigKey(ctx, cfg)
+	}
+
+	if ctx.GlobalString(ChainFlag.Name) == params.FermionChainName {
+		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
+			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, params.FermionChainName, MiningEnabledFlag.Name))
+		}
+		setSigKey(ctx, cfg)
 	}
 }
 
