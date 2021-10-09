@@ -1130,10 +1130,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 }
 
 // dumpState writes the content of current state into a file with given name
-func dumpState(chaindata string, statefile string, block int) error {
+func dumpState(chaindata string, block int, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create(statefile)
+	f, err := os.Create(name + ".dat")
 	if err != nil {
 		return err
 	}
@@ -1179,8 +1179,8 @@ func dumpState(chaindata string, statefile string, block int) error {
 				}
 			}
 			i += 2
-			if i%1_000_000 == 0 {
-				log.Info("Written into file", "words", i)
+			if i%10_000_000 == 0 {
+				log.Info("Written into file", "millions", i/1_000_000)
 			}
 			if uint64(i) == 2*count {
 				break
@@ -1203,7 +1203,7 @@ func mphf(chaindata string, block int) error {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("not sure if statedump.dat exists: %w", err)
 		}
-		if err = dumpState(chaindata, statefile, int(block)); err != nil {
+		if err = dumpState(chaindata, int(block), "statefile"); err != nil {
 			return err
 		}
 	}
@@ -1456,8 +1456,8 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 						lastK = k
 					}
 				}
-				if repeats > minPatternRepeats {
-					score := uint64(repeats * int(l-4))
+				score := uint64(repeats * int(l-4))
+				if score > minPatternScore {
 					// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
 					dictKey := make([]byte, l)
 					for s := 0; s < l; s++ {
@@ -1587,28 +1587,18 @@ const superstringLimit = 16 * 1024 * 1024
 // minPatternLen is minimum length of pattern we consider to be included into the dictionary
 const minPatternLen = 5
 
-// minPatternRepeats is minimum repeats (per superstring) required to consider including pattern into the dictionary
-const minPatternRepeats = 128
+// minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
+const minPatternScore = 1024
 
 // maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
 // Large values increase memory consumption of dictionary reduction phase
 const maxDictPatterns = 1024 * 1024
 
-func compress(chaindata string, block int) error {
-	// Create a file to compress if it does not exist already
-	statefile := "statedump.dat"
-	if _, err := os.Stat(statefile); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("not sure if statedump.dat exists: %w", err)
-		}
-		if err = dumpState(chaindata, statefile, block); err != nil {
-			return err
-		}
-	}
+func compress(chaindata string, name string) error {
 	var superstring []byte
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
-	f, err := os.Open(statefile)
+	f, err := os.Open(name + ".dat")
 	if err != nil {
 		return err
 	}
@@ -1630,10 +1620,13 @@ func compress(chaindata string, block int) error {
 		collectors[i] = collector
 		go processSuperstring(ch, collector, &wg)
 	}
-	var buf [256]byte
+	var buf []byte
 	l, e := binary.ReadUvarint(r)
 	i := 0
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
+		if len(buf) < int(l) {
+			buf = make([]byte, l)
+		}
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
@@ -1646,8 +1639,8 @@ func compress(chaindata string, block int) error {
 		}
 		superstring = append(superstring, 0, 0)
 		i++
-		if i%1_000_000 == 0 {
-			log.Info("Dictionary preprocessing", "words", i)
+		if i%10_000_000 == 0 {
+			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
@@ -1677,7 +1670,7 @@ func compress(chaindata string, block int) error {
 	}
 	db.finish()
 	var df *os.File
-	df, err = os.Create("dictionary.txt")
+	df, err = os.Create(name + ".dictionary.txt")
 	if err != nil {
 		return err
 	}
@@ -1783,7 +1776,7 @@ func (r *Ring) Truncate(i int) {
 	r.tail = (r.head + i) & (len(r.cells) - 1)
 }
 
-func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.PatriciaTree, mf *patricia.MatchFinder, output []byte, cover []bool, patterns []int, cellRing *Ring) ([]byte, []int) {
+func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.PatriciaTree, mf *patricia.MatchFinder, output []byte, cover []bool, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int) {
 	matches := mf.FindLongestMatches(trie, input)
 	if len(matches) == 0 {
 		n := binary.PutUvarint(numBuf, 0)
@@ -1906,6 +1899,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 			cover[j] = true
 		}
 		// Starting position
+		posMap[uint64(matches[pattern].Start+1)]++
 		n := binary.PutUvarint(numBuf, uint64(matches[pattern].Start))
 		output = append(output, numBuf[:n]...)
 		// Code
@@ -1926,7 +1920,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	return output, patterns
 }
 
-func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize *uint64, outputSize *uint64) {
+func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize *uint64, outputSize *uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output []byte = make([]byte, 0, 256)
 	var cover []bool = make([]bool, 256)
@@ -1938,57 +1932,16 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 		// First 8 bytes are idx
 		n := binary.PutUvarint(numBuf, uint64(len(input)-8))
 		output = append(output[:0], numBuf[:n]...)
-		output, patterns = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, cover, patterns, cellRing)
+		output, patterns = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, cover, patterns, cellRing, posMap)
 		if err := collector.Collect(input[:8], output); err != nil {
 			log.Error("Could not collect", "error", err)
 			return
 		}
 		atomic.AddUint64(inputSize, 1+uint64(len(input)-8))
 		atomic.AddUint64(outputSize, uint64(len(output)))
+		posMap[uint64(len(input)-8+1)]++
+		posMap[0]++
 	}
-}
-
-func decode(output []byte, invDict map[uint64][]byte) ([]byte, error) {
-	r := bytes.NewReader(output)
-	var l uint64
-	var err error
-	if l, err = binary.ReadUvarint(r); err != nil {
-		return nil, err
-	}
-	input := make([]byte, l)
-	if l == 0 {
-		return input, nil
-	}
-	cover := make([]bool, l) // Which characters are covered by the pattens
-	var p uint64             // Number of patterns
-	if p, err = binary.ReadUvarint(r); err != nil {
-		return nil, err
-	}
-	// Now reading patterns one by one
-	for i := 0; i < int(p); i++ {
-		var pos uint64 // Starting position for pattern
-		if pos, err = binary.ReadUvarint(r); err != nil {
-			return nil, err
-		}
-		var code uint64 // Code of the pattern
-		if code, err = binary.ReadUvarint(r); err != nil {
-			return nil, err
-		}
-		word := invDict[code]
-		for j := 0; j < len(word); j++ {
-			input[int(pos)+j] = word[j]
-			cover[int(pos)+j] = true
-		}
-	}
-	// Read uncovered characters
-	for i := 0; i < int(l); i++ {
-		if !cover[i] {
-			if input[i], err = r.ReadByte(); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return input, nil
 }
 
 type Pattern struct {
@@ -2094,15 +2047,151 @@ func (ph *PatternHeap) Pop() interface{} {
 	return x
 }
 
+type Position struct {
+	pos      uint64
+	uses     uint64
+	code     uint64
+	codeBits int
+	offset   uint64
+}
+
+type PositionHuff struct {
+	uses       uint64
+	tieBreaker uint64
+	p0, p1     *Position
+	h0, h1     *PositionHuff
+	offset     uint64
+}
+
+func (h *PositionHuff) AddZero() {
+	if h.p0 != nil {
+		h.p0.code <<= 1
+		h.p0.codeBits++
+	} else {
+		h.h0.AddZero()
+	}
+	if h.p1 != nil {
+		h.p1.code <<= 1
+		h.p1.codeBits++
+	} else {
+		h.h1.AddZero()
+	}
+}
+
+func (h *PositionHuff) AddOne() {
+	if h.p0 != nil {
+		h.p0.code <<= 1
+		h.p0.code++
+		h.p0.codeBits++
+	} else {
+		h.h0.AddOne()
+	}
+	if h.p1 != nil {
+		h.p1.code <<= 1
+		h.p1.code++
+		h.p1.codeBits++
+	} else {
+		h.h1.AddOne()
+	}
+}
+
+type PositionList []*Position
+
+func (pl PositionList) Len() int {
+	return len(pl)
+}
+
+func (pl PositionList) Less(i, j int) bool {
+	if pl[i].uses == pl[j].uses {
+		return pl[i].pos < pl[j].pos
+	}
+	return pl[i].uses < pl[j].uses
+}
+
+func (pl *PositionList) Swap(i, j int) {
+	(*pl)[i], (*pl)[j] = (*pl)[j], (*pl)[i]
+}
+
+type PositionHeap []*PositionHuff
+
+func (ph PositionHeap) Len() int {
+	return len(ph)
+}
+
+func (ph PositionHeap) Less(i, j int) bool {
+	if ph[i].uses == ph[j].uses {
+		return ph[i].tieBreaker < ph[j].tieBreaker
+	}
+	return ph[i].uses < ph[j].uses
+}
+
+func (ph *PositionHeap) Swap(i, j int) {
+	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
+}
+
+func (ph *PositionHeap) Push(x interface{}) {
+	*ph = append(*ph, x.(*PositionHuff))
+}
+
+func (ph *PositionHeap) Pop() interface{} {
+	old := *ph
+	n := len(old)
+	x := old[n-1]
+	*ph = old[0 : n-1]
+	return x
+}
+
+type HuffmanCoder struct {
+	w          *bufio.Writer
+	outputBits int
+	outputByte byte
+	trace      bool
+}
+
+func (hf *HuffmanCoder) encode(code uint64, codeBits int) error {
+	for codeBits > 0 {
+		var bitsUsed int
+		if hf.outputBits+codeBits > 8 {
+			bitsUsed = 8 - hf.outputBits
+		} else {
+			bitsUsed = codeBits
+		}
+		mask := (uint64(1) << bitsUsed) - 1
+		hf.outputByte |= byte((code & mask) << hf.outputBits)
+		code >>= bitsUsed
+		codeBits -= bitsUsed
+		hf.outputBits += bitsUsed
+		if hf.outputBits == 8 {
+			if e := hf.w.WriteByte(hf.outputByte); e != nil {
+				return e
+			}
+			hf.outputBits = 0
+			hf.outputByte = 0
+		}
+	}
+	return nil
+}
+
+func (hf *HuffmanCoder) flush() error {
+	if hf.outputBits > 0 {
+		if e := hf.w.WriteByte(hf.outputByte); e != nil {
+			return e
+		}
+		hf.outputBits = 0
+		hf.outputByte = 0
+	}
+	return nil
+}
+
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict() error {
+func reducedict(name string) error {
 	go func() {
 		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
 			log.Error("Failure in running pprof server", "err", err)
 		}
 	}()
 	// Read up the dictionary
-	df, err := os.Open("dictionary.txt")
+	df, err := os.Open(name + ".dictionary.txt")
 	if err != nil {
 		return err
 	}
@@ -2134,7 +2223,7 @@ func reducedict() error {
 		return err
 	}
 	log.Info("dictionary file parsed", "entries", len(code2pattern))
-	statefile := "statedump.dat"
+	statefile := name + ".dat"
 	f, err := os.Open(statefile)
 	if err != nil {
 		return err
@@ -2144,21 +2233,27 @@ func reducedict() error {
 	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
 		return err
 	}
-	var buf [1024]byte
+	var buf []byte
 	tmpDir := ""
 	ch := make(chan []byte, 10000)
 	var inputSize, outputSize uint64
 	var wg sync.WaitGroup
-	collectors := make([]*etl.Collector, runtime.NumCPU())
+	var collectors []*etl.Collector
+	var posMaps []map[uint64]uint64
 	for i := 0; i < runtime.NumCPU(); i++ {
 		collector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		collectors[i] = collector
+		collectors = append(collectors, collector)
+		posMap := make(map[uint64]uint64)
+		posMaps = append(posMaps, posMap)
 		wg.Add(1)
-		go reduceDictWorker(ch, &wg, &pt, collector, &inputSize, &outputSize)
+		go reduceDictWorker(ch, &wg, &pt, collector, &inputSize, &outputSize, posMap)
 	}
 	l, e := binary.ReadUvarint(r)
 	i := 0
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
+		if len(buf) < int(l) {
+			buf = make([]byte, l)
+		}
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
@@ -2167,10 +2262,10 @@ func reducedict() error {
 		copy(input[8:], buf[:l])
 		ch <- input
 		i++
-		if i%1_000_000 == 0 {
+		if i%10_000_000 == 0 {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Replacement preprocessing", "words", i, "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
@@ -2184,6 +2279,13 @@ func reducedict() error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Done", "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	posMap := make(map[uint64]uint64)
+	for _, m := range posMaps {
+		for l, c := range m {
+			posMap[l] += c
+		}
+	}
+	fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
 	for _, p := range code2pattern {
 		if p.uses > 0 {
@@ -2253,7 +2355,7 @@ func reducedict() error {
 	}
 	root := heap.Pop(&codeHeap).(*PatternHuff)
 	var cf *os.File
-	if cf, err = os.Create("compressed.dat"); err != nil {
+	if cf, err = os.Create(name + ".compressed.dat"); err != nil {
 		return err
 	}
 	cw := bufio.NewWriter(cf)
@@ -2308,13 +2410,124 @@ func reducedict() error {
 	}
 	log.Info("Dictionary", "size", offset, "pattern cutoff", patternCutoff)
 
+	var positionList PositionList
+	pos2code := make(map[uint64]*Position)
+	for pos, uses := range posMap {
+		p := &Position{pos: pos, uses: uses, code: 0, codeBits: 0, offset: 0}
+		positionList = append(positionList, p)
+		pos2code[pos] = p
+	}
+	sort.Sort(&positionList)
+	// Calculate offsets of the dictionary positions and total size
+	offset = 0
+	for _, p := range positionList {
+		p.offset = offset
+		n := binary.PutUvarint(numBuf, p.pos)
+		offset += uint64(n)
+	}
+	positionCutoff := offset // All offsets below this will be considered positions
+	i = 0
+	log.Info("Positional dictionary", "size", positionList.Len())
+	// Build Huffman tree for codes
+	var posHeap PositionHeap
+	heap.Init(&posHeap)
+	tieBreaker = uint64(0)
+	var posHuffs []*PositionHuff // To be used to output dictionary
+	for posHeap.Len()+(positionList.Len()-i) > 1 {
+		// New node
+		h := &PositionHuff{
+			tieBreaker: tieBreaker,
+			offset:     offset,
+		}
+		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
+			// Take h0 from the heap
+			h.h0 = heap.Pop(&posHeap).(*PositionHuff)
+			h.h0.AddZero()
+			h.uses += h.h0.uses
+			n := binary.PutUvarint(numBuf, h.h0.offset)
+			offset += uint64(n)
+		} else {
+			// Take p0 from the list
+			h.p0 = positionList[i]
+			h.p0.code = 0
+			h.p0.codeBits = 1
+			h.uses += h.p0.uses
+			n := binary.PutUvarint(numBuf, h.p0.offset)
+			offset += uint64(n)
+			i++
+		}
+		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
+			// Take h1 from the heap
+			h.h1 = heap.Pop(&posHeap).(*PositionHuff)
+			h.h1.AddOne()
+			h.uses += h.h1.uses
+			n := binary.PutUvarint(numBuf, h.h1.offset)
+			offset += uint64(n)
+		} else {
+			// Take p1 from the list
+			h.p1 = positionList[i]
+			h.p1.code = 1
+			h.p1.codeBits = 1
+			h.uses += h.p1.uses
+			n := binary.PutUvarint(numBuf, h.p1.offset)
+			offset += uint64(n)
+			i++
+		}
+		tieBreaker++
+		heap.Push(&posHeap, h)
+		posHuffs = append(posHuffs, h)
+	}
+	posRoot := heap.Pop(&posHeap).(*PositionHuff)
+	// First, output dictionary
+	binary.BigEndian.PutUint64(numBuf, offset) // Dictionary size
+	if _, err = cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	// Secondly, output directory root
+	binary.BigEndian.PutUint64(numBuf, posRoot.offset)
+	if _, err = cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	// Thirdly, output pattern cutoff offset
+	binary.BigEndian.PutUint64(numBuf, positionCutoff)
+	if _, err = cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	// Write all the pattens
+	for _, p := range positionList {
+		n := binary.PutUvarint(numBuf, p.pos)
+		if _, err = cw.Write(numBuf[:n]); err != nil {
+			return err
+		}
+	}
+	// Write all the huffman nodes
+	for _, h := range posHuffs {
+		var n int
+		if h.h0 != nil {
+			n = binary.PutUvarint(numBuf, h.h0.offset)
+		} else {
+			n = binary.PutUvarint(numBuf, h.p0.offset)
+		}
+		if _, err = cw.Write(numBuf[:n]); err != nil {
+			return err
+		}
+		if h.h1 != nil {
+			n = binary.PutUvarint(numBuf, h.h1.offset)
+		} else {
+			n = binary.PutUvarint(numBuf, h.p1.offset)
+		}
+		if _, err = cw.Write(numBuf[:n]); err != nil {
+			return err
+		}
+	}
+	log.Info("Positional dictionary", "size", offset, "position cutoff", positionCutoff)
 	df, err = os.Create("huffman_codes.txt")
 	if err != nil {
 		return err
 	}
 	w := bufio.NewWriter(df)
-	for _, p := range patternList {
-		fmt.Fprintf(w, "%d %x %x\n", p.codeBits, p.code, p.w)
+	for _, p := range positionList {
+		fmt.Fprintf(w, "%d %x %d uses %d\n", p.codeBits, p.code, p.pos, p.uses)
 	}
 	if err = w.Flush(); err != nil {
 		return err
@@ -2332,6 +2545,8 @@ func reducedict() error {
 	}
 
 	wc := 0
+	var hc HuffmanCoder
+	hc.w = cw
 	if err = aggregator.Load(CompressLogPrefix, nil /* db */, "" /* bucket */, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		// Re-encode it
 		r := bytes.NewReader(v)
@@ -2340,17 +2555,13 @@ func reducedict() error {
 		if l, err = binary.ReadUvarint(r); e != nil {
 			return e
 		}
-		n := binary.PutUvarint(numBuf, l)
-		if _, e = cw.Write(numBuf[:n]); e != nil {
+		posCode := pos2code[l+1]
+		if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
 			return e
 		}
 		cover := make([]bool, l) // Which characters are covered by the pattens
 		var pNum uint64          // Number of patterns
 		if pNum, e = binary.ReadUvarint(r); e != nil {
-			return e
-		}
-		n = binary.PutUvarint(numBuf, pNum)
-		if _, e = cw.Write(numBuf[:n]); e != nil {
 			return e
 		}
 		// Now reading patterns one by one
@@ -2359,51 +2570,30 @@ func reducedict() error {
 			if pos, e = binary.ReadUvarint(r); e != nil {
 				return e
 			}
-			n = binary.PutUvarint(numBuf, pos)
-			if _, e = cw.Write(numBuf[:n]); e != nil {
+			posCode = pos2code[pos+1]
+			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
 			var code uint64 // Code of the pattern
 			if code, e = binary.ReadUvarint(r); e != nil {
 				return e
 			}
-			p := code2pattern[code]
-			word := p.w
+			patternCode := code2pattern[code]
+			word := patternCode.w
 			for j := 0; j < len(word); j++ {
 				cover[int(pos)+j] = true
 			}
-			// Huffman code
-			codeBits := p.codeBits
-			huffman := p.code
-			outputBits := 0
-			var outputByte byte
-			for codeBits > 0 {
-				var bitsUsed int
-				if outputBits+codeBits > 8 {
-					bitsUsed = 8 - outputBits
-				} else {
-					bitsUsed = codeBits
-				}
-				mask := (uint64(1) << bitsUsed) - 1
-				outputByte |= byte((huffman & mask) << outputBits)
-				huffman >>= bitsUsed
-				codeBits -= bitsUsed
-				outputBits += bitsUsed
-				if outputBits == 8 {
-					if e = cw.WriteByte(outputByte); e != nil {
-						return e
-					}
-					outputBits = 0
-					outputByte = 0
-				}
+			if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+				return e
 			}
-			// Output last byte
-			if outputBits > 0 {
-				if e = cw.WriteByte(outputByte); e != nil {
-					return e
-				}
-				outputBits = 0
-			}
+		}
+		// Terminating position and flush
+		posCode = pos2code[0]
+		if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+			return e
+		}
+		if e = hc.flush(); e != nil {
+			return e
 		}
 		// Read uncovered characters
 		var b byte
@@ -2418,6 +2608,9 @@ func reducedict() error {
 			}
 		}
 		wc++
+		if wc%10_000_000 == 0 {
+			log.Info("Compressed", "millions", wc/1_000_000)
+		}
 		return nil
 	}, etl.TransformArgs{}); err != nil {
 		return err
@@ -2433,45 +2626,114 @@ func reducedict() error {
 }
 
 type Dictionary struct {
-	data          []byte
-	rootOffset    uint64
-	patternCutoff uint64
+	data       []byte
+	rootOffset uint64
+	cutoff     uint64
 }
 
 type DictionaryState struct {
+	r      *bufio.Reader
 	d      *Dictionary
+	posD   *Dictionary
 	offset uint64
 	numBuf [binary.MaxVarintLen64]byte
+	b      byte
+	mask   byte
 }
 
-func (ds *DictionaryState) Reset() {
-	ds.offset = ds.d.rootOffset
-}
-
-func (ds *DictionaryState) Zero() bool {
+func (ds *DictionaryState) zero() bool {
 	ds.offset, _ = binary.Uvarint(ds.d.data[ds.offset:])
-	return ds.offset < ds.d.patternCutoff
+	return ds.offset < ds.d.cutoff
 }
 
-func (ds *DictionaryState) One() bool {
+func (ds *DictionaryState) one() bool {
 	_, n := binary.Uvarint(ds.d.data[ds.offset:])
 	ds.offset, _ = binary.Uvarint(ds.d.data[ds.offset+uint64(n):])
-	return ds.offset < ds.d.patternCutoff
+	return ds.offset < ds.d.cutoff
 }
 
-func (ds *DictionaryState) Pattern() []byte {
+func (ds *DictionaryState) posZero() bool {
+	ds.offset, _ = binary.Uvarint(ds.posD.data[ds.offset:])
+	return ds.offset < ds.posD.cutoff
+}
+
+func (ds *DictionaryState) posOne() bool {
+	_, n := binary.Uvarint(ds.posD.data[ds.offset:])
+	ds.offset, _ = binary.Uvarint(ds.posD.data[ds.offset+uint64(n):])
+	return ds.offset < ds.posD.cutoff
+}
+
+func (ds *DictionaryState) pattern() []byte {
 	l, n := binary.Uvarint(ds.d.data[ds.offset:])
 	return ds.d.data[ds.offset+uint64(n) : ds.offset+uint64(n)+l]
 }
 
-func decompress() error {
-	cf, err := os.Open("compressed.dat")
+func (ds *DictionaryState) pos() uint64 {
+	pos, _ := binary.Uvarint(ds.posD.data[ds.offset:])
+	return pos
+}
+
+func (ds *DictionaryState) NextPos(clean bool) (uint64, error) {
+	if clean {
+		ds.mask = 0
+	}
+	ds.offset = ds.posD.rootOffset
+	for {
+		if ds.mask == 0 {
+			ds.mask = 1
+			var e error
+			if ds.b, e = ds.r.ReadByte(); e != nil {
+				return 0, e
+			}
+		}
+		if ds.b&ds.mask == 0 {
+			ds.mask <<= 1
+			if ds.posZero() {
+				break
+			}
+		} else {
+			ds.mask <<= 1
+			if ds.posOne() {
+				break
+			}
+		}
+	}
+	return ds.pos(), nil
+}
+
+func (ds *DictionaryState) NextPattern() ([]byte, error) {
+	ds.offset = ds.d.rootOffset
+	for {
+		if ds.mask == 0 {
+			ds.mask = 1
+			var e error
+			if ds.b, e = ds.r.ReadByte(); e != nil {
+				return nil, e
+			}
+		}
+		if ds.b&ds.mask == 0 {
+			ds.mask <<= 1
+			if ds.zero() {
+				break
+			}
+		} else {
+			ds.mask <<= 1
+			if ds.one() {
+				break
+			}
+		}
+	}
+	return ds.pattern(), nil
+}
+
+func decompress(name string) error {
+	cf, err := os.Open(name + ".compressed.dat")
 	if err != nil {
 		return err
 	}
 	cr := bufio.NewReader(cf)
 	var df *os.File
-	if df, err = os.Create("decompressed.dat"); err != nil {
+	if df, err = os.Create(name + ".decompressed.dat"); err != nil {
 		return err
 	}
 	dw := bufio.NewWriter(df)
@@ -2498,59 +2760,52 @@ func decompress() error {
 	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
 		return err
 	}
-	dict.patternCutoff = binary.BigEndian.Uint64(numBuf[:8])
-	fmt.Printf("patternCutoff = %d\n", dict.patternCutoff)
+	dict.cutoff = binary.BigEndian.Uint64(numBuf[:8])
+	fmt.Printf("cutoff = %d\n", dict.cutoff)
 	if _, err = io.ReadFull(cr, dict.data); err != nil {
 		return err
 	}
-	var ds DictionaryState
-	ds.d = &dict
-	l, e := binary.ReadUvarint(cr)
-	for ; e == nil; l, e = binary.ReadUvarint(cr) {
+	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
+		return err
+	}
+	dictSize = binary.BigEndian.Uint64(numBuf[:8])
+	fmt.Printf("pos dictSize = %d\n", dictSize)
+	var posDict Dictionary
+	posDict.data = make([]byte, dictSize)
+	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
+		return err
+	}
+	posDict.rootOffset = binary.BigEndian.Uint64(numBuf[:8])
+	fmt.Printf("pos rootOffset = %d\n", posDict.rootOffset)
+	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
+		return err
+	}
+	posDict.cutoff = binary.BigEndian.Uint64(numBuf[:8])
+	fmt.Printf("pos cutoff = %d\n", posDict.cutoff)
+	if _, err = io.ReadFull(cr, posDict.data); err != nil {
+		return err
+	}
+	ds := DictionaryState{d: &dict, posD: &posDict, r: cr}
+	l, e := ds.NextPos(true)
+	wc := 0
+	for ; e == nil; l, e = ds.NextPos(true /* clean */) {
+		l--
 		n := binary.PutUvarint(numBuf, l)
 		if _, e = dw.Write(numBuf[:n]); e != nil {
 			return e
 		}
 		cover := make([]bool, l) // Which characters are covered by the pattens
 		word := make([]byte, l)
-		var pNum uint64 // Number of patterns
-		if pNum, e = binary.ReadUvarint(cr); e != nil {
-			return e
-		}
-		// Now reading patterns one by one
-		for i := 0; i < int(pNum); i++ {
-			var pos uint64 // Starting position for pattern
-			if pos, e = binary.ReadUvarint(cr); e != nil {
+		var pos uint64
+		for pos, e = ds.NextPos(false /* clean */); e == nil && pos != 0; pos, e = ds.NextPos(false) {
+			intPos := int(pos) - 1
+			var pattern []byte
+			if pattern, e = ds.NextPattern(); e != nil {
 				return e
 			}
-			ds.Reset()
-			var b byte
-			if b, e = cr.ReadByte(); e != nil {
-				return e
-			}
-			mask := byte(1)
-			for {
-				if b&mask == 0 {
-					if ds.Zero() {
-						break
-					}
-				} else {
-					if ds.One() {
-						break
-					}
-				}
-				mask <<= 1
-				if mask == 0 {
-					mask = 1
-					if b, e = cr.ReadByte(); e != nil {
-						return e
-					}
-				}
-			}
-			pattern := ds.Pattern()
 			for j := 0; j < len(pattern); j++ {
-				word[int(pos)+j] = pattern[j]
-				cover[int(pos)+j] = true
+				word[intPos+j] = pattern[j]
+				cover[intPos+j] = true
 			}
 		}
 		// Uncovered characters
@@ -2563,6 +2818,10 @@ func decompress() error {
 		}
 		if _, e = dw.Write(word); e != nil {
 			return e
+		}
+		wc++
+		if wc%10_000_000 == 0 {
+			log.Info("Decompressed", "millions", wc/1_000_000)
 		}
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
@@ -3246,6 +3505,82 @@ func fixState(chaindata string) error {
 	return tx.Commit()
 }
 
+func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var txs kv.Cursor
+	if txs, err = tx.Cursor(kv.EthTx); err != nil {
+		return err
+	}
+	defer txs.Close()
+	var bodies kv.Cursor
+	if bodies, err = tx.Cursor(kv.BlockBody); err != nil {
+		return err
+	}
+	defer bodies.Close()
+	f, err := os.Create(name + ".dat")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	i := 0
+	var countBytes [8]byte
+	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Put real count if required
+	if _, err = w.Write(countBytes[:]); err != nil {
+		return err
+	}
+	numBuf := make([]byte, binary.MaxVarintLen64)
+	blockEncoded := dbutils.EncodeBlockNumber(block)
+	k, v, e := bodies.Seek(blockEncoded)
+	for ; k != nil && e == nil; k, v, e = bodies.Next() {
+		bodyNum := binary.BigEndian.Uint64(k)
+		if bodyNum >= block+uint64(*blockTotal) {
+			break
+		}
+		var body types.BodyForStorage
+		if e = rlp.DecodeBytes(v, &body); err != nil {
+			return e
+		}
+		if body.TxAmount > 0 {
+			binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
+			tk, tv, te := txs.Seek(numBuf[:8])
+			for ; tk != nil && te == nil; tk, tv, te = txs.Next() {
+				txId := binary.BigEndian.Uint64(tk)
+				if txId >= body.BaseTxId+uint64(body.TxAmount) {
+					break
+				}
+				n := binary.PutUvarint(numBuf, uint64(len(tv)))
+				if _, e = w.Write(numBuf[:n]); e != nil {
+					return err
+				}
+				if len(tv) > 0 {
+					if _, e = w.Write(tv); e != nil {
+						return e
+					}
+				}
+				i++
+				if i%1_000_000 == 0 {
+					log.Info("Wrote into file", "million txs", i/1_000_000, "block num", bodyNum)
+				}
+			}
+			if te != nil && !errors.Is(te, io.EOF) {
+				return te
+			}
+		}
+	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
+	}
+	return nil
+}
+
 func trimTxs(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -3819,14 +4154,18 @@ func main() {
 
 	case "devTx":
 		err = devTx(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
-		err = compress(*chaindata, *block)
+		err = compress(*chaindata, *name)
 	case "reducedict":
-		err = reducedict()
+		err = reducedict(*name)
 	case "decompress":
-		err = decompress()
+		err = decompress(*name)
 	case "genstate":
 		err = genstate()
+	case "dumpTxs":
+		err = dumpTxs(*chaindata, uint64(*block), int(*blockTotal), *name)
 	}
 
 	if err != nil {
