@@ -255,7 +255,7 @@ func fakeRlpTx(slot *TxSlot, data []byte) []byte {
 	buf[0] = byte(DynamicFeeTxType)
 	p := 1
 	p += rlp.EncodeListPrefix(dataLen, buf[p:])
-	p += rlp.EncodeU64(1, buf[p:])
+	p += rlp.EncodeU64(1, buf[p:]) //chainID
 	p += rlp.EncodeU64(slot.nonce, buf[p:])
 	p += rlp.EncodeU64(slot.tip, buf[p:])
 	p += rlp.EncodeU64(slot.feeCap, buf[p:])
