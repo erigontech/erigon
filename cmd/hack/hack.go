@@ -2021,10 +2021,12 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 		// First 8 bytes are idx
 		n := binary.PutUvarint(numBuf, uint64(len(input)-8))
 		output = append(output[:0], numBuf[:n]...)
-		output, patterns = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, cover, patterns, cellRing, posMap)
-		if err := collector.Collect(input[:8], output); err != nil {
-			log.Error("Could not collect", "error", err)
-			return
+		if len(input) > 8 {
+			output, patterns = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, cover, patterns, cellRing, posMap)
+			if err := collector.Collect(input[:8], output); err != nil {
+				log.Error("Could not collect", "error", err)
+				return
+			}
 		}
 		atomic.AddUint64(inputSize, 1+uint64(len(input)-8))
 		atomic.AddUint64(outputSize, uint64(len(output)))
@@ -2582,7 +2584,7 @@ func reducedict(name string) error {
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// Write all the pattens
+	// Write all the positions
 	for _, p := range positionList {
 		n := binary.PutUvarint(numBuf, p.pos)
 		if _, err = cw.Write(numBuf[:n]); err != nil {
@@ -2648,52 +2650,52 @@ func reducedict(name string) error {
 		if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
 			return e
 		}
-		cover := make([]bool, l) // Which characters are covered by the pattens
-		var pNum uint64          // Number of patterns
-		if pNum, e = binary.ReadUvarint(r); e != nil {
-			return e
-		}
-		// Now reading patterns one by one
-		var lastPos uint64
-		for i := 0; i < int(pNum); i++ {
-			var pos uint64 // Starting position for pattern
-			if pos, e = binary.ReadUvarint(r); e != nil {
+		if l > 0 {
+			var pNum uint64 // Number of patterns
+			if pNum, e = binary.ReadUvarint(r); e != nil {
 				return e
 			}
-			posCode = pos2code[pos-lastPos+1]
-			lastPos = pos
+			// Now reading patterns one by one
+			var lastPos uint64
+			var lastUncovered int
+			var uncoveredCount int
+			for i := 0; i < int(pNum); i++ {
+				var pos uint64 // Starting position for pattern
+				if pos, e = binary.ReadUvarint(r); e != nil {
+					return e
+				}
+				posCode = pos2code[pos-lastPos+1]
+				lastPos = pos
+				if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+					return e
+				}
+				var code uint64 // Code of the pattern
+				if code, e = binary.ReadUvarint(r); e != nil {
+					return e
+				}
+				patternCode := code2pattern[code]
+				if int(pos) > lastUncovered {
+					uncoveredCount += int(pos) - lastUncovered
+				}
+				lastUncovered = int(pos) + len(patternCode.w)
+				if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+					return e
+				}
+			}
+			if int(l) > lastUncovered {
+				uncoveredCount += int(l) - lastUncovered
+			}
+			// Terminating position and flush
+			posCode = pos2code[0]
 			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
-			var code uint64 // Code of the pattern
-			if code, e = binary.ReadUvarint(r); e != nil {
+			if e = hc.flush(); e != nil {
 				return e
 			}
-			patternCode := code2pattern[code]
-			word := patternCode.w
-			for j := 0; j < len(word); j++ {
-				cover[int(pos)+j] = true
-			}
-			if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
-				return e
-			}
-		}
-		// Terminating position and flush
-		posCode = pos2code[0]
-		if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
-			return e
-		}
-		if e = hc.flush(); e != nil {
-			return e
-		}
-		// Read uncovered characters
-		var b byte
-		for i := 0; i < int(l); i++ {
-			if !cover[i] {
-				if b, e = r.ReadByte(); e != nil {
-					return e
-				}
-				if e = cw.WriteByte(b); e != nil {
+			// Copy uncovered characters
+			if uncoveredCount > 0 {
+				if _, e = io.CopyN(cw, r, int64(uncoveredCount)); e != nil {
 					return e
 				}
 			}
@@ -2877,6 +2879,8 @@ func decompress(name string) error {
 		return err
 	}
 	ds := DictionaryState{d: &dict, posD: &posDict, r: cr}
+	uncovered := make([]int, 0, 256)
+	var word []byte
 	var nonDecodeTime time.Duration
 	start := time.Now()
 	l, e := ds.NextPos(true)
@@ -2888,34 +2892,41 @@ func decompress(name string) error {
 		if _, e = dw.Write(numBuf[:n]); e != nil {
 			return e
 		}
-		nonDecodeTime += time.Since(ioStart)
-		cover := make([]bool, l) // Which characters are covered by the pattens
-		word := make([]byte, l)
-		var pos uint64
-		var lastPos int
-		for pos, e = ds.NextPos(false /* clean */); e == nil && pos != 0; pos, e = ds.NextPos(false) {
-			intPos := lastPos + int(pos) - 1
-			lastPos = intPos
-			var pattern []byte
-			if pattern, e = ds.NextPattern(); e != nil {
-				return e
+		if l > 0 {
+			nonDecodeTime += time.Since(ioStart)
+			if int(l) > len(word) {
+				word = make([]byte, l)
 			}
-			for j := 0; j < len(pattern); j++ {
-				word[intPos+j] = pattern[j]
-				cover[intPos+j] = true
+			var pos uint64
+			var lastPos int
+			var lastUncovered int
+			uncovered = uncovered[:0]
+			for pos, e = ds.NextPos(false /* clean */); e == nil && pos != 0; pos, e = ds.NextPos(false) {
+				intPos := lastPos + int(pos) - 1
+				lastPos = intPos
+				var pattern []byte
+				if pattern, e = ds.NextPattern(); e != nil {
+					return e
+				}
+				copy(word[intPos:], pattern)
+				if intPos > lastUncovered {
+					uncovered = append(uncovered, lastUncovered, intPos)
+				}
+				lastUncovered = intPos + len(pattern)
 			}
-		}
-		// Uncovered characters
-		for i := 0; i < int(l); i++ {
-			if !cover[i] {
-				if word[i], e = cr.ReadByte(); e != nil {
+			if int(l) > lastUncovered {
+				uncovered = append(uncovered, lastUncovered, int(l))
+			}
+			// Uncovered characters
+			for i := 0; i < len(uncovered); i += 2 {
+				if _, e = io.ReadFull(cr, word[uncovered[i]:uncovered[i+1]]); e != nil {
 					return e
 				}
 			}
-		}
-		ioStart = time.Now()
-		if _, e = dw.Write(word); e != nil {
-			return e
+			ioStart = time.Now()
+			if _, e = dw.Write(word[:l]); e != nil {
+				return e
+			}
 		}
 		wc++
 		if wc%10_000_000 == 0 {
