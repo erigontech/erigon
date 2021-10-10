@@ -52,7 +52,7 @@ func StageLoop(
 		start := time.Now()
 
 		// Estimate the current top height seen from the peer
-		height, err := TopSeenHeight(db, sync, hd)
+		height, err := TopSeenHeight(db, sync, initialCycle, hd)
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -95,9 +95,12 @@ func StageLoop(
 // TopSeenHeight - returns hd.TopSeenHeight() or run stages.Header once to set correct hd.TopSeenHeight()
 // because headers downloading process happening in the background - means if hd.TopSeenHeight() > 0 is a
 // good estimation for sync step size
-func TopSeenHeight(db kv.RwDB, sync *stagedsync.Sync, hd *headerdownload.HeaderDownload) (uint64, error) {
+func TopSeenHeight(db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, hd *headerdownload.HeaderDownload) (uint64, error) {
 	height := hd.TopSeenHeight()
 	if height > 0 {
+		return height, nil
+	}
+	if !initialCycle {
 		return height, nil
 	}
 	stagesBackup := sync.DisableAllStages()
