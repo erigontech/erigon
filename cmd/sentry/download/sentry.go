@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -213,13 +212,7 @@ func handShake(
 			return fmt.Errorf("%w", err1)
 		}
 
-		td, overflow := uint256.FromBig(reply.TD)
-		if overflow {
-			return fmt.Errorf("reply.TD higher than 2^256-1")
-		}
-
-		startSyncWithThisPeer := td.Cmp(ourTD) > 0 && startSync != nil
-		if startSyncWithThisPeer {
+		if startSync != nil {
 			if err := startSync(reply.Head); err != nil {
 				return err
 			}
