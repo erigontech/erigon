@@ -1133,65 +1133,151 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 func dumpState(chaindata string, block int, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	f, err := os.Create(name + ".dat")
+	fa, err := os.Create(name + ".accounts.dat")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
+	defer fa.Close()
+	wa := bufio.NewWriter(fa)
+	// Write out number of key/value pairs first
+	var countBytes [8]byte
+	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Write correct number or remove
+	if _, err = wa.Write(countBytes[:]); err != nil {
+		return err
+	}
+	defer wa.Flush()
+	var fs, fc *os.File
+	if fs, err = os.Create(name + ".storage.dat"); err != nil {
+		return err
+	}
+	defer fs.Close()
+	ws := bufio.NewWriter(fs)
+	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Write correct number or remove
+	if _, err = ws.Write(countBytes[:]); err != nil {
+		return err
+	}
+	defer ws.Flush()
+	if fc, err = os.Create(name + ".code.dat"); err != nil {
+		return err
+	}
+	defer fc.Close()
+	wc := bufio.NewWriter(fc)
+	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Write correct number or remove
+	if _, err = wc.Write(countBytes[:]); err != nil {
+		return err
+	}
+	defer wc.Flush()
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var sc kv.Cursor
+	if sc, err = tx.Cursor(kv.PlainState); err != nil {
+		return err
+	}
+	defer sc.Close()
+	var cc kv.Cursor
+	if cc, err = tx.Cursor(kv.PlainContractCode); err != nil {
+		return err
+	}
+	defer cc.Close()
+	var hc kv.Cursor
+	if hc, err = tx.Cursor(kv.Code); err != nil {
+		return err
+	}
+	defer hc.Close()
 	i := 0
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.PlainState)
-		if err != nil {
-			return err
-		}
-		var count uint64
-		if count, err = c.Count(); err != nil {
-			return err
-		}
-		if block > 1 {
-			count = uint64(block)
-		}
-		// Write out number of key/value pairs first
-		var countBytes [8]byte
-		binary.BigEndian.PutUint64(countBytes[:], count)
-		if _, err = w.Write(countBytes[:]); err != nil {
-			return err
-		}
-		numBuf := make([]byte, binary.MaxVarintLen64)
-		k, v, e := c.First()
-		for ; k != nil && e == nil; k, v, e = c.Next() {
+	numBuf := make([]byte, binary.MaxVarintLen64)
+	k, v, e := sc.First()
+	var a accounts.Account
+	var addr common.Address
+	var ks [20 + 32]byte
+	for ; k != nil && e == nil; k, v, e = sc.Next() {
+		if len(k) == 20 {
 			n := binary.PutUvarint(numBuf, uint64(len(k)))
-			if _, err = w.Write(numBuf[:n]); err != nil {
+			if _, err = wa.Write(numBuf[:n]); err != nil {
 				return err
 			}
-			if _, err = w.Write(k); err != nil {
+			if _, err = wa.Write(k); err != nil {
 				return err
 			}
 			n = binary.PutUvarint(numBuf, uint64(len(v)))
-			if _, err = w.Write(numBuf[:n]); err != nil {
+			if _, err = wa.Write(numBuf[:n]); err != nil {
 				return err
 			}
 			if len(v) > 0 {
-				if _, err = w.Write(v); err != nil {
+				if _, err = wa.Write(v); err != nil {
 					return err
 				}
 			}
+			if err = a.DecodeForStorage(v); err != nil {
+				return err
+			}
+			if a.CodeHash != trie.EmptyCodeHash {
+				var code []byte
+				if _, code, err = hc.SeekExact(a.CodeHash[:]); err != nil {
+					return err
+				}
+				if len(code) != 0 {
+					n = binary.PutUvarint(numBuf, uint64(len(k)))
+					if _, err = wc.Write(numBuf[:n]); err != nil {
+						return err
+					}
+					if _, err = wc.Write(k); err != nil {
+						return err
+					}
+					n = binary.PutUvarint(numBuf, uint64(len(code)))
+					if _, err = wc.Write(numBuf[:n]); err != nil {
+						return err
+					}
+					if len(code) > 0 {
+						if _, err = wc.Write(code); err != nil {
+							return err
+						}
+					}
+					i += 2
+					if i%10_000_000 == 0 {
+						log.Info("Written into file", "millions", i/1_000_000)
+					}
+				}
+			}
+			copy(addr[:], k)
 			i += 2
 			if i%10_000_000 == 0 {
 				log.Info("Written into file", "millions", i/1_000_000)
 			}
-			if uint64(i) == 2*count {
-				break
+		}
+		if len(k) == 60 {
+			inc := binary.BigEndian.Uint64(k[20:])
+			if bytes.Equal(k[:20], addr[:]) && inc == a.Incarnation {
+				copy(ks[:], k[:20])
+				copy(ks[20:], k[20+8:])
+				n := binary.PutUvarint(numBuf, uint64(len(ks)))
+				if _, err = ws.Write(numBuf[:n]); err != nil {
+					return err
+				}
+				if _, err = ws.Write(ks[:]); err != nil {
+					return err
+				}
+				n = binary.PutUvarint(numBuf, uint64(len(v)))
+				if _, err = ws.Write(numBuf[:n]); err != nil {
+					return err
+				}
+				if len(v) > 0 {
+					if _, err = ws.Write(v); err != nil {
+						return err
+					}
+				}
+				i += 2
+				if i%10_000_000 == 0 {
+					log.Info("Written into file", "millions", i/1_000_000)
+				}
 			}
 		}
-		if e != nil {
-			return e
-		}
-		return nil
-	}); err != nil {
-		return err
+	}
+	if e != nil {
+		return e
 	}
 	return nil
 }
@@ -1603,7 +1689,6 @@ func compress(chaindata string, name string) error {
 		return err
 	}
 	r := bufio.NewReader(f)
-	defer f.Close()
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
 	// Read number of keys
@@ -1646,6 +1731,9 @@ func compress(chaindata string, name string) error {
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
+	if err = f.Close(); err != nil {
+		return err
+	}
 	if len(superstring) > 0 {
 		ch <- superstring
 	}
@@ -1662,13 +1750,12 @@ func compress(chaindata string, name string) error {
 	if err = dictAggregator.finish(); err != nil {
 		return err
 	}
-	// Aggregate the dictionary and build Aho-Corassick matcher
-	defer dictCollector.Close(CompressLogPrefix)
 	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
 	if err = dictCollector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, db.compressLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	db.finish()
+	dictCollector.Close(CompressLogPrefix)
 	var df *os.File
 	df, err = os.Create(name + ".dictionary.txt")
 	if err != nil {
@@ -1685,7 +1772,7 @@ func compress(chaindata string, name string) error {
 		return err
 	}
 	df.Close()
-	return nil
+	return reducedict(name)
 }
 
 type DictEntry struct {
@@ -1889,6 +1976,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	p := binary.PutUvarint(numBuf, patternCount)
 	output = append(output, numBuf[:p]...)
 	patternIdx = optimCell.patternIdx
+	lastStart := 0
 	for patternIdx != 0 {
 		pattern := patterns[patternIdx]
 		p := matches[pattern].Val.(*Pattern)
@@ -1899,7 +1987,8 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 			cover[j] = true
 		}
 		// Starting position
-		posMap[uint64(matches[pattern].Start+1)]++
+		posMap[uint64(matches[pattern].Start-lastStart+1)]++
+		lastStart = matches[pattern].Start
 		n := binary.PutUvarint(numBuf, uint64(matches[pattern].Start))
 		output = append(output, numBuf[:n]...)
 		// Code
@@ -2565,12 +2654,14 @@ func reducedict(name string) error {
 			return e
 		}
 		// Now reading patterns one by one
+		var lastPos uint64
 		for i := 0; i < int(pNum); i++ {
 			var pos uint64 // Starting position for pattern
 			if pos, e = binary.ReadUvarint(r); e != nil {
 				return e
 			}
-			posCode = pos2code[pos+1]
+			posCode = pos2code[pos-lastPos+1]
+			lastPos = pos
 			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
 				return e
 			}
@@ -2786,19 +2877,25 @@ func decompress(name string) error {
 		return err
 	}
 	ds := DictionaryState{d: &dict, posD: &posDict, r: cr}
+	var nonDecodeTime time.Duration
+	start := time.Now()
 	l, e := ds.NextPos(true)
 	wc := 0
 	for ; e == nil; l, e = ds.NextPos(true /* clean */) {
 		l--
+		ioStart := time.Now()
 		n := binary.PutUvarint(numBuf, l)
 		if _, e = dw.Write(numBuf[:n]); e != nil {
 			return e
 		}
+		nonDecodeTime += time.Since(ioStart)
 		cover := make([]bool, l) // Which characters are covered by the pattens
 		word := make([]byte, l)
 		var pos uint64
+		var lastPos int
 		for pos, e = ds.NextPos(false /* clean */); e == nil && pos != 0; pos, e = ds.NextPos(false) {
-			intPos := int(pos) - 1
+			intPos := lastPos + int(pos) - 1
+			lastPos = intPos
 			var pattern []byte
 			if pattern, e = ds.NextPattern(); e != nil {
 				return e
@@ -2816,6 +2913,7 @@ func decompress(name string) error {
 				}
 			}
 		}
+		ioStart = time.Now()
 		if _, e = dw.Write(word); e != nil {
 			return e
 		}
@@ -2823,10 +2921,12 @@ func decompress(name string) error {
 		if wc%10_000_000 == 0 {
 			log.Info("Decompressed", "millions", wc/1_000_000)
 		}
+		nonDecodeTime += time.Since(ioStart)
 	}
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
+	log.Info("Average decoding time", "per word", time.Duration(int64(time.Since(start)-nonDecodeTime)/int64(wc)))
 	if err = dw.Flush(); err != nil {
 		return err
 	}
@@ -4158,8 +4258,6 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress(*chaindata, *name)
-	case "reducedict":
-		err = reducedict(*name)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":
