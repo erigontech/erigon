@@ -182,13 +182,16 @@ func (r DiscardReason) String() string {
 
 // metaTx holds transaction and some metadata
 type metaTx struct {
-	Tx             *TxSlot
-	subPool        SubPoolMarker
-	effectiveTip   uint64 // max(minTip, minFeeCap - baseFee)
-	bestIndex      int
-	worstIndex     int
-	currentSubPool SubPoolType
-	timestamp      uint64 // when it was added to pool
+	Tx                        *TxSlot
+	subPool                   SubPoolMarker
+	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
+	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
+	minFeeCap                 uint64
+	effectiveTip              uint64 // max(minTip, minFeeCap - baseFee)
+	bestIndex                 int
+	worstIndex                int
+	currentSubPool            SubPoolType
+	timestamp                 uint64 // when it was added to pool
 }
 
 func newMetaTx(slot *TxSlot, isLocal bool, timestmap uint64) *metaTx {
@@ -925,6 +928,7 @@ func onBaseFeeChange(byNonce *BySenderAndNonce, pendingBaseFee uint64) {
 			prevSenderID = mt.Tx.senderID
 		}
 		minFeeCap = min(minFeeCap, mt.Tx.feeCap)
+		mt.minFeeCap = minFeeCap
 		minTip = min(minTip, mt.Tx.tip)
 		if pendingBaseFee <= minFeeCap {
 			mt.effectiveTip = min(minFeeCap-pendingBaseFee, minTip)
@@ -949,11 +953,17 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 	minTip := uint64(math.MaxUint64)
 	byNonce.ascend(senderID, func(mt *metaTx) bool {
 		minFeeCap = min(minFeeCap, mt.Tx.feeCap)
+		mt.minFeeCap = minFeeCap
 		minTip = min(minTip, mt.Tx.tip)
 		if pendingBaseFee <= minFeeCap {
 			mt.effectiveTip = min(minFeeCap-pendingBaseFee, minTip)
 		} else {
 			mt.effectiveTip = minTip
+		}
+
+		mt.nonceDistance = 0
+		if mt.Tx.nonce > senderNonce { // no uint underflow
+			mt.nonceDistance = mt.Tx.nonce - senderNonce
 		}
 
 		// Sender has enough balance for: gasLimit x feeCap + transferred_value
@@ -987,17 +997,22 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 		// set if there is currently a guarantee that the transaction and all its required prior
 		// transactions will be able to pay for gas.
 		mt.subPool &^= EnoughBalance
+		mt.cumulativeBalanceDistance = math.MaxUint64
 		if mt.Tx.nonce >= senderNonce {
 			cumulativeRequiredBalance = cumulativeRequiredBalance.Add(cumulativeRequiredBalance, needBalance) // already deleted all transactions with nonce <= sender.nonce
 			if senderBalance.Gt(cumulativeRequiredBalance) || senderBalance.Eq(cumulativeRequiredBalance) {
 				mt.subPool |= EnoughBalance
+			} else {
+				if cumulativeRequiredBalance.IsUint64() && senderBalance.IsUint64() {
+					mt.cumulativeBalanceDistance = cumulativeRequiredBalance.Uint64() - senderBalance.Uint64()
+				}
 			}
 		}
 
 		// 4. Dynamic fee requirement. Set to 1 if feeCap of the transaction is no less than
 		// baseFee of the currently pending block. Set to 0 otherwise.
 		mt.subPool &^= EnoughFeeCapBlock
-		if mt.Tx.feeCap >= pendingBaseFee {
+		if mt.minFeeCap >= pendingBaseFee {
 			mt.subPool |= EnoughFeeCapBlock
 		}
 
@@ -1929,11 +1944,29 @@ func (mt *metaTx) Less(than *metaTx) bool {
 	if mt.subPool != than.subPool {
 		return mt.subPool < than.subPool
 	}
-	if mt.effectiveTip != than.effectiveTip {
-		return mt.effectiveTip < than.effectiveTip
-	}
-	if mt.Tx.nonce != than.Tx.nonce {
-		return mt.Tx.nonce < than.Tx.nonce
+
+	switch mt.currentSubPool {
+	case PendingSubPool:
+		if mt.nonceDistance != than.nonceDistance {
+			return mt.nonceDistance < than.nonceDistance
+		}
+		if mt.effectiveTip != than.effectiveTip {
+			return mt.effectiveTip < than.effectiveTip
+		}
+	case BaseFeeSubPool:
+		if mt.minFeeCap != than.minFeeCap {
+			return mt.minFeeCap > than.minFeeCap // yes, here is greaterOrEqual to sort by revert order of minFeeCap
+		}
+		if mt.nonceDistance != than.nonceDistance {
+			return mt.nonceDistance < than.nonceDistance
+		}
+	case QueuedSubPool:
+		if mt.nonceDistance != than.nonceDistance {
+			return mt.nonceDistance < than.nonceDistance
+		}
+		if mt.cumulativeBalanceDistance != than.cumulativeBalanceDistance {
+			return mt.cumulativeBalanceDistance < than.cumulativeBalanceDistance
+		}
 	}
 	return mt.timestamp < than.timestamp
 }
