@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -214,13 +213,7 @@ func handShake(
 			return fmt.Errorf("%w", err1)
 		}
 
-		td, overflow := uint256.FromBig(reply.TD)
-		if overflow {
-			return fmt.Errorf("reply.TD higher than 2^256-1")
-		}
-
-		startSyncWithThisPeer := td.Cmp(ourTD) > 0 && startSync != nil
-		if startSyncWithThisPeer {
+		if startSync != nil {
 			if err := startSync(reply.Head); err != nil {
 				return err
 			}
@@ -729,7 +722,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %w", peerID, err)
 	}
 	if strings.Contains(peerInfo.peer.Fullname(), "alex") && msgcode < 6 && msgcode != 2 {
-		log.Warn("send by id, done", "msg id", msgcode, "peerID", fmt.Sprintf("%s",gointerfaces.ConvertH512ToBytes(inreq.PeerId)), "data.len", len(inreq.Data.Data), "name", peerInfo.peer.Fullname())
+		log.Warn("send by id, done", "msg id", msgcode, "peerID", fmt.Sprintf("%s", gointerfaces.ConvertH512ToBytes(inreq.PeerId)), "data.len", len(inreq.Data.Data), "name", peerInfo.peer.Fullname())
 	}
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
 }
