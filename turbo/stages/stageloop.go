@@ -52,7 +52,18 @@ func StageLoop(
 		start := time.Now()
 
 		// Estimate the current top height seen from the peer
-		height := hd.TopSeenHeight()
+		height, err := TopSeenHeight(db, sync, hd)
+		if err != nil {
+			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+				return
+			}
+			log.Error("Staged Sync", "error", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				log.Error("Failed to recover header downloader", "error", recoveryErr)
+			}
+			continue
+		}
+
 		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -81,6 +92,24 @@ func StageLoop(
 	}
 }
 
+// TopSeenHeight - returns hd.TopSeenHeight() or run stages.Header once to set correct hd.TopSeenHeight()
+// because headers downloading process happening in the background - means if hd.TopSeenHeight() > 0 is a
+// good estimation for sync step size
+func TopSeenHeight(db kv.RwDB, sync *stagedsync.Sync, hd *headerdownload.HeaderDownload) (uint64, error) {
+	height := hd.TopSeenHeight()
+	if height > 0 {
+		return height, nil
+	}
+	stagesBackup := sync.DisableAllStages()
+	defer sync.EnableStages(stagesBackup...)
+
+	sync.EnableStages(stages.Headers)
+	if err := sync.Run(db, nil, true); err != nil {
+		return 0, err
+	}
+	return hd.TopSeenHeight(), nil
+}
+
 func StageLoopStep(
 	ctx context.Context,
 	db kv.RwDB,
@@ -92,17 +121,14 @@ func StageLoopStep(
 	snapshotMigratorFinal func(tx kv.Tx) error,
 ) (err error) {
 	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
-	var origin, hashStateStageProgress, finishProgressBefore uint64
+
+	var origin, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		origin, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
 			return err
 		}
-		hashStateStageProgress, err = stages.GetStageProgress(tx, stages.Bodies) // TODO: shift this when more stages are added
-		if err != nil {
-			return err
-		}
-		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish) // TODO: shift this when more stages are added
+		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
 		}
@@ -111,7 +137,7 @@ func StageLoopStep(
 		return err
 	}
 
-	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 8096 && highestSeenHeader-hashStateStageProgress < 8096
+	canRunCycleInOneTransaction := highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
