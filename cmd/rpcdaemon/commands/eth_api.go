@@ -105,6 +105,8 @@ type BaseAPI struct {
 	_chainConfig *params.ChainConfig
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
+
+	TevmEnabled bool // experiment
 }
 
 func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode bool) *BaseAPI {
@@ -119,6 +121,8 @@ func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
 	cfg, _, err := api.chainConfigWithGenesis(tx)
 	return cfg, err
 }
+
+func (api *BaseAPI) EnableTevmExperiment() { api.TevmEnabled = true }
 
 // nolint:unused
 func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
