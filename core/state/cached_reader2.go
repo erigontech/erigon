@@ -56,7 +56,7 @@ func (r *CachedReader2) ReadAccountCode(address common.Address, incarnation uint
 	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
 		return nil, nil
 	}
-	fmt.Printf("%x\n", codeHash)
+	fmt.Printf("alex code: %x\n", codeHash)
 	code, err := r.cache.GetCode(codeHash.Bytes())
 	if len(code) == 0 {
 		return nil, nil
