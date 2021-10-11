@@ -485,7 +485,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", from)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", fmt.Sprintf("%x", from))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -517,7 +517,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", to)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", fmt.Sprintf("%x", to))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:

@@ -890,10 +890,11 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneAccountHistoryIndex(ps, tx, cfg, ctx)
+		err = stagedsync.PruneStorageHistoryIndex(ps, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
+		_ = printStages(tx)
 	} else {
 		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
 			return err
