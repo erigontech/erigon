@@ -1933,8 +1933,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 			}
 			d.coverStart = f.Start
 			d.patternIdx = len(patterns)
-			patterns = append(patterns, i-1)
-			patterns = append(patterns, maxCell.patternIdx)
+			patterns = append(patterns, i-1, maxCell.patternIdx)
 		} else {
 			if trace {
 				fmt.Printf("cell for %d: with patterns", f.Start)
@@ -2228,7 +2227,6 @@ type HuffmanCoder struct {
 	w          *bufio.Writer
 	outputBits int
 	outputByte byte
-	trace      bool
 }
 
 func (hf *HuffmanCoder) encode(code uint64, codeBits int) error {
@@ -2721,7 +2719,6 @@ type DictionaryState struct {
 	d      *Dictionary
 	posD   *Dictionary
 	offset uint64
-	numBuf [binary.MaxVarintLen64]byte
 	b      byte
 	mask   byte
 }
