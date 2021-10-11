@@ -38,10 +38,14 @@ func (c *DummyCache) Len() int                               { return 0 }
 func (c *DummyCache) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	return tx.GetOne(kv.PlainState, k)
 }
+func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
+	return tx.GetOne(kv.Code, k)
+}
 
 type DummyView struct {
 	cache *DummyCache
 	tx    kv.Tx
 }
 
-func (c *DummyView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
+func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
+func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }

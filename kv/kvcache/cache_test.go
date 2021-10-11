@@ -42,7 +42,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.False(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
-	require.Equal(0, c.evictList.Len())
+	require.Equal(0, c.stateEvict.Len())
 
 	c.advanceRoot(2)
 	require.Equal(1, len(c.roots))
@@ -50,7 +50,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.True(c.roots[2].isCanonical)
 
 	c.add([]byte{1}, nil, c.roots[2], 2)
-	require.Equal(1, c.evictList.Len())
+	require.Equal(1, c.stateEvict.Len())
 
 	c.selectOrCreateRoot(5)
 	require.Equal(2, len(c.roots))
@@ -58,9 +58,9 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.False(c.roots[5].isCanonical)
 
 	c.add([]byte{2}, nil, c.roots[5], 5) // not added to evict list
-	require.Equal(1, c.evictList.Len())
+	require.Equal(1, c.stateEvict.Len())
 	c.add([]byte{2}, nil, c.roots[2], 2) // added to evict list, because it's latest view
-	require.Equal(2, c.evictList.Len())
+	require.Equal(2, c.stateEvict.Len())
 
 	c.selectOrCreateRoot(6)
 	require.Equal(3, len(c.roots))
@@ -93,8 +93,8 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.True(c.roots[100].isCanonical)
 
 	//c.add([]byte{1}, nil, c.roots[2], 2)
-	require.Equal(0, c.latestView.cache.Len())
-	require.Equal(0, c.evictList.Len())
+	require.Equal(0, c.latestStateView.cache.Len())
+	require.Equal(0, c.stateEvict.Len())
 }
 
 func TestEviction(t *testing.T) {
@@ -116,11 +116,11 @@ func TestEviction(t *testing.T) {
 		_, _ = c.Get([]byte{1}, tx, view.viewID)
 		_, _ = c.Get([]byte{2}, tx, view.viewID)
 		_, _ = c.Get([]byte{3}, tx, view.viewID)
-		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
+		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 		return nil
 	})
-	require.Equal(0, c.evictList.Len())
-	//require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
+	require.Equal(0, c.stateEvict.Len())
+	//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 	c.OnNewBlock(&remote.StateChangeBatch{
 		DatabaseViewID: id + 1,
 		ChangeBatch: []*remote.StateChange{
@@ -134,8 +134,8 @@ func TestEviction(t *testing.T) {
 			},
 		},
 	})
-	require.Equal(1, c.evictList.Len())
-	require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
+	require.Equal(1, c.stateEvict.Len())
+	require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
 		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
 		cacheView, _ := c.View(ctx, tx)
@@ -147,8 +147,8 @@ func TestEviction(t *testing.T) {
 		_, _ = c.Get([]byte{6}, tx, view.viewID)
 		return nil
 	})
-	require.Equal(c.roots[c.latestViewID].cache.Len(), c.evictList.Len())
-	require.Equal(cfg.KeysLimit, c.evictList.Len())
+	require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
+	require.Equal(cfg.KeysLimit, c.stateEvict.Len())
 }
 
 func TestAPI(t *testing.T) {
@@ -336,4 +336,28 @@ func TestAPI(t *testing.T) {
 	require.NoError(err)
 
 	wg.Wait()
+}
+
+func TestCode(t *testing.T) {
+	require, ctx := require.New(t), context.Background()
+	c := New(DefaultCoherentConfig)
+	db := memdb.NewTestDB(t)
+	k1, k2 := [20]byte{1}, [20]byte{2}
+
+	_ = db.Update(ctx, func(tx kv.RwTx) error {
+		_ = tx.Put(kv.Code, k1[:], k2[:])
+		cacheView, _ := c.View(ctx, tx)
+		view := cacheView.(*CoherentView)
+
+		v, err := c.GetCode(k1[:], tx, view.viewID)
+		require.NoError(err)
+		require.Equal(k2[:], v)
+
+		v, err = c.GetCode(k1[:], tx, view.viewID)
+		require.NoError(err)
+		require.Equal(k2[:], v)
+
+		//require.Equal(c.roots[c.latestViewID].cache.Len(), c.stateEvict.Len())
+		return nil
+	})
 }
