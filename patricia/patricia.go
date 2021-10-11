@@ -28,9 +28,9 @@ type node struct {
 	p0 uint32 // Number of bits in the left prefix is encoded into the lower 5 bits, the remaining 27 bits are left prefix
 	p1 uint32 // Number of bits in the right prefix is encoding into the lower 5 bits, the remaining 27 bits are right prefix
 	//size   uint64
-	n0     *node
-	n1     *node
-	values [][]byte
+	n0  *node
+	n1  *node
+	val interface{} // value associated with the key
 }
 
 func tostr(x uint32) string {
@@ -41,6 +41,7 @@ func tostr(x uint32) string {
 	return str[:x&0x1f]
 }
 
+// print assumes values are byte slices
 func (n *node) print(sb *strings.Builder, indent string) {
 	sb.WriteString(indent)
 	fmt.Fprintf(sb, "%p ", n)
@@ -56,12 +57,10 @@ func (n *node) print(sb *strings.Builder, indent string) {
 	if n.n1 != nil {
 		n.n1.print(sb, indent+"    ")
 	}
-	if len(n.values) > 0 {
+	if n.val != nil {
 		sb.WriteString(indent)
-		sb.WriteString("vals:")
-		for _, v := range n.values {
-			fmt.Fprintf(sb, " %x", v)
-		}
+		sb.WriteString("val:")
+		fmt.Fprintf(sb, " %x", n.val.([]byte))
 		sb.WriteString("\n")
 	}
 }
@@ -285,7 +284,7 @@ func (s *state) diverge(divergence uint32) {
 	s.tail = 0
 }
 
-func (n *node) insert(key []byte, value []byte) {
+func (n *node) insert(key []byte, value interface{}) {
 	s := makestate(n)
 	for _, b := range key {
 		divergence := s.transition(b)
@@ -296,7 +295,7 @@ func (n *node) insert(key []byte, value []byte) {
 	s.insert(value)
 }
 
-func (s *state) insert(value []byte) {
+func (s *state) insert(value interface{}) {
 	if s.tail != 0 {
 		s.diverge(0)
 	}
@@ -310,10 +309,10 @@ func (s *state) insert(value []byte) {
 		s.n = &dn
 		s.head = 0
 	}
-	s.n.values = append(s.n.values, value)
+	s.n.val = value
 }
 
-func (n *node) get(key []byte) ([][]byte, bool) {
+func (n *node) get(key []byte) (interface{}, bool) {
 	s := makestate(n)
 	for _, b := range key {
 		divergence := s.transition(b)
@@ -325,25 +324,25 @@ func (n *node) get(key []byte) ([][]byte, bool) {
 	if s.tail != 0 {
 		return nil, false
 	}
-	return s.n.values, len(s.n.values) > 0
+	return s.n.val, s.n.val != nil
 }
 
 type PatriciaTree struct {
 	root node
 }
 
-func (pt *PatriciaTree) Insert(key []byte, value []byte) {
+func (pt *PatriciaTree) Insert(key []byte, value interface{}) {
 	pt.root.insert(key, value)
 }
 
-func (pt PatriciaTree) Get(key []byte) ([][]byte, bool) {
+func (pt PatriciaTree) Get(key []byte) (interface{}, bool) {
 	return pt.root.get(key)
 }
 
 type Match struct {
 	Start int
 	End   int
-	Vals  [][]byte
+	Val   interface{}
 }
 
 type MatchFinder struct {
@@ -360,7 +359,7 @@ func (mf *MatchFinder) FindLongestMatches(pt *PatriciaTree, data []byte) []Match
 		emitted := false
 		for end := start + 1; end < len(data); end++ {
 			if d := s.transition(data[end-1]); d == 0 {
-				if s.tail == 0 && len(s.n.values) > 0 && end > lastEnd {
+				if s.tail == 0 && s.n.val != nil && end > lastEnd {
 					var m *Match
 					if !emitted {
 						if matchCount == len(mf.matches) {
@@ -377,7 +376,7 @@ func (mf *MatchFinder) FindLongestMatches(pt *PatriciaTree, data []byte) []Match
 					// This possible overwrites previous match for the same start position
 					m.Start = start
 					m.End = end
-					m.Vals = s.n.values
+					m.Val = s.n.val
 					lastEnd = end
 				}
 			} else {

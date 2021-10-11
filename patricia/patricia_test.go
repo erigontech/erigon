@@ -59,19 +59,19 @@ func TestInserts1(t *testing.T) {
 	fmt.Printf("14 tree:\n%s\n", n)
 
 	vs, ok := n.get([]byte{0xff, 0xff, 0xff, 0xff, 0x0f})
-	fmt.Printf("15 vs = %x, ok = %t\n", vs, ok)
+	fmt.Printf("15 vs = %v, ok = %t\n", vs, ok)
 
 	vs, ok = n.get([]byte{0xff, 0xff, 0xff, 0xff, 0xff})
-	fmt.Printf("16 vs = %x, ok = %t\n", vs, ok)
+	fmt.Printf("16 vs = %v, ok = %t\n", vs, ok)
 
 	vs, ok = n.get([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0x56})
-	fmt.Printf("17 vs = %x, ok = %t\n", vs, ok)
+	fmt.Printf("17 vs = %v, ok = %t\n", vs, ok)
 
 	vs, ok = n.get([]byte{0x34, 0x56, 0xff, 0xcc})
-	fmt.Printf("18 vs = %x, ok = %t\n", vs, ok)
+	fmt.Printf("18 vs = %v, ok = %t\n", vs, ok)
 
 	vs, ok = n.get([]byte{})
-	fmt.Printf("19 vs = %x, ok = %t\n", vs, ok)
+	fmt.Printf("19 vs = %v, ok = %t\n", vs, ok)
 }
 
 func TestInserts2(t *testing.T) {
@@ -81,10 +81,10 @@ func TestInserts2(t *testing.T) {
 	fmt.Printf("tree:\n%s", &n)
 
 	vs, ok := n.get([]byte{0xff})
-	fmt.Printf("vs = %x, ok = %t\n", vs, ok)
+	fmt.Printf("vs = %v, ok = %t\n", vs, ok)
 
 	vs, ok = n.get([]byte{0xed})
-	fmt.Printf("vs = %x, ok = %t\n", vs, ok)
+	fmt.Printf("vs = %v, ok = %t\n", vs, ok)
 }
 
 func TestFindMatches1(t *testing.T) {

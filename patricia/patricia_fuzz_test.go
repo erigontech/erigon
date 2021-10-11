@@ -29,7 +29,7 @@ import (
 func FuzzPatricia(f *testing.F) {
 	f.Fuzz(func(t *testing.T, build []byte, test []byte) {
 		var n node
-		keyMap := make(map[string][][]byte)
+		keyMap := make(map[string][]byte)
 		i := 0
 		for i < len(build) {
 			keyLen := int(build[i]>>16) + 1
@@ -47,13 +47,8 @@ func FuzzPatricia(f *testing.F) {
 				i++
 				valLen--
 			}
-			//if len(key) == 0 {
-			//	continue
-			//}
 			n.insert(key, val)
-			m, _ := keyMap[string(key)]
-			m = append(m, val)
-			keyMap[string(key)] = m
+			keyMap[string(key)] = val
 		}
 		var testKeys [][]byte
 		i = 0
@@ -66,27 +61,16 @@ func FuzzPatricia(f *testing.F) {
 				i++
 				keyLen--
 			}
-			//if len(key) == 0 {
-			//	continue
-			//}
 			if _, ok := keyMap[string(key)]; !ok {
 				testKeys = append(testKeys, key)
 			}
 		}
-		//fmt.Printf("\n%s", &n)
 		// Test for keys
 		for key, vals := range keyMap {
-			//fmt.Printf("key [%x], vals %x\n", key, vals)
 			v, ok := n.get([]byte(key))
 			if ok {
-				if len(vals) == len(v) {
-					for j := 0; j < len(vals); j++ {
-						if !bytes.Equal(vals[j], v[j]) {
-							t.Errorf("for key %x expected value[%d] %x, got %x", key, j, vals[j], v[j])
-						}
-					}
-				} else {
-					t.Errorf("for key %x expected values %d, got %d", key, len(vals), len(v))
+				if !bytes.Equal(vals, v.([]byte)) {
+					t.Errorf("for key %x expected value %x, got %x", key, vals, v.([]byte))
 				}
 			} else {
 				t.Errorf("expected key not found %x", key)
@@ -94,7 +78,6 @@ func FuzzPatricia(f *testing.F) {
 		}
 		// Test for non-existent keys
 		for _, key := range testKeys {
-			//fmt.Printf("testkey [%x]\n", key)
 			_, ok := n.get(key)
 			if ok {
 				t.Errorf("unexpected key found [%x]", key)
