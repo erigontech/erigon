@@ -389,10 +389,17 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx)
 	return nil
 }
 
-func (s *Sync) DisableAllStages() {
+func (s *Sync) DisableAllStages() []stages.SyncStage {
+	var backupEnabledIds []stages.SyncStage
+	for i := range s.stages {
+		if !s.stages[i].Disabled {
+			backupEnabledIds = append(backupEnabledIds, s.stages[i].ID)
+		}
+	}
 	for i := range s.stages {
 		s.stages[i].Disabled = true
 	}
+	return backupEnabledIds
 }
 
 func (s *Sync) DisableStages(ids ...stages.SyncStage) {

@@ -5,9 +5,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -18,7 +18,7 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	if len(k) != 40 {
 		return nil
 	}
-	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
+	return next(k, libcommon.Copy(k[8:]), libcommon.Copy(k[:8]))
 }
 
 type BlockHashesCfg struct {

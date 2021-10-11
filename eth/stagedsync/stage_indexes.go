@@ -13,9 +13,9 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -420,6 +420,14 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	defer collector.Close(logPrefix)
 
 	if err := changeset.ForRange(tx, csTable, 0, pruneTo, func(blockNum uint64, k, _ []byte) error {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", csTable, "block_num", blockNum)
+		case <-ctx.Done():
+			return libcommon.ErrStopped
+		default:
+		}
+
 		return collector.Collect(k, nil)
 	}); err != nil {
 		return err
@@ -430,9 +438,9 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
 	defer c.Close()
-	prefixLen := common.AddressLength
+	prefixLen := length.Addr
 	if csTable == kv.StorageChangeSet {
-		prefixLen = common.HashLength
+		prefixLen = length.Hash
 	}
 	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {

@@ -12,6 +12,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -114,11 +115,11 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		if blockNum > endBlock {
 			break
 		}
-		if len(v) != common.AddressLength+1 {
+		if len(v) != length.Addr+1 {
 			return fmt.Errorf(" wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 		}
-		mapKey := string(v[:common.AddressLength])
-		if v[common.AddressLength]&1 > 0 {
+		mapKey := string(v[:length.Addr])
+		if v[length.Addr]&1 > 0 {
 			m, ok := froms[mapKey]
 			if !ok {
 				m = roaring64.New()
@@ -126,7 +127,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 			}
 			m.Add(blockNum)
 		}
-		if v[common.AddressLength]&2 > 0 {
+		if v[length.Addr]&2 > 0 {
 			m, ok := tos[mapKey]
 			if !ok {
 				m = roaring64.New()
@@ -283,16 +284,16 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 		if blockNum >= from {
 			break
 		}
-		if len(v) != common.AddressLength+1 {
+		if len(v) != length.Addr+1 {
 			return fmt.Errorf("wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 		}
-		mapKey := v[:common.AddressLength]
-		if v[common.AddressLength]&1 > 0 {
+		mapKey := v[:length.Addr]
+		if v[length.Addr]&1 > 0 {
 			if err = froms.Collect(mapKey, nil); err != nil {
 				return nil
 			}
 		}
-		if v[common.AddressLength]&2 > 0 {
+		if v[length.Addr]&2 > 0 {
 			if err = tos.Collect(mapKey, nil); err != nil {
 				return nil
 			}
@@ -436,16 +437,16 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			if blockNum >= pruneTo {
 				break
 			}
-			if len(v) != common.AddressLength+1 {
+			if len(v) != length.Addr+1 {
 				return fmt.Errorf("wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
 			}
-			mapKey := v[:common.AddressLength]
-			if v[common.AddressLength]&1 > 0 {
+			mapKey := v[:length.Addr]
+			if v[length.Addr]&1 > 0 {
 				if err := froms.Collect(mapKey, nil); err != nil {
 					return err
 				}
 			}
-			if v[common.AddressLength]&2 > 0 {
+			if v[length.Addr]&2 > 0 {
 				if err := tos.Collect(mapKey, nil); err != nil {
 					return err
 				}
@@ -474,7 +475,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 				if err != nil {
 					return err
 				}
-				blockNum := binary.BigEndian.Uint64(k[common.AddressLength:])
+				blockNum := binary.BigEndian.Uint64(k[length.Addr:])
 				if !bytes.HasPrefix(k, from) || blockNum >= pruneTo {
 					break
 				}
@@ -484,7 +485,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", from)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", fmt.Sprintf("%x", from))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -506,7 +507,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 				if err != nil {
 					return err
 				}
-				blockNum := binary.BigEndian.Uint64(k[common.AddressLength:])
+				blockNum := binary.BigEndian.Uint64(k[length.Addr:])
 				if !bytes.HasPrefix(k, to) || blockNum >= pruneTo {
 					break
 				}
@@ -516,7 +517,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", to)
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", fmt.Sprintf("%x", to))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -267,7 +268,7 @@ func doTestFind(
 		require.NoError(t, err)
 
 		err = m.Encode(1, ch, func(k, v []byte) error {
-			if err2 := c.Put(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
+			if err2 := c.Put(libcommon.Copy(k), libcommon.Copy(v)); err2 != nil {
 				return err2
 			}
 			return nil

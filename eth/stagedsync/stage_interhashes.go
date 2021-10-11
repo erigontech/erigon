@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -511,8 +512,8 @@ func accountTrieCollector(collector *etl.Collector) trie.HashCollector2 {
 		if hasState == 0 {
 			return collector.Collect(keyHex, nil)
 		}
-		if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
-			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
+		if bits.OnesCount16(hasHash) != len(hashes)/length.Hash {
+			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/length.Hash))
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
@@ -532,8 +533,8 @@ func storageTrieCollector(collector *etl.Collector) trie.StorageHashCollector2 {
 		if len(keyHex) > 0 && hasHash == 0 && hasTree == 0 {
 			return nil
 		}
-		if bits.OnesCount16(hasHash) != len(hashes)/common.HashLength {
-			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/common.HashLength))
+		if bits.OnesCount16(hasHash) != len(hashes)/length.Hash {
+			panic(fmt.Errorf("invariant bits.OnesCount16(hasHash) == len(hashes) failed: %d, %d", bits.OnesCount16(hasHash), len(hashes)/length.Hash))
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
