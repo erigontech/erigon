@@ -420,6 +420,14 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	defer collector.Close(logPrefix)
 
 	if err := changeset.ForRange(tx, csTable, 0, pruneTo, func(blockNum uint64, k, _ []byte) error {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", csTable, "block_num", blockNum)
+		case <-ctx.Done():
+			return libcommon.ErrStopped
+		default:
+		}
+
 		return collector.Collect(k, nil)
 	}); err != nil {
 		return err
