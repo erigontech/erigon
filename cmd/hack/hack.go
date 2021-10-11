@@ -1775,11 +1775,6 @@ func compress(chaindata string, name string) error {
 	return reducedict(name)
 }
 
-type DictEntry struct {
-	score uint64
-	code  uint64
-}
-
 // DynamicCell represents result of dynamic programming for certain starting position
 type DynamicCell struct {
 	optimStart  int
@@ -1863,20 +1858,13 @@ func (r *Ring) Truncate(i int) {
 	r.tail = (r.head + i) & (len(r.cells) - 1)
 }
 
-func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.PatriciaTree, mf *patricia.MatchFinder, output []byte, cover []bool, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int) {
+func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.PatriciaTree, mf *patricia.MatchFinder, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
 	matches := mf.FindLongestMatches(trie, input)
 	if len(matches) == 0 {
 		n := binary.PutUvarint(numBuf, 0)
 		output = append(output, numBuf[:n]...)
 		output = append(output, input...)
-		return output, patterns
-	}
-	for i := 0; i < len(input); i++ {
-		if i == len(cover) {
-			cover = append(cover, false)
-		} else {
-			cover[i] = false
-		}
+		return output, patterns, uncovered
 	}
 	if trace {
 		fmt.Printf("Cluster | input = %x\n", input)
@@ -1977,15 +1965,18 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	output = append(output, numBuf[:p]...)
 	patternIdx = optimCell.patternIdx
 	lastStart := 0
+	var lastUncovered int
+	uncovered = uncovered[:0]
 	for patternIdx != 0 {
 		pattern := patterns[patternIdx]
 		p := matches[pattern].Val.(*Pattern)
 		if trace {
 			fmt.Printf(" [%x %d-%d]", input[matches[pattern].Start:matches[pattern].End], matches[pattern].Start, matches[pattern].End)
 		}
-		for j := matches[pattern].Start; j < matches[pattern].End; j++ {
-			cover[j] = true
+		if matches[pattern].Start > lastUncovered {
+			uncovered = append(uncovered, lastUncovered, matches[pattern].Start)
 		}
+		lastUncovered = matches[pattern].End
 		// Starting position
 		posMap[uint64(matches[pattern].Start-lastStart+1)]++
 		lastStart = matches[pattern].Start
@@ -1997,22 +1988,23 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 		atomic.AddUint64(&p.uses, 1)
 		patternIdx = patterns[patternIdx+1]
 	}
+	if len(input) > lastUncovered {
+		uncovered = append(uncovered, lastUncovered, len(input))
+	}
 	if trace {
 		fmt.Printf("\n\n")
 	}
 	// Add uncoded input
-	for i := 0; i < len(input); i++ {
-		if !cover[i] {
-			output = append(output, input[i])
-		}
+	for i := 0; i < len(uncovered); i += 2 {
+		output = append(output, input[uncovered[i]:uncovered[i+1]]...)
 	}
-	return output, patterns
+	return output, patterns, uncovered
 }
 
 func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize *uint64, outputSize *uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output []byte = make([]byte, 0, 256)
-	var cover []bool = make([]bool, 256)
+	var uncovered []int = make([]int, 256)
 	var patterns []int = make([]int, 0, 256)
 	cellRing := NewRing()
 	var mf patricia.MatchFinder
@@ -2022,7 +2014,7 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 		n := binary.PutUvarint(numBuf, uint64(len(input)-8))
 		output = append(output[:0], numBuf[:n]...)
 		if len(input) > 8 {
-			output, patterns = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, cover, patterns, cellRing, posMap)
+			output, patterns, uncovered = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, uncovered, patterns, cellRing, posMap)
 			if err := collector.Collect(input[:8], output); err != nil {
 				log.Error("Could not collect", "error", err)
 				return
