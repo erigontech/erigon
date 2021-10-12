@@ -137,7 +137,7 @@ type CoherentConfig struct {
 }
 
 var DefaultCoherentConfig = CoherentConfig{
-	KeepViews:     50,
+	KeepViews:     5,
 	NewBlockWait:  50 * time.Millisecond,
 	KeysLimit:     1_000_000,
 	CodeKeysLimit: 10_000,
