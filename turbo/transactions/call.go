@@ -114,10 +114,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
-	go func() {
-		<-ctx.Done()
-		evm.Cancel()
-	}()
+	defer evm.Cancel()
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
 	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
