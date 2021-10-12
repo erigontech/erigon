@@ -110,9 +110,9 @@ type BaseAPI struct {
 
 func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode bool) *BaseAPI {
 	var blocksLRU *lru.Cache
-	if !singleNodeMode {
-		blocksLRU, _ = lru.New(256)
-	}
+	//if !singleNodeMode {
+	blocksLRU, _ = lru.New(256)
+	//}
 	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU}
 }
 
