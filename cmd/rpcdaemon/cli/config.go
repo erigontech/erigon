@@ -69,7 +69,7 @@ var rootCmd = &cobra.Command{
 func RootCommand() (*cobra.Command, *Flags) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
-	cfg := &Flags{}
+	cfg := &Flags{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
