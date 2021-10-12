@@ -253,7 +253,7 @@ var (
 
 	FermionChainConfig = &ChainConfig{
 		ChainName:           FermionChainName,
-		ChainID:             big.NewInt(102),
+		ChainID:             big.NewInt(1212120),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
