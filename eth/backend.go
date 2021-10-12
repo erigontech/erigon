@@ -499,17 +499,19 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			}
 
 			if backend.config.TxPool.V2 {
-				if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-					pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
-					return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-						PendingBlockBaseFee: pendingBaseFee.Uint64(),
-						DatabaseViewID:      tx.ViewID(),
-						ChangeBatch: []*remote.StateChange{
-							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
-						},
-					}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
-				}); err != nil {
-					return nil, err
+				if hh != nil {
+					if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+						pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
+						return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
+							PendingBlockBaseFee: pendingBaseFee.Uint64(),
+							DatabaseViewID:      tx.ViewID(),
+							ChangeBatch: []*remote.StateChange{
+								{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
+							},
+						}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
+					}); err != nil {
+						return nil, err
+					}
 				}
 			} else {
 				if hh != nil {

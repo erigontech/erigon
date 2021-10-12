@@ -25,7 +25,7 @@ func NewCachedReader2(cache kvcache.CacheView, tx kv.Tx) *CachedReader2 {
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader2) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := r.cache.Get(address.Bytes())
+	enc, err := r.cache.Get(address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (r *CachedReader2) ReadAccountCode(address common.Address, incarnation uint
 	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := r.db.GetOne(kv.Code, codeHash.Bytes())
+	code, err := r.cache.GetCode(codeHash.Bytes())
 	if len(code) == 0 {
 		return nil, nil
 	}
