@@ -116,7 +116,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
 		<-ctx.Done()
-		defer evm.Cancel()
+		evm.Cancel()
 	}()
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
