@@ -152,7 +152,11 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 }
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+		it, ok := api.blocksLRU.Get(hash)
+		if !ok {
+			fmt.Printf("blockLRU miss\n")
+		}
+		if ok && it != nil {
 			return it.(*types.Block), nil
 		}
 	}
