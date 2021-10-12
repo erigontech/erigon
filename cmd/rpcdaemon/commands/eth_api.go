@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -166,6 +167,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 		for _, txn := range block.Transactions() {
 			txn.Hash()
 		}
+		fmt.Printf("add blockLRU: %d,%x\n", block.NumberU64(), block.Hash())
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil
