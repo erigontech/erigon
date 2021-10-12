@@ -53,6 +53,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 	if err != nil {
 		return nil, err
 	}
+	if block == nil {
+		return nil, nil
+	}
 
 	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.stateCache, contractHasTEVM)
 	if err != nil {
@@ -200,6 +203,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		block, err := api.BaseAPI.blockWithSenders(dbtx, hash, blockNumber)
 		if err != nil {
 			return false, nil, err
+		}
+		if block == nil {
+			return false, nil, nil
 		}
 
 		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
