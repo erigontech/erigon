@@ -46,7 +46,7 @@ var (
 	ErigonGenesisHash  = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
-	FermionGenesisHash = common.HexToHash("0xcb6399165d4b9460d2462a71f4574984df2a92fe513b1ab64d69573426ecc75f")
+	FermionGenesisHash = common.HexToHash("0x2a4f2488bd9b62b128b39382c079e11d938f0ebbef6490042b5c6b86b17ea505")
 )
 
 var (
@@ -255,18 +255,18 @@ var (
 		ChainName:           FermionChainName,
 		ChainID:             big.NewInt(102),
 		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      false,
+		DAOForkBlock:        big.NewInt(0),
+		DAOForkSupport:      true,
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
 		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(5067000),
-		ConstantinopleBlock: big.NewInt(9200000),
-		PetersburgBlock:     big.NewInt(10255201),
-		IstanbulBlock:       big.NewInt(14111141),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(24770900),
-		LondonBlock:         big.NewInt(26741100),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
 		CatalystBlock:       nil,
 		Aura:                &AuRaConfig{},
 	}
