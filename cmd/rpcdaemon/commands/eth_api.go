@@ -151,11 +151,10 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 	return api.blockWithSenders(tx, hash, *number)
 }
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
-	fmt.Printf("blockLRU type: %T\n", api.blocksLRU)
 	if api.blocksLRU != nil {
 		it, ok := api.blocksLRU.Get(hash)
 		if !ok {
-			fmt.Printf("blockLRU miss\n")
+			fmt.Printf("blockLRU miss: %x\n", hash)
 		}
 		if ok && it != nil {
 			return it.(*types.Block), nil
@@ -172,7 +171,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 		for _, txn := range block.Transactions() {
 			txn.Hash()
 		}
-		fmt.Printf("add blockLRU: %d,%x\n", block.NumberU64(), block.Hash())
+		fmt.Printf("add blockLRU: %d,%x, %x\n", block.NumberU64(), block.Hash(), hash)
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil
