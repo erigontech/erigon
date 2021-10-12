@@ -161,11 +161,6 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 	}
 
 	if api.blocksLRU != nil {
-		// Once calc memoized fields to
-		block.Hash()
-		for _, txn := range block.Transactions() {
-			txn.Hash()
-		}
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil
