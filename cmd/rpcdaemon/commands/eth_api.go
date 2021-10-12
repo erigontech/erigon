@@ -155,6 +155,8 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 		it, ok := api.blocksLRU.Get(hash)
 		if !ok {
 			fmt.Printf("blockLRU miss: %x\n", hash)
+		} else {
+			fmt.Printf("blockLRU hit!: %x\n", hash)
 		}
 		if ok && it != nil {
 			return it.(*types.Block), nil
