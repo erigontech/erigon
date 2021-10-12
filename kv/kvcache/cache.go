@@ -88,6 +88,7 @@ type Coherent struct {
 	hits, miss, timeout          *metrics.Counter
 	keys, evict                  *metrics.Counter
 	codeHits, codeMiss, codeKeys *metrics.Counter
+	codeEvictLen                 *metrics.Counter
 	latestStateView              *CoherentRoot
 	roots                        map[ViewID]*CoherentRoot
 	stateEvict, codeEvict        *ThreadSafeEvictionList
@@ -149,19 +150,20 @@ func New(cfg CoherentConfig) *Coherent {
 		panic("empty config passed")
 	}
 	return &Coherent{
-		roots:      map[ViewID]*CoherentRoot{},
-		stateEvict: &ThreadSafeEvictionList{l: NewList()},
-		codeEvict:  &ThreadSafeEvictionList{l: NewList()},
-		hasher:     sha3.NewLegacyKeccak256(),
-		cfg:        cfg,
-		miss:       metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		hits:       metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		timeout:    metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:       metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
-		codeMiss:   metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		codeHits:   metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		codeKeys:   metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		roots:        map[ViewID]*CoherentRoot{},
+		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
+		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
+		hasher:       sha3.NewLegacyKeccak256(),
+		cfg:          cfg,
+		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
+		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
+		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
+		keys:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		evict:        metrics.GetOrCreateCounter(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
+		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
+		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
+		codeKeys:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		codeEvictLen: metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -222,6 +224,7 @@ func (c *Coherent) advanceRoot(viewID ViewID) (r *CoherentRoot) {
 	c.keys.Set(uint64(c.latestStateView.cache.Len()))
 	c.codeKeys.Set(uint64(c.latestStateView.codeCache.Len()))
 	c.evict.Set(uint64(c.stateEvict.Len()))
+	c.codeEvictLen.Set(uint64(c.codeEvict.Len()))
 	return r
 }
 
