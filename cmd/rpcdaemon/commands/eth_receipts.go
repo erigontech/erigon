@@ -44,17 +44,22 @@ func getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig,
 		return nil, err
 	}
 
-	var receipts types.Receipts
+	usedGas := new(uint64)
 	gp := new(core.GasPool).AddGas(block.GasLimit())
-	var usedGas = new(uint64)
+
+	ethashFaker := ethash.NewFaker()
+	noopWriter := state.NewNoopWriter()
+
+	receipts := make(types.Receipts, len(block.Transactions()))
+
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, contractHasTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethashFaker, nil, gp, ibs, noopWriter, block.Header(), txn, usedGas, vm.Config{}, contractHasTEVM)
 		if err != nil {
 			return nil, err
 		}
 		receipt.BlockHash = block.Hash()
-		receipts = append(receipts, receipt)
+		receipts[i] = receipt
 	}
 
 	return receipts, nil
