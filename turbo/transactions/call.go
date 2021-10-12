@@ -34,12 +34,14 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 	blockNumber := block.NumberU64()
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+		panic(1)
 		cacheView, err := stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
+		panic(2)
 		stateReader = state.NewPlainState(tx, blockNumber)
 	}
 	state := state.New(stateReader)
