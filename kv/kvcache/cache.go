@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/crypto/sha3"
 )
@@ -310,9 +309,6 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 func (c *Coherent) getFromCache(k []byte, id ViewID, code bool) (btree.Item, *CoherentRoot, error) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-
-	//TODO: create thread-safe list wrapper
-
 	r, ok := c.roots[id]
 	if !ok {
 		return nil, r, fmt.Errorf("too old ViewID: %d, latestViewID=%d", id, c.latestViewID)
@@ -338,8 +334,8 @@ func (c *Coherent) Get(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	}
 
 	if it != nil {
-		c.hits.Inc()
 		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
+		c.hits.Inc()
 		return it.(*Element).V, nil
 	}
 	c.miss.Inc()
@@ -363,18 +359,12 @@ func (c *Coherent) GetCode(k []byte, tx kv.Tx, id ViewID) ([]byte, error) {
 	}
 
 	if it != nil {
-		c.codeHits.Inc()
 		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
+		c.codeHits.Inc()
 		return it.(*Element).V, nil
 	}
-
-	//{
-	//	r, ok := c.roots[id]
-	//	if ok {
-	//		fmt.Printf("miss: %x,%d,%d\n", k, id, r.codeCache.Len())
-	//	}
-	//}
 	c.codeMiss.Inc()
+
 	v, err := tx.GetOne(kv.Code, k)
 	if err != nil {
 		return nil, err
@@ -506,8 +496,6 @@ func (c *Coherent) evictRoots() {
 		return
 	}
 	to := c.latestViewID - ViewID(c.cfg.KeepViews)
-	fmt.Printf("evict: %d,%d,%d\n", c.cfg.KeepViews, c.latestViewID, to)
-	//fmt.Printf("collecting: %d\n", to)
 	var toDel []ViewID
 	for txId := range c.roots {
 		if txId > to {
@@ -515,7 +503,7 @@ func (c *Coherent) evictRoots() {
 		}
 		toDel = append(toDel, txId)
 	}
-	log.Info("forget old roots", "list", fmt.Sprintf("%d", toDel))
+	//log.Info("forget old roots", "list", fmt.Sprintf("%d", toDel))
 	for _, txId := range toDel {
 		delete(c.roots, txId)
 	}
