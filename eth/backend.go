@@ -207,6 +207,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
+	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())

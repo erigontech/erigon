@@ -246,6 +246,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		config = params.TestChainConfig
 	}
 	headers, blocks, receipts := make([]*types.Header, n), make(types.Blocks, n), make([]types.Receipts, n)
+	types.SetHeaderSealFlag(config.IsHeaderWithSeal())
 	chainreader := &FakeChainReader{Cfg: config, current: parent}
 	tx, errBegin := db.BeginRw(context.Background())
 	if errBegin != nil {
@@ -413,7 +414,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
 		header.Eip1559 = true
 	}
-	//header.WithSeal = debug.HeadersSeal()
+	header.WithSeal = chain.Config().IsHeaderWithSeal()
 
 	return header
 }

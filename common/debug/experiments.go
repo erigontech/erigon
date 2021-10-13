@@ -105,21 +105,6 @@ func SlowCommit() time.Duration {
 }
 
 var (
-	headersSeal    bool
-	getHeadersSeal sync.Once
-)
-
-func HeadersSeal() bool {
-	getHeadersSeal.Do(func() {
-		v, _ := os.LookupEnv("HEADERS_SEAL")
-		if v == "true" {
-			headersSeal = true
-		}
-	})
-	return headersSeal
-}
-
-var (
 	stopBeforeStage     string
 	stopBeforeStageFlag sync.Once
 )
