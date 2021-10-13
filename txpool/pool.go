@@ -1492,42 +1492,38 @@ func (p *TxPool) logStats() {
 func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	/*
-		for _, all := range p.all.bySenderID {
-			all.Ascend(func(i btree.Item) bool {
-				mt := i.(sortByNonce).metaTx
-				slot := mt.Tx
-				slotRlp := slot.rlp
-				if slot.rlp == nil {
-					v, err := tx.GetOne(kv.PoolTransaction, slot.idHash[:])
-					if err != nil {
-						log.Error("[txpool] get tx from db", "err", err)
-						return false
-					}
-					if v == nil {
-						log.Error("[txpool] tx not found in db")
-						return false
-					}
-					slotRlp = v[20:]
-				}
-
-				var sender []byte
-				found := false
-				for addr, senderID := range p.senders.senderIDs { // TODO: do we need inverted index here?
-					if slot.senderID == senderID {
-						sender = []byte(addr)
-						found = true
-						break
-					}
-				}
-				if !found {
-					return true
-				}
-				f(slotRlp, sender, mt.currentSubPool)
-				return true
-			})
+	p.all.tree.Ascend(func(i btree.Item) bool {
+		mt := i.(sortByNonce).metaTx
+		slot := mt.Tx
+		slotRlp := slot.rlp
+		if slot.rlp == nil {
+			v, err := tx.GetOne(kv.PoolTransaction, slot.idHash[:])
+			if err != nil {
+				log.Error("[txpool] get tx from db", "err", err)
+				return false
+			}
+			if v == nil {
+				log.Error("[txpool] tx not found in db")
+				return false
+			}
+			slotRlp = v[20:]
 		}
-	*/
+
+		var sender []byte
+		found := false
+		for addr, senderID := range p.senders.senderIDs { // TODO: do we need inverted index here?
+			if slot.senderID == senderID {
+				sender = []byte(addr)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return true
+		}
+		f(slotRlp, sender, mt.currentSubPool)
+		return true
+	})
 	return nil
 }
 
