@@ -220,6 +220,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if cfg.chainConfig.IsLondon(header.Number.Uint64()) {
+		header.Eip1559 = true
 		header.BaseFee = misc.CalcBaseFee(&cfg.chainConfig, parent)
 		if !cfg.chainConfig.IsLondon(parent.Number.Uint64()) {
 			parentGasLimit := parent.GasLimit * params.ElasticityMultiplier
