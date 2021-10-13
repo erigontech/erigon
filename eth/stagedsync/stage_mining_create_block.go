@@ -136,6 +136,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
 		// txpool v2 - doesn't prioritise local txs over remote
 		current.LocalTxs = types.NewTransactionsFixedOrder(nil)
+		log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "local", 0, "remote", len(txs))
 	} else {
 		pendingTxs, err := cfg.txPool.Pending()
 		if err != nil {
