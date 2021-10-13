@@ -2714,6 +2714,7 @@ func decompress(name string) error {
 	if err != nil {
 		return err
 	}
+	defer d.Close()
 	var df *os.File
 	if df, err = os.Create(name + ".decompressed.dat"); err != nil {
 		return err
