@@ -828,6 +828,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, params.FermionChainName, MiningEnabledFlag.Name))
 		}
 		setSigKey(ctx, cfg)
+		cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
 	}
 }
 
