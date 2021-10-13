@@ -269,7 +269,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 
 	runtime.ReadMemStats(&m)
 	log.Debug(
-		fmt.Sprintf("[%s] Committed batch", logPrefix),
+		fmt.Sprintf("[%s] ETL Load done", logPrefix),
 		"bucket", bucket,
 		"records", i,
 		"current key", makeCurrentKeyStr(nil),
