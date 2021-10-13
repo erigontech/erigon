@@ -715,9 +715,6 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 		// Skip duplicates
 		return nil
 	}
-	if blockHeight < hi.prevHeight {
-		return fmt.Errorf("[%s] headers are unexpectedly unsorted, got %d after %d", hi.logPrefix, blockHeight, hi.prevHeight)
-	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
 		return nil
@@ -725,9 +722,8 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	// Load parent header
 	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
 	if parent == nil {
-		log.Warn(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
-		// Skip headers without parents
-		return nil
+		// Fail on headers without parent
+		return fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
