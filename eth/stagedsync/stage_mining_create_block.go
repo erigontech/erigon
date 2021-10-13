@@ -167,6 +167,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 		current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
 		current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
+		log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "local", len(localTxs), "remote", len(remoteTxs))
 	}
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
@@ -212,6 +213,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
+		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil),
 		Extra:      cfg.miner.MiningConfig.ExtraData,
 		Time:       uint64(timestamp),
 	}
