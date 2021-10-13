@@ -28,6 +28,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -1680,7 +1681,7 @@ const minPatternScore = 1024
 // Large values increase memory consumption of dictionary reduction phase
 const maxDictPatterns = 1024 * 1024
 
-func compress(chaindata string, name string) error {
+func compress1(chaindata string, name string) error {
 	var superstring []byte
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
@@ -2809,111 +2810,30 @@ func (ds *DictionaryState) NextPattern() ([]byte, error) {
 }
 
 func decompress(name string) error {
-	cf, err := os.Open(name + ".compressed.dat")
+	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
 	}
-	cr := bufio.NewReader(cf)
 	var df *os.File
 	if df, err = os.Create(name + ".decompressed.dat"); err != nil {
 		return err
 	}
 	dw := bufio.NewWriter(df)
-	var countBuf [8]byte
-	if _, err = io.ReadFull(cr, countBuf[:]); err != nil {
-		return err
-	}
-	if _, err = dw.Write(countBuf[:]); err != nil {
-		return err
-	}
+	var word []byte = make([]byte, 0, 256)
 	numBuf := make([]byte, binary.MaxVarintLen64)
-	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
-		return err
-	}
-	dictSize := binary.BigEndian.Uint64(numBuf[:8])
-	fmt.Printf("dictSize = %d\n", dictSize)
-	var dict Dictionary
-	dict.data = make([]byte, dictSize)
-	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
-		return err
-	}
-	dict.rootOffset = binary.BigEndian.Uint64(numBuf[:8])
-	fmt.Printf("rootOffset = %d\n", dict.rootOffset)
-	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
-		return err
-	}
-	dict.cutoff = binary.BigEndian.Uint64(numBuf[:8])
-	fmt.Printf("cutoff = %d\n", dict.cutoff)
-	if _, err = io.ReadFull(cr, dict.data); err != nil {
-		return err
-	}
-	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
-		return err
-	}
-	dictSize = binary.BigEndian.Uint64(numBuf[:8])
-	fmt.Printf("pos dictSize = %d\n", dictSize)
-	var posDict Dictionary
-	posDict.data = make([]byte, dictSize)
-	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
-		return err
-	}
-	posDict.rootOffset = binary.BigEndian.Uint64(numBuf[:8])
-	fmt.Printf("pos rootOffset = %d\n", posDict.rootOffset)
-	if _, err = io.ReadFull(cr, numBuf[:8]); err != nil {
-		return err
-	}
-	posDict.cutoff = binary.BigEndian.Uint64(numBuf[:8])
-	fmt.Printf("pos cutoff = %d\n", posDict.cutoff)
-	if _, err = io.ReadFull(cr, posDict.data); err != nil {
-		return err
-	}
-	ds := DictionaryState{d: &dict, posD: &posDict, r: cr}
-	uncovered := make([]int, 0, 256)
-	var word []byte
-	var nonDecodeTime time.Duration
+	var decodeTime time.Duration
+	g := d.MakeGetter()
 	start := time.Now()
-	l, e := ds.NextPos(true)
 	wc := 0
-	for ; e == nil; l, e = ds.NextPos(true /* clean */) {
-		l--
-		ioStart := time.Now()
-		n := binary.PutUvarint(numBuf, l)
-		if _, e = dw.Write(numBuf[:n]); e != nil {
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		decodeTime += time.Since(start)
+		n := binary.PutUvarint(numBuf, uint64(len(word)))
+		if _, e := dw.Write(numBuf[:n]); e != nil {
 			return e
 		}
-		if l > 0 {
-			nonDecodeTime += time.Since(ioStart)
-			if int(l) > len(word) {
-				word = make([]byte, l)
-			}
-			var pos uint64
-			var lastPos int
-			var lastUncovered int
-			uncovered = uncovered[:0]
-			for pos, e = ds.NextPos(false /* clean */); e == nil && pos != 0; pos, e = ds.NextPos(false) {
-				intPos := lastPos + int(pos) - 1
-				lastPos = intPos
-				var pattern []byte
-				if pattern, e = ds.NextPattern(); e != nil {
-					return e
-				}
-				copy(word[intPos:], pattern)
-				if intPos > lastUncovered {
-					uncovered = append(uncovered, lastUncovered, intPos)
-				}
-				lastUncovered = intPos + len(pattern)
-			}
-			if int(l) > lastUncovered {
-				uncovered = append(uncovered, lastUncovered, int(l))
-			}
-			// Uncovered characters
-			for i := 0; i < len(uncovered); i += 2 {
-				if _, e = io.ReadFull(cr, word[uncovered[i]:uncovered[i+1]]); e != nil {
-					return e
-				}
-			}
-			ioStart = time.Now()
-			if _, e = dw.Write(word[:l]); e != nil {
+		if len(word) > 0 {
+			if _, e := dw.Write(word); e != nil {
 				return e
 			}
 		}
@@ -2921,19 +2841,13 @@ func decompress(name string) error {
 		if wc%10_000_000 == 0 {
 			log.Info("Decompressed", "millions", wc/1_000_000)
 		}
-		nonDecodeTime += time.Since(ioStart)
+		start = time.Now()
 	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	log.Info("Average decoding time", "per word", time.Duration(int64(time.Since(start)-nonDecodeTime)/int64(wc)))
+	log.Info("Average decoding time", "per word", time.Duration(int64(decodeTime)/int64(wc)))
 	if err = dw.Flush(); err != nil {
 		return err
 	}
 	if err = df.Close(); err != nil {
-		return err
-	}
-	if err = cf.Close(); err != nil {
 		return err
 	}
 	return nil
@@ -4257,7 +4171,7 @@ func main() {
 	case "dumpState":
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
-		err = compress(*chaindata, *name)
+		err = compress1(*chaindata, *name)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":
