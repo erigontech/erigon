@@ -269,9 +269,10 @@ var (
 	FermionChainConfig = &ChainConfig{
 		ChainName:           FermionChainName,
 		ChainID:             big.NewInt(1212120),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        big.NewInt(0),
-		DAOForkSupport:      true,
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
 		EIP158Block:         big.NewInt(0),
@@ -283,7 +284,10 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
 		CatalystBlock:       nil,
-		Aura:                &AuRaConfig{},
+		Clique: &CliqueConfig{
+			Period: 15,
+			Epoch:  30000,
+		},
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

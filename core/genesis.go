@@ -624,17 +624,10 @@ func DefaultKovanGenesisBlock() *Genesis {
 }
 
 func DefaultFermionGenesisBlock() *Genesis {
-	sealRlp, err := rlp.EncodeToBytes([][]byte{
-		common.FromHex(""),
-		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-	})
-	if err != nil {
-		panic(err)
-	}
 	return &Genesis{
 		Config:     params.FermionChainConfig,
 		Timestamp:  0x0,
-		SealRlp:    sealRlp,
+		ExtraData:  hexutil.MustDecode("0x000000000000000000000000000000000000000000000000000000000000000042d5d120ad9c1692c5fa72dca20657254bbaa08d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x5B8D80,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/fermion.json"),
