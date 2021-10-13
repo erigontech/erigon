@@ -109,7 +109,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1)
 
 	blockNum := executionAt + 1
 	if cfg.txPool2 != nil {
@@ -227,6 +226,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			header.GasLimit = core.CalcGasLimit(parent.GasUsed, parentGasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil)
 		}
 	}
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 
 	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
 	//if w.isRunning() {
