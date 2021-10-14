@@ -129,7 +129,6 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 }
 
 func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
-
 	if notifier == nil {
 		log.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
@@ -146,6 +145,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		}
 		notifyFrom = finishStageAfterSync - heightSpan
 	}
+	notifyFrom++
 
 	startKey := make([]byte, reflect.TypeOf(notifyFrom).Size()+32)
 	var notifyTo uint64
@@ -167,7 +167,6 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		return err
 	}
 
-	log.Info("RPC Daemon notified of new headers", "from", notifyFrom, "to", notifyTo)
+	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo)
 	return nil
-
 }

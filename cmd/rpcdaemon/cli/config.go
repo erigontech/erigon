@@ -69,7 +69,7 @@ var rootCmd = &cobra.Command{
 func RootCommand() (*cobra.Command, *Flags) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
-	cfg := &Flags{}
+	cfg := &Flags{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
@@ -99,6 +99,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TxPoolV2, "txpool.v2", false, "experimental external txpool")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
+	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -242,7 +243,11 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		db = rwKv
 		stateCache = kvcache.NewDummy()
 	} else {
-		stateCache = kvcache.New(cfg.StateCache)
+		if cfg.StateCache.KeysLimit > 0 {
+			stateCache = kvcache.New(cfg.StateCache)
+		} else {
+			stateCache = kvcache.NewDummy()
+		}
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 

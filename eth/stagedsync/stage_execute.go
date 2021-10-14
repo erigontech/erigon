@@ -10,6 +10,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -154,18 +155,18 @@ func executeBlock(
 			if j > 0 && prev == addr {
 				continue
 			}
-			var v [common.AddressLength + 1]byte
+			var v [length.Addr + 1]byte
 			copy(v[:], addr[:])
 			if _, ok := callTracer.froms[addr]; ok {
-				v[common.AddressLength] |= 1
+				v[length.Addr] |= 1
 			}
 			if _, ok := callTracer.tos[addr]; ok {
-				v[common.AddressLength] |= 2
+				v[length.Addr] |= 2
 			}
 			// TEVM marking still untranslated contracts
 			if vmConfig.EnableTEMV {
 				if created = callTracer.tos[addr]; created {
-					v[common.AddressLength] |= 4
+					v[length.Addr] |= 4
 				}
 			}
 			if j == 0 {
@@ -407,7 +408,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	logPrefix := s.LogPrefix()
 	stateBucket := kv.PlainState
-	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
+	storageKeyLength := length.Addr + length.Incarnation + length.Hash
 
 	var accumulator *shards.Accumulator
 	if !initialCycle && cfg.stateStream {
@@ -483,10 +484,10 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 			var address common.Address
 			var incarnation uint64
 			var location common.Hash
-			copy(address[:], k[:common.AddressLength])
-			incarnation = binary.BigEndian.Uint64(k[common.AddressLength:])
-			copy(location[:], k[common.AddressLength+common.IncarnationLength:])
-			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
+			copy(address[:], k[:length.Addr])
+			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
+			copy(location[:], k[length.Addr+length.Incarnation:])
+			accumulator.ChangeStorage(address, incarnation, location, libcommon.Copy(v))
 		}
 		if len(v) > 0 {
 			if err := next(k, k[:storageKeyLength], v); err != nil {

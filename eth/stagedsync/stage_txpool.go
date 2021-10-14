@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -238,9 +239,9 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 			// non-canonical case
 			continue
 		}
-		sendersArray := make([]common.Address, len(v)/common.AddressLength)
+		sendersArray := make([]common.Address, len(v)/length.Addr)
 		for i := 0; i < len(sendersArray); i++ {
-			copy(sendersArray[i][:], v[i*common.AddressLength:])
+			copy(sendersArray[i][:], v[i*length.Addr:])
 		}
 		senders[blockNumber-from-1] = sendersArray
 	}

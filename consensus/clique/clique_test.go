@@ -53,7 +53,7 @@ func TestReimportMirroredState(t *testing.T) {
 	genspec := &core.Genesis{
 		ExtraData: make([]byte, clique.ExtraVanity+common.AddressLength+clique.ExtraSeal),
 		Alloc: map[common.Address]core.GenesisAccount{
-			addr: {Balance: big.NewInt(1)},
+			addr: {Balance: big.NewInt(10000000000000000)},
 		},
 		Config: params.AllCliqueProtocolChanges,
 	}
@@ -79,7 +79,8 @@ func TestReimportMirroredState(t *testing.T) {
 		// We want to simulate an empty middle block, having the same state as the
 		// first one. The last is needs a state change again to force a reorg.
 		if i != 1 {
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, nil, nil), *signer, key)
+			baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

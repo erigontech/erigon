@@ -207,6 +207,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
+	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -499,17 +500,19 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			}
 
 			if backend.config.TxPool.V2 {
-				if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-					pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
-					return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-						PendingBlockBaseFee: pendingBaseFee.Uint64(),
-						DatabaseViewID:      tx.ViewID(),
-						ChangeBatch: []*remote.StateChange{
-							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
-						},
-					}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
-				}); err != nil {
-					return nil, err
+				if hh != nil {
+					if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+						pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
+						return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
+							PendingBlockBaseFee: pendingBaseFee.Uint64(),
+							DatabaseViewID:      tx.ViewID(),
+							ChangeBatch: []*remote.StateChange{
+								{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
+							},
+						}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
+					}); err != nil {
+						return nil, err
+					}
 				}
 			} else {
 				if hh != nil {
@@ -680,7 +683,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 	if s.chainConfig.ChainID.Uint64() > 10 {
 		go func() {
-			skipCycleEvery := time.NewTicker(3 * time.Second)
+			skipCycleEvery := time.NewTicker(4 * time.Second)
 			defer skipCycleEvery.Stop()
 			for range skipCycleEvery.C {
 				select {

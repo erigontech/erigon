@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
@@ -108,34 +109,34 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1)
 
 	blockNum := executionAt + 1
 	if cfg.txPool2 != nil {
-		txSlots := txpool.TxsRlp{}
+		var txs []types.Transaction
 		if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+			txSlots := txpool.TxsRlp{}
 			if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
 				return err
 			}
-			for i := 0; i < len(txSlots.Txs); i++ {
-				txSlots.Txs[i] = common.CopyBytes(txSlots.Txs[i]) // because we need this data outside of tx
+
+			txs, err = types.DecodeTransactions(txSlots.Txs)
+			if err != nil {
+				return fmt.Errorf("decode rlp of pending txs: %w", err)
 			}
+			var sender common.Address
+			for i := range txs {
+				copy(sender[:], txSlots.Senders.At(i))
+				txs[i].SetSender(sender)
+			}
+
 			return nil
 		}); err != nil {
 			return err
 		}
-		txs, err := types.DecodeTransactions(txSlots.Txs)
-		if err != nil {
-			return fmt.Errorf("decode rlp of pending txs: %w", err)
-		}
-		var sender common.Address
-		for i := range txs {
-			copy(sender[:], txSlots.Senders.At(i))
-			txs[i].SetSender(sender)
-		}
 		current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
 		// txpool v2 - doesn't prioritise local txs over remote
 		current.LocalTxs = types.NewTransactionsFixedOrder(nil)
+		log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
 	} else {
 		pendingTxs, err := cfg.txPool.Pending()
 		if err != nil {
@@ -166,6 +167,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 		current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
 		current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
+		log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "local", len(localTxs), "remote", len(remoteTxs))
 	}
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
@@ -211,18 +213,21 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
+		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil),
 		Extra:      cfg.miner.MiningConfig.ExtraData,
 		Time:       uint64(timestamp),
 	}
 
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if cfg.chainConfig.IsLondon(header.Number.Uint64()) {
+		header.Eip1559 = true
 		header.BaseFee = misc.CalcBaseFee(&cfg.chainConfig, parent)
 		if !cfg.chainConfig.IsLondon(parent.Number.Uint64()) {
 			parentGasLimit := parent.GasLimit * params.ElasticityMultiplier
 			header.GasLimit = core.CalcGasLimit(parent.GasUsed, parentGasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil)
 		}
 	}
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 
 	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
 	//if w.isRunning() {
@@ -248,7 +253,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		if header.Number.Cmp(daoBlock) >= 0 && header.Number.Cmp(limit) < 0 {
 			// Depending whether we support or oppose the fork, override differently
 			if cfg.chainConfig.DAOForkSupport {
-				header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
+				header.Extra = libcommon.Copy(params.DAOForkBlockExtra)
 			} else if bytes.Equal(header.Extra, params.DAOForkBlockExtra) {
 				header.Extra = []byte{} // If miner opposes, don't let it use the reserved extra-data
 			}
