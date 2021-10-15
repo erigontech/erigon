@@ -227,7 +227,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 		return
 	}
 
-	b.size += len(k) + len(v)
+	b.size += len(k)*2 + len(v)
 	b.entries[ks] = v
 }
 
