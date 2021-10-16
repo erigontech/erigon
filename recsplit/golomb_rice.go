@@ -17,8 +17,10 @@
 package recsplit
 
 import (
+	"encoding/binary"
 	"io"
 	"math/bits"
+	"unsafe"
 )
 
 // Optimal Golomb-Rice parameters for leaves
@@ -26,12 +28,8 @@ var bijMemo []uint32 = []uint32{0, 0, 0, 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15, 1
 
 // GolombRice can build up the golomb-rice encoding of the sequeuce of numbers, as well as read the numbers back from it.
 type GolombRice struct {
-	bitCount            int      // Speficic to the builder - number of bits added to the encoding so far
-	data                []uint64 // Present in the builder and in the reader
-	currFixedOffset     int      // Specific to the reader
-	currWindowUnary     uint64
-	currPtrUnary        int
-	validLowerBitsUnary int
+	bitCount int      // Speficic to the builder - number of bits added to the encoding so far
+	data     []uint64 // Present in the builder and in the reader
 }
 
 // appendUnaryAll adds the unary encoding of specified sequence of numbers to the end of the
@@ -87,7 +85,7 @@ func (g GolombRice) Bits() int {
 	return g.bitCount
 }
 
-func (g *GolombRice) ReadReset(bitPos int, unaryOffset int) {
+func (g *GolombRiceReader) ReadReset(bitPos int, unaryOffset int) {
 	g.currFixedOffset = bitPos
 	unaryPos := bitPos + unaryOffset
 	g.currPtrUnary = unaryPos / 64
@@ -96,7 +94,7 @@ func (g *GolombRice) ReadReset(bitPos int, unaryOffset int) {
 	g.validLowerBitsUnary = 64 - (unaryPos & 63)
 }
 
-func (g *GolombRice) SkipSubtree(nodes int, fixedLen int) {
+func (g *GolombRiceReader) SkipSubtree(nodes int, fixedLen int) {
 	if nodes <= 0 {
 		panic("nodes <= 0")
 	}
@@ -188,7 +186,7 @@ func select64(x uint64, k int) int {
 	return place + int(kSelectInByte[((x>>place)&0xFF)|(byteRank<<8)])
 }
 
-func (g *GolombRice) ReadNext(log2golomb int) uint64 {
+func (g *GolombRiceReader) ReadNext(log2golomb int) uint64 {
 	var result uint64
 
 	if g.currWindowUnary == 0 {
@@ -229,12 +227,27 @@ func (g GolombRice) Data() []uint64 {
 	return g.data
 }
 
+const maxDataSize = 0xFFFFFFFFFFFF
+
 // Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
-func (g GolombRice) Write(w io.Writer) error {
+func (g *GolombRice) Write(w io.Writer) error {
+	var numBuf [8]byte
+	binary.BigEndian.PutUint64(numBuf[:], uint64(len(g.data)))
+	if _, e := w.Write(numBuf[:]); e != nil {
+		return e
+	}
+	p := (*[maxDataSize]byte)(unsafe.Pointer(&g.data[0]))
+	b := (*p)[:]
+	if _, e := w.Write(b[:len(g.data)*8]); e != nil {
+		return e
+	}
 	return nil
 }
 
-// Read inputs the state of golomb rice encoding from a reader s
-func (g *GolombRice) Read(r io.Reader) error {
-	return nil
+type GolombRiceReader struct {
+	data                []uint64 // Present in the builder and in the reader
+	currFixedOffset     int      // Specific to the reader
+	currWindowUnary     uint64
+	currPtrUnary        int
+	validLowerBitsUnary int
 }

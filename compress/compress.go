@@ -34,14 +34,13 @@ import (
 )
 
 // Compressor is the main operating type for performing per-word compression
-// This include two phases:
-// 1. Building initial dictionary
-// 3. Compression
-// For each ot these phases, the set of words needs to be provided, using corresponding functions
+// After creating a compression, one needs to add words to it, using `AddWord` function
+// After that, `Compress` function needs to be called to perform the compression
+// and eventually create output file
 type Compressor struct {
-	outputFile string // File where to output the dictionary and compressed data
-	tmpDir     string // temporary directory to use for ETL when building dictionary
-	phase      Phase  // Current phase (dictionary building or compressings)
+	outputFile      string // File where to output the dictionary and compressed data
+	tmpDir          string // temporary directory to use for ETL when building dictionary
+	minPatternScore uint64 //minimum score (per superstring) required to consider including pattern into the dictionary
 	// Buffer for "superstring" - transformation of words where each byte of a word, say b,
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many words) suffix
@@ -57,6 +56,8 @@ type Compressor struct {
 	pt          patricia.PatriciaTree       // Patricia tree of dictionary patterns
 	mf          patricia.MatchFinder        // Match finder to use together with patricia tree (it stores search context and buffers matches)
 	ring        *Ring                       // Cycling ring for dynamic programming algorithm determining optimal coverage of word by dictionary patterns
+	wordFile    *os.File                    // Temporary file to keep words in for the second pass
+	wordW       *bufio.Writer               // Bufferred writer for temporary file
 	interFile   *os.File                    // File to write intermediate compression to
 	interW      *bufio.Writer               // Buffered writer associate to interFile
 	patterns    []int                       // Buffer of pattern ids (used in the dynamic programming algorithm to remember patterns corresponding to dynamic cells)
@@ -78,9 +79,6 @@ const superstringLimit = 16 * 1024 * 1024
 
 // minPatternLen is minimum length of pattern we consider to be included into the dictionary
 const minPatternLen = 5
-
-// minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
-const minPatternScore = 1024
 
 // maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
 // Large values increase memory consumption of dictionary reduction phase
@@ -485,32 +483,34 @@ func (r *Ring) Truncate(i int) {
 	r.tail = (r.head + i) & (len(r.cells) - 1)
 }
 
-func NewCompressor(outputFile string, tmpDir string) (*Compressor, error) {
+func NewCompressor(outputFile string, tmpDir string, minPatternScore uint64) (*Compressor, error) {
 	c := &Compressor{
-		outputFile:  outputFile,
-		tmpDir:      tmpDir,
-		superstring: make([]byte, 0, superstringLimit), // Allocate enough, so we never need to resize
-		suffixarray: make([]int32, superstringLimit),
-		lcp:         make([]int32, superstringLimit/2),
-		collectBuf:  make([]byte, 8, 256),
-		ring:        NewRing(),
-		patterns:    make([]int, 0, 32),
-		uncovered:   make([]int, 0, 32),
-		posMap:      make(map[uint64]uint64),
+		minPatternScore: minPatternScore,
+		outputFile:      outputFile,
+		tmpDir:          tmpDir,
+		superstring:     make([]byte, 0, superstringLimit), // Allocate enough, so we never need to resize
+		suffixarray:     make([]int32, superstringLimit),
+		lcp:             make([]int32, superstringLimit/2),
+		collectBuf:      make([]byte, 8, 256),
+		ring:            NewRing(),
+		patterns:        make([]int, 0, 32),
+		uncovered:       make([]int, 0, 32),
+		posMap:          make(map[uint64]uint64),
 	}
 	var err error
 	if c.divsufsort, err = transform.NewDivSufSort(); err != nil {
 		return nil, err
 	}
+	if c.wordFile, err = ioutil.TempFile(c.tmpDir, "words-"); err != nil {
+		return nil, err
+	}
+	c.wordW = bufio.NewWriter(c.wordFile)
 	c.collector = etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	return c, nil
 }
 
-// BuildDictNextWord needs to be called repeatedly to provide all the words for building the dictonary phase
-func (c *Compressor) BuildDictNextWord(word []byte) error {
-	if c.phase != BuildDict {
-		return fmt.Errorf("buidling dictionary already finished, phase %v", c.phase)
-	}
+// AddWord needs to be called repeatedly to provide all the words to compress
+func (c *Compressor) AddWord(word []byte) error {
 	if len(c.superstring)+2*len(word)+2 > superstringLimit {
 		// Adding this word would make superstring go over the limit
 		if err := c.processSuperstring(); err != nil {
@@ -521,150 +521,197 @@ func (c *Compressor) BuildDictNextWord(word []byte) error {
 		c.superstring = append(c.superstring, 1, b)
 	}
 	c.superstring = append(c.superstring, 0, 0)
-	return nil
-}
-
-// CompressNextWord needs to be called repeatedly to provide all the words for reducing the dictionary
-func (c *Compressor) CompressNextWord(word []byte) error {
-	switch c.phase {
-	case BuildDict:
-		// Perform dictionary building and switch to the next phase
-		if err := c.buildDictionary(); err != nil {
-			return err
-		}
-		c.phase = Compress
-	case Compress:
-	default:
-		return fmt.Errorf("rcompression already finished, phase %v", c.phase)
-	}
-	// Encode length of the word as var int for the intermediate compression
 	n := binary.PutUvarint(c.numBuf[:], uint64(len(word)))
-	if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
+	if _, err := c.wordW.Write(c.numBuf[:n]); err != nil {
 		return err
 	}
 	if len(word) > 0 {
-		matches := c.mf.FindLongestMatches(&c.pt, word)
-		if len(matches) == 0 {
-			n = binary.PutUvarint(c.numBuf[:], 0)
-			if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
-				return err
-			}
-			if _, err := c.interW.Write(word); err != nil {
-				return err
-			}
-			return nil
-		}
-		c.ring.Reset()
-		c.patterns = append(c.patterns[:0], 0, 0) // Sentinel entry - no meaning
-		lastF := matches[len(matches)-1]
-		for j := lastF.Start; j < lastF.End; j++ {
-			d := c.ring.PushBack()
-			d.optimStart = j + 1
-			d.coverStart = len(word)
-			d.compression = 0
-			d.patternIdx = 0
-			d.score = 0
-		}
-		// Starting from the last match
-		for i := len(matches); i > 0; i-- {
-			f := matches[i-1]
-			p := f.Val.(*Pattern)
-			firstCell := c.ring.Get(0)
-			maxCompression := firstCell.compression
-			maxScore := firstCell.score
-			maxCell := firstCell
-			var maxInclude bool
-			for e := 0; e < c.ring.Len(); e++ {
-				cell := c.ring.Get(e)
-				comp := cell.compression - 4
-				if cell.coverStart >= f.End {
-					comp += f.End - f.Start
-				} else {
-					comp += cell.coverStart - f.Start
-				}
-				score := cell.score + p.score
-				if comp > maxCompression || (comp == maxCompression && score > maxScore) {
-					maxCompression = comp
-					maxScore = score
-					maxInclude = true
-					maxCell = cell
-				}
-				if cell.optimStart > f.End {
-					c.ring.Truncate(e)
-					break
-				}
-			}
-			d := c.ring.PushFront()
-			d.optimStart = f.Start
-			d.score = maxScore
-			d.compression = maxCompression
-			if maxInclude {
-				d.coverStart = f.Start
-				d.patternIdx = len(c.patterns)
-				c.patterns = append(c.patterns, i-1, maxCell.patternIdx)
-			} else {
-				d.coverStart = maxCell.coverStart
-				d.patternIdx = maxCell.patternIdx
-			}
-		}
-		optimCell := c.ring.Get(0)
-		// Count number of patterns
-		var patternCount uint64
-		patternIdx := optimCell.patternIdx
-		for patternIdx != 0 {
-			patternCount++
-			patternIdx = c.patterns[patternIdx+1]
-		}
-		n = binary.PutUvarint(c.numBuf[:], patternCount)
-		if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
+		if _, err := c.wordW.Write(word); err != nil {
 			return err
-		}
-		patternIdx = optimCell.patternIdx
-		lastStart := 0
-		var lastUncovered int
-		c.uncovered = c.uncovered[:0]
-		for patternIdx != 0 {
-			pattern := c.patterns[patternIdx]
-			p := matches[pattern].Val.(*Pattern)
-			if matches[pattern].Start > lastUncovered {
-				c.uncovered = append(c.uncovered, lastUncovered, matches[pattern].Start)
-			}
-			lastUncovered = matches[pattern].End
-			// Starting position
-			c.posMap[uint64(matches[pattern].Start-lastStart+1)]++
-			lastStart = matches[pattern].Start
-			n = binary.PutUvarint(c.numBuf[:], uint64(matches[pattern].Start))
-			if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
-				return err
-			}
-			// Code
-			n = binary.PutUvarint(c.numBuf[:], p.code)
-			if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
-				return err
-			}
-			p.uses++
-			patternIdx = c.patterns[patternIdx+1]
-		}
-		if len(word) > lastUncovered {
-			c.uncovered = append(c.uncovered, lastUncovered, len(word))
-		}
-		// Add uncoded input
-		for i := 0; i < len(c.uncovered); i += 2 {
-			if _, err := c.interW.Write(word[c.uncovered[i]:c.uncovered[i+1]]); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
 }
 
-// Close finishes compression and closes output file, and cleans up temporary files
-func (c *Compressor) Close() error {
-	if c.interW != nil {
-		if err := c.interW.Flush(); err != nil {
+func (c *Compressor) Compress() error {
+	if c.wordW != nil {
+		if err := c.wordW.Flush(); err != nil {
 			return err
 		}
 	}
+	if err := c.buildDictionary(); err != nil {
+		return err
+	}
+	if err := c.findMatches(); err != nil {
+		return err
+	}
+	if err := c.optimiseCodes(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Compressor) findMatches() error {
+	// Build patricia tree out of the patterns in the dictionary, for further matching in individual words
+	// Allocate temporary initial codes to the patterns so that patterns with higher scores get smaller code
+	// This helps reduce the size of intermediate compression
+	for i, p := range c.dictBuilder.items {
+		p.code = uint64(len(c.dictBuilder.items) - i - 1)
+		c.pt.Insert(p.chars, p)
+	}
+	var err error
+	if c.interFile, err = ioutil.TempFile(c.tmpDir, "inter-compress-"); err != nil {
+		return err
+	}
+	c.interW = bufio.NewWriter(c.interFile)
+	if _, err := c.wordFile.Seek(0, 0); err != nil {
+		return err
+	}
+	defer os.Remove(c.wordFile.Name())
+	defer c.wordFile.Close()
+	r := bufio.NewReader(c.wordFile)
+	var readBuf []byte
+	l, e := binary.ReadUvarint(r)
+	for ; e == nil; l, e = binary.ReadUvarint(r) {
+		c.posMap[l+1]++
+		c.posMap[0]++
+		if int(l) > len(readBuf) {
+			readBuf = make([]byte, l)
+		}
+		if _, e := io.ReadFull(r, readBuf[:l]); e != nil {
+			return e
+		}
+		word := readBuf[:l]
+		// Encode length of the word as var int for the intermediate compression
+		n := binary.PutUvarint(c.numBuf[:], uint64(len(word)))
+		if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
+			return err
+		}
+		if len(word) > 0 {
+			matches := c.mf.FindLongestMatches(&c.pt, word)
+			if len(matches) == 0 {
+				n = binary.PutUvarint(c.numBuf[:], 0)
+				if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
+					return err
+				}
+				if _, err := c.interW.Write(word); err != nil {
+					return err
+				}
+				continue
+			}
+			c.ring.Reset()
+			c.patterns = append(c.patterns[:0], 0, 0) // Sentinel entry - no meaning
+			lastF := matches[len(matches)-1]
+			for j := lastF.Start; j < lastF.End; j++ {
+				d := c.ring.PushBack()
+				d.optimStart = j + 1
+				d.coverStart = len(word)
+				d.compression = 0
+				d.patternIdx = 0
+				d.score = 0
+			}
+			// Starting from the last match
+			for i := len(matches); i > 0; i-- {
+				f := matches[i-1]
+				p := f.Val.(*Pattern)
+				firstCell := c.ring.Get(0)
+				maxCompression := firstCell.compression
+				maxScore := firstCell.score
+				maxCell := firstCell
+				var maxInclude bool
+				for e := 0; e < c.ring.Len(); e++ {
+					cell := c.ring.Get(e)
+					comp := cell.compression - 4
+					if cell.coverStart >= f.End {
+						comp += f.End - f.Start
+					} else {
+						comp += cell.coverStart - f.Start
+					}
+					score := cell.score + p.score
+					if comp > maxCompression || (comp == maxCompression && score > maxScore) {
+						maxCompression = comp
+						maxScore = score
+						maxInclude = true
+						maxCell = cell
+					}
+					if cell.optimStart > f.End {
+						c.ring.Truncate(e)
+						break
+					}
+				}
+				d := c.ring.PushFront()
+				d.optimStart = f.Start
+				d.score = maxScore
+				d.compression = maxCompression
+				if maxInclude {
+					d.coverStart = f.Start
+					d.patternIdx = len(c.patterns)
+					c.patterns = append(c.patterns, i-1, maxCell.patternIdx)
+				} else {
+					d.coverStart = maxCell.coverStart
+					d.patternIdx = maxCell.patternIdx
+				}
+			}
+			optimCell := c.ring.Get(0)
+			// Count number of patterns
+			var patternCount uint64
+			patternIdx := optimCell.patternIdx
+			for patternIdx != 0 {
+				patternCount++
+				patternIdx = c.patterns[patternIdx+1]
+			}
+			n = binary.PutUvarint(c.numBuf[:], patternCount)
+			if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
+				return err
+			}
+			patternIdx = optimCell.patternIdx
+			lastStart := 0
+			var lastUncovered int
+			c.uncovered = c.uncovered[:0]
+			for patternIdx != 0 {
+				pattern := c.patterns[patternIdx]
+				p := matches[pattern].Val.(*Pattern)
+				if matches[pattern].Start > lastUncovered {
+					c.uncovered = append(c.uncovered, lastUncovered, matches[pattern].Start)
+				}
+				lastUncovered = matches[pattern].End
+				// Starting position
+				c.posMap[uint64(matches[pattern].Start-lastStart+1)]++
+				lastStart = matches[pattern].Start
+				n = binary.PutUvarint(c.numBuf[:], uint64(matches[pattern].Start))
+				if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
+					return err
+				}
+				// Code
+				n = binary.PutUvarint(c.numBuf[:], p.code)
+				if _, err := c.interW.Write(c.numBuf[:n]); err != nil {
+					return err
+				}
+				p.uses++
+				patternIdx = c.patterns[patternIdx+1]
+			}
+			if len(word) > lastUncovered {
+				c.uncovered = append(c.uncovered, lastUncovered, len(word))
+			}
+			// Add uncoded input
+			for i := 0; i < len(c.uncovered); i += 2 {
+				if _, err := c.interW.Write(word[c.uncovered[i]:c.uncovered[i+1]]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
+	}
+	if err = c.interW.Flush(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// optimises coding for patterns and positions
+func (c *Compressor) optimiseCodes() error {
 	if _, err := c.interFile.Seek(0, 0); err != nil {
 		return err
 	}
@@ -736,19 +783,26 @@ func (c *Compressor) Close() error {
 		heap.Push(&codeHeap, h)
 		huffs = append(huffs, h)
 	}
-	root := heap.Pop(&codeHeap).(*PatternHuff) // Root node of huffman tree
+	var root *PatternHuff
+	if codeHeap.Len() > 0 {
+		root = heap.Pop(&codeHeap).(*PatternHuff) // Root node of huffman tree
+	}
 	cf, err := os.Create(c.outputFile)
 	if err != nil {
 		return err
 	}
 	cw := bufio.NewWriter(cf)
-	// First, output dictionary
+	// First, output dictionary size
 	binary.BigEndian.PutUint64(c.numBuf[:], offset) // Dictionary size
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
 	// Secondly, output directory root
-	binary.BigEndian.PutUint64(c.numBuf[:], root.offset)
+	if root == nil {
+		binary.BigEndian.PutUint64(c.numBuf[:], 0)
+	} else {
+		binary.BigEndian.PutUint64(c.numBuf[:], root.offset)
+	}
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
@@ -853,14 +907,21 @@ func (c *Compressor) Close() error {
 		heap.Push(&posHeap, h)
 		posHuffs = append(posHuffs, h)
 	}
-	posRoot := heap.Pop(&posHeap).(*PositionHuff)
-	// First, output dictionary
+	var posRoot *PositionHuff
+	if posHeap.Len() > 0 {
+		posRoot = heap.Pop(&posHeap).(*PositionHuff)
+	}
+	// First, output dictionary size
 	binary.BigEndian.PutUint64(c.numBuf[:], offset) // Dictionary size
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
 	// Secondly, output directory root
-	binary.BigEndian.PutUint64(c.numBuf[:], posRoot.offset)
+	if posRoot == nil {
+		binary.BigEndian.PutUint64(c.numBuf[:], 0)
+	} else {
+		binary.BigEndian.PutUint64(c.numBuf[:], posRoot.offset)
+	}
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
@@ -902,8 +963,10 @@ func (c *Compressor) Close() error {
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
 		posCode := pos2code[l+1]
-		if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
-			return e
+		if posCode != nil {
+			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+				return e
+			}
 		}
 		if l > 0 {
 			var pNum uint64 // Number of patterns
@@ -921,8 +984,10 @@ func (c *Compressor) Close() error {
 				}
 				posCode = pos2code[pos-lastPos+1]
 				lastPos = pos
-				if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
-					return e
+				if posCode != nil {
+					if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+						return e
+					}
 				}
 				var code uint64 // Code of the pattern
 				if code, e = binary.ReadUvarint(r); e != nil {
@@ -942,8 +1007,10 @@ func (c *Compressor) Close() error {
 			}
 			// Terminating position and flush
 			posCode = pos2code[0]
-			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
-				return e
+			if posCode != nil {
+				if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+					return e
+				}
 			}
 			if e = hc.flush(); e != nil {
 				return e
@@ -983,18 +1050,6 @@ func (c *Compressor) buildDictionary() error {
 	c.collector.Close(compressLogPrefix)
 	// Sort dictionary inside the dictionary bilder in the order of increasing scores
 	sort.Sort(&c.dictBuilder)
-	// Build patricia tree out of the patterns in the dictionary, for further matching in individual words
-	// Allocate temporary initial codes to the patterns so that patterns with higher scores get smaller code
-	// This helps reduce the size of intermediate compression
-	for i, p := range c.dictBuilder.items {
-		p.code = uint64(len(c.dictBuilder.items) - i - 1)
-		c.pt.Insert(p.chars, p)
-	}
-	var err error
-	if c.interFile, err = ioutil.TempFile(c.tmpDir, "inter-compress-"); err != nil {
-		return err
-	}
-	c.interW = bufio.NewWriter(c.interFile)
 	return nil
 }
 
@@ -1004,11 +1059,15 @@ func (c *Compressor) processSuperstring() error {
 	// because it won't be used after filtration
 	n := len(c.superstring) / 2
 	saFiltered := c.suffixarray[:n]
-	for i := 0; i < n; i++ {
-		saFiltered[i] = c.suffixarray[i*2] / 2
+	j := 0
+	for _, s := range c.suffixarray[:len(c.superstring)] {
+		if (s & 1) == 0 {
+			saFiltered[j] = s >> 1
+			j++
+		}
 	}
 	// Now create an inverted array - we reuse the second half of sa.suffixarray for that
-	saInverted := c.suffixarray[n:]
+	saInverted := c.suffixarray[:n]
 	for i := 0; i < n; i++ {
 		saInverted[saFiltered[i]] = int32(i)
 	}
@@ -1045,7 +1104,7 @@ func (c *Compressor) processSuperstring() error {
 	}
 	// Walk over LCP array and compute the scores of the strings
 	b := saInverted
-	j := 0
+	j = 0
 	for i := 0; i < n-1; i++ {
 		// Only when there is a drop in LCP value
 		if c.lcp[i+1] >= c.lcp[i] {
@@ -1077,7 +1136,7 @@ func (c *Compressor) processSuperstring() error {
 				}
 			}
 			score := uint64(repeats * int(l-4))
-			if score >= minPatternScore {
+			if score >= c.minPatternScore {
 				// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
 				c.collectBuf = c.collectBuf[:8]
 				for s := int32(0); s < l; s++ {

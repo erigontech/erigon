@@ -37,13 +37,30 @@ func FuzzEliasFano(f *testing.F) {
 		// Treat each byte of the sequence as difference between previous value and the next
 		numBuckets := len(in) / 2
 		cumKeys := make([]uint64, numBuckets+1)
+		var minDeltaCumKeys, minDeltaPosition uint64
 		position := make([]uint64, numBuckets+1)
 		for i, b := range in[:numBuckets] {
 			cumKeys[i+1] = cumKeys[i] + uint64(b)
+			if i == 0 || uint64(b) < minDeltaCumKeys {
+				minDeltaCumKeys = uint64(b)
+			}
 		}
 		for i, b := range in[numBuckets:] {
 			position[i+1] = position[i] + uint64(b)
+			if i == 0 || uint64(b) < minDeltaPosition {
+				minDeltaPosition = uint64(b)
+			}
 		}
+		ef1 := NewEliasFano(uint64(numBuckets+1), cumKeys[numBuckets], minDeltaCumKeys)
+		for _, c := range cumKeys {
+			ef1.AddOffset(c)
+		}
+		ef1.Build()
+		ef2 := NewEliasFano(uint64(numBuckets+1), position[numBuckets], minDeltaPosition)
+		for _, p := range position {
+			ef2.AddOffset(p)
+		}
+		ef2.Build()
 		ef.Build(cumKeys, position)
 		// Try to read from ef
 		for bucket := 0; bucket < numBuckets; bucket++ {
@@ -53,6 +70,14 @@ func FuzzEliasFano(f *testing.F) {
 			}
 			if bitPos != position[bucket] {
 				t.Fatalf("bucket %d: position from EF = %d, expected %d", bucket, bitPos, position[bucket])
+			}
+			cumKey = ef1.Get(uint64(bucket))
+			if cumKey != cumKeys[bucket] {
+				t.Fatalf("bucket %d: cumKey from EF1 = %d, expected %d", bucket, cumKey, cumKeys[bucket])
+			}
+			bitPos = ef2.Get(uint64(bucket))
+			if bitPos != position[bucket] {
+				t.Fatalf("bucket %d: position from EF2 = %d, expected %d", bucket, bitPos, position[bucket])
 			}
 		}
 		for bucket := 0; bucket < numBuckets; bucket++ {

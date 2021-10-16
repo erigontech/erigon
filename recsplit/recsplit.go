@@ -17,10 +17,12 @@
 package recsplit
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"math/bits"
+	"os"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/spaolacci/murmur3"
@@ -49,32 +51,45 @@ func remix(z uint64) uint64 {
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
 // pages 175−185. SIAM, 2020.
 type RecSplit struct {
-	bucketSize       int
-	keyExpectedCount uint64          // Number of keys in the hash table
-	keysAdded        uint64          // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
-	bucketCount      uint64          // Number of buckets
-	hasher           murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
-	collector        *etl.Collector
-	built            bool       // Flag indicating that the hash function has been built and no more keys can be added
-	currentBucketIdx uint64     // Current bucket being accumulated
-	currentBucket    []uint64   // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
-	gr               GolombRice // Helper object to encode the tree of hash function salts using Golomb-Rice code.
+	bucketSize        int
+	keyExpectedCount  uint64          // Number of keys in the hash table
+	keysAdded         uint64          // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
+	bucketCount       uint64          // Number of buckets
+	hasher            murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
+	bucketCollector   *etl.Collector  // Collector that sorts by buckets
+	enums             bool            // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	offsetCollector   *etl.Collector  // Collector that sorts by offsets
+	built             bool            // Flag indicating that the hash function has been built and no more keys can be added
+	currentBucketIdx  uint64          // Current bucket being accumulated
+	currentBucket     []uint64        // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
+	currentBucketOffs []uint64        // Index offsets for the current bucket
+	maxOffset         uint64          // Maximum value of index offset to later decide how many bytes to use for the encoding
+	gr                GolombRice      // Helper object to encode the tree of hash function salts using Golomb-Rice code.
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 DoubleEliasFano
-	bucketSizeAcc      []uint64 // Bucket size accumulator
-	bucketPosAcc       []uint64 // Accumulator for position of every bucket in the encoding of the hash function
-	leafSize           uint16   // Leaf size for recursive split algorithm
-	primaryAggrBound   uint16   // The lower bound for primary key aggregation (computed from leafSize)
-	secondaryAggrBound uint16   // The lower bound for secondary key aggregation (computed from leadSize)
+	offsetEf           *EliasFano // Elias Fano instance for encoding the offsets
+	bucketSizeAcc      []uint64   // Bucket size accumulator
+	bucketPosAcc       []uint64   // Accumulator for position of every bucket in the encoding of the hash function
+	leafSize           uint16     // Leaf size for recursive split algorithm
+	primaryAggrBound   uint16     // The lower bound for primary key aggregation (computed from leafSize)
+	secondaryAggrBound uint16     // The lower bound for secondary key aggregation (computed from leadSize)
 	startSeed          []uint64
 	golombRice         []uint32
 	buffer             []uint64
+	offsetBuffer       []uint64
 	count              []uint16
 	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
 	collision          bool
 	tmpDir             string
+	indexFile          string
+	indexF             *os.File
+	indexW             *bufio.Writer
+	bytesPerRec        int
+	numBuf             [8]byte
 	trace              bool
+	prevOffset         uint64 // Previously added offset (for calculating minDelta for Elias Fano encoding of "enum -> offset" index)
+	minDelta           uint64 // minDelta for Elias Fano encoding of "enum -> offset" index
 }
 
 type RecSplitArgs struct {
@@ -82,8 +97,10 @@ type RecSplitArgs struct {
 	BucketSize int
 	Salt       uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize   uint16
+	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir     string
 	StartSeed  []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
+	Enums      bool     // Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
@@ -96,8 +113,15 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	rs.salt = args.Salt
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
-	rs.collector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rs.indexFile = args.IndexFile
+	rs.bucketCollector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rs.enums = args.Enums
+	if args.Enums {
+		rs.offsetCollector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
+	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
+	rs.maxOffset = 0
 	rs.bucketSizeAcc = make([]uint64, 1, bucketCount+1)
 	rs.bucketPosAcc = make([]uint64, 1, bucketCount+1)
 	if args.LeafSize > MaxLeafSize {
@@ -141,28 +165,30 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.keysAdded = 0
 	rs.salt++
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
-	rs.collector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rs.bucketCollector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	rs.currentBucket = rs.currentBucket[:0]
+	rs.currentBucketOffs = rs.currentBucketOffs[:0]
+	rs.maxOffset = 0
 	rs.bucketSizeAcc = rs.bucketSizeAcc[:1] // First entry is always zero
 	rs.bucketPosAcc = rs.bucketPosAcc[:0]   // First entry is always zero
 }
 
-func (rs *RecSplit) splitParams(m uint16) (fanout, unit uint16) {
-	if m > rs.secondaryAggrBound { // High-level aggregation (fanout 2)
-		unit = rs.secondaryAggrBound * (((m+1)/2 + rs.secondaryAggrBound - 1) / rs.secondaryAggrBound)
+func splitParams(m uint16, leafSize uint16, primaryAggrBound uint16, secondaryAggrBound uint16) (fanout, unit uint16) {
+	if m > secondaryAggrBound { // High-level aggregation (fanout 2)
+		unit = secondaryAggrBound * (((m+1)/2 + secondaryAggrBound - 1) / secondaryAggrBound)
 		fanout = 2
-	} else if m > rs.primaryAggrBound { // Second-level aggregation
-		unit = rs.primaryAggrBound
-		fanout = (m + rs.primaryAggrBound - 1) / rs.primaryAggrBound
+	} else if m > primaryAggrBound { // Second-level aggregation
+		unit = primaryAggrBound
+		fanout = (m + primaryAggrBound - 1) / primaryAggrBound
 	} else { // First-level aggregation
-		unit = rs.leafSize
-		fanout = (m + rs.leafSize - 1) / rs.leafSize
+		unit = leafSize
+		fanout = (m + leafSize - 1) / leafSize
 	}
 	return
 }
 
-func (rs *RecSplit) computeGolombRice(m uint16, table []uint32) {
-	fanout, unit := rs.splitParams(m)
+func computeGolombRice(m uint16, table []uint32, leafSize uint16, primaryAggrBound uint16, secondaryAggrBound uint16) {
+	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	k := make([]uint16, fanout)
 	k[fanout-1] = m
 	for i := uint16(0); i < fanout-1; i++ {
@@ -190,7 +216,7 @@ func (rs *RecSplit) computeGolombRice(m uint16, table []uint32) {
 	for i := uint16(0); i < fanout; i++ {
 		nodes += (table[k[i]] >> 16) & 0x7FF
 	}
-	if rs.leafSize >= 3 && nodes > 0x7FF {
+	if leafSize >= 3 && nodes > 0x7FF {
 		panic("rs.leafSize >= 3 && nodes > 0x7FF")
 	}
 	table[m] |= nodes << 16
@@ -209,7 +235,7 @@ func (rs *RecSplit) golombParam(m uint16) int {
 		} else if s <= rs.leafSize {
 			rs.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
 		} else {
-			rs.computeGolombRice(s, rs.golombRice)
+			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		}
 		s++
 	}
@@ -219,7 +245,7 @@ func (rs *RecSplit) golombParam(m uint16) int {
 // Add key to the RecSplit. There can be many more keys than what fits in RAM, and RecSplit
 // spills data onto disk to accomodate that. The key gets copied by the collector, therefore
 // the slice underlying key is not getting accessed by RecSplit after this invocation.
-func (rs *RecSplit) AddKey(key []byte) error {
+func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	if rs.built {
 		return fmt.Errorf("cannot add keys after perfect hash function had been built")
 	}
@@ -229,8 +255,34 @@ func (rs *RecSplit) AddKey(key []byte) error {
 	var bucketKey [16]byte
 	binary.BigEndian.PutUint64(bucketKey[:], remap(hi, rs.bucketCount))
 	binary.BigEndian.PutUint64(bucketKey[8:], lo)
+	var offsetVal [8]byte
+	binary.BigEndian.PutUint64(offsetVal[:], offset)
+	if offset > rs.maxOffset {
+		rs.maxOffset = offset
+	}
+	if rs.keysAdded > 0 {
+		delta := offset - rs.prevOffset
+		if rs.keysAdded == 1 || delta < rs.minDelta {
+			rs.minDelta = delta
+		}
+	}
+
+	if rs.enums {
+		if err := rs.offsetCollector.Collect(offsetVal[:], nil); err != nil {
+			return err
+		}
+		var keyIdx [8]byte
+		binary.BigEndian.PutUint64(keyIdx[:], rs.keysAdded)
+		if err := rs.bucketCollector.Collect(bucketKey[:], keyIdx[:]); err != nil {
+			return err
+		}
+	} else {
+		if err := rs.bucketCollector.Collect(bucketKey[:], offsetVal[:]); err != nil {
+			return err
+		}
+	}
 	rs.keysAdded++
-	return rs.collector.Collect(bucketKey[:], []byte{})
+	return nil
 }
 
 func (rs *RecSplit) recsplitCurrentBucket() error {
@@ -249,12 +301,17 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 		bitPos := rs.gr.bitCount
 		if rs.buffer == nil {
 			rs.buffer = make([]uint64, len(rs.currentBucket))
+			rs.offsetBuffer = make([]uint64, len(rs.currentBucketOffs))
 		} else {
 			for len(rs.buffer) < len(rs.currentBucket) {
 				rs.buffer = append(rs.buffer, 0)
+				rs.offsetBuffer = append(rs.offsetBuffer, 0)
 			}
 		}
-		unary := rs.recsplit(0 /* level */, rs.currentBucket, nil /* unary */)
+		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, nil /* unary */)
+		if err != nil {
+			return err
+		}
 		rs.gr.appendUnaryAll(unary)
 		if rs.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
@@ -267,11 +324,12 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	rs.bucketPosAcc[int(rs.currentBucketIdx)+1] = uint64(rs.gr.Bits())
 	// clear for the next buckey
 	rs.currentBucket = rs.currentBucket[:0]
+	rs.currentBucketOffs = rs.currentBucketOffs[:0]
 	return nil
 }
 
 // recsplit applies recSplit algorithm to the given bucket
-func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint64 {
+func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64) ([]uint64, error) {
 	if rs.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
 	}
@@ -297,6 +355,16 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint6
 			}
 			salt++
 		}
+		for i := uint16(0); i < m; i++ {
+			j := remap16(remix(bucket[i]+salt), m)
+			rs.offsetBuffer[j] = offsets[i]
+		}
+		for _, offset := range rs.offsetBuffer[:m] {
+			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
+			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+				return nil, err
+			}
+		}
 		salt -= rs.startSeed[level]
 		log2golomb := rs.golombParam(m)
 		if rs.trace {
@@ -305,7 +373,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint6
 		rs.gr.appendFixed(salt, log2golomb)
 		unary = append(unary, salt>>log2golomb)
 	} else {
-		fanout, unit := rs.splitParams(m)
+		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
 		for {
 			for i := uint16(0); i < fanout-1; i++ {
@@ -330,9 +398,11 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint6
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m) / unit
 			rs.buffer[count[j]] = bucket[i]
+			rs.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
 		}
 		copy(bucket, rs.buffer)
+		copy(offsets, rs.offsetBuffer)
 		salt -= rs.startSeed[level]
 		log2golomb := rs.golombParam(m)
 		if rs.trace {
@@ -340,19 +410,29 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, unary []uint64) []uint6
 		}
 		rs.gr.appendFixed(salt, log2golomb)
 		unary = append(unary, salt>>log2golomb)
+		var err error
 		var i uint16
 		for i = 0; i < m-unit; i += unit {
-			unary = rs.recsplit(level+1, bucket[i:i+unit], unary)
+			if unary, err = rs.recsplit(level+1, bucket[i:i+unit], offsets[i:i+unit], unary); err != nil {
+				return nil, err
+			}
 		}
 		if m-i > 1 {
-			unary = rs.recsplit(level+1, bucket[i:], unary)
+			if unary, err = rs.recsplit(level+1, bucket[i:], offsets[i:], unary); err != nil {
+				return nil, err
+			}
+		} else if m-i == 1 {
+			binary.BigEndian.PutUint64(rs.numBuf[:], offsets[i])
+			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+				return nil, err
+			}
 		}
 	}
-	return unary
+	return unary, nil
 }
 
-// loadFunc is required to satisfy the type etl.LoadFunc type, to use with collector.Load
-func (rs *RecSplit) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+// loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
+func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 	// k is the BigEndian encoding of the bucket number, and the v is the key that is assigned into that bucket
 	bucketIdx := binary.BigEndian.Uint64(k)
 	if rs.currentBucketIdx != bucketIdx {
@@ -364,11 +444,18 @@ func (rs *RecSplit) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl
 		rs.currentBucketIdx = bucketIdx
 	}
 	rs.currentBucket = append(rs.currentBucket, binary.BigEndian.Uint64(k[8:]))
+	rs.currentBucketOffs = append(rs.currentBucketOffs, binary.BigEndian.Uint64(v))
+	return nil
+}
+
+func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+	offset := binary.BigEndian.Uint64(k)
+	rs.offsetEf.AddOffset(offset)
 	return nil
 }
 
 // Build has to be called after all the keys have been added, and it initiates the process
-// of building the perfect hash function.
+// of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build() error {
 	if rs.built {
 		return fmt.Errorf("already built")
@@ -376,9 +463,25 @@ func (rs *RecSplit) Build() error {
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("expected keys %d, got %d", rs.keyExpectedCount, rs.keysAdded)
 	}
+	var err error
+	if rs.indexF, err = os.Create(rs.indexFile); err != nil {
+		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
+	}
+	defer rs.indexF.Close()
+	rs.indexW = bufio.NewWriter(rs.indexF)
+	// Write number of keys
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+	// Write number of bytes per index record
+	rs.bytesPerRec = (bits.Len64(rs.maxOffset) + 7) / 8
+	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
+		return fmt.Errorf("write bytes per record: %w", err)
+	}
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
-	defer rs.collector.Close(RecSplitLogPrefix)
-	if err := rs.collector.Load(RecSplitLogPrefix, nil /* db */, "" /* toBucket */, rs.loadFunc, etl.TransformArgs{}); err != nil {
+	defer rs.bucketCollector.Close(RecSplitLogPrefix)
+	if err := rs.bucketCollector.Load(RecSplitLogPrefix, nil /* db */, "" /* toBucket */, rs.loadFuncBucket, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	if len(rs.currentBucket) > 0 {
@@ -386,106 +489,77 @@ func (rs *RecSplit) Build() error {
 			return err
 		}
 	}
+	if rs.enums {
+		rs.offsetEf = NewEliasFano(rs.keysAdded, rs.maxOffset, rs.minDelta)
+		defer rs.offsetCollector.Close(RecSplitLogPrefix)
+		if err := rs.offsetCollector.Load(RecSplitLogPrefix, nil /* db */, "" /* toBucket */, rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
+			return err
+		}
+	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
 	rs.ef.Build(rs.bucketSizeAcc, rs.bucketPosAcc)
 	rs.built = true
+	// Write out bucket count, bucketSize, leafSize
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.bucketCount)
+	if _, err := rs.indexW.Write(rs.numBuf[:8]); err != nil {
+		return fmt.Errorf("writing bucketCount: %w", err)
+	}
+	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(rs.bucketSize))
+	if _, err := rs.indexW.Write(rs.numBuf[:2]); err != nil {
+		return fmt.Errorf("writing bucketSize: %w", err)
+	}
+	binary.BigEndian.PutUint16(rs.numBuf[:], rs.leafSize)
+	if _, err := rs.indexW.Write(rs.numBuf[:2]); err != nil {
+		return fmt.Errorf("writing leafSize: %w", err)
+	}
+	// Write out salt
+	binary.BigEndian.PutUint32(rs.numBuf[:], rs.salt)
+	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
+		return fmt.Errorf("writing salt: %w", err)
+	}
+	// Write out start seeds
+	if err := rs.indexW.WriteByte(byte(len(rs.startSeed))); err != nil {
+		return fmt.Errorf("writing len of start seeds: %w", err)
+	}
+	for _, s := range rs.startSeed {
+		binary.BigEndian.PutUint64(rs.numBuf[:], s)
+		if _, err := rs.indexW.Write(rs.numBuf[:8]); err != nil {
+			return fmt.Errorf("writing start seed: %w", err)
+		}
+	}
+	if rs.enums {
+		if err := rs.indexW.WriteByte(1); err != nil {
+			return fmt.Errorf("writing enums = true: %w", err)
+		}
+	} else {
+		if err := rs.indexW.WriteByte(0); err != nil {
+			return fmt.Errorf("writing enums = true: %w", err)
+		}
+	}
+	if rs.enums {
+		// Write out elias fano for offsets
+		if err := rs.offsetEf.Write(rs.indexW); err != nil {
+			return fmt.Errorf("writing elias fano for offsets: %w", err)
+		}
+	}
+	// Write out the size of golomb rice params
+	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
+	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
+		return fmt.Errorf("writing golomb rice param size: %w", err)
+	}
+	// Write out golomb rice
+	if err := rs.gr.Write(rs.indexW); err != nil {
+		return fmt.Errorf("writing golomb rice: %w", err)
+	}
+	// Write out elias fano
+	if err := rs.ef.Write(rs.indexW); err != nil {
+		return fmt.Errorf("writing elias fano: %w", err)
+	}
+	if err := rs.indexW.Flush(); err != nil {
+		return err
+	}
 	return nil
-}
-
-func (rs *RecSplit) skipBits(m uint16) int {
-	return int(rs.golombRice[m] & 0xffff)
-}
-
-func (rs *RecSplit) skipNodes(m uint16) int {
-	return int(rs.golombRice[m]>>16) & 0x7FF
-}
-
-func (rs *RecSplit) Lookup(key []byte, trace bool) int {
-	rs.hasher.Reset()
-	rs.hasher.Write(key) //nolint:errcheck
-	bucketHash, fingerprint := rs.hasher.Sum128()
-	if trace {
-		fmt.Printf("lookup key %x, fingerprint %x\n", key, fingerprint)
-	}
-	bucket := remap(bucketHash, rs.bucketCount)
-	cumKeys, cumKeysNext, bitPos := rs.ef.Get3(bucket)
-	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket
-	if trace {
-		fmt.Printf("bucket: %d, m = %d, bitPos = %d, unaryOffset = %d\n", bucket, m, bitPos, rs.skipBits(m))
-	}
-	rs.gr.ReadReset(int(bitPos), rs.skipBits(m))
-	var level int
-	var p int
-	for m > rs.secondaryAggrBound { // fanout = 2
-		if trace {
-			p = rs.gr.currFixedOffset
-		}
-		d := rs.gr.ReadNext(rs.golombParam(m))
-		if trace {
-			fmt.Printf("level %d, p = %d, d = %d golomb %d\n", level, p, d, rs.golombParam(m))
-		}
-		hmod := remap16(remix(fingerprint+rs.startSeed[level]+d), m)
-		split := (((m+1)/2 + rs.secondaryAggrBound - 1) / rs.secondaryAggrBound) * rs.secondaryAggrBound
-		if hmod < split {
-			m = split
-		} else {
-			rs.gr.SkipSubtree(rs.skipNodes(split), rs.skipBits(split))
-			m -= split
-			cumKeys += uint64(split)
-		}
-		level++
-	}
-	if m > rs.primaryAggrBound {
-		if trace {
-			p = rs.gr.currFixedOffset
-		}
-		d := rs.gr.ReadNext(rs.golombParam(m))
-		if trace {
-			fmt.Printf("level %d, p = %d, d = %d golomb %d\n", level, p, d, rs.golombParam(m))
-		}
-		hmod := remap16(remix(fingerprint+rs.startSeed[level]+d), m)
-		part := hmod / rs.primaryAggrBound
-		if rs.primaryAggrBound < m-part*rs.primaryAggrBound {
-			m = rs.primaryAggrBound
-		} else {
-			m = m - part*rs.primaryAggrBound
-		}
-		cumKeys += uint64(rs.primaryAggrBound * part)
-		if part != 0 {
-			rs.gr.SkipSubtree(rs.skipNodes(rs.primaryAggrBound)*int(part), rs.skipBits(rs.primaryAggrBound)*int(part))
-		}
-		level++
-	}
-	if m > rs.leafSize {
-		if trace {
-			p = rs.gr.currFixedOffset
-		}
-		d := rs.gr.ReadNext(rs.golombParam(m))
-		if trace {
-			fmt.Printf("level %d, p = %d, d = %d, golomb %d\n", level, p, d, rs.golombParam(m))
-		}
-		hmod := remap16(remix(fingerprint+rs.startSeed[level]+d), m)
-		part := hmod / rs.leafSize
-		if rs.leafSize < m-part*rs.leafSize {
-			m = rs.leafSize
-		} else {
-			m = m - part*rs.leafSize
-		}
-		cumKeys += uint64(rs.leafSize * part)
-		if part != 0 {
-			rs.gr.SkipSubtree(int(part), rs.skipBits(rs.leafSize)*int(part))
-		}
-		level++
-	}
-	if trace {
-		p = rs.gr.currFixedOffset
-	}
-	b := rs.gr.ReadNext(rs.golombParam(m))
-	if trace {
-		fmt.Printf("level %d, p = %d, b = %d, golomn = %d\n", level, p, b, rs.golombParam(m))
-	}
-	return int(cumKeys) + int(remap16(remix(fingerprint+rs.startSeed[level]+b), m))
 }
 
 // Stats returns the size of golomb rice encoding and ellias fano encoding
