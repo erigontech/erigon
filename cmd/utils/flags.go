@@ -151,9 +151,9 @@ var (
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
 	// Transaction pool settings
-	TxPoolV2Flag = cli.BoolFlag{
-		Name:  "txpool.v2",
-		Usage: "experimental internal pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+	TxPoolV1Flag = cli.BoolFlag{
+		Name:  "txpool.v1",
+		Usage: "switch from pool v2 to v1. see ./cmd/txpool/readme.md for more info",
 	}
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
@@ -969,11 +969,9 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 }
 
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
-	if ctx.GlobalIsSet(TxPoolV2Flag.Name) {
-		cfg.V2 = true
-		cfg.GlobalSlots = 20_000
-		cfg.GlobalBaseFeeQueue = 20_000
-		cfg.GlobalQueue = 20_000
+	cfg.V2 = true
+	if ctx.GlobalIsSet(TxPoolV1Flag.Name) {
+		cfg.V2 = false
 	}
 	if ctx.GlobalIsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
