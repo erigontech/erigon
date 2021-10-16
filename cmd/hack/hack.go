@@ -1315,6 +1315,7 @@ func mphf(chaindata string, block int) error {
 		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
+		IndexFile: "state.idx",
 	}); err != nil {
 		return err
 	}
@@ -1327,7 +1328,7 @@ func mphf(chaindata string, block int) error {
 		}
 		if i%1 == 0 {
 			// It is key, we skip the values here
-			if err := rs.AddKey(buf[:l]); err != nil {
+			if err := rs.AddKey(buf[:l], uint64(i/2)); err != nil {
 				return err
 			}
 		}
@@ -1346,6 +1347,11 @@ func mphf(chaindata string, block int) error {
 	}
 	s1, s2 := rs.Stats()
 	log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
+	var idx *recsplit.Index
+	if idx, err = recsplit.NewIndex("state.idx"); err != nil {
+		return err
+	}
+	defer idx.Close()
 	log.Info("Testing bijection")
 	bitCount := (count + 63) / 64
 	bits := make([]uint64, bitCount)
@@ -1363,16 +1369,16 @@ func mphf(chaindata string, block int) error {
 		if i%1 == 0 {
 			// It is key, we skip the values here
 			start := time.Now()
-			idx := rs.Lookup(buf[:l], false /* trace */)
+			offset := idx.Lookup(buf[:l])
 			lookupTime += time.Since(start)
-			if idx >= int(count) {
+			if offset >= count {
 				return fmt.Errorf("idx %d >= count %d", idx, count)
 			}
-			mask := uint64(1) << (idx & 63)
-			if bits[idx>>6]&mask != 0 {
-				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, idx)
+			mask := uint64(1) << (offset & 63)
+			if bits[offset>>6]&mask != 0 {
+				return fmt.Errorf("no bijection key idx=%d, lookup up idx = %d", i, offset)
 			}
-			bits[idx>>6] |= mask
+			bits[offset>>6] |= mask
 		}
 		i++
 		if i == int(count*2) {
@@ -2441,10 +2447,6 @@ func reducedict(name string) error {
 		return err
 	}
 	cw := bufio.NewWriter(cf)
-	// Number of words
-	if _, err := cw.Write(countBuf[:]); err != nil {
-		return err
-	}
 	// First, output dictionary
 	binary.BigEndian.PutUint64(numBuf, offset) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
