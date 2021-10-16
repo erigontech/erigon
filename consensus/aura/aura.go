@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"container/list"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -32,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
@@ -48,6 +50,51 @@ import (
 )
 
 const DEBUG_LOG_FROM = 999_999_999
+
+const (
+	epochLength          = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
+	ExtraVanity          = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
+	ExtraSeal            = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
+	warmupCacheSnapshots = 20
+
+	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
+)
+
+var (
+	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
+	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
+
+	emptyUncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
+
+	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
+	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
+)
+
+var(
+	// errUnknownBlock is returned when the list of signers is requested for a block
+	// that is not part of the local blockchain.
+	errUnknownBlock = errors.New("unknown block")
+
+	// errMissingVanity is returned if a block's extra-data section is shorter than
+	// 32 bytes, which is required to store the signer vanity.
+	errMissingVanity = errors.New("extra-data 32 byte vanity prefix missing")
+
+	// errMissingSignature is returned if a block's extra-data section doesn't seem
+	// to contain a 65 byte secp256k1 signature.
+	errMissingSignature = errors.New("extra-data 65 byte signature suffix missing")
+
+	// errExtraSigners is returned if non-checkpoint block contain signer data in
+	// their extra-data fields.
+	errExtraSigners = errors.New("non-checkpoint block contains extra signer list")
+
+	// errInvalidVote is returned if a nonce value is something else that the two
+	// allowed constants of 0x00..0 or 0xff..f.
+	errInvalidVote = errors.New("vote nonce not 0x00..0 or 0xff..f")
+
+	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
+	errInvalidMixDigest = errors.New("non-zero mix digest")
+)
+
 
 /*
 Not implemented features from OS:
@@ -514,7 +561,7 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
-	return nil
+	return c.verifyHeader(chain, header, nil)
 }
 
 //nolint
