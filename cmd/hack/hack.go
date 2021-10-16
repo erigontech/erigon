@@ -1372,7 +1372,7 @@ func mphf(chaindata string, block int) error {
 			offset := idx.Lookup(buf[:l])
 			lookupTime += time.Since(start)
 			if offset >= count {
-				return fmt.Errorf("idx %d >= count %d", idx, count)
+				return fmt.Errorf("idx %d >= count %d", offset, count)
 			}
 			mask := uint64(1) << (offset & 63)
 			if bits[offset>>6]&mask != 0 {
