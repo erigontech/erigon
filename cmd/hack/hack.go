@@ -2312,10 +2312,6 @@ func reducedict(name string) error {
 		return err
 	}
 	r := bufio.NewReader(f)
-	var countBuf [8]byte
-	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
-		return err
-	}
 	var buf []byte
 	tmpDir := ""
 	ch := make(chan []byte, 10000)
