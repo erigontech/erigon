@@ -1698,11 +1698,6 @@ func compress1(chaindata string, name string) error {
 	r := bufio.NewReader(f)
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
-	// Read number of keys
-	var countBuf [8]byte
-	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
-		return err
-	}
 	ch := make(chan []byte, runtime.NumCPU())
 	var wg sync.WaitGroup
 	wg.Add(runtime.NumCPU())
@@ -3448,11 +3443,6 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 	i := 0
-	var countBytes [8]byte
-	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Put real count if required
-	if _, err = w.Write(countBytes[:]); err != nil {
-		return err
-	}
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	blockEncoded := dbutils.EncodeBlockNumber(block)
 	k, v, e := bodies.Seek(blockEncoded)
