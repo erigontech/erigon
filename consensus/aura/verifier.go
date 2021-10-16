@@ -13,6 +13,7 @@ import (
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
+// verifyHeader follows this https://openethereum.github.io/Trace-NewBlock
 func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 
 	if header.Number == nil{
