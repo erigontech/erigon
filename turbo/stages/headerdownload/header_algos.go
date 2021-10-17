@@ -159,7 +159,7 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) markPreverified(link *Link) {
 	// Go through all parent links that are not preveried and mark them too
-	for link != nil && !link.preverified {
+	for link != nil && !link.persisted {
 		link.preverified = true
 		link = hd.links[link.header.ParentHash]
 	}
@@ -237,10 +237,8 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 				prevLink.next = append(prevLink.next, link)
 			}
 			prevLink = link
-			if !anchorPreverified {
-				if _, ok := hd.preverifiedHashes[link.hash]; ok {
-					hd.markPreverified(link)
-				}
+			if _, ok := hd.preverifiedHashes[link.hash]; ok {
+				hd.markPreverified(link)
 			}
 		}
 		prevLink.next = anchor.links
@@ -288,10 +286,8 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
-		if !anchorPreverified {
-			if _, ok := hd.preverifiedHashes[link.hash]; ok {
-				hd.markPreverified(link)
-			}
+		if _, ok := hd.preverifiedHashes[link.hash]; ok {
+			hd.markPreverified(link)
 		}
 	}
 	prevLink.next = anchor.links
