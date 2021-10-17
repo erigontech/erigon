@@ -556,9 +556,6 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
-	if len(hd.anchors) > 16 {
-		return nil // Need to be below anchor threshold to produce skeleton request
-	}
 	stride := uint64(8 * 192)
 	if hd.topSeenHeight < hd.highestInDb+stride {
 		return nil
@@ -566,6 +563,17 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	length := (hd.topSeenHeight - hd.highestInDb) / stride
 	if length > 192 {
 		length = 192
+	}
+	queryRange := hd.highestInDb + length*stride
+	// Count anchors within the range of the skeleton query
+	anchorsWithinRange := 0
+	for _, anchor := range hd.anchors {
+		if anchor.blockHeight < queryRange {
+			anchorsWithinRange++
+		}
+	}
+	if anchorsWithinRange > 16 {
+		return nil // Need to be below anchor threshold to produce skeleton request
 	}
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
