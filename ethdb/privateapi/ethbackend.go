@@ -71,7 +71,7 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 }
 
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
-	log.Trace("Establishing event subscription channel with the RPC daemon ...")
+	log.Trace("New 'newHeader' event subscriber joined")
 	s.events.AddHeaderSubscription(func(h *types.Header) error {
 		select {
 		case <-s.ctx.Done():
@@ -92,6 +92,7 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 			Type: remote.Event_HEADER,
 			Data: payload,
 		})
+		log.Info("'newHeader' event subscriber joined")
 
 		// we only close the wg on error because if we successfully sent an event,
 		// that means that the channel wasn't closed and is ready to
@@ -104,7 +105,6 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 		return err
 	})
 
-	log.Info("event subscription channel established with the RPC daemon")
 	select {
 	case <-subscribeServer.Context().Done():
 	case <-s.ctx.Done():
