@@ -870,8 +870,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	}
 
 	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
-		// --dev mode can't use p2p networking.
-		cfg.MaxPeers = 0
+		// --dev mode can't use p2p discovery.
 		cfg.ListenAddr = ":0"
 		cfg.NoDiscovery = true
 		cfg.DiscoveryV5 = false
