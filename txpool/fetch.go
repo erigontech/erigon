@@ -68,8 +68,8 @@ func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Poo
 		coreDB:               coreDB,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
-		stateChangesParseCtx: NewTxParseContext(rules, chainID), //TODO: change ctx if rules changed
-		pooledTxsParseCtx:    NewTxParseContext(rules, chainID),
+		stateChangesParseCtx: NewTxParseContext(chainID), //TODO: change ctx if rules changed
+		pooledTxsParseCtx:    NewTxParseContext(chainID),
 	}
 }
 

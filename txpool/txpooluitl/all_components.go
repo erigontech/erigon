@@ -108,7 +108,7 @@ func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, 
 
 	rules := chain.NewRules(chainConfig, blockNum)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, rules, *chainID)
+	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}

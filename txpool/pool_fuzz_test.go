@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -38,15 +37,15 @@ func init() {
 }
 
 func FuzzTwoQueue(f *testing.F) {
-	f.Add([]uint8{0b11000, 0b00101, 0b000111})
-	f.Add([]uint8{0b10101, 0b11110, 0b11101, 0b10001})
+	f.Add([]uint8{0b1000, 0b0101, 0b0111})
+	f.Add([]uint8{0b0101, 0b1110, 0b1101, 0b0001})
 	f.Fuzz(func(t *testing.T, in []uint8) {
 		t.Parallel()
 		assert := assert.New(t)
 		{
 			sub := NewPendingSubPool(PendingSubPool, 1024)
 			for _, i := range in {
-				sub.UnsafeAdd(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
+				sub.UnsafeAdd(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			sub.EnforceWorstInvariants()
 			sub.EnforceBestInvariants()
@@ -67,7 +66,7 @@ func FuzzTwoQueue(f *testing.F) {
 		{
 			sub := NewSubPool(BaseFeeSubPool, 1024)
 			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			assert.Equal(len(in), sub.best.Len())
 			assert.Equal(len(in), sub.worst.Len())
@@ -100,7 +99,7 @@ func FuzzTwoQueue(f *testing.F) {
 		{
 			sub := NewSubPool(QueuedSubPool, 1024)
 			for _, i := range in {
-				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b11111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			var prev *uint8
 			i := sub.Len()
@@ -219,7 +218,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		senderIDs[string(senders.At(i%senders.Len()))] = senderID
 	}
 	txs.txs = make([]*TxSlot, len(txNonce))
-	parseCtx := NewTxParseContext(chain.MainnetRules, *u256.N1)
+	parseCtx := NewTxParseContext(*u256.N1)
 	parseCtx.WithSender(false)
 	for i := range txNonce {
 		txs.txs[i] = &TxSlot{
@@ -334,8 +333,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-
-		pool, err := New(ch, coreDB, cfg, sendersCache, chain.MainnetRules, *u256.N1)
+		pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1)
 		assert.NoError(err)
 		pool.senders.senderIDs = senderIDs
 		for addr, id := range senderIDs {
@@ -348,7 +346,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			assert.LessOrEqual(pending.Len(), cfg.PendingSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
-			if worst != nil && worst.subPool < 0b11110 {
+			if worst != nil && worst.subPool < 0b1110 {
 				t.Fatalf("pending worst too small %b", worst.subPool)
 			}
 			for _, tx := range pending.best {
@@ -387,7 +385,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
 			assert.LessOrEqual(baseFee.Len(), cfg.BaseFeeSubPoolLimit, msg)
-			if worst != nil && worst.subPool < 0b11100 {
+			if worst != nil && worst.subPool < 0b1100 {
 				t.Fatalf("baseFee worst too small %b", worst.subPool)
 			}
 			iterateSubPoolUnordered(baseFee, func(tx *metaTx) {
@@ -414,9 +412,9 @@ func FuzzOnNewBlocks(f *testing.F) {
 			assert.LessOrEqual(queued.Len(), cfg.QueuedSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
-			if worst != nil && worst.subPool < 0b10000 {
-				t.Fatalf("queued worst too small %b", worst.subPool)
-			}
+			//if worst != nil && worst.subPool <= 0b1111 {
+			//	t.Fatalf("queued worst too small %b", worst.subPool)
+			//}
 			iterateSubPoolUnordered(queued, func(tx *metaTx) {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
@@ -588,7 +586,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxSlots{}, "after_flush")
 		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
-		p2, err := New(ch, coreDB, DefaultConfig, sendersCache, chain.MainnetRules, *u256.N1)
+		p2, err := New(ch, coreDB, DefaultConfig, sendersCache, *u256.N1)
 		assert.NoError(err)
 		p2.senders = pool.senders // senders are not persisted
 		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })

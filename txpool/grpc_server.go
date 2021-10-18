@@ -129,7 +129,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	defer tx.Rollback()
 
 	var slots TxSlots
-	parseCtx := NewTxParseContext(s.rules, s.chainID)
+	parseCtx := NewTxParseContext(s.chainID)
 	parseCtx.Reject(func(hash []byte) error {
 		if known, _ := s.txPool.IdHashKnown(tx, hash); known {
 			return ErrAlreadyKnown

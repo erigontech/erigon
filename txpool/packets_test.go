@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/stretchr/testify/require"
 )
@@ -133,6 +132,7 @@ func TestPooledTransactionsPacket(t *testing.T) {
 	require.Equal(t, decodeHex("84a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680"), out)
 	require.Equal(t, 34, pos)
 }
+
 func TestPooledTransactionsPacket66(t *testing.T) {
 	for i, tt := range ptp66EncodeTests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
@@ -141,7 +141,7 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(chain.MainnetRules, *u256.N1)
+			ctx := NewTxParseContext(*u256.N1)
 			slots := &TxSlots{}
 			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
 			require.NoError(err)
@@ -158,7 +158,7 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(chain.MainnetRules, *u256.N1)
+			ctx := NewTxParseContext(*u256.N1)
 			ctx.checkHash = func(bytes []byte) error { return ErrRejected }
 			slots := &TxSlots{}
 			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)

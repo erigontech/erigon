@@ -54,11 +54,12 @@ func EncodeListPrefix(dataLen int, to []byte) int {
 	to[0] = 192 + byte(dataLen)
 	return 1
 }
+
 func U64Len(i uint64) int {
-	if i > 128 {
-		return 1 + (bits.Len64(i)+7)/8
+	if i < 128 {
+		return 1
 	}
-	return 1
+	return 1 + (bits.Len64(i)+7)/8
 }
 
 func EncodeU64(i uint64, to []byte) int {

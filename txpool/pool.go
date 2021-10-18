@@ -272,11 +272,10 @@ type TxPool struct {
 	recentlyConnectedPeers *recentlyConnectedPeers // all txs will be propagated to this peers eventually, and clear list
 	senders                *sendersBatch
 
-	rules   chain.Rules
 	chainID uint256.Int
 }
 
-func New(newTxs chan Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, rules chain.Rules, chainID uint256.Int) (*TxPool, error) {
+func New(newTxs chan Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, chainID uint256.Int) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU(10_000, nil)
 	if err != nil {
 		return nil, err
@@ -301,7 +300,6 @@ func New(newTxs chan Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, ru
 		senders:                 newSendersCache(),
 		_chainDB:                coreDB,
 		cfg:                     cfg,
-		rules:                   rules,
 		chainID:                 chainID,
 		unprocessedRemoteTxs:    &TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
@@ -430,6 +428,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	}
 
 	p.pending.captureAddedHashes(&p.promoted)
+
 	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
@@ -561,7 +560,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs TxSlots) {
 		if ok {
 			continue
 		}
-		p.unprocessedRemoteTxs.Append(newTxs.txs[i], newTxs.senders.At(i), newTxs.isLocal[i])
+		p.unprocessedRemoteTxs.Append(newTxs.txs[i], newTxs.senders.At(i), false)
 	}
 }
 
@@ -586,7 +585,7 @@ func (p *TxPool) validateTxs(txs TxSlots) ([]DiscardReason, TxSlots, error) {
 
 	j := 0
 	for i := range txs.txs {
-		reasons[i] = p.validateTx(txs.txs[i], true)
+		reasons[i] = p.validateTx(txs.txs[i], txs.isLocal[i])
 		if reasons[i] != Success {
 			if reasons[i] == Spammer {
 				p.punishSpammer(txs.txs[i].senderID)
@@ -596,7 +595,7 @@ func (p *TxPool) validateTxs(txs TxSlots) ([]DiscardReason, TxSlots, error) {
 		reasons[i] = NotSet
 		newTxs.Resize(uint(j + 1))
 		newTxs.txs[j] = txs.txs[i]
-		newTxs.isLocal[j] = true
+		newTxs.isLocal[j] = txs.isLocal[i]
 		copy(newTxs.senders.At(j), txs.senders.At(i))
 		j++
 	}
@@ -665,20 +664,19 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 		return nil, err
 	}
 
-	p.pending.captureAddedHashes(&p.promoted)
 	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return nil, err
 	}
-	p.pending.added = nil
 
-	if p.promoted.Len() > 0 {
-		select {
-		case p.newPendingTxs <- common.Copy(p.promoted):
-		default:
+	reasons = fillDiscardReasons(reasons, newTxs, p.discardReasonsLRU)
+	var notify Hashes
+	for i := range reasons {
+		if reasons[i] == Success {
+			notify = append(notify, newTxs.txs[i].idHash[:]...)
 		}
 	}
-
-	return fillDiscardReasons(reasons, newTxs, p.discardReasonsLRU), nil
+	p.newPendingTxs <- notify
+	return reasons, nil
 }
 
 func (p *TxPool) coreDB() kv.RoDB {
@@ -1196,7 +1194,14 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				}
 			}
 
-			send.BroadcastLocalPooledTxs(localTxHashes)
+			sentTo := send.BroadcastLocalPooledTxs(localTxHashes)
+			if len(localTxHashes)/32 > 0 {
+				if len(localTxHashes)/32 == 1 {
+					log.Info("local tx propagated", "to_peers_amount", sentTo, "tx_hash", fmt.Sprintf("%x", localTxHashes))
+				} else {
+					log.Info("local txs propagated", "to_peers_amount", sentTo, "txs_amount", len(localTxHashes)/32)
+				}
+			}
 			send.BroadcastRemotePooledTxs(remoteTxHashes)
 			propagateNewTxsTimer.UpdateDuration(t)
 		case <-syncToNewPeersEvery.C: // new peer
@@ -1315,6 +1320,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		return err
 	}
 	if err := tx.ForEach(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
+		//fmt.Printf("is local restored from db: %x\n", k)
 		p.isLocalLRU.Add(string(v), struct{}{})
 		return nil
 	}); err != nil {
@@ -1322,7 +1328,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	}
 
 	txs := TxSlots{}
-	parseCtx := NewTxParseContext(p.rules, p.chainID)
+	parseCtx := NewTxParseContext(p.chainID)
 	parseCtx.WithSender(false)
 
 	i := 0

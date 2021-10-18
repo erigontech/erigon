@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,7 +96,7 @@ var allNetsTestCases = []struct {
 func TestParseTransactionRLP(t *testing.T) {
 	for _, testSet := range allNetsTestCases {
 		t.Run(strconv.Itoa(int(testSet.chainID.Uint64())), func(t *testing.T) {
-			ctx := NewTxParseContext(chain.MainnetRules, testSet.chainID)
+			ctx := NewTxParseContext(testSet.chainID)
 			require := require.New(t)
 
 			tx, txSender := &TxSlot{}, [20]byte{}

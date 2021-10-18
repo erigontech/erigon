@@ -6,7 +6,6 @@ package txpool
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 )
 
@@ -27,7 +26,7 @@ func FuzzParseTx(f *testing.F) {
 	f.Add([]byte{1}, 0)
 	f.Fuzz(func(t *testing.T, in []byte, pos int) {
 		t.Parallel()
-		ctx := NewTxParseContext(chain.MainnetRules, *u256.N1)
+		ctx := NewTxParseContext(*u256.N1)
 		txn := &TxSlot{}
 		sender := make([]byte, 20)
 		_, _ = ctx.ParseTransaction(in, pos, txn, sender)
