@@ -428,7 +428,6 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	}
 
 	p.pending.captureAddedHashes(&p.promoted)
-
 	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
@@ -664,18 +663,19 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 		return nil, err
 	}
 
+	p.pending.captureAddedHashes(&p.promoted)
 	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return nil, err
 	}
+	p.pending.added = nil
 
 	reasons = fillDiscardReasons(reasons, newTxs, p.discardReasonsLRU)
-	var notify Hashes
 	for i := range reasons {
 		if reasons[i] == Success {
-			notify = append(notify, newTxs.txs[i].idHash[:]...)
+			p.promoted = append(p.promoted, newTxs.txs[i].idHash[:]...)
 		}
 	}
-	p.newPendingTxs <- notify
+	p.newPendingTxs <- common.Copy(p.promoted)
 	return reasons, nil
 }
 
@@ -1144,6 +1144,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 			if !p.Started() {
 				continue
 			}
+
 			if err := p.processRemoteTxs(ctx); err != nil {
 				if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
 					continue
@@ -1197,9 +1198,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 			sentTo := send.BroadcastLocalPooledTxs(localTxHashes)
 			if len(localTxHashes)/32 > 0 {
 				if len(localTxHashes)/32 == 1 {
-					log.Info("local tx propagated", "to_peers_amount", sentTo, "tx_hash", fmt.Sprintf("%x", localTxHashes))
+					log.Info("local tx propagated", "to_peers_amount", sentTo, "tx_hash", fmt.Sprintf("%x", localTxHashes), "baseFee", p.pendingBaseFee.Load())
 				} else {
-					log.Info("local txs propagated", "to_peers_amount", sentTo, "txs_amount", len(localTxHashes)/32)
+					log.Info("local txs propagated", "to_peers_amount", sentTo, "txs_amount", len(localTxHashes)/32, "baseFee", p.pendingBaseFee.Load())
 				}
 			}
 			send.BroadcastRemotePooledTxs(remoteTxHashes)

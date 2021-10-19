@@ -309,7 +309,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}, &grpc.EmptyCallOption{}); err != nil {
 			return err
 		}
-	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66:
+	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_65, sentry.MessageId_TRANSACTIONS_66:
 		txs := TxSlots{}
 		f.pooledTxsParseCtx.Reject(func(hash []byte) error {
 			known, err := f.pool.IdHashKnown(tx, hash)
@@ -322,7 +322,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			return nil
 		})
 		switch req.Id {
-		case sentry.MessageId_POOLED_TRANSACTIONS_65:
+		case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_TRANSACTIONS_65, sentry.MessageId_TRANSACTIONS_66:
 			if _, err := ParsePooledTransactions65(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {
 				return err
 			}
@@ -338,7 +338,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 		f.pool.AddRemoteTxs(ctx, txs)
 	default:
-		//defer log.Info("dropped", "id", req.Id)
+		defer log.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}
 
 	return nil
