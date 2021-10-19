@@ -422,10 +422,10 @@ func rootContext() context.Context {
 
 func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
-	log.Info("Starting Sentry P2P server", "on", sentryAddr)
+	log.Info("Starting Sentry gRPC server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
-			log.Info("Sentry P2P received connection", "via", network, "from", address)
+			log.Info("Sentry gRPC received connection", "via", network, "from", address)
 			return nil
 		},
 	}
@@ -437,7 +437,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
-			log.Error("Sentry P2P server fail", "err", err1)
+			log.Error("Sentry gRPC server fail", "err", err1)
 		}
 	}()
 	return grpcServer, nil
@@ -663,6 +663,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 	if msgcode != eth.GetBlockHeadersMsg &&
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
+		panic(msgcode)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
 	if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(inreq.Data.Data)), Payload: bytes.NewReader(inreq.Data.Data)}); err != nil {
@@ -697,6 +698,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		msgcode != eth.NewPooledTransactionHashesMsg &&
 		msgcode != eth.PooledTransactionsMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
+		panic(msgcode)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
 
@@ -718,6 +720,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	if msgcode != eth.NewBlockMsg &&
 		msgcode != eth.NewBlockHashesMsg &&
 		msgcode != eth.NewPooledTransactionHashesMsg {
+		panic(msgcode)
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
@@ -762,6 +765,9 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	if msgcode != eth.NewBlockMsg &&
 		msgcode != eth.NewPooledTransactionHashesMsg && // to broadcast new local transactions
 		msgcode != eth.NewBlockHashesMsg {
+
+		panic(msgcode)
+
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
@@ -772,6 +778,10 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 		peerInfo, _ := value.(*PeerInfo)
 		if peerInfo == nil {
 			return true
+		}
+
+		if msgcode == eth.NewPooledTransactionHashesMsg {
+			fmt.Printf("msgcode: %s, %x\n", req.Id.String(), req.Data)
 		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
 			peerInfo.Remove()
