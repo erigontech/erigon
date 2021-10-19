@@ -499,6 +499,10 @@ github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
 github.com/ledgerwatch/erigon-lib v0.0.0-20211016094341-967937151d39 h1:fdz2EgL2khOrKnBh+6T6VraJ1WVDuu35YvAxYbNuFbM=
 github.com/ledgerwatch/erigon-lib v0.0.0-20211016094341-967937151d39/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211019141520-571293c34fdd h1:NzWDjFlIH2vD2/Cjg2Drk7bSJ7tUOfVCfM7fIYFh9Y0=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211019141520-571293c34fdd/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211019142238-a3fca27261ef h1:ybn6Wl8cxDlpvibNZeUF+9t5tsxH9mVxszw9SFDF4gY=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211019142238-a3fca27261ef/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
 github.com/ledgerwatch/log/v3 v3.3.1 h1:HmvLeTEvtCtqSvtu4t/a5MAdcLfeBcbIeowXbLYuzLc=
 github.com/ledgerwatch/log/v3 v3.3.1/go.mod h1:S3VJqhhVX32rbp1JyyvhJou12twtFwNEPESBgpbNkRk=
 github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d h1:/IKMrJdfRsoYNc36PXqP4xMH3vhW/8IQyBKGQbKZUno=
@@ -522,6 +526,7 @@ github.com/marten-seemann/qtls v0.10.0/go.mod h1:UvMd1oaYDACI99/oZUYLzMCkBXQVT0a
 github.com/marten-seemann/qtls-go1-15 v0.1.0/go.mod h1:GyFwywLKkRt+6mfU99csTEY1joMZz5vmB1WNZH3P81I=
 github.com/marten-seemann/qtls-go1-15 v0.1.1 h1:LIH6K34bPVttyXnUWixk0bzH6/N07VxbSabxn5A5gZQ=
 github.com/marten-seemann/qtls-go1-15 v0.1.1/go.mod h1:GyFwywLKkRt+6mfU99csTEY1joMZz5vmB1WNZH3P81I=
+github.com/matryer/moq v0.2.3 h1:Q06vEqnBYjjfx5KKgHfYRKE/lvlRu+Nj+xodG4YdHnU=
 github.com/matryer/moq v0.2.3/go.mod h1:9RtPYjTnH1bSBIkpvtHkFN7nbWAnO7oRpdJkEIn6UtE=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-colorable v0.1.8/go.mod h1:u6P/XSegPjTcexA+o6vUJrdnUu04hMope9wVRipJSqc=

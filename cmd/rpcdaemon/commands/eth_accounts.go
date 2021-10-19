@@ -7,10 +7,14 @@ import (
 
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
@@ -39,6 +43,17 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
+	fmt.Printf("blockNrOrHash = %+v\n", blockNrOrHash)
+	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+		reply, err := api.txPool.GetTransactionCount(ctx, &txpool_proto.TransactionCountRequest{
+			Address: gointerfaces.ConvertAddressToH160(address),
+		}, &grpc.EmptyCallOption{})
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("Handle pending case, reply: %+v\n", *reply)
+		return (*hexutil.Uint64)(&reply.Nonce), nil
+	}
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
