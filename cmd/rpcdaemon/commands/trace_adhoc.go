@@ -270,7 +270,7 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 			vmTrace.Code = code
 		}
 	}
-	if precompile && depth > 0 && value.Sign() == 0 {
+	if precompile && depth > 0 {
 		ot.precompile = true
 		return nil
 	}
