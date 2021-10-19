@@ -151,9 +151,9 @@ var (
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
 	// Transaction pool settings
-	TxPoolV2Flag = cli.BoolFlag{
-		Name:  "txpool.v2",
-		Usage: "experimental internal pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+	TxPoolV1Flag = cli.BoolFlag{
+		Name:  "txpool.v1",
+		Usage: "switch from pool v2 to v1. see ./cmd/txpool/readme.md for more info",
 	}
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
@@ -828,6 +828,9 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, params.FermionChainName, MiningEnabledFlag.Name))
 		}
 		setSigKey(ctx, cfg)
+		if cfg.Miner.SigKey != nil {
+			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
+		}
 	}
 }
 
@@ -868,7 +871,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 
 	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
 		// --dev mode can't use p2p networking.
-		cfg.MaxPeers = 0
+		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		cfg.ListenAddr = ":0"
 		cfg.NoDiscovery = true
 		cfg.DiscoveryV5 = false
@@ -968,11 +971,9 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 }
 
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
-	if ctx.GlobalIsSet(TxPoolV2Flag.Name) {
-		cfg.V2 = true
-		cfg.GlobalSlots = 20_000
-		cfg.GlobalBaseFeeQueue = 20_000
-		cfg.GlobalQueue = 20_000
+	cfg.V2 = true
+	if ctx.GlobalIsSet(TxPoolV1Flag.Name) {
+		cfg.V2 = false
 	}
 	if ctx.GlobalIsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
@@ -1309,6 +1310,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 
 		// Create a new developer genesis block or reuse existing one
 		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), developer)
+		log.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}

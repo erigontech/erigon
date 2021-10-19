@@ -159,7 +159,7 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) markPreverified(link *Link) {
 	// Go through all parent links that are not preveried and mark them too
-	for link != nil && !link.preverified {
+	for link != nil && !link.persisted {
 		link.preverified = true
 		link = hd.links[link.header.ParentHash]
 	}
@@ -237,10 +237,8 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 				prevLink.next = append(prevLink.next, link)
 			}
 			prevLink = link
-			if !anchorPreverified {
-				if _, ok := hd.preverifiedHashes[link.hash]; ok {
-					hd.markPreverified(link)
-				}
+			if _, ok := hd.preverifiedHashes[link.hash]; ok {
+				hd.markPreverified(link)
 			}
 		}
 		prevLink.next = anchor.links
@@ -288,10 +286,8 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
-		if !anchorPreverified {
-			if _, ok := hd.preverifiedHashes[link.hash]; ok {
-				hd.markPreverified(link)
-			}
+		if _, ok := hd.preverifiedHashes[link.hash]; ok {
+			hd.markPreverified(link)
 		}
 	}
 	prevLink.next = anchor.links
@@ -560,16 +556,20 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
-	if len(hd.anchors) > 16 {
-		return nil // Need to be below anchor threshold to produce skeleton request
-	}
 	stride := uint64(8 * 192)
-	if hd.topSeenHeight < hd.highestInDb+stride {
-		return nil
+	queryRange := hd.topSeenHeight
+	// Determine the query range as the height of lowest anchor
+	for _, anchor := range hd.anchors {
+		if anchor.blockHeight < queryRange {
+			queryRange = anchor.blockHeight
+		}
 	}
-	length := (hd.topSeenHeight - hd.highestInDb) / stride
+	length := (queryRange - hd.highestInDb) / stride
 	if length > 192 {
 		length = 192
+	}
+	if length == 0 {
+		return nil
 	}
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
@@ -715,9 +715,6 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 		// Skip duplicates
 		return nil
 	}
-	if blockHeight < hi.prevHeight {
-		return fmt.Errorf("[%s] headers are unexpectedly unsorted, got %d after %d", hi.logPrefix, blockHeight, hi.prevHeight)
-	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
 		return nil
@@ -725,9 +722,8 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	// Load parent header
 	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
 	if parent == nil {
-		log.Warn(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
-		// Skip headers without parents
-		return nil
+		// Fail on headers without parent
+		return fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)

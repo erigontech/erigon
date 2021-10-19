@@ -54,7 +54,7 @@ var (
 	ErigonGenesisHash  = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
-	FermionGenesisHash = common.HexToHash("0x2a4f2488bd9b62b128b39382c079e11d938f0ebbef6490042b5c6b86b17ea505")
+	FermionGenesisHash = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 )
 
 var (
@@ -269,9 +269,10 @@ var (
 	FermionChainConfig = &ChainConfig{
 		ChainName:           FermionChainName,
 		ChainID:             big.NewInt(1212120),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        big.NewInt(0),
-		DAOForkSupport:      true,
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
 		EIP158Block:         big.NewInt(0),
@@ -283,7 +284,10 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
 		CatalystBlock:       nil,
-		Aura:                &AuRaConfig{},
+		Clique: &CliqueConfig{
+			Period: 15,
+			Epoch:  30000,
+		},
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

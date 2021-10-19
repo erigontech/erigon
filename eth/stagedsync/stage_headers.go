@@ -119,7 +119,6 @@ func HeadersForward(
 	var peer []byte
 	stopped := false
 	prevProgress := headerProgress
-	noProgressCount := 0 // How many time the progress was printed without actual progress
 Loop:
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
@@ -163,9 +162,6 @@ Loop:
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
-		if s.BlockNumber > 0 && noProgressCount >= 5 {
-			break
-		}
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			if !initialCycle {
 				// if this is not an initial cycle, we need to react quickly when new headers are coming in
@@ -185,11 +181,6 @@ Loop:
 			stopped = true
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
-			if prevProgress == progress {
-				noProgressCount++
-			} else {
-				noProgressCount = 0 // Reset, there was progress
-			}
 			logProgressHeaders(logPrefix, prevProgress, progress)
 			prevProgress = progress
 		case <-timer.C:
