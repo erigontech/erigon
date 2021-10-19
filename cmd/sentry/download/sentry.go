@@ -774,9 +774,6 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 			return true
 		}
 
-		if msgcode == eth.NewPooledTransactionHashesMsg {
-			fmt.Printf("msgcode: %s, %x\n", req.Id.String(), req.Data)
-		}
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
 			peerInfo.Remove()
 			ss.GoodPeers.Delete(peerID)
