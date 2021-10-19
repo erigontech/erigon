@@ -307,6 +307,20 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 	return penalties, nil
 }
 
+func (hd *HeaderDownload) removeAnchor(segment *ChainSegment, start int) error {
+	// Find attachement anchors again
+	anchorHeader := segment.Headers[start]
+	anchor, ok := hd.anchors[anchorHeader.Hash()]
+	if !ok {
+		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
+	}
+	// Anchor is removed from the map, but not from the anchorQueue
+	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
+	// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
+	delete(hd.anchors, anchor.parentHash)
+	return nil
+}
+
 // if anchor will be abandoned - given peerID will get Penalty
 func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerID string) (bool, error) {
 	anchorHeader := segment.Headers[end-1]
@@ -844,6 +858,13 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 	foundTip, end := hd.findLink(segment, start) // We ignore penalty because we will check it as part of PoW check
 	if end == 0 {
 		log.Trace("Duplicate segment")
+		if foundAnchor {
+			// If duplicate segment is extending from the anchor, the anchor needs to be deleted,
+			// otherwise it will keep producing requests that will be found duplicate
+			if err := hd.removeAnchor(segment, start); err != nil {
+				log.Warn("removal of anchor failed", "error", err)
+			}
+		}
 		return
 	}
 	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
