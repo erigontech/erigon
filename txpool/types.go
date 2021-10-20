@@ -40,7 +40,6 @@ type TxParsseConfig struct {
 // TxParseContext is object that is required to parse transactions and turn transaction payload into TxSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxParseContext struct {
-	recCtx           *secp256k1.Context // Context for sender recovery
 	keccak1          hash.Hash
 	keccak2          hash.Hash
 	chainId, r, s, v uint256.Int // Signature values
@@ -63,7 +62,6 @@ func NewTxParseContext(chainID uint256.Int) *TxParseContext {
 		withSender: true,
 		keccak1:    sha3.NewLegacyKeccak256(),
 		keccak2:    sha3.NewLegacyKeccak256(),
-		recCtx:     secp256k1.NewContext(),
 	}
 
 	// behave as of London enabled
@@ -413,7 +411,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	binary.BigEndian.PutUint64(ctx.sig[56:64], ctx.s[0])
 	ctx.sig[64] = vByte
 	// recover sender
-	if _, err = secp256k1.RecoverPubkeyWithContext(ctx.recCtx, ctx.sighash[:], ctx.sig[:], ctx.buf[:0]); err != nil {
+	if _, err = secp256k1.RecoverPubkeyWithContext(secp256k1.DefaultContext, ctx.sighash[:], ctx.sig[:], ctx.buf[:0]); err != nil {
 		return 0, fmt.Errorf("%s: recovering sender from signature: %w", ParseTransactionErrorPrefix, err)
 	}
 	//apply keccak to the public key
