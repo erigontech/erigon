@@ -16,6 +16,7 @@ import (
 type requestBody struct {
 	MinPeerCount *uint            `json:"min_peer_count"`
 	BlockNumber  *rpc.BlockNumber `json:"known_block"`
+	SyncTimeThreshold  *uint      `json:"sync_time_threshold"`
 }
 
 const (
@@ -39,13 +40,14 @@ func ProcessHealthcheckIfNeeded(
 
 	var errMinPeerCount = errCheckDisabled
 	var errCheckBlock = errCheckDisabled
+	var errCheckSync = errCheckDisabled
 
 	body, errParse := parseHealthCheckBody(r.Body)
 	defer r.Body.Close()
 
 	if errParse != nil {
 		log.Root().Warn("unable to process healthcheck request", "error", errParse)
-	} else {
+	} else if body.SyncTimeThreshold != nil {
 		// 1. net_peerCount
 		if body.MinPeerCount != nil {
 			errMinPeerCount = checkMinPeers(*body.MinPeerCount, netAPI)
@@ -54,10 +56,11 @@ func ProcessHealthcheckIfNeeded(
 		if body.BlockNumber != nil {
 			errCheckBlock = checkBlockNumber(*body.BlockNumber, ethAPI)
 		}
-		// TODO add time from the last sync cycle
+		// 3. check time from the last sync cycle
+		errCheckSync = checkSyncTimeThreshold(*body.SyncTimeThreshold, ethAPI)
 	}
 
-	err := reportHealth(errParse, errMinPeerCount, errCheckBlock, w)
+	err := reportHealth(errParse, errMinPeerCount, errCheckBlock, errCheckSync, w)
 	if err != nil {
 		log.Root().Warn("unable to process healthcheck request", "error", err)
 	}
@@ -81,7 +84,7 @@ func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 	return body, nil
 }
 
-func reportHealth(errParse, errMinPeerCount, errCheckBlock error, w http.ResponseWriter) error {
+func reportHealth(errParse, errMinPeerCount, errCheckBlock, errCheckSync error, w http.ResponseWriter) error {
 	statusCode := http.StatusOK
 	errors := make(map[string]string)
 
@@ -99,6 +102,11 @@ func reportHealth(errParse, errMinPeerCount, errCheckBlock error, w http.Respons
 		statusCode = http.StatusInternalServerError
 	}
 	errors["check_block"] = errorStringOrOK(errCheckBlock)
+
+	if shouldChangeStatusCode(errCheckSync) {
+		statusCode = http.StatusInternalServerError
+	}
+	errors["check_sync"] = errorStringOrOK(errCheckSync)
 
 	w.WriteHeader(statusCode)
 

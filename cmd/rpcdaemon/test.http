@@ -203,3 +203,16 @@ Content-Type: application/json
   ]
 }
 
+
+###
+
+# Helth check
+POST localhost:8545/health
+Content-Type: application/json
+
+{
+  "min_peer_count": 0,
+  "known_block": 0,
+  "sync_time_threshold": 1
+}
+

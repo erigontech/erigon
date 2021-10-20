@@ -19,6 +19,7 @@ package stages
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -52,6 +53,8 @@ var (
 	CreateHeadersSnapshot SyncStage = "CreateHeadersSnapshot"
 	CreateBodiesSnapshot  SyncStage = "CreateBodiesSnapshot"
 	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
+
+	LastSyncTimeKey string = "LastSyncTime"
 )
 
 var AllStages = []SyncStage{
@@ -96,6 +99,20 @@ func GetStagePruneProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 
 func SaveStagePruneProgress(db kv.Putter, stage SyncStage, progress uint64) error {
 	return db.Put(kv.SyncStageProgress, []byte("prune_"+stage), marshalData(progress))
+}
+
+// GetLastSyncTime retrieves last sync timestamp written at the final stage of sync
+func GetLastSyncTime(db kv.Getter) (uint64, error) {
+	v, err := db.GetOne(LastSyncTimeKey, []byte(LastSyncTimeKey))
+	if err != nil {
+		return 0, err
+	}
+	return unmarshalData(v)
+}
+
+func SaveSyncTime(db kv.Putter) error {
+	syncTime := uint64(time.Now().UnixNano())
+	return db.Put(LastSyncTimeKey, []byte(LastSyncTimeKey), marshalData(syncTime))
 }
 
 func marshalData(blockNumber uint64) []byte {

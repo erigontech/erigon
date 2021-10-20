@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"reflect"
 
 	"github.com/ledgerwatch/erigon/params"
@@ -71,6 +72,10 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	err = s.Update(tx, executionAt)
 	if err != nil {
+		return err
+	}
+
+	if err := stages.SaveSyncTime(tx); err != nil {
 		return err
 	}
 

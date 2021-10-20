@@ -77,7 +77,8 @@ Configuration of the health check is sent as POST body of the method.
 ```
 {
    "min_peer_count": <minimal number of the node peers>,
-   "known_block": <number_of_block_that_node_should_know>
+   "known_block": <number_of_block_that_node_should_know>,
+   "sync_time_threshold": <time from the last sync cycle that sync state considered achieved>
 }
 ```
 

@@ -47,6 +47,11 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return false, err
 	}
 
+	lastSyncTime, err := stages.GetLastSyncTime(tx)
+	if err != nil {
+		return false, err
+	}
+
 	if currentBlock > 0 && currentBlock >= highestBlock { // Return not syncing if the synchronisation already completed
 		return false, nil
 	}
@@ -70,6 +75,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		"currentBlock": hexutil.Uint64(currentBlock),
 		"highestBlock": hexutil.Uint64(highestBlock),
 		"stages":       stagesMap,
+		"lastSyncTime": lastSyncTime,
 	}, nil
 }
 
