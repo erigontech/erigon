@@ -14,10 +14,10 @@ func TestCutLeft(t *testing.T) {
 		bm.AddRange(uint64(j), uint64(j+10))
 	}
 	N := uint64(1024)
-	for bm.GetCardinality() > 0 {
+	for !bm.IsEmpty() {
 		lft := bitmapdb.CutLeft(bm, N)
 		lftSz := lft.GetSerializedSizeInBytes()
-		if bm.GetCardinality() > 0 {
+		if !bm.IsEmpty() {
 			require.True(t, lftSz > N-256 && lftSz < N+256)
 		} else {
 			require.True(t, lft.GetSerializedSizeInBytes() > 0)
@@ -30,10 +30,10 @@ func TestCutLeft(t *testing.T) {
 		bm.AddRange(uint64(j), uint64(j+10))
 	}
 	N = uint64(2048)
-	for bm.GetCardinality() > 0 {
+	for !bm.IsEmpty() {
 		lft := bitmapdb.CutLeft(bm, N)
 		lftSz := lft.GetSerializedSizeInBytes()
-		if bm.GetCardinality() > 0 {
+		if !bm.IsEmpty() {
 			require.True(t, lftSz > N-256 && lftSz < N+256)
 		} else {
 			require.True(t, lft.GetSerializedSizeInBytes() > 0)

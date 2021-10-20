@@ -136,7 +136,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 	}
 
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return returnLogs(logs), nil
 	}
 

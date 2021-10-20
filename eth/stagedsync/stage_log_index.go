@@ -303,7 +303,7 @@ func needFlush(bitmaps map[string]*roaring.Bitmap, memLimit datasize.ByteSize) b
 func flushBitmaps(c *etl.Collector, inMem map[string]*roaring.Bitmap) error {
 	for k, v := range inMem {
 		v.RunOptimize()
-		if v.GetCardinality() == 0 {
+		if v.IsEmpty() {
 			continue
 		}
 		newV := bytes.NewBuffer(make([]byte, 0, v.GetSerializedSizeInBytes()))

@@ -125,12 +125,12 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
 		bm, err := bitmapdb.Get64(tx, indexBucket, hashes[0], 1999, math.MaxUint32)
 		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
+		if !bm.IsEmpty() && bm.Maximum() > 1999 {
 			t.Fatal(bm.Maximum())
 		}
 		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 1999, math.MaxUint32)
 		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
+		if !bm.IsEmpty() && bm.Maximum() > 1999 {
 			t.Fatal()
 		}
 		//})
@@ -146,12 +146,12 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		}
 		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[0], 999, math.MaxUint32)
 		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
+		if !bm.IsEmpty() && bm.Maximum() > 999 {
 			t.Fatal()
 		}
 		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 999, math.MaxUint32)
 		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
+		if !bm.IsEmpty() && bm.Maximum() > 999 {
 			t.Fatal()
 		}
 

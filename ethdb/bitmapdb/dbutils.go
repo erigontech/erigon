@@ -20,7 +20,7 @@ const ChunkLimit = uint64(1950 * datasize.B) // threshold beyond which MDBX over
 // removing lft part from `bm`
 // returns nil on zero cardinality
 func CutLeft(bm *roaring.Bitmap, sizeLimit uint64) *roaring.Bitmap {
-	if bm.GetCardinality() == 0 {
+	if bm.IsEmpty() {
 		return nil
 	}
 
@@ -53,8 +53,8 @@ func CutLeft(bm *roaring.Bitmap, sizeLimit uint64) *roaring.Bitmap {
 }
 
 func WalkChunks(bm *roaring.Bitmap, sizeLimit uint64, f func(chunk *roaring.Bitmap, isLast bool) error) error {
-	for bm.GetCardinality() > 0 {
-		if err := f(CutLeft(bm, sizeLimit), bm.GetCardinality() == 0); err != nil {
+	for !bm.IsEmpty() {
+		if err := f(CutLeft(bm, sizeLimit), bm.IsEmpty()); err != nil {
 			return err
 		}
 	}
@@ -86,7 +86,7 @@ func TruncateRange(db kv.RwTx, bucket string, key []byte, to uint32) error {
 		return err
 	}
 
-	if bm.GetCardinality() > 0 && to <= bm.Maximum() {
+	if !bm.IsEmpty() && to <= bm.Maximum() {
 		bm.RemoveRange(uint64(to), uint64(bm.Maximum())+1)
 	}
 
@@ -169,7 +169,7 @@ func SeekInBitmap(m *roaring.Bitmap, n uint32) (found uint32, ok bool) {
 // removing lft part from `bm`
 // returns nil on zero cardinality
 func CutLeft64(bm *roaring64.Bitmap, sizeLimit uint64) *roaring64.Bitmap {
-	if bm.GetCardinality() == 0 {
+	if bm.IsEmpty() {
 		return nil
 	}
 
@@ -202,8 +202,8 @@ func CutLeft64(bm *roaring64.Bitmap, sizeLimit uint64) *roaring64.Bitmap {
 }
 
 func WalkChunks64(bm *roaring64.Bitmap, sizeLimit uint64, f func(chunk *roaring64.Bitmap, isLast bool) error) error {
-	for bm.GetCardinality() > 0 {
-		if err := f(CutLeft64(bm, sizeLimit), bm.GetCardinality() == 0); err != nil {
+	for !bm.IsEmpty() {
+		if err := f(CutLeft64(bm, sizeLimit), bm.IsEmpty()); err != nil {
 			return err
 		}
 	}
@@ -235,7 +235,7 @@ func TruncateRange64(db kv.RwTx, bucket string, key []byte, to uint64) error {
 		return err
 	}
 
-	if bm.GetCardinality() > 0 && to <= bm.Maximum() {
+	if !bm.IsEmpty() && to <= bm.Maximum() {
 		bm.RemoveRange(to, bm.Maximum()+1)
 	}
 

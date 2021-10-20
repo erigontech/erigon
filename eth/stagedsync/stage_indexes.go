@@ -322,7 +322,7 @@ func needFlush64(bitmaps map[string]*roaring64.Bitmap, memLimit datasize.ByteSiz
 func flushBitmaps64(c *etl.Collector, inMem map[string]*roaring64.Bitmap) error {
 	for k, v := range inMem {
 		v.RunOptimize()
-		if v.GetCardinality() == 0 {
+		if v.IsEmpty() {
 			continue
 		}
 		newV := bytes.NewBuffer(make([]byte, 0, v.GetSerializedSizeInBytes()))
