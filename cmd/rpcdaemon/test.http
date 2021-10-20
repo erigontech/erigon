@@ -213,6 +213,6 @@ Content-Type: application/json
 {
   "min_peer_count": 0,
   "known_block": 0,
-  "sync_time_threshold": 1
+  "sync_time_threshold": 0
 }
 
