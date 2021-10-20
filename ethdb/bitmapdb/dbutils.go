@@ -21,7 +21,7 @@ const ChunkLimit = uint64(1950 * datasize.B) // threshold beyond which MDBX over
 // returns nil on zero cardinality
 func CutLeft(bm *roaring.Bitmap, sizeLimit uint64) *roaring.Bitmap {
 	if bm.IsEmpty() {
-		return nil
+		return roaring.New()
 	}
 
 	sz := bm.GetSerializedSizeInBytes()
@@ -170,7 +170,7 @@ func SeekInBitmap(m *roaring.Bitmap, n uint32) (found uint32, ok bool) {
 // returns nil on zero cardinality
 func CutLeft64(bm *roaring64.Bitmap, sizeLimit uint64) *roaring64.Bitmap {
 	if bm.IsEmpty() {
-		return nil
+		return roaring64.New()
 	}
 
 	sz := bm.GetSerializedSizeInBytes()
