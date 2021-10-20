@@ -53,6 +53,8 @@ var (
 	CreateHeadersSnapshot SyncStage = "CreateHeadersSnapshot"
 	CreateBodiesSnapshot  SyncStage = "CreateBodiesSnapshot"
 	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
+
+	LastSyncTimeKey string = "LastSyncTime"
 )
 
 var AllStages = []SyncStage{
@@ -101,7 +103,7 @@ func SaveStagePruneProgress(db kv.Putter, stage SyncStage, progress uint64) erro
 
 // GetLastSyncTime retrieves last sync timestamp written at the final stage of sync
 func GetLastSyncTime(db kv.Getter) (uint64, error) {
-	v, err := db.GetOne(kv.LastSyncTime, []byte(kv.LastSyncTime))
+	v, err := db.GetOne(kv.DatabaseInfo, []byte(LastSyncTimeKey))
 	if err != nil {
 		return 0, err
 	}
@@ -110,7 +112,7 @@ func GetLastSyncTime(db kv.Getter) (uint64, error) {
 
 func SaveSyncTime(db kv.Putter) error {
 	syncTime := uint64(time.Now().UnixNano())
-	return db.Put(kv.LastSyncTime, []byte(kv.LastSyncTime), marshalData(syncTime))
+	return db.Put(kv.DatabaseInfo, []byte(LastSyncTimeKey), marshalData(syncTime))
 }
 
 func marshalData(blockNumber uint64) []byte {

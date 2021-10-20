@@ -18,7 +18,7 @@ func checkSyncTimeThreshold(syncTimeThreshold uint, api EthAPI) error {
 	if !ok {
 		return fmt.Errorf("invalid last sync time")
 	}
-	tm := time.Unix(int64(lastSyncTime), 0)
+	tm := time.Unix(0, int64(lastSyncTime))
 	if time.Since(tm).Seconds() > float64(syncTimeThreshold) {
 		return fmt.Errorf("time from the last sync (%v) exceed (%v seconds)", tm.Unix(), syncTimeThreshold)
 	}
