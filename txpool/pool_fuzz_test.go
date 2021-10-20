@@ -474,23 +474,19 @@ func FuzzOnNewBlocks(f *testing.F) {
 				//assert.Equal(len(txs1.txs), newHashes.Len())
 				assert.Greater(len(newHashes), 0)
 				for i := 0; i < newHashes.Len(); i++ {
-					foundInUnwind := false
-					foundInMined := false
 					newHash := newHashes.At(i)
 					for j := range unwindTxs.txs {
 						if bytes.Equal(unwindTxs.txs[j].idHash[:], newHash) {
-							foundInUnwind = true
-							break
+							mt := pool.all.get(unwindTxs.txs[j].senderID, unwindTxs.txs[j].nonce)
+							require.True(mt != nil && mt.currentSubPool == PendingSubPool, msg)
 						}
 					}
 					for j := range minedTxs.txs {
 						if bytes.Equal(minedTxs.txs[j].idHash[:], newHash) {
-							foundInMined = true
-							break
+							mt := pool.all.get(unwindTxs.txs[j].senderID, unwindTxs.txs[j].nonce)
+							require.True(mt != nil && mt.currentSubPool == PendingSubPool, msg)
 						}
 					}
-					assert.True(foundInUnwind, msg)
-					assert.False(foundInMined, msg)
 				}
 			default: // no notifications - means pools must be unchanged or drop some txs
 				pendingHashes := copyHashes(pending)
