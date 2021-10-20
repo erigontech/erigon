@@ -50,6 +50,6 @@ func TestCutLeft(t *testing.T) {
 
 	bm = roaring.New()
 	lft = bitmapdb.CutLeft(bm, N)
-	require.True(t, lft == nil)
+	require.True(t, lft.GetCardinality() == 0)
 	require.True(t, bm.GetCardinality() == 0)
 }
