@@ -47,9 +47,6 @@ func SpawnTxPool(s *StageState, tx kv.RwTx, cfg TxPoolCfg, ctx context.Context) 
 	if err != nil {
 		return err
 	}
-	if to == s.BlockNumber {
-		return nil
-	}
 
 	logPrefix := s.LogPrefix()
 	if to < s.BlockNumber {
