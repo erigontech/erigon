@@ -499,6 +499,14 @@ github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
 github.com/ledgerwatch/erigon-lib v0.0.0-20211020014220-ee3f58e0b272 h1:bPhwt0n5j6+ZBSxsIcwPgT74GJ9HgQOIsB18tbFJne4=
 github.com/ledgerwatch/erigon-lib v0.0.0-20211020014220-ee3f58e0b272/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211020084242-31c7b471a6af h1:dEid9kdcjb7k1vAjBGTnLKvHjn5+3oa0WxjP2wpxYmI=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211020084242-31c7b471a6af/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211020163405-62f7a771242c h1:duksHjaDPwInNhUYUhcwvTCrr+4I1FH5DfF6jtMSJCU=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211020163405-62f7a771242c/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211021074253-7eba08521d61 h1:r9iuPgyBfCsfPTvCIn6IeNjlrKhrmHZhOKMJdKS+vZ4=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211021074253-7eba08521d61/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211021113304-980d71ad9613 h1:slA8g/S9nJN1zgdN1Pedn5IJ/fwhdbkJp10caThvuDc=
+github.com/ledgerwatch/erigon-lib v0.0.0-20211021113304-980d71ad9613/go.mod h1:fAmUDZVBIGfy8D434J02D0eR8zBLunkWEKoZ2sAYGws=
 github.com/ledgerwatch/log/v3 v3.3.1 h1:HmvLeTEvtCtqSvtu4t/a5MAdcLfeBcbIeowXbLYuzLc=
 github.com/ledgerwatch/log/v3 v3.3.1/go.mod h1:S3VJqhhVX32rbp1JyyvhJou12twtFwNEPESBgpbNkRk=
 github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d h1:/IKMrJdfRsoYNc36PXqP4xMH3vhW/8IQyBKGQbKZUno=
@@ -522,6 +530,7 @@ github.com/marten-seemann/qtls v0.10.0/go.mod h1:UvMd1oaYDACI99/oZUYLzMCkBXQVT0a
 github.com/marten-seemann/qtls-go1-15 v0.1.0/go.mod h1:GyFwywLKkRt+6mfU99csTEY1joMZz5vmB1WNZH3P81I=
 github.com/marten-seemann/qtls-go1-15 v0.1.1 h1:LIH6K34bPVttyXnUWixk0bzH6/N07VxbSabxn5A5gZQ=
 github.com/marten-seemann/qtls-go1-15 v0.1.1/go.mod h1:GyFwywLKkRt+6mfU99csTEY1joMZz5vmB1WNZH3P81I=
+github.com/matryer/moq v0.2.3 h1:Q06vEqnBYjjfx5KKgHfYRKE/lvlRu+Nj+xodG4YdHnU=
 github.com/matryer/moq v0.2.3/go.mod h1:9RtPYjTnH1bSBIkpvtHkFN7nbWAnO7oRpdJkEIn6UtE=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-colorable v0.1.8/go.mod h1:u6P/XSegPjTcexA+o6vUJrdnUu04hMope9wVRipJSqc=
