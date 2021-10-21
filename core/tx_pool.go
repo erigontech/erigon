@@ -167,7 +167,7 @@ var DefaultTxPoolConfig = TxPoolConfig{
 
 	AccountSlots:       16,
 	GlobalSlots:        10_000,
-	GlobalBaseFeeQueue: 10_000,
+	GlobalBaseFeeQueue: 20_000,
 	AccountQueue:       64,
 	GlobalQueue:        10_000,
 
