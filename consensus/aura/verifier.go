@@ -16,7 +16,7 @@ import (
 // verifyHeader follows this https://openethereum.github.io/Trace-NewBlock
 func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 
-	if header.Number == nil{
+	if header.Number == nil {
 		return errUnknownBlock
 	}
 
@@ -35,11 +35,11 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 
 	// checks for the vanity and the signature
 	// checking blocks integrity
-	if len(header.Extra) < ExtraVanity{
+	if len(header.Extra) < ExtraVanity {
 		return errMissingVanity
 	}
 
-	if len(header.Extra) < ExtraVanity+ExtraSeal{
+	if len(header.Extra) < ExtraVanity+ExtraSeal {
 		return errMissingSignature
 	}
 

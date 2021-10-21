@@ -11,47 +11,46 @@ import (
 type Snapshot struct {
 	config *params.CliqueConfig // Consensus engine parameters to fine tune behavior
 
-	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
-	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
-	Signers map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
-	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
-	encodedManifest []byte
+	Number             uint64                      `json:"number"`  // Block number where the snapshot was created
+	Hash               common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
+	Signers            map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
+	Recents            map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
+	encodedManifest    []byte
 	encodedStateChunks []byte
-
 }
 
-type Manifest struct{
-	version uint64 //  snapshot format version. Must be set to 2
-	stateHashes StateChunks // a list of all the state chunks in this snapshot
-	blockHashes []byte // a list of all of the block chunks in this snapshot it is 32 bit longs
-	block_number uint64 // the number of the best block in the snapshot; the one which the state coordinates to
-	block_hash common.Hash // the hash of the bst block in the snapshot
+type Manifest struct {
+	version      uint64      //  snapshot format version. Must be set to 2
+	stateHashes  StateChunks // a list of all the state chunks in this snapshot
+	blockHashes  []byte      // a list of all of the block chunks in this snapshot it is 32 bit longs
+	block_number uint64      // the number of the best block in the snapshot; the one which the state coordinates to
+	block_hash   common.Hash // the hash of the bst block in the snapshot
 }
 
-type StateChunks struct{
-	accountEntries []Chunks 
+type StateChunks struct {
+	accountEntries []Chunks
 }
 
-type Chunks struct{
-	address common.Address
+type Chunks struct {
+	address     common.Address
 	richAccount RichAccount
 }
 
-type RichAccount struct{
-	nonce uint64
+type RichAccount struct {
+	nonce   uint64
 	balance uint64
-	code []byte
+	code    []byte
 	storage [][]byte
 }
 
-type AbridgedBlock struct{
-	author []byte
+type AbridgedBlock struct {
+	author     []byte
 	state_root []byte
-	log_bloom []byte
+	log_bloom  []byte
 	difficulty uint64
-	gas_limit []byte
-	gas_used []byte
-	timestamp int64
+	gas_limit  []byte
+	gas_used   []byte
+	timestamp  int64
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
