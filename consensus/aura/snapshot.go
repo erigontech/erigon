@@ -29,6 +29,10 @@ type Manifest struct{
 }
 
 type StateChunks struct{
+	accountEntries []Chunks 
+}
+
+type Chunks struct{
 	address common.Address
 	richAccount RichAccount
 }
@@ -38,6 +42,16 @@ type RichAccount struct{
 	balance uint64
 	code []byte
 	storage [][]byte
+}
+
+type AbridgedBlock struct{
+	author []byte
+	state_root []byte
+	log_bloom []byte
+	difficulty uint64
+	gas_limit []byte
+	gas_used []byte
+	timestamp int64
 }
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
