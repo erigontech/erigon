@@ -14,9 +14,9 @@ import (
 )
 
 type requestBody struct {
-	MinPeerCount *uint            `json:"min_peer_count"`
-	BlockNumber  *rpc.BlockNumber `json:"known_block"`
-	SyncTimeThreshold  *uint      `json:"sync_time_threshold"`
+	MinPeerCount      *uint            `json:"min_peer_count"`
+	BlockNumber       *rpc.BlockNumber `json:"known_block"`
+	SyncTimeThreshold *uint            `json:"sync_time_threshold"`
 }
 
 const (
