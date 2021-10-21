@@ -373,7 +373,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.MinFeeCap = config.TxPool.PriceLimit
 		cfg.AccountSlots = config.TxPool.AccountSlots
 		cfg.LogEvery = 1 * time.Minute     //5 * time.Minute
-		cfg.CommitEvery = 15 * time.Second //5 * time.Minute
+		cfg.CommitEvery = 60 * time.Second //5 * time.Minute
 
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
