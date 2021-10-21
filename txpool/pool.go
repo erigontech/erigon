@@ -82,9 +82,9 @@ var DefaultConfig = Config{
 	CommitEvery:           15 * time.Second,
 	LogEvery:              30 * time.Second,
 
-	PendingSubPoolLimit: 100_000,
-	BaseFeeSubPoolLimit: 200_000,
-	QueuedSubPoolLimit:  200_000,
+	PendingSubPoolLimit: 10_000,
+	BaseFeeSubPoolLimit: 10_000,
+	QueuedSubPoolLimit:  10_000,
 
 	MinFeeCap:    1,
 	AccountSlots: 16, //TODO: to choose right value (16 to be compat with Geth)
@@ -1137,6 +1137,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	for {
 		select {
 		case <-ctx.Done():
+			_, _ = p.flush(db)
 			return
 		case <-logEvery.C:
 			p.logStats()
@@ -1155,7 +1156,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				log.Error("[txpool] process batch remote txs", "err", err)
 			}
 		case <-commitEvery.C:
-			if db != nil {
+			if db != nil && p.Started() {
 				t := time.Now()
 				written, err := p.flush(db)
 				if err != nil {
@@ -1248,8 +1249,14 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 			}
 		}
 		//fmt.Printf("del:%d,%d,%d\n", p.deletedTxs[i].Tx.senderID, p.deletedTxs[i].Tx.nonce, p.deletedTxs[i].Tx.tip)
-		if err := tx.Delete(kv.PoolTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
+		has, err := tx.Has(kv.PoolTransaction, p.deletedTxs[i].Tx.idHash[:])
+		if err != nil {
 			return err
+		}
+		if has {
+			if err := tx.Delete(kv.PoolTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
+				return err
+			}
 		}
 		p.deletedTxs[i] = nil // for gc
 	}
