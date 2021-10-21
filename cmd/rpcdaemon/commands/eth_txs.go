@@ -50,6 +50,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
+	if curHeader == nil {
+		return nil, nil
+	}
 
 	// No finalized transaction, try to retrieve it from the pool
 	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(hash)}})

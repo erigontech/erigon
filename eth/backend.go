@@ -33,9 +33,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -49,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -60,7 +57,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node"
@@ -372,8 +368,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
 		cfg.MinFeeCap = config.TxPool.PriceLimit
 		cfg.AccountSlots = config.TxPool.AccountSlots
-		cfg.LogEvery = 1 * time.Minute    //5 * time.Minute
-		cfg.CommitEvery = 1 * time.Minute //5 * time.Minute
+		cfg.LogEvery = 1 * time.Minute     //5 * time.Minute
+		cfg.CommitEvery = 60 * time.Second //5 * time.Minute
 
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
@@ -482,45 +478,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 					}
 				}
 			}()
-		}
-
-		// start pool on non-mainnet immediately
-		if backend.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !backend.config.TxPool.Disable {
-			var execution uint64
-			var hh *types.Header
-			if err := chainKv.View(ctx, func(tx kv.Tx) error {
-				execution, err = stages.GetStageProgress(tx, stages.Execution)
-				if err != nil {
-					return err
-				}
-				hh = rawdb.ReadCurrentHeader(tx)
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-
-			if backend.config.TxPool.V2 {
-				if hh != nil {
-					if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-						pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
-						return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-							PendingBlockBaseFee: pendingBaseFee.Uint64(),
-							DatabaseViewID:      tx.ViewID(),
-							ChangeBatch: []*remote.StateChange{
-								{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
-							},
-						}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
-					}); err != nil {
-						return nil, err
-					}
-				}
-			} else {
-				if hh != nil {
-					if err := backend.txPool.Start(hh.GasLimit, execution); err != nil {
-						return nil, err
-					}
-				}
-			}
 		}
 	}
 	go func() {

@@ -422,10 +422,10 @@ func rootContext() context.Context {
 
 func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
-	log.Info("Starting Sentry P2P server", "on", sentryAddr)
+	log.Info("Starting Sentry gRPC server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
-			log.Info("Sentry P2P received connection", "via", network, "from", address)
+			log.Info("Sentry gRPC received connection", "via", network, "from", address)
 			return nil
 		},
 	}
@@ -437,7 +437,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
-			log.Error("Sentry P2P server fail", "err", err1)
+			log.Error("Sentry gRPC server fail", "err", err1)
 		}
 	}()
 	return grpcServer, nil
@@ -773,6 +773,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 		if peerInfo == nil {
 			return true
 		}
+
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
 			peerInfo.Remove()
 			ss.GoodPeers.Delete(peerID)
