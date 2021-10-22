@@ -9,10 +9,10 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -123,7 +123,11 @@ func StageLoopStep(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx kv.Tx) error,
 ) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 
 	var origin, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
@@ -209,6 +213,9 @@ func StageLoopStep(
 			}
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
+			if header.Number.Uint64() == 0 {
+				notifications.Accumulator.StartChange(0, header.Hash(), nil, false)
+			}
 			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
 
 			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
@@ -222,7 +229,11 @@ func StageLoopStep(
 }
 
 func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
