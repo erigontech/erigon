@@ -22,7 +22,6 @@ func LogPanic() {
 	}
 
 	log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
-	//WriteStackTraceOnPanic(stack)
 	if sigc != nil {
 		sigc <- syscall.SIGINT
 	}
