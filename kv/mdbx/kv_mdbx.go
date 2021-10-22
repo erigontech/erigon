@@ -293,21 +293,21 @@ type MdbxKV struct {
 // otherwise re-try by RW transaction
 // it allow open DB from another process - even if main process holding long RW transaction
 func (db *MdbxKV) openDBIs(buckets []string) error {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		for _, name := range buckets {
-			if db.buckets[name].IsDeprecated {
-				continue
+	if db.opts.flags&mdbx.Readonly != 0 {
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
+			for _, name := range buckets {
+				if db.buckets[name].IsDeprecated {
+					continue
+				}
+				if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
+					return err
+				}
 			}
-			if err := tx.(kv.BucketMigrator).CreateBucket(name); err != nil {
-				return err
-			}
-		}
-		return tx.Commit() // when open db as read-only, commit of this RO transaction is required
-	}); err != nil {
-		if db.opts.flags&mdbx.Readonly != 0 {
+			return tx.Commit() // when open db as read-only, commit of this RO transaction is required
+		}); err != nil {
 			return err
 		}
-
+	} else {
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			for _, name := range buckets {
 				if db.buckets[name].IsDeprecated {
