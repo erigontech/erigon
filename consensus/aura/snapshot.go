@@ -17,8 +17,6 @@ type Snapshot struct {
 	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
 	encodedManifest []byte
 	encodedStateChunks []byte
-	blockNumber uint64 // the number of the best block in the snapshot and the one the state coordinates to
-	blockHash common.Hash // the best in the snapshot block hash
 }
 
 type Manifest struct{
@@ -77,5 +75,5 @@ func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 
 func blockChunkGeneration() *BlockChunk{
-	
+
 }
