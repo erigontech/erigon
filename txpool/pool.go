@@ -1459,7 +1459,7 @@ func (p *TxPool) printDebug(prefix string) {
 }
 func (p *TxPool) logStats() {
 	if !p.started.Load() {
-		log.Info("[txpool] Not started yet, waiting for new blocks...")
+		//log.Info("[txpool] Not started yet, waiting for new blocks...")
 		return
 	}
 	//protocolBaseFee, pendingBaseFee := p.protocolBaseFee.Load(), p.pendingBaseFee.Load()
