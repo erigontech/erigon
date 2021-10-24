@@ -17,6 +17,8 @@
 package rpc
 
 import (
+	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,4 +127,33 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	if len(r) != respLength {
 		t.Fatalf("response has wrong length %d, want %d", len(r), respLength)
 	}
+}
+
+// This checks that maxRequestContentLength is not applied to the response of a request.
+func TestSuccessHealthCheck(t *testing.T) {
+	t.Helper()
+	s := Server{}
+	ts := httptest.NewServer(&s)
+	defer ts.Close()
+	body := "{\"min_peer_count\":0,\"known_block\":0,\"sync_time_threshold\":0}"
+
+	request, err := http.NewRequest(http.MethodGet, ts.URL + "/health", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to create a valid HTTP request: %v", err)
+	}
+	if len(contentType) > 0 {
+		request.Header.Set("Content-Type", contentType)
+	}
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	var rbody []byte
+	if rbody, err = ioutil.ReadAll(resp.Body); err != nil {
+		rbody = []byte(fmt.Sprintf("(could not fetch response body for error: %s)", err))
+	}
+	t.Log(rbody)
+
+	defer resp.Body.Close()
+	confirmStatusCode(t, resp.StatusCode, 500)
 }

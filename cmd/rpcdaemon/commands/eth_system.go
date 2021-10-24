@@ -79,6 +79,7 @@ func (api *APIImpl) LastSyncInfo(ctx context.Context) (map[string]interface{}, e
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	lastSyncTime, err := stages.GetLastSyncTime(tx)
 	if err != nil {

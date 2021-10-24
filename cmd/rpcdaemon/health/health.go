@@ -1,6 +1,7 @@
 package health
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ var (
 func ProcessHealthcheckIfNeeded(
 	w http.ResponseWriter,
 	r *http.Request,
+	ctx context.Context,
 	rpcAPI []rpc.API,
 ) bool {
 	if !strings.EqualFold(r.URL.Path, urlPath) {
@@ -57,7 +59,7 @@ func ProcessHealthcheckIfNeeded(
 			errCheckBlock = checkBlockNumber(*body.BlockNumber, ethAPI)
 		}
 		// 3. check time from the last sync cycle
-		errCheckSync = checkSyncTimeThreshold(*body.SyncTimeThreshold, ethAPI)
+		errCheckSync = checkSyncTimeThreshold(*body.SyncTimeThreshold, ctx, ethAPI)
 	}
 
 	err := reportHealth(errParse, errMinPeerCount, errCheckBlock, errCheckSync, w)

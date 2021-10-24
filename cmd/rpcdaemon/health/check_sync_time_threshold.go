@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-func checkSyncTimeThreshold(syncTimeThreshold uint, api EthAPI) error {
+func checkSyncTimeThreshold(syncTimeThreshold uint, ctx context.Context, api EthAPI) error {
 	if api == nil {
 		return fmt.Errorf("no connection to the Erigon server or `eth` namespace isn't enabled")
 	}
-	status, err := api.LastSyncInfo(context.Background())
+	status, err := api.LastSyncInfo(ctx)
 	if err != nil {
 		return err
 	}
