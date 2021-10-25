@@ -84,6 +84,7 @@ const minPatternLen = 5
 // Large values increase memory consumption of dictionary reduction phase
 const maxDictPatterns = 1024 * 1024
 
+//nolint
 const compressLogPrefix = "compress"
 
 type DictionaryBuilder struct {
@@ -483,7 +484,7 @@ func (r *Ring) Truncate(i int) {
 	r.tail = (r.head + i) & (len(r.cells) - 1)
 }
 
-func NewCompressor(outputFile string, tmpDir string, minPatternScore uint64) (*Compressor, error) {
+func NewCompressor(logPrefix, outputFile string, tmpDir string, minPatternScore uint64) (*Compressor, error) {
 	c := &Compressor{
 		minPatternScore: minPatternScore,
 		outputFile:      outputFile,
@@ -505,7 +506,7 @@ func NewCompressor(outputFile string, tmpDir string, minPatternScore uint64) (*C
 		return nil, err
 	}
 	c.wordW = bufio.NewWriter(c.wordFile)
-	c.collector = etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	c.collector = etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	return c, nil
 }
 
@@ -1043,11 +1044,11 @@ func (c *Compressor) buildDictionary() error {
 		}
 	}
 	c.dictBuilder.Reset(maxDictPatterns)
-	if err := c.collector.Load(compressLogPrefix, nil /* db */, "" /* toBucket */, c.dictBuilder.loadFunc, etl.TransformArgs{}); err != nil {
+	if err := c.collector.Load(nil, "", c.dictBuilder.loadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	c.dictBuilder.finish()
-	c.collector.Close(compressLogPrefix)
+	c.collector.Close()
 	// Sort dictionary inside the dictionary bilder in the order of increasing scores
 	sort.Sort(&c.dictBuilder)
 	return nil

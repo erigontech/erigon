@@ -114,10 +114,10 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
-	rs.bucketCollector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	rs.enums = args.Enums
 	if args.Enums {
-		rs.offsetCollector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -165,7 +165,7 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.keysAdded = 0
 	rs.salt++
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
-	rs.bucketCollector = etl.NewCollector(rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
 	rs.maxOffset = 0
@@ -480,8 +480,8 @@ func (rs *RecSplit) Build() error {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
-	defer rs.bucketCollector.Close(RecSplitLogPrefix)
-	if err := rs.bucketCollector.Load(RecSplitLogPrefix, nil /* db */, "" /* toBucket */, rs.loadFuncBucket, etl.TransformArgs{}); err != nil {
+	defer rs.bucketCollector.Close()
+	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	if len(rs.currentBucket) > 0 {
@@ -491,8 +491,8 @@ func (rs *RecSplit) Build() error {
 	}
 	if rs.enums {
 		rs.offsetEf = NewEliasFano(rs.keysAdded, rs.maxOffset, rs.minDelta)
-		defer rs.offsetCollector.Close(RecSplitLogPrefix)
-		if err := rs.offsetCollector.Load(RecSplitLogPrefix, nil /* db */, "" /* toBucket */, rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
+		defer rs.offsetCollector.Close()
+		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
 			return err
 		}
 	}

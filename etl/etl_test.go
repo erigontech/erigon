@@ -108,7 +108,7 @@ func TestFileDataProviders(t *testing.T) {
 
 	generateTestData(t, tx, sourceBucket, 10)
 
-	collector := NewCollector("", NewSortableBuffer(1))
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(1))
 
 	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
@@ -122,7 +122,7 @@ func TestFileDataProviders(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	collector.Close("logPrefix")
+	collector.Close()
 
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
@@ -138,7 +138,7 @@ func TestRAMDataProviders(t *testing.T) {
 	sourceBucket := kv.ChaindataTables[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
-	collector := NewCollector("", NewSortableBuffer(BufferOptimalSize))
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize))
 	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil)
 	assert.NoError(t, err)
 

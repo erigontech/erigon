@@ -102,8 +102,8 @@ func Transform(
 		bufferSize = datasize.ByteSize(args.BufferSize)
 	}
 	buffer := getBufferByType(args.BufferType, bufferSize)
-	collector := NewCollector(tmpdir, buffer)
-	defer collector.Close(logPrefix)
+	collector := NewCollector(logPrefix, tmpdir, buffer)
+	defer collector.Close()
 
 	t := time.Now()
 	if err := extractBucketIntoFiles(logPrefix, db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, collector, extractFunc, args.Quit, args.LogDetailsExtract); err != nil {
@@ -114,7 +114,7 @@ func Transform(
 	defer func(t time.Time) {
 		log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
 	}(time.Now())
-	return collector.Load(logPrefix, db, toBucket, loadFunc, args)
+	return collector.Load(db, toBucket, loadFunc, args)
 }
 
 func extractBucketIntoFiles(

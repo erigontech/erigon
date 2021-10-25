@@ -48,10 +48,11 @@ type Collector struct {
 	allFlushed      bool
 	autoClean       bool
 	bufType         int
+	logPrefix       string
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
-func NewCollectorFromFiles(tmpdir string) (*Collector, error) {
+func NewCollectorFromFiles(logPrefix, tmpdir string) (*Collector, error) {
 	if _, err := os.Stat(tmpdir); os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -71,18 +72,18 @@ func NewCollectorFromFiles(tmpdir string) (*Collector, error) {
 		}
 		dataProviders[i] = &dataProvider
 	}
-	return &Collector{dataProviders: dataProviders, allFlushed: true, autoClean: false}, nil
+	return &Collector{dataProviders: dataProviders, allFlushed: true, autoClean: false, logPrefix: logPrefix}, nil
 }
 
 // NewCriticalCollector does not clean up temporary files if loading has failed
-func NewCriticalCollector(tmpdir string, sortableBuffer Buffer) *Collector {
-	c := NewCollector(tmpdir, sortableBuffer)
+func NewCriticalCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
+	c := NewCollector(logPrefix, tmpdir, sortableBuffer)
 	c.autoClean = false
 	return c
 }
 
-func NewCollector(tmpdir string, sortableBuffer Buffer) *Collector {
-	c := &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer)}
+func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
+	c := &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer), logPrefix: logPrefix}
 	encoder := codec.NewEncoder(nil, &cbor)
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
@@ -123,10 +124,10 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) Load(logPrefix string, db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
+func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
 		if c.autoClean {
-			c.Close(logPrefix)
+			c.Close()
 		}
 	}()
 	if !c.allFlushed {
@@ -134,19 +135,19 @@ func (c *Collector) Load(logPrefix string, db kv.RwTx, toBucket string, loadFunc
 			return e
 		}
 	}
-	if err := loadFilesIntoBucket(logPrefix, db, toBucket, c.bufType, c.dataProviders, loadFunc, args); err != nil {
+	if err := loadFilesIntoBucket(c.logPrefix, db, toBucket, c.bufType, c.dataProviders, loadFunc, args); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *Collector) Close(logPrefix string) {
+func (c *Collector) Close() {
 	totalSize := uint64(0)
 	for _, p := range c.dataProviders {
 		totalSize += p.Dispose()
 	}
 	if totalSize > 0 {
-		log.Info(fmt.Sprintf("[%s] etl: temp files removed", logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
+		log.Info(fmt.Sprintf("[%s] etl: temp files removed", c.logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
 	}
 }
 
