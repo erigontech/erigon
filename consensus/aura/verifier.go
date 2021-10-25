@@ -55,10 +55,7 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		return errInvalidMixDigest
 	}
 
-	// need to verify if there is uncles
-	// if there is uncles then call engine to verify uncle block basic
-
-	return nil
+	return c.verifyCascadingFields(chain, header, parents)
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
@@ -66,6 +63,10 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 // in a batch of parents (ascending order) to avoid looking those up from the
 // database. This is useful for concurrently verifying a batch of new headers.
 func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+
+}
+
+func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error{
 
 }
 
