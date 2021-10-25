@@ -66,7 +66,7 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 
 }
 
-func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error{
+func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
 
 }
 

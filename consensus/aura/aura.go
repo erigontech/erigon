@@ -380,7 +380,7 @@ type AuRa struct {
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
 	// EmptyStepsSet     *EmptyStepSet
-	EpochManager      *EpochManager // Mutex<EpochManager>,
+	EpochManager *EpochManager // Mutex<EpochManager>,
 
 	//Validators                     ValidatorSet
 	//ValidateScoreTransition        uint64
@@ -750,12 +750,11 @@ func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types
 	return nil
 }
 
-
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *AuRa) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 	snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
-	
+
 	if err != nil {
 		return err
 	}
