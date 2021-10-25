@@ -379,7 +379,7 @@ type AuRa struct {
 
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
-	EmptyStepsSet     *EmptyStepSet
+	// EmptyStepsSet     *EmptyStepSet
 	EpochManager      *EpochManager // Mutex<EpochManager>,
 
 	//Validators                     ValidatorSet
@@ -750,25 +750,16 @@ func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types
 	return nil
 }
 
-// VerifyUncles implements consensus.Engine, always returning an error for any
-// uncles as this consensus mechanism doesn't permit uncles.
-func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
-	return nil
-	//if len(uncles) > 0 {
-	//	return errors.New("uncles not allowed")
-	//}
-	//return nil
-}
 
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *AuRa) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return nil
-	//snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
-	//if err != nil {
-	//	return err
-	//}
-	//return c.verifySeal(chain, header, snap)
+	snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	
+	if err != nil {
+		return err
+	}
+	return c.verifySeal(chain, header, snap)
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
