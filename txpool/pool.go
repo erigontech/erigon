@@ -1717,6 +1717,13 @@ func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwind
 	return nil
 }
 
+// BySenderAndNonce - designed to perform most expensive operation in TxPool:
+// "recalculate all ephemeral fields of all transactions" by algo
+//      - for all senders - iterate over all transactions in nonce growing order
+//
+// Performane decisions:
+//  - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
+//  - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
 type BySenderAndNonce struct {
 	tree   *btree.BTree
 	search sortByNonce
@@ -1797,6 +1804,9 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTx) *metaTx {
 	return nil
 }
 
+// PendingPool - is different from other pools - it's best is Slice instead of Heap
+// It's more expensive to maintain "slice sort" invariant, but it allow do cheap copy of
+// pending.best slice for mining (because we consider txs and metaTx are immutable)
 type PendingPool struct {
 	limit int
 	t     SubPoolType
