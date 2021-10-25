@@ -87,7 +87,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
-	if curHeader != nil {
+	if curHeader == nil {
 		return nil, nil
 	}
 	// Flatten the pending transactions

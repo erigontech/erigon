@@ -167,10 +167,10 @@ func RemoveBlocksData(db kv.RoDB, tx kv.RwTx, newSnapshot uint64) (err error) {
 	}
 
 	logPrefix := "RemoveBlocksData"
-	bodiesCollector := etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer bodiesCollector.Close(logPrefix)
-	ethTXCollector := etl.NewCollector(os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer ethTXCollector.Close(logPrefix)
+	bodiesCollector := etl.NewCollector(logPrefix, os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer bodiesCollector.Close()
+	ethTXCollector := etl.NewCollector(logPrefix, os.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer ethTXCollector.Close()
 	err = ethdb.Walk(blockBodyWriteCursor, dbutils.BlockBodyKey(0, common.Hash{}), 0, func(k, v []byte) (bool, error) {
 		if binary.BigEndian.Uint64(k) > newSnapshot {
 			return false, nil
@@ -247,12 +247,12 @@ func RemoveBlocksData(db kv.RoDB, tx kv.RwTx, newSnapshot uint64) (err error) {
 	if err != nil {
 		return err
 	}
-	err = bodiesCollector.Load("bodies", writeTX, kv.BlockBody, etl.IdentityLoadFunc, etl.TransformArgs{})
+	err = bodiesCollector.Load(writeTX, kv.BlockBody, etl.IdentityLoadFunc, etl.TransformArgs{})
 	if err != nil {
 		return err
 	}
 
-	err = ethTXCollector.Load("ethtx", writeTX, kv.EthTx, etl.IdentityLoadFunc, etl.TransformArgs{})
+	err = ethTXCollector.Load(writeTX, kv.EthTx, etl.IdentityLoadFunc, etl.TransformArgs{})
 	if err != nil {
 		return err
 	}
