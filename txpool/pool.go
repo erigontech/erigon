@@ -38,6 +38,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -143,6 +144,8 @@ const (
 	PendingPoolOverflow DiscardReason = 12
 	BaseFeePoolOverflow DiscardReason = 13
 	QueuedPoolOverflow  DiscardReason = 14
+	GasUintOverflow     DiscardReason = 15
+	IntrinsicGas        DiscardReason = 16
 )
 
 func (r DiscardReason) String() string {
@@ -339,7 +342,8 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	if err := unwindTxs.Valid(); err != nil {
+	_, unwindTxs, err = p.validateTxs(unwindTxs)
+	if err != nil {
 		return err
 	}
 	if err := minedTxs.Valid(); err != nil {
@@ -568,18 +572,24 @@ func (p *TxPool) validateTx(txn *TxSlot, isLocal bool) DiscardReason {
 	if !isLocal && txn.feeCap < p.cfg.MinFeeCap {
 		return UnderPriced
 	}
+	gas, reason := CalcIntrinsicGas(uint64(txn.dataLen), uint64(txn.dataNonZeroLen), nil, txn.creation, true, true)
+	if reason != Success {
+		return reason
+	}
+	if gas > txn.gas {
+		return IntrinsicGas
+	}
 	if uint64(p.all.count(txn.senderID)) > p.cfg.AccountSlots {
 		return Spammer
 	}
 	return Success
 }
 
-func (p *TxPool) validateTxs(txs TxSlots) ([]DiscardReason, TxSlots, error) {
-	reasons := make([]DiscardReason, len(txs.txs))
-	newTxs := TxSlots{}
+func (p *TxPool) validateTxs(txs TxSlots) (reasons []DiscardReason, goodTxs TxSlots, err error) {
+	reasons = make([]DiscardReason, len(txs.txs))
 
 	if err := txs.Valid(); err != nil {
-		return reasons, newTxs, err
+		return reasons, goodTxs, err
 	}
 
 	j := 0
@@ -592,14 +602,14 @@ func (p *TxPool) validateTxs(txs TxSlots) ([]DiscardReason, TxSlots, error) {
 			continue
 		}
 		reasons[i] = NotSet
-		newTxs.Resize(uint(j + 1))
-		newTxs.txs[j] = txs.txs[i]
-		newTxs.isLocal[j] = txs.isLocal[i]
-		copy(newTxs.senders.At(j), txs.senders.At(i))
+		goodTxs.Resize(uint(j + 1))
+		goodTxs.txs[j] = txs.txs[i]
+		goodTxs.isLocal[j] = txs.isLocal[i]
+		copy(goodTxs.senders.At(j), txs.senders.At(i))
 		j++
 	}
 
-	return reasons, newTxs, nil
+	return reasons, goodTxs, nil
 }
 
 // punishSpammer by drop half of it's transactions with high nonce
@@ -1539,6 +1549,42 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte,
 		return true
 	})
 	return nil
+}
+
+// CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
+func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, DiscardReason) {
+	// Set the starting gas for the raw transaction
+	var gas uint64
+	if isContractCreation && isHomestead {
+		gas = fixedgas.TxGasContractCreation
+	} else {
+		gas = fixedgas.TxGas
+	}
+	// Bump the required gas by the amount of transactional data
+	if dataLen > 0 {
+		// Zero and non-zero bytes are priced differently
+		nz := dataNonZeroLen
+		// Make sure we don't exceed uint64 for all data combinations
+		nonZeroGas := fixedgas.TxDataNonZeroGasFrontier
+		if isEIP2028 {
+			nonZeroGas = fixedgas.TxDataNonZeroGasEIP2028
+		}
+		if (math.MaxUint64-gas)/nonZeroGas < nz {
+			return 0, GasUintOverflow
+		}
+		gas += nz * nonZeroGas
+
+		z := dataLen - nz
+		if (math.MaxUint64-gas)/fixedgas.TxDataZeroGas < z {
+			return 0, GasUintOverflow
+		}
+		gas += z * fixedgas.TxDataZeroGas
+	}
+	if accessList != nil {
+		gas += uint64(len(accessList)) * fixedgas.TxAccessListAddressGas
+		gas += uint64(accessList.StorageKeys()) * fixedgas.TxAccessListStorageKeyGas
+	}
+	return gas, Success
 }
 
 var PoolChainConfigKey = []byte("chain_config")

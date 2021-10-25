@@ -33,7 +33,7 @@ import (
 // gotip test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
 
 func init() {
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 }
 
 func FuzzTwoQueue(f *testing.F) {
@@ -596,13 +596,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		//checkNotify(txs2, TxSlots{}, "fromDB")
 		assert.Equal(pool.senders.senderID, p2.senders.senderID)
 		assert.Equal(pool.lastSeenBlock.Load(), p2.lastSeenBlock.Load())
-
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
 		assert.Equal(pool.baseFee.Len(), p2.baseFee.Len())
 		require.Equal(pool.queued.Len(), p2.queued.Len())
 		assert.Equal(pool.pendingBaseFee.Load(), p2.pendingBaseFee.Load())
 	})
-
 }
 
 func copyHashes(p *PendingPool) (hashes Hashes) {

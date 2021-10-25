@@ -180,7 +180,7 @@ func select64(x uint64, k int) int {
 	byteSums := s * kOnesStep8
 
 	kStep8 := uint64(k) * kOnesStep8
-	geqKStep8 := (((kStep8 | kLAMBDAsStep8) - byteSums) & kLAMBDAsStep8)
+	geqKStep8 := ((kStep8 | kLAMBDAsStep8) - byteSums) & kLAMBDAsStep8
 	place := bits.OnesCount64(geqKStep8) * 8
 	byteRank := uint64(k) - (((byteSums << 8) >> place) & uint64(0xFF))
 	return place + int(kSelectInByte[((x>>place)&0xFF)|(byteRank<<8)])

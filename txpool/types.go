@@ -75,17 +75,18 @@ func NewTxParseContext(chainID uint256.Int) *TxParseContext {
 type TxSlot struct {
 	//txId        uint64      // Transaction id (distinct from transaction hash), used as a compact reference to a transaction accross data structures
 	//senderId    uint64      // Sender id (distinct from sender address), used as a compact referecne to to a sender accross data structures
-	nonce       uint64      // Nonce of the transaction
-	tip         uint64      // Maximum tip that transaction is giving to miner/block proposer
-	feeCap      uint64      // Maximum fee that transaction burns and gives to the miner/block proposer
-	gas         uint64      // Gas limit of the transaction
-	value       uint256.Int // Value transferred by the transaction
-	idHash      [32]byte    // Transaction hash for the purposes of using it as a transaction Id
-	senderID    uint64      // SenderID - require external mapping to it's address
-	creation    bool        // Set to true if "To" field of the transation is not set
-	dataLen     int         // Length of transaction's data (for calculation of intrinsic gas)
-	alAddrCount int         // Number of addresses in the access list
-	alStorCount int         // Number of storage keys in the access list
+	nonce          uint64      // Nonce of the transaction
+	tip            uint64      // Maximum tip that transaction is giving to miner/block proposer
+	feeCap         uint64      // Maximum fee that transaction burns and gives to the miner/block proposer
+	gas            uint64      // Gas limit of the transaction
+	value          uint256.Int // Value transferred by the transaction
+	idHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
+	senderID       uint64      // SenderID - require external mapping to it's address
+	creation       bool        // Set to true if "To" field of the transation is not set
+	dataLen        int         // Length of transaction's data (for calculation of intrinsic gas)
+	dataNonZeroLen int
+	alAddrCount    int // Number of addresses in the access list
+	alStorCount    int // Number of storage keys in the access list
 	//bestIdx     int         // Index of the transaction in the best priority queue (of whatever pool it currently belongs to)
 	//worstIdx    int         // Index of the transaction in the worst priority queue (of whatever pook it currently belongs to)
 	//local       bool        // Whether transaction has been injected locally (and hence needs priority when mining or proposing a block)
@@ -232,7 +233,17 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		return 0, fmt.Errorf("%s: data len: %w", ParseTransactionErrorPrefix, err)
 	}
 	slot.dataLen = dataLen
+
+	// Zero and non-zero bytes are priced differently
+	slot.dataNonZeroLen = 0
+	for _, byt := range payload[dataPos : dataPos+dataLen] {
+		if byt != 0 {
+			slot.dataNonZeroLen++
+		}
+	}
+
 	p = dataPos + dataLen
+
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
 	if !legacy {
 		dataPos, dataLen, err = rlp.List(payload, p)
@@ -603,4 +614,22 @@ func bytesToUint64(buf []byte) (x uint64) {
 func (tx *TxSlot) printDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.value.Uint64())
 	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.idHash)
+}
+
+// AccessList is an EIP-2930 access list.
+type AccessList []AccessTuple
+
+// AccessTuple is the element type of an access list.
+type AccessTuple struct {
+	Address     [20]byte   `json:"address"        gencodec:"required"`
+	StorageKeys [][32]byte `json:"storageKeys"    gencodec:"required"`
+}
+
+// StorageKeys returns the total number of storage keys in the access list.
+func (al AccessList) StorageKeys() int {
+	sum := 0
+	for _, tuple := range al {
+		sum += len(tuple.StorageKeys)
+	}
+	return sum
 }
