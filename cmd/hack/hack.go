@@ -1703,7 +1703,7 @@ func compress1(chaindata string, name string) error {
 	wg.Add(runtime.NumCPU())
 	collectors := make([]*etl.Collector, runtime.NumCPU())
 	for i := 0; i < runtime.NumCPU(); i++ {
-		collector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		collectors[i] = collector
 		go processSuperstring(ch, collector, &wg)
 	}
@@ -1741,23 +1741,23 @@ func compress1(chaindata string, name string) error {
 	}
 	close(ch)
 	wg.Wait()
-	dictCollector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	dictCollector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	dictAggregator := &DictAggregator{collector: dictCollector}
 	for _, collector := range collectors {
-		if err = collector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, dictAggregator.aggLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{}); err != nil {
 			return err
 		}
-		collector.Close(CompressLogPrefix)
+		collector.Close()
 	}
 	if err = dictAggregator.finish(); err != nil {
 		return err
 	}
 	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
-	if err = dictCollector.Load(CompressLogPrefix, nil /* db */, "" /* toBucket */, db.compressLoadFunc, etl.TransformArgs{}); err != nil {
+	if err = dictCollector.Load(nil, "", db.compressLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	db.finish()
-	dictCollector.Close(CompressLogPrefix)
+	dictCollector.Close()
 	var df *os.File
 	df, err = os.Create(name + ".dictionary.txt")
 	if err != nil {
@@ -2004,9 +2004,9 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 
 func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize *uint64, outputSize *uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
-	var output []byte = make([]byte, 0, 256)
-	var uncovered []int = make([]int, 256)
-	var patterns []int = make([]int, 0, 256)
+	var output = make([]byte, 0, 256)
+	var uncovered = make([]int, 256)
+	var patterns = make([]int, 0, 256)
 	cellRing := NewRing()
 	var mf patricia.MatchFinder
 	numBuf := make([]byte, binary.MaxVarintLen64)
@@ -2320,7 +2320,7 @@ func reducedict(name string) error {
 	var collectors []*etl.Collector
 	var posMaps []map[uint64]uint64
 	for i := 0; i < runtime.NumCPU(); i++ {
-		collector := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		collector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		collectors = append(collectors, collector)
 		posMap := make(map[uint64]uint64)
 		posMaps = append(posMaps, posMap)
@@ -2609,20 +2609,20 @@ func reducedict(name string) error {
 	}
 	df.Close()
 
-	aggregator := etl.NewCollector(tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	aggregator := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	for _, collector := range collectors {
-		if err = collector.Load(CompressLogPrefix, nil /* db */, "" /* bucket */, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if err = collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			return aggregator.Collect(k, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
-		collector.Close(CompressLogPrefix)
+		collector.Close()
 	}
 
 	wc := 0
 	var hc HuffmanCoder
 	hc.w = cw
-	if err = aggregator.Load(CompressLogPrefix, nil /* db */, "" /* bucket */, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err = aggregator.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		// Re-encode it
 		r := bytes.NewReader(v)
 		var l uint64
@@ -2692,7 +2692,7 @@ func reducedict(name string) error {
 	}, etl.TransformArgs{}); err != nil {
 		return err
 	}
-	aggregator.Close(CompressLogPrefix)
+	aggregator.Close()
 	if err = cw.Flush(); err != nil {
 		return err
 	}
@@ -2713,7 +2713,7 @@ func decompress(name string) error {
 		return err
 	}
 	dw := bufio.NewWriter(df)
-	var word []byte = make([]byte, 0, 256)
+	var word = make([]byte, 0, 256)
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	var decodeTime time.Duration
 	g := d.MakeGetter()
