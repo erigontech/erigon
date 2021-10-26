@@ -52,27 +52,53 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		dataLen = 1
 		isList = false
 	case first < 184:
-		// string of len < 56, and it is non-legacy transaction
+		// Otherwise, if a string is 0-55 bytes long,
+		// the RLP encoding consists of a single byte with value 0x80 plus the
+		// length of the string followed by the string. The range of the first
+		// byte is thus [0x80, 0xB7].
 		dataPos = pos + 1
 		dataLen = int(first) - 128
 		isList = false
 	case first < 192:
-		// string of len >= 56, and it is non-legacy transaction
+		// If a string is more than 55 bytes long, the
+		// RLP encoding consists of a single byte with value 0xB7 plus the length
+		// of the length of the string in binary form, followed by the length of
+		// the string, followed by the string. For example, a length-1024 string
+		// would be encoded as 0xB90400 followed by the string. The range of
+		// the first byte is thus [0xB8, 0xBF].
 		beLen := int(first) - 183
 		dataPos = pos + 1 + beLen
 		dataLen, err = BeInt(payload, pos+1, beLen)
 		isList = false
+		if dataLen < 56 {
+			err = fmt.Errorf("rlp: non-canonical size information")
+			break
+		}
 	case first < 248:
-		// isList of len < 56, and it is a legacy transaction
+		// isList of len < 56
+		// If the total payload of a list
+		// (i.e. the combined length of all its items) is 0-55 bytes long, the
+		// RLP encoding consists of a single byte with value 0xC0 plus the length
+		// of the list followed by the concatenation of the RLP encodings of the
+		// items. The range of the first byte is thus [0xC0, 0xF7].
 		dataPos = pos + 1
 		dataLen = int(first) - 192
 		isList = true
 	default:
-		// isList of len >= 56, and it is a legacy transaction
+		// If the total payload of a list is more than 55 bytes long,
+		// the RLP encoding consists of a single byte with value 0xF7
+		// plus the length of the length of the payload in binary
+		// form, followed by the length of the payload, followed by
+		// the concatenation of the RLP encodings of the items. The
+		// range of the first byte is thus [0xF8, 0xFF].
 		beLen := int(first) - 247
 		dataPos = pos + 1 + beLen
 		dataLen, err = BeInt(payload, pos+1, beLen)
 		isList = true
+		if dataLen < 56 {
+			err = fmt.Errorf("rlp: non-canonical size information")
+			break
+		}
 	}
 	if err == nil {
 		if dataPos+dataLen > len(payload) {

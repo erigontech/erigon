@@ -307,6 +307,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		} else {
 			ctx.chainId.Sub(&ctx.v, u256.N35)
 			ctx.chainId.Rsh(&ctx.chainId, 1)
+			if ctx.chainId.Cmp(&ctx.cfg.chainID) != 0 {
+				return 0, fmt.Errorf("%s: %s, %d (expected %d)", ParseTransactionErrorPrefix, "invalid chainID", ctx.chainId.Uint64(), ctx.cfg.chainID.Uint64())
+			}
+
 			chainIdBits = ctx.chainId.BitLen()
 			if chainIdBits <= 7 {
 				chainIdLen = 1
