@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
@@ -234,7 +235,11 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header.Coinbase = coinbase
 	//}
 
-	if err = cfg.engine.Prepare(chain, header); err != nil {
+	stateReader := state.NewPlainStateReader(tx)
+	ibs := state.New(stateReader)
+	if err = cfg.engine.Prepare(chain, header, func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, cfg.chainConfig, ibs, header, cfg.engine)
+	}); err != nil {
 		log.Error("Failed to prepare header for mining",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),

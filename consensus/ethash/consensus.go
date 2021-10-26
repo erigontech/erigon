@@ -589,7 +589,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 
 // Prepare implements consensus.Engine, initializing the difficulty field of a
 // header to conform to the ethash protocol. The changes are done inline.
-func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.Header, syscall consensus.SystemCall) error {
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor

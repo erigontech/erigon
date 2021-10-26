@@ -40,7 +40,7 @@ func (c *powEngine) VerifyUncles(chain consensus.ChainReader, block *types.Heade
 func (c *powEngine) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
 	panic("must not be called")
 }
-func (c *powEngine) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (c *powEngine) Prepare(chain consensus.ChainHeaderReader, header *types.Header, syscall consensus.SystemCall) error {
 	panic("must not be called")
 }
 func (c *powEngine) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {

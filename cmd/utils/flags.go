@@ -536,6 +536,18 @@ var (
 		Usage: "a path to clique db folder",
 		Value: "",
 	}
+	// HeimdallURLFlag flag for heimdall url
+	HeimdallURLFlag = cli.StringFlag{
+		Name:  "bor.heimdall",
+		Usage: "URL of Heimdall service",
+		Value: "http://localhost:1317",
+	}
+
+	// WithoutHeimdallFlag no heimdall (for testing purpose)
+	WithoutHeimdallFlag = cli.BoolFlag{
+		Name:  "bor.withoutheimdall",
+		Usage: "Run without Heimdall service (for testing purpose)",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -608,6 +620,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case params.FermionChainName:
 			urls = params.FermionBootnodes
+		case params.MumbaiChainName:
+			urls = params.MumbaiBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -652,6 +666,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case params.FermionChainName:
 			urls = params.FermionBootnodes
+		case params.MumbaiChainName:
+			urls = params.MumbaiBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -910,6 +926,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "kovan")
 	case params.FermionChainName:
 		return filepath.Join(datadir, "fermion")
+	case params.MumbaiChainName:
+		return filepath.Join(datadir, "mumbai")
 	default:
 		return datadir
 	}
@@ -1113,6 +1131,11 @@ func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
 	cfg.DBPath = path.Join(datadir, "aura")
 }
 
+func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.HeimdallURL = ctx.GlobalString(HeimdallURLFlag.Name)
+	cfg.WithoutHeimdall = ctx.GlobalBool(WithoutHeimdallFlag.Name)
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
@@ -1218,6 +1241,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	setAuRa(ctx, &cfg.Aura, nodeConfig.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
+	setBorConfig(ctx, cfg)
 
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 
@@ -1297,6 +1321,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 1212120
 		}
 		cfg.Genesis = core.DefaultFermionGenesisBlock()
+	case params.MumbaiChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 80001
+		}
+		cfg.Genesis = core.DefaultMumbaiGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.MumbaiGenesisHash)
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1375,6 +1405,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultKovanGenesisBlock()
 	case params.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
+	case params.MumbaiChainName:
+		genesis = core.DefaultMumbaiGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

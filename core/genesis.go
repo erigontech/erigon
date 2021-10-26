@@ -311,6 +311,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.KovanChainConfig
 	case ghash == params.FermionGenesisHash:
 		return params.FermionChainConfig
+	case ghash == params.MumbaiGenesisHash:
+		return params.MumbaiChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -631,6 +633,19 @@ func DefaultFermionGenesisBlock() *Genesis {
 		GasLimit:   0x5B8D80,
 		Difficulty: big.NewInt(0x20000),
 		Alloc:      readPrealloc("allocs/fermion.json"),
+	}
+}
+
+func DefaultMumbaiGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.MumbaiChainConfig,
+		Nonce:      0,
+		Timestamp:  1558348305,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      readPrealloc("allocs/mumbai.json"),
 	}
 }
 

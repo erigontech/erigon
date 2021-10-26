@@ -21,14 +21,17 @@ import (
 	"math/big"
 	"os"
 	"os/user"
+	"path"
 	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -160,6 +163,7 @@ type Config struct {
 
 	Clique params.SnapshotConfig
 	Aura   params.AuRaConfig
+	Bor    params.BorConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -179,9 +183,15 @@ type Config struct {
 
 	// SyncLoopThrottle sets a minimum time between staged loop iterations
 	SyncLoopThrottle time.Duration
+
+	// URL to connect to Heimdall node
+	HeimdallURL string
+
+	// No heimdall service
+	WithoutHeimdall bool
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -218,6 +228,11 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			if err != nil {
 				panic(err)
 			}
+		}
+
+	case *params.BorConfig:
+		if chainConfig.Bor != nil {
+			eng = bor.New(chainConfig, db.OpenDatabase(path.Join(paths.DefaultDataDir()+"bor"), logger, true), HeimdallURL, WithoutHeimdall)
 		}
 	}
 

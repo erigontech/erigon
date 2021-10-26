@@ -35,6 +35,7 @@ const (
 	SokolChainName   = "sokol"
 	KovanChainName   = "kovan"
 	FermionChainName = "fermion"
+	MumbaiChainName  = "mumbai"
 )
 
 type ConsensusType string
@@ -55,6 +56,7 @@ var (
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
 	FermionGenesisHash = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
+	MumbaiGenesisHash  = common.HexToHash("0x7b66506a9ebdbf30d32b43c5f15a3b1216269a1ec3a75aa3182b86176a2b1ca7")
 )
 
 var (
@@ -344,6 +346,31 @@ var (
 		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
+	MumbaiChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(80001),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      true,
+		EIP150Hash:          common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(2722000),
+		MuirGlacierBlock:    big.NewInt(2722000),
+		BerlinBlock:         big.NewInt(13996000),
+		Bor: &BorConfig{
+			Period:                2,
+			ProducerDelay:         6,
+			Sprint:                64,
+			BackupMultiplier:      2,
+			ValidatorContract:     "0x0000000000000000000000000000000000001000",
+			StateReceiverContract: "0x0000000000000000000000000000000000001001",
+		},
+	}
+
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{
@@ -428,6 +455,7 @@ type ChainConfig struct {
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
+	Bor    *BorConfig    `json:"bor,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -456,6 +484,23 @@ func (c *CliqueConfig) String() string {
 	return "clique"
 }
 
+// BorConfig is the consensus engine configs for Matic bor based sealing.
+type BorConfig struct {
+	Period                uint64 `json:"period"`                // Number of seconds between blocks to enforce
+	ProducerDelay         uint64 `json:"producerDelay"`         // Number of seconds delay between two producer interval
+	Sprint                uint64 `json:"sprint"`                // Epoch length to proposer
+	BackupMultiplier      uint64 `json:"backupMultiplier"`      // Backup multiplier to determine the wiggle time
+	ValidatorContract     string `json:"validatorContract"`     // Validator set contract
+	StateReceiverContract string `json:"stateReceiverContract"` // State receiver contract
+
+	OverrideStateSyncRecords map[string]int `json:"overrideStateSyncRecords"` // override state records count
+}
+
+// String implements the stringer interface, returning the consensus engine details.
+func (b *BorConfig) String() string {
+	return "bor"
+}
+
 // String implements the fmt.Stringer interface.
 func (c *ChainConfig) String() string {
 	var engine interface{}
@@ -464,6 +509,8 @@ func (c *ChainConfig) String() string {
 		engine = c.Ethash
 	case c.Clique != nil:
 		engine = c.Clique
+	case c.Bor != nil:
+		engine = c.Bor
 	default:
 		engine = "unknown"
 	}
