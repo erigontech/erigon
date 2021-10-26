@@ -1139,7 +1139,7 @@ func dumpState(chaindata string, block int, name string) error {
 		return err
 	}
 	defer fa.Close()
-	wa := bufio.NewWriter(fa)
+	wa := bufio.NewWriterSize(fa, etl.BufIOSize)
 	// Write out number of key/value pairs first
 	var countBytes [8]byte
 	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Write correct number or remove
@@ -1152,7 +1152,7 @@ func dumpState(chaindata string, block int, name string) error {
 		return err
 	}
 	defer fs.Close()
-	ws := bufio.NewWriter(fs)
+	ws := bufio.NewWriterSize(fs, etl.BufIOSize)
 	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Write correct number or remove
 	if _, err = ws.Write(countBytes[:]); err != nil {
 		return err
@@ -1162,7 +1162,7 @@ func dumpState(chaindata string, block int, name string) error {
 		return err
 	}
 	defer fc.Close()
-	wc := bufio.NewWriter(fc)
+	wc := bufio.NewWriterSize(fc, etl.BufIOSize)
 	binary.BigEndian.PutUint64(countBytes[:], 0) // TODO: Write correct number or remove
 	if _, err = wc.Write(countBytes[:]); err != nil {
 		return err
@@ -1299,7 +1299,7 @@ func mphf(chaindata string, block int) error {
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReader(f)
+	r := bufio.NewReaderSize(f, etl.BufIOSize)
 	defer f.Close()
 	var countBuf [8]byte
 	if _, err = io.ReadFull(r, countBuf[:]); err != nil {
@@ -1326,7 +1326,7 @@ func mphf(chaindata string, block int) error {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		if i%1 == 0 {
+		if i%2 == 0 {
 			// It is key, we skip the values here
 			if err := rs.AddKey(buf[:l], uint64(i/2)); err != nil {
 				return err
@@ -1358,7 +1358,7 @@ func mphf(chaindata string, block int) error {
 	if _, err = f.Seek(8, 0); err != nil {
 		return err
 	}
-	r = bufio.NewReader(f)
+	r = bufio.NewReaderSize(f, etl.BufIOSize)
 	l, e = r.ReadByte()
 	i = 0
 	var lookupTime time.Duration
@@ -1366,7 +1366,7 @@ func mphf(chaindata string, block int) error {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
 		}
-		if i%1 == 0 {
+		if i%2 == 0 {
 			// It is key, we skip the values here
 			start := time.Now()
 			offset := idx.Lookup(buf[:l])
@@ -1399,7 +1399,7 @@ func genstate() error {
 		return err
 	}
 	defer f.Close()
-	w := bufio.NewWriter(f)
+	w := bufio.NewWriterSize(f, etl.BufIOSize)
 	defer w.Flush()
 	var count uint64 = 25
 	var countBuf [8]byte
@@ -1763,7 +1763,7 @@ func compress1(chaindata string, name string) error {
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriter(df)
+	w := bufio.NewWriterSize(df, etl.BufIOSize)
 	// Sort dictionary builder
 	sort.Sort(db)
 
@@ -2437,7 +2437,7 @@ func reducedict(name string) error {
 	if cf, err = os.Create(name + ".compressed.dat"); err != nil {
 		return err
 	}
-	cw := bufio.NewWriter(cf)
+	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
 	// First, output dictionary
 	binary.BigEndian.PutUint64(numBuf, offset) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -2600,7 +2600,7 @@ func reducedict(name string) error {
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriter(df)
+	w := bufio.NewWriterSize(df, etl.BufIOSize)
 	for _, p := range positionList {
 		fmt.Fprintf(w, "%d %x %d uses %d\n", p.codeBits, p.code, p.pos, p.uses)
 	}
@@ -2712,7 +2712,7 @@ func decompress(name string) error {
 	if df, err = os.Create(name + ".decompressed.dat"); err != nil {
 		return err
 	}
-	dw := bufio.NewWriter(df)
+	dw := bufio.NewWriterSize(df, etl.BufIOSize)
 	var word = make([]byte, 0, 256)
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	var decodeTime time.Duration
@@ -3436,7 +3436,7 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 		return err
 	}
 	defer f.Close()
-	w := bufio.NewWriter(f)
+	w := bufio.NewWriterSize(f, etl.BufIOSize)
 	defer w.Flush()
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
