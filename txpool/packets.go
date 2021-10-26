@@ -97,7 +97,7 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 	}
 	hashes = common.EnsureEnoughSize(hashbuf, length.Hash*hashesCount)
 
-	for i := 0; pos < len(payload); i++ {
+	for i := 0; i < hashesCount; i++ {
 		pos, err = rlp.ParseHash(payload, pos, hashes[i*length.Hash:])
 		if err != nil {
 			return 0, hashes, 0, err
@@ -114,7 +114,7 @@ func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hash
 	}
 	hashes = common.EnsureEnoughSize(hashbuf, length.Hash*hashesCount)
 
-	for i := 0; pos < len(payload); i++ {
+	for i := 0; i < hashesCount; i++ {
 		pos, err = rlp.ParseHash(payload, pos, hashes[i*length.Hash:])
 		if err != nil {
 			return hashes, 0, err
