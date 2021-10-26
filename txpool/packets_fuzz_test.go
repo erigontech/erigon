@@ -33,3 +33,20 @@ func FuzzPooledTransactions66(f *testing.F) {
 		}
 	})
 }
+
+func FuzzGetPooledTransactions66(f *testing.F) {
+	f.Add([]byte{})
+	f.Add(decodeHex("e68306f854e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"))
+	f.Fuzz(func(t *testing.T, in []byte) {
+		t.Parallel()
+		reqId, hashes, _, err := ParseGetPooledTransactions66(in, 0, nil)
+		if err != nil {
+			t.Skip()
+		}
+
+		_, err = EncodeGetPooledTransactions66(hashes, reqId, nil)
+		if err != nil {
+			t.Skip()
+		}
+	})
+}
