@@ -468,7 +468,7 @@ func (rs *RecSplit) Build() error {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
 	defer rs.indexF.Close()
-	rs.indexW = bufio.NewWriter(rs.indexF)
+	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
 	// Write number of keys
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
