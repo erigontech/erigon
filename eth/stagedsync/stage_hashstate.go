@@ -6,11 +6,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"time"
+	"strconv"
+	"runtime"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -123,35 +128,18 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 }
 
 func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
-	err := etl.Transform(
+	if err := readPlainStateOnce(
 		logPrefix,
 		db,
 		kv.PlainState,
-		kv.HashedAccounts,
 		cfg.tmpDir,
 		keyTransformExtractAcc(transformPlainStateKey),
-		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			Quit: quit,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	err = etl.Transform(
-		logPrefix,
-		db,
-		kv.PlainState,
-		kv.HashedStorage,
-		cfg.tmpDir,
 		keyTransformExtractStorage(transformPlainStateKey),
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: quit,
 		},
-	)
-	if err != nil {
+	); err != nil {
 		return err
 	}
 
@@ -169,6 +157,126 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 	)
 }
 
+// should I pass kv.HashedAccounts and kv.HashedStorage as arguments in readPlainStateOnce?
+func readPlainStateOnce(
+	logPrefix string,
+	db kv.RwTx,
+	fromBucket string,
+	tmpdir string,
+	extractAccFunc etl.ExtractFunc,
+	extractStorageFunc etl.ExtractFunc,
+	loadFunc etl.LoadFunc,
+	args etl.TransformArgs,
+) error {
+	bufferSize := etl.BufferOptimalSize
+	if args.BufferSize > 0 {
+		bufferSize = datasize.ByteSize(args.BufferSize)
+	}
+	// getBufferByType is declared in erigon-lib/etl.go as private, that is why I have to redeclare it here
+	buffer := func(tp int, size datasize.ByteSize) etl.Buffer {
+		switch tp {
+		case etl.SortableSliceBuffer:
+			return etl.NewSortableBuffer(size)
+		case etl.SortableAppendBuffer:
+			return etl.NewAppendBuffer(size)
+		case etl.SortableOldestAppearedBuffer:
+			return etl.NewOldestEntryBuffer(size)
+		default:
+			panic("unknown buffer type " + strconv.Itoa(tp))
+		}
+	}(args.BufferType, bufferSize)
+
+	collector1 := etl.NewCollector(logPrefix, tmpdir, buffer)
+	collector2 := etl.NewCollector(logPrefix, tmpdir, buffer)
+	defer func() {
+		collector1.Close()
+		collector2.Close()
+	}()
+	
+	logEvery := time.NewTicker(30 * time.Second) // should we set longer ticker e.g. 1m?
+	defer logEvery.Stop()
+	var m runtime.MemStats
+
+	c, err := db.Cursor(fromBucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	startkey := args.ExtractStartKey
+	endkey := args.ExtractEndKey
+	quit := args.Quit
+	additionalLogArguments := args.LogDetailsExtract
+
+	// reading kv.PlainState
+	for k, v, e := c.Seek(startkey); k != nil; k, v, e = c.Next() {
+		if e != nil {
+			return e
+		}
+		if err := libcommon.Stopped(quit); err != nil {
+			return err
+		}
+		select {
+		default:
+		case <-logEvery.C:
+			logArs := []interface{}{"from", fromBucket}
+			if additionalLogArguments != nil {
+				logArs = append(logArs, additionalLogArguments(k, v)...)
+			} else {
+				// makeCurrentKeyStr is declared in erigon-lib/etl.go as private. That's why I have to redeclare it.
+				makeCurrentKeyStr := func(k []byte) string {
+					var currentKeyStr string
+					if k == nil {
+						currentKeyStr = "final"
+					} else if len(k) < 4 {
+						currentKeyStr = fmt.Sprintf("%x", k)
+					} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
+						currentKeyStr = fmt.Sprintf("%x", k)
+					} else {
+						currentKeyStr = fmt.Sprintf("%x...", k[:4])
+					}
+					return currentKeyStr
+				}
+				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+			}
+
+			runtime.ReadMemStats(&m)
+			logArs = append(logArs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
+		}
+		if endkey != nil && bytes.Compare(k, endkey) > 0 {
+			return nil
+		}
+
+		// should we make extractNextFunc public?
+		if err := extractAccFunc(k, v, collector1.extractNextFunc); err != nil {
+			return err
+		}
+
+		if err := extractStorageFunc(k, v, collector2.extractNextFunc); err != nil {
+			return err
+		}
+	}
+
+	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
+	defer func(t time.Time) {
+		log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
+	}(time.Now())
+
+	//  filling up 2 collectors
+	if err := collector1.Load(db, kv.HashedAccounts, loadFunc, args); err != nil {
+		return err
+	}
+
+	if err := collector1.Load(db, kv.HashedStorage, loadFunc, args); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+
+
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
 		newK, err := transformKey(k)
@@ -178,6 +286,7 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 		return next(k, newK, v)
 	}
 }
+
 
 func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
