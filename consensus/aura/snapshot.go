@@ -64,8 +64,8 @@ type Chunk struct {
 type RichAccount struct {
 	nonce   uint64
 	balance uint64
-	code    common.Hash
-	storage [][]byte
+	code    []byte
+	storage []byte
 }
 
 type AbridgedBlock struct {
