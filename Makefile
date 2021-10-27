@@ -20,14 +20,14 @@ grpc:
 
 	$(eval PROTOC_TMP := $(shell mktemp -d))
 	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.18.0/protoc-3.18.0-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
-	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc $(GOBIN) && mv include $(GOBIN)/..
+	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc "$(GOBIN)" && mv include "$(GOBIN)"/..
 
-	$(GOBUILD) -o $(GOBIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
-	$(GOBUILD) -o $(GOBIN)/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
+	$(GOBUILD) -o "$(GOBIN)"/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
+	$(GOBUILD) -o "$(GOBIN)"/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
 
-	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
+	PATH="$(GOBIN)":"$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
 		types/types.proto
-	PATH=$(GOBIN):$(PATH) protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
+	PATH="$(GOBIN)":"$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
 		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
 		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
 		p2psentry/sentry.proto \
@@ -39,8 +39,8 @@ grpc:
 
 
 mocks:
-	$(GOBUILD) -o $(GOBIN)/moq	  github.com/matryer/moq
-	PATH=$(GOBIN):$(PATH) go generate ./...
+	$(GOBUILD) -o "$(GOBIN)"/moq	  github.com/matryer/moq
+	PATH="$(GOBIN)":"$(PATH)" go generate ./...
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
