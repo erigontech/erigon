@@ -75,6 +75,9 @@ var (
 	// that is not part of the local blockchain.
 	errUnknownBlock = errors.New("unknown block")
 
+	// errTooOldOfBlock is returned when the block number requested for is below 20
+	errTooOldOfBlock = errors.New("The block requested is too old")
+
 	// errMissingVanity is returned if a block's extra-data section is shorter than
 	// 32 bytes, which is required to store the signer vanity.
 	errMissingVanity = errors.New("extra-data 32 byte vanity prefix missing")
@@ -379,8 +382,8 @@ type AuRa struct {
 
 	OurSigningAddress common.Address // Same as Etherbase in Mining
 	cfg               AuthorityRoundParams
-	// EmptyStepsSet     *EmptyStepSet
-	EpochManager *EpochManager // Mutex<EpochManager>,
+	EmptyStepsSet     *EmptyStepSet
+	EpochManager      *EpochManager // Mutex<EpochManager>,
 
 	//Validators                     ValidatorSet
 	//ValidateScoreTransition        uint64
@@ -561,6 +564,19 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	return c.verifyHeader(chain, header, nil)
+}
+
+// verifies AuRas uncles
+func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+	for _, uncle := range uncles {
+		err := c.verifyUncle(chain, uncle)
+
+		if err != nil {
+			return err
+		}
+
+	}
+	return nil
 }
 
 //nolint
@@ -753,12 +769,13 @@ func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *AuRa) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
+	return nil
+	// snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
 
-	if err != nil {
-		return err
-	}
-	return c.verifySeal(chain, header, snap)
+	// if err != nil {
+	// 	return err
+	// }
+	// return c.verifySeal(chain, header, nil)
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
