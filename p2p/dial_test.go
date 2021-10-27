@@ -39,8 +39,8 @@ func TestDialSchedDynDial(t *testing.T) {
 	t.Parallel()
 
 	config := dialConfig{
-		maxActiveDials: 5,
-		maxDialPeers:   4,
+		maxActiveDials: IntSlice{5, 5},
+		maxDialPeers:   IntSlice{4, 4},
 	}
 	runDialTest(t, config, []dialTestRound{
 		// 3 out of 4 peers are connected, leaving 2 dial slots.
@@ -132,8 +132,8 @@ func TestDialSchedNetRestrict(t *testing.T) {
 	}
 	config := dialConfig{
 		netRestrict:    new(netutil.Netlist),
-		maxActiveDials: 10,
-		maxDialPeers:   10,
+		maxActiveDials: IntSlice{10, 10},
+		maxDialPeers:   IntSlice{10, 10},
 	}
 	config.netRestrict.Add("127.0.2.0/24")
 	runDialTest(t, config, []dialTestRound{
@@ -157,8 +157,8 @@ func TestDialSchedStaticDial(t *testing.T) {
 	t.Parallel()
 
 	config := dialConfig{
-		maxActiveDials: 5,
-		maxDialPeers:   4,
+		maxActiveDials: IntSlice{5, 5},
+		maxDialPeers:   IntSlice{4, 4},
 	}
 	runDialTest(t, config, []dialTestRound{
 		// Static dials are launched for the nodes that
@@ -234,8 +234,8 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 	t.Parallel()
 
 	config := dialConfig{
-		maxActiveDials: 1,
-		maxDialPeers:   1,
+		maxActiveDials: IntSlice{1, 1},
+		maxDialPeers:   IntSlice{1, 1},
 	}
 	runDialTest(t, config, []dialTestRound{
 		// Add static nodes. Ignore maxActiveDials config
@@ -292,8 +292,8 @@ func TestDialSchedHistory(t *testing.T) {
 	t.Parallel()
 
 	config := dialConfig{
-		maxActiveDials: 3,
-		maxDialPeers:   3,
+		maxActiveDials: IntSlice{3, 3},
+		maxDialPeers:   IntSlice{3, 3},
 	}
 	runDialTest(t, config, []dialTestRound{
 		{
@@ -338,8 +338,8 @@ func TestDialSchedResolve(t *testing.T) {
 	t.Parallel()
 
 	config := dialConfig{
-		maxActiveDials: 1,
-		maxDialPeers:   1,
+		maxActiveDials: IntSlice{1, 1},
+		maxDialPeers:   IntSlice{1, 1},
 	}
 	node := newNode(uintID(0x01), "")
 	resolved := newNode(uintID(0x01), "127.0.0.1:30303")

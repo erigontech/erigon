@@ -112,7 +112,7 @@ type dialScheduler struct {
 	// should only be accessed by code on the loop goroutine.
 	dialing   map[enode.ID]*dialTask // active tasks
 	peers     map[enode.ID]connFlag  // all connected peers
-	dialPeers int                    // current number of dialed peers
+	dialPeers IntSlice               // current number of dialed peers
 
 	// The static map tracks all static dial tasks. The subset of usable static dial tasks
 	// (i.e. those passing checkDial) is kept in staticPool. The scheduler prefers
@@ -135,8 +135,8 @@ type dialSetupFunc func(net.Conn, connFlag, *enode.Node) error
 
 type dialConfig struct {
 	self           enode.ID         // our own ID
-	maxDialPeers   int              // maximum number of dialed peers
-	maxActiveDials int              // maximum number of active dials
+	maxDialPeers   IntSlice         // maximum number of dialed peers
+	maxActiveDials IntSlice         // maximum number of active dials
 	netRestrict    *netutil.Netlist // IP whitelist, disabled if nil
 	resolver       nodeResolver
 	dialer         NodeDialer
@@ -146,7 +146,7 @@ type dialConfig struct {
 }
 
 func (cfg dialConfig) withDefaults() dialConfig {
-	if cfg.maxActiveDials == 0 {
+	if cfg.maxActiveDials == 0 { // FIXME
 		cfg.maxActiveDials = defaultMaxPendingPeers
 	}
 	if cfg.log == nil {
@@ -269,7 +269,7 @@ loop:
 
 		case c := <-d.addPeerCh:
 			if c.is(dynDialedConn) || c.is(staticDialedConn) {
-				d.dialPeers++
+				d.dialPeers++ //FIXME
 			}
 			id := c.node.ID()
 			d.peers[id] = connFlag(atomic.LoadInt32((*int32)(&c.flags)))
@@ -282,7 +282,7 @@ loop:
 
 		case c := <-d.remPeerCh:
 			if c.is(dynDialedConn) || c.is(staticDialedConn) {
-				d.dialPeers--
+				d.dialPeers-- //FIXME
 			}
 			delete(d.peers, c.node.ID())
 			d.updateStaticPool(c.node.ID())
@@ -345,7 +345,7 @@ func (d *dialScheduler) logStats() {
 	if d.lastStatsLog.Add(dialStatsLogInterval) > now {
 		return
 	}
-	if d.dialPeers < dialStatsPeerLimit && d.dialPeers < d.maxDialPeers {
+	if d.dialPeers < dialStatsPeerLimit && d.dialPeers < d.maxDialPeers { // FIXME
 		d.log.Info("[p2p] Looking for peers", "protocol", d.subProtocolVersion, "peers", fmt.Sprintf("%d/%d", len(d.peers), d.maxDialPeers), "tried", d.doneSinceLastLog, "static", len(d.static))
 	}
 	d.doneSinceLastLog = 0
@@ -386,11 +386,9 @@ func (d *dialScheduler) expireHistory() {
 // freeDialSlots returns the number of free dial slots. The result can be negative
 // when peers are connected while their task is still running.
 func (d *dialScheduler) freeDialSlots() int {
-	slots := (d.maxDialPeers - d.dialPeers) * 2
-	if slots > d.maxActiveDials {
-		slots = d.maxActiveDials
-	}
-	free := slots - len(d.dialing)
+	slots := d.maxDialPeers.sub(d.dialPeers).mul(2)
+	slots = slots.saturate(d.maxActiveDials)
+	free := slots - len(d.dialing) // FIXME
 	return free
 }
 

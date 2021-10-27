@@ -57,7 +57,7 @@ var (
 	MaxPeersFlag = cli.IntSliceFlag{
 		Name:  "maxpeers",
 		Usage: "Maximum number of network peers (network disabled if set to 0)",
-		Value: &node.DefaultConfig.P2P.MaxPeers,
+		Value: (*cli.IntSlice)(&node.DefaultConfig.P2P.MaxPeers),
 	}
 
 	PruneFlag = cli.StringFlag{

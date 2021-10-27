@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 const (
@@ -55,7 +54,7 @@ const (
 	discmixTimeout = 5 * time.Second
 
 	// Connectivity defaults.
-	defaultMaxPendingPeers = 50
+	defaultMaxPendingPeers = IntSlice{50, 50} // FIXME
 	defaultDialRatio       = 3
 
 	// This time limits inbound connection attempts per source IP.
@@ -78,14 +77,16 @@ type Config struct {
 	// This field must be set to a valid secp256k1 private key.
 	PrivateKey *ecdsa.PrivateKey `toml:"-"`
 
+	EnabledProtocols IntSlice
+
 	// MaxPeers is the maximum number of peers that can be
 	// connected. It must be greater than zero.
-	MaxPeers cli.IntSlice
+	MaxPeers IntSlice
 
 	// MaxPendingPeers is the maximum number of peers that can be pending in the
 	// handshake phase, counted separately for inbound and outbound connections.
 	// Zero defaults to preset values.
-	MaxPendingPeers int `toml:",omitempty"`
+	MaxPendingPeers IntSlice `toml:",omitempty"`
 
 	// DialRatio controls the ratio of inbound to dialed connections.
 	// Example: a DialRatio of 2 allows 1/2 of connections to be dialed.
@@ -660,21 +661,30 @@ func (srv *Server) setupDialScheduler() {
 	}
 }
 
-func (srv *Server) maxInboundConns() int {
-	return srv.MaxPeers - srv.maxDialedConns()
+func (srv *Server) maxInboundConns() IntSlice {
+	return srv.MaxPeers.sub(srv.maxDialedConns())
 }
 
-func (srv *Server) maxDialedConns() (limit int) {
-	if srv.NoDial || srv.MaxPeers == 0 {
+func (srv *Server) rawMaxDialedConns(maxPeers int) (limit int) {
+	if srv.NoDial || maxPeers == 0 {
 		return 0
 	}
 	if srv.DialRatio == 0 {
-		limit = srv.MaxPeers / defaultDialRatio
+		limit = maxPeers / defaultDialRatio
 	} else {
-		limit = srv.MaxPeers / srv.DialRatio
+		limit = maxPeers / srv.DialRatio
 	}
 	if limit == 0 {
 		limit = 1
+	}
+	return limit
+}
+
+func (srv *Server) maxDialedConns() (limit IntSlice) {
+	maxPeersLength := len(srv.MaxPeers)
+	limit = make(IntSlice, maxPeersLength)
+	for i := 0; i < maxPeersLength; i++ {
+		limit[i] = srv.rawMaxDialedConns(srv.MaxPeers[i])
 	}
 	return limit
 }
@@ -835,9 +845,9 @@ running:
 
 func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount int, c *conn) error {
 	switch {
-	case !c.is(trustedConn) && len(peers) >= srv.MaxPeers:
+	case !c.is(trustedConn) && len(peers) >= srv.MaxPeers: // FIXME
 		return DiscTooManyPeers
-	case !c.is(trustedConn) && c.is(inboundConn) && inboundCount >= srv.maxInboundConns():
+	case !c.is(trustedConn) && c.is(inboundConn) && inboundCount >= srv.maxInboundConns(): // FIXME
 		return DiscTooManyPeers
 	case peers[c.node.ID()] != nil:
 		return DiscAlreadyConnected
@@ -866,7 +876,7 @@ func (srv *Server) listenLoop() {
 
 	// The slots channel limits accepts of new connections.
 	tokens := defaultMaxPendingPeers
-	if srv.MaxPendingPeers > 0 {
+	if srv.MaxPendingPeers > 0 { // FIXME
 		tokens = srv.MaxPendingPeers
 	}
 	slots := make(chan struct{}, tokens)

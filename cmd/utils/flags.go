@@ -394,27 +394,45 @@ var (
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non EIP155 signed) transactions to be submitted via RPC",
 	}
-
+	// Network Settings
+	EnabledProtocolsFlag = cli.IntSliceFlag{
+		Name:  "enabledprotocols",
+		Usage: "Select enabled comma separated protocols",
+		Value: (*cli.IntSlice)(&node.DefaultConfig.P2P.EnabledProtocols),
+	}
 	// Network Settings
 	MaxPeersFlag = cli.IntSliceFlag{
 		Name:  "maxpeers",
 		Usage: "Maximum number of network peers (network disabled if set to 0)",
-		Value: &node.DefaultConfig.P2P.MaxPeers,
+		Value: (*cli.IntSlice)(&node.DefaultConfig.P2P.MaxPeers),
 	}
-	MaxPendingPeersFlag = cli.IntFlag{
+	MaxPendingPeersFlag = cli.IntSliceFlag{
 		Name:  "maxpendpeers",
 		Usage: "Maximum number of pending connection attempts (defaults used if set to 0)",
-		Value: node.DefaultConfig.P2P.MaxPendingPeers,
+		Value: (*cli.IntSlice)(&node.DefaultConfig.P2P.MaxPendingPeers),
 	}
 	ListenPortFlag = cli.IntFlag{
 		Name:  "port",
 		Usage: "Network listening port",
 		Value: 30303,
 	}
+	ListenPort66Flag = cli.IntFlag{
+		Name:  "p2p.eth66.port",
+		Usage: "ETH66 Network listening port",
+		Value: 30303,
+	}
 	ListenPort65Flag = cli.IntFlag{
 		Name:  "p2p.eth65.port",
 		Usage: "ETH65 Network listening port",
 		Value: 30304,
+	}
+	Eth66EnableFlag = cli.BoolFlag{
+		Name:  "p2p.eth66.enabled",
+		Usage: "Enables or disables ETH66 protocol",
+	}
+	Eth65EnableFlag = cli.BoolFlag{
+		Name:  "p2p.eth65.enabled",
+		Usage: "Enables or disables ETH65 protocol",
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
@@ -713,7 +731,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
-		MaxPeers:     cli.IntSlice{100, 100},
+		MaxPeers:     p2p.IntSlice{100, 100},
 		NAT:          nat.Any(),
 		NoDiscovery:  nodiscover,
 		PrivateKey:   serverKey,
@@ -761,6 +779,9 @@ func nodeKey(keyfile string) *ecdsa.PrivateKey {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
+	}
+	if ctx.GlobalIsSet(ListenPort66Flag.Name) {
+		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort66Flag.Name))
 	}
 	if ctx.GlobalIsSet(ListenPort65Flag.Name) {
 		cfg.ListenAddr65 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort65Flag.Name))
@@ -843,11 +864,11 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	setStaticPeers(ctx, cfg)
 
 	if ctx.GlobalIsSet(MaxPeersFlag.Name) {
-		cfg.MaxPeers = ctx.GlobalInt(MaxPeersFlag.Name)
+		cfg.MaxPeers = ctx.GlobalIntSlice(MaxPeersFlag.Name)
 	}
 
 	if ctx.GlobalIsSet(MaxPendingPeersFlag.Name) {
-		cfg.MaxPendingPeers = ctx.GlobalInt(MaxPendingPeersFlag.Name)
+		cfg.MaxPendingPeers = ctx.GlobalIntSlice(MaxPendingPeersFlag.Name)
 	}
 	if ctx.GlobalIsSet(NoDiscoverFlag.Name) {
 		cfg.NoDiscovery = true

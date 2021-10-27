@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 type testTransport struct {
@@ -69,12 +68,13 @@ func (c *testTransport) close(err error) {
 
 func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *Server {
 	config := Config{
-		Name:        "test",
-		MaxPeers:    cli.IntSlice{10, 10},
-		ListenAddr:  "127.0.0.1:0",
-		NoDiscovery: true,
-		PrivateKey:  newkey(),
-		Logger:      testlog.Logger(t, log.LvlInfo),
+		Name:             "test",
+		EnabledProtocols: IntSlice{65, 66},
+		MaxPeers:         IntSlice{10, 10},
+		ListenAddr:       "127.0.0.1:0",
+		NoDiscovery:      true,
+		PrivateKey:       newkey(),
+		Logger:           testlog.Logger(t, log.LvlInfo),
 	}
 	server := &Server{
 		Config:      config,
@@ -207,18 +207,20 @@ func TestServerDial(t *testing.T) {
 // This test checks that RemovePeer disconnects the peer if it is connected.
 func TestServerRemovePeerDisconnect(t *testing.T) {
 	srv1 := &Server{Config: Config{
-		PrivateKey:  newkey(),
-		MaxPeers:    cli.IntSlice{1, 1},
-		NoDiscovery: true,
-		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "1"),
+		PrivateKey:       newkey(),
+		EnabledProtocols: IntSlice{65, 66},
+		MaxPeers:         IntSlice{1, 1},
+		NoDiscovery:      true,
+		Logger:           testlog.Logger(t, log.LvlTrace).New("server", "1"),
 	}}
 	srv2 := &Server{Config: Config{
-		PrivateKey:  newkey(),
-		MaxPeers:    cli.IntSlice{1, 1},
-		NoDiscovery: true,
-		NoDial:      true,
-		ListenAddr:  "127.0.0.1:0",
-		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "2"),
+		PrivateKey:       newkey(),
+		EnabledProtocols: IntSlice{65, 66},
+		MaxPeers:         IntSlice{1, 1},
+		NoDiscovery:      true,
+		NoDial:           true,
+		ListenAddr:       "127.0.0.1:0",
+		Logger:           testlog.Logger(t, log.LvlTrace).New("server", "2"),
 	}}
 	if err := srv1.Start(); err != nil {
 		t.Fatal("cant start srv1")
@@ -245,12 +247,13 @@ func TestServerAtCap(t *testing.T) {
 	trustedID := enode.PubkeyToIDV4(&trustedNode.PublicKey)
 	srv := &Server{
 		Config: Config{
-			PrivateKey:   newkey(),
-			MaxPeers:     cli.IntSlice{10, 10},
-			NoDial:       true,
-			NoDiscovery:  true,
-			TrustedNodes: []*enode.Node{newNode(trustedID, "")},
-			Logger:       testlog.Logger(t, log.LvlTrace),
+			PrivateKey:       newkey(),
+			EnabledProtocols: IntSlice{65, 66},
+			MaxPeers:         IntSlice{10, 10},
+			NoDial:           true,
+			NoDiscovery:      true,
+			TrustedNodes:     []*enode.Node{newNode(trustedID, "")},
+			Logger:           testlog.Logger(t, log.LvlTrace),
 		},
 	}
 	if err := srv.Start(); err != nil {
@@ -321,12 +324,13 @@ func TestServerPeerLimits(t *testing.T) {
 
 	srv := &Server{
 		Config: Config{
-			PrivateKey:  srvkey,
-			MaxPeers:    cli.IntSlice{0, 0},
-			NoDial:      true,
-			NoDiscovery: true,
-			Protocols:   []Protocol{discard},
-			Logger:      testlog.Logger(t, log.LvlTrace),
+			PrivateKey:       srvkey,
+			EnabledProtocols: IntSlice{65, 66},
+			MaxPeers:         IntSlice{0, 0},
+			NoDial:           true,
+			NoDiscovery:      true,
+			Protocols:        []Protocol{discard},
+			Logger:           testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return tp },
 	}
@@ -428,12 +432,13 @@ func TestServerSetupConn(t *testing.T) {
 	for i, test := range tests {
 		t.Run(test.wantCalls, func(t *testing.T) {
 			cfg := Config{
-				PrivateKey:  srvkey,
-				MaxPeers:    cli.IntSlice{10, 10},
-				NoDial:      true,
-				NoDiscovery: true,
-				Protocols:   []Protocol{discard},
-				Logger:      testlog.Logger(t, log.LvlTrace),
+				PrivateKey:       srvkey,
+				EnabledProtocols: IntSlice{65, 66},
+				MaxPeers:         IntSlice{10, 10},
+				NoDial:           true,
+				NoDiscovery:      true,
+				Protocols:        []Protocol{discard},
+				Logger:           testlog.Logger(t, log.LvlTrace),
 			}
 			srv := &Server{
 				Config:       cfg,
@@ -514,13 +519,14 @@ func TestServerInboundThrottle(t *testing.T) {
 	newTransportCalled := make(chan struct{})
 	srv := &Server{
 		Config: Config{
-			PrivateKey:  newkey(),
-			ListenAddr:  "127.0.0.1:0",
-			MaxPeers:    cli.IntSlice{10, 10},
-			NoDial:      true,
-			NoDiscovery: true,
-			Protocols:   []Protocol{discard},
-			Logger:      testlog.Logger(t, log.LvlTrace),
+			PrivateKey:       newkey(),
+			ListenAddr:       "127.0.0.1:0",
+			EnabledProtocols: IntSlice{65, 66},
+			MaxPeers:         IntSlice{10, 10},
+			NoDial:           true,
+			NoDiscovery:      true,
+			Protocols:        []Protocol{discard},
+			Logger:           testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport {
 			newTransportCalled <- struct{}{}
