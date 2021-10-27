@@ -396,10 +396,10 @@ var (
 	}
 
 	// Network Settings
-	MaxPeersFlag = cli.IntFlag{
+	MaxPeersFlag = cli.IntSliceFlag{
 		Name:  "maxpeers",
 		Usage: "Maximum number of network peers (network disabled if set to 0)",
-		Value: node.DefaultConfig.P2P.MaxPeers,
+		Value: &node.DefaultConfig.P2P.MaxPeers,
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
@@ -713,7 +713,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
-		MaxPeers:     100,
+		MaxPeers:     cli.IntSlice{100, 100},
 		NAT:          nat.Any(),
 		NoDiscovery:  nodiscover,
 		PrivateKey:   serverKey,

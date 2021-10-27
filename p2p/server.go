@@ -43,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli"
 )
 
 const (
@@ -79,7 +80,7 @@ type Config struct {
 
 	// MaxPeers is the maximum number of peers that can be
 	// connected. It must be greater than zero.
-	MaxPeers int
+	MaxPeers cli.IntSlice
 
 	// MaxPendingPeers is the maximum number of peers that can be pending in the
 	// handshake phase, counted separately for inbound and outbound connections.

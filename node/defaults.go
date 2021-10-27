@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/urfave/cli"
 )
 
 const (
@@ -42,7 +43,7 @@ var DefaultConfig = Config{
 	P2P: p2p.Config{
 		ListenAddr:   ":30303",
 		ListenAddr65: ":30304",
-		MaxPeers:     100,
+		MaxPeers:     cli.IntSlice{100, 100},
 		NAT:          nat.Any(),
 	},
 }

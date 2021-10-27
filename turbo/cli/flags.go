@@ -54,10 +54,10 @@ var (
 		Value: kv.ReadersLimit - 128,
 	}
 
-	MaxPeersFlag = cli.IntFlag{
+	MaxPeersFlag = cli.IntSliceFlag{
 		Name:  "maxpeers",
 		Usage: "Maximum number of network peers (network disabled if set to 0)",
-		Value: node.DefaultConfig.P2P.MaxPeers,
+		Value: &node.DefaultConfig.P2P.MaxPeers,
 	}
 
 	PruneFlag = cli.StringFlag{

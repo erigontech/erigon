@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli"
 )
 
 type testTransport struct {
@@ -69,7 +70,7 @@ func (c *testTransport) close(err error) {
 func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *Server {
 	config := Config{
 		Name:        "test",
-		MaxPeers:    10,
+		MaxPeers:    cli.IntSlice{10, 10},
 		ListenAddr:  "127.0.0.1:0",
 		NoDiscovery: true,
 		PrivateKey:  newkey(),
@@ -207,13 +208,13 @@ func TestServerDial(t *testing.T) {
 func TestServerRemovePeerDisconnect(t *testing.T) {
 	srv1 := &Server{Config: Config{
 		PrivateKey:  newkey(),
-		MaxPeers:    1,
+		MaxPeers:    cli.IntSlice{1, 1},
 		NoDiscovery: true,
 		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "1"),
 	}}
 	srv2 := &Server{Config: Config{
 		PrivateKey:  newkey(),
-		MaxPeers:    1,
+		MaxPeers:    cli.IntSlice{1, 1},
 		NoDiscovery: true,
 		NoDial:      true,
 		ListenAddr:  "127.0.0.1:0",
@@ -245,7 +246,7 @@ func TestServerAtCap(t *testing.T) {
 	srv := &Server{
 		Config: Config{
 			PrivateKey:   newkey(),
-			MaxPeers:     10,
+			MaxPeers:     cli.IntSlice{10, 10},
 			NoDial:       true,
 			NoDiscovery:  true,
 			TrustedNodes: []*enode.Node{newNode(trustedID, "")},
@@ -321,7 +322,7 @@ func TestServerPeerLimits(t *testing.T) {
 	srv := &Server{
 		Config: Config{
 			PrivateKey:  srvkey,
-			MaxPeers:    0,
+			MaxPeers:    cli.IntSlice{0, 0},
 			NoDial:      true,
 			NoDiscovery: true,
 			Protocols:   []Protocol{discard},
@@ -428,7 +429,7 @@ func TestServerSetupConn(t *testing.T) {
 		t.Run(test.wantCalls, func(t *testing.T) {
 			cfg := Config{
 				PrivateKey:  srvkey,
-				MaxPeers:    10,
+				MaxPeers:    cli.IntSlice{10, 10},
 				NoDial:      true,
 				NoDiscovery: true,
 				Protocols:   []Protocol{discard},
@@ -515,7 +516,7 @@ func TestServerInboundThrottle(t *testing.T) {
 		Config: Config{
 			PrivateKey:  newkey(),
 			ListenAddr:  "127.0.0.1:0",
-			MaxPeers:    10,
+			MaxPeers:    cli.IntSlice{10, 10},
 			NoDial:      true,
 			NoDiscovery: true,
 			Protocols:   []Protocol{discard},

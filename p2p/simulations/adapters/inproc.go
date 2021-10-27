@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/simulations/pipes"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli"
 
 	"github.com/gorilla/websocket"
 )
@@ -95,7 +96,7 @@ func (s *SimAdapter) NewNode(config *NodeConfig) (Node, error) {
 	n, err := node.New(&node.Config{
 		P2P: p2p.Config{
 			PrivateKey:      config.PrivateKey,
-			MaxPeers:        math.MaxInt32,
+			MaxPeers:        cli.IntSlice{math.MaxInt32, math.MaxInt32},
 			NoDiscovery:     true,
 			Dialer:          s,
 			EnableMsgEvents: config.EnableMsgEvents,
