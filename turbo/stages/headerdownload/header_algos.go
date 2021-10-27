@@ -563,7 +563,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 	}
 	anchor.timeouts++
 	anchor.timestamp = currentTime + timeout
-	heap.Fix(hd.anchorQueue, 0)
+	heap.Fix(hd.anchorQueue, anchor.idx)
 }
 
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {

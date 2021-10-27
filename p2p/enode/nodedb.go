@@ -127,7 +127,7 @@ func newMemoryDB(logger log.Logger) (*DB, error) {
 func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	var db kv.RwDB
 	var err error
-	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(256 * datasize.MB).WithTablessCfg(bucketsConfig).Open()
+	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(1024 * datasize.MB).WithTablessCfg(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
