@@ -168,7 +168,16 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
+	var db kv.RwDB
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	if t != nil {
+		db = memdb.NewTestDB(t)
+	} else {
+		db = memdb.New()
+	}
+	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db)
 	mock := &MockSentry{
+		Ctx: ctx, cancel: ctxCancel, DB: db,
 		t:           t,
 		Log:         log.New(),
 		tmpdir:      tmpdir,
@@ -178,16 +187,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		Notifications: &stagedsync.Notifications{
 			Events:               privateapi.NewEvents(),
 			Accumulator:          shards.NewAccumulator(gspec.Config),
-			StateChangesConsumer: nil,
+			StateChangesConsumer: erigonGrpcServeer,
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
 		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
-	}
-	if t != nil {
-		mock.DB = memdb.NewTestDB(t)
-	} else {
-		mock.DB = memdb.New()
 	}
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
@@ -229,7 +233,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		poolCfg := txpool2.DefaultConfig
 		newTxs := make(chan txpool2.Hashes, 1024)
-		defer close(newTxs)
+		t.Cleanup(func() {
+			close(newTxs)
+		})
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
 		mock.TxPoolV2, err = txpool2.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
 		if err != nil {
@@ -237,22 +243,19 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 		txPoolDB := memdb.NewTestPoolDB(t)
 
-		stateChangesClient := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(mock.Ctx, mock.DB))
+		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
 		mock.TxPoolV2Fetch = txpool2.NewFetch(mock.Ctx, sentries, mock.TxPoolV2, stateChangesClient, mock.DB, txPoolDB, *chainID)
 		mock.TxPoolV2Fetch.SetWaitGroup(&mock.ReceiveWg)
 		mock.TxPoolV2Send = txpool2.NewSend(mock.Ctx, sentries, mock.TxPoolV2)
 		mock.TxPoolV2GrpcServer = txpool2.NewGrpcServer(mock.Ctx, mock.TxPoolV2, txPoolDB, *chainID)
-		fmt.Printf("3\n")
+
 		mock.TxPoolV2Fetch.ConnectCore()
-		mock.TxPoolV2Fetch.ConnectSentries()
-		fmt.Printf("4\n")
 		mock.StreamWg.Add(1)
-		go txpool2.MainLoop(mock.Ctx,
-			txPoolDB, mock.DB,
-			mock.TxPoolV2, newTxs, mock.TxPoolV2Send, mock.TxPoolV2GrpcServer.NewSlotsStreams,
-			func() {})
+		mock.TxPoolV2Fetch.ConnectSentries()
 		mock.StreamWg.Wait()
+
+		go txpool2.MainLoop(mock.Ctx, txPoolDB, mock.DB, mock.TxPoolV2, newTxs, mock.TxPoolV2Send, mock.TxPoolV2GrpcServer.NewSlotsStreams, func() {})
 	}
 
 	// Committed genesis will be shared between download and mock sentry
@@ -400,7 +403,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 // Mock is conviniece function to create a mock with some pre-set values
 func Mock(t *testing.T) *MockSentry {
-	funds := big.NewInt(1000000000)
+	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := params.AllEthashProtocolChanges
@@ -470,8 +473,14 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
+	if ms.TxPoolV2 != nil {
+		ms.ReceiveWg.Add(1)
+	}
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
+	}
+	if ms.TxPoolV2 != nil {
+		ms.ReceiveWg.Wait() // Wait for TxPool notification
 	}
 	// Check if the latest header was imported or rolled back
 	if err = ms.DB.View(ms.Ctx, func(tx kv.Tx) error {
