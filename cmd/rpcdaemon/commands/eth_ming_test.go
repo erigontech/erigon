@@ -16,7 +16,7 @@ import (
 )
 
 func TestPendingBlock(t *testing.T) {
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn2(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -42,7 +42,7 @@ func TestPendingBlock(t *testing.T) {
 }
 
 func TestPendingLogs(t *testing.T) {
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn2(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
 	expect := []byte{211}

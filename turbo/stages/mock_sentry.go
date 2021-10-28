@@ -168,13 +168,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
-	var db kv.RwDB
+
+	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	if t != nil {
-		db = memdb.NewTestDB(t)
-	} else {
-		db = memdb.New()
+		context.WithValue(ctx, "_test_name", t.Name())
 	}
+
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db)
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
@@ -193,7 +193,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
 	}
-	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 	var err error
 
@@ -214,6 +213,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
 	cfg.TxPool.V2 = true
+	var txPoolDB kv.RwDB
+
 	if !cfg.TxPool.V2 {
 		mock.TxPool = core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
 		mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, sentries, mock.TxPool)
@@ -243,12 +244,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if err != nil {
 			t.Fatal(err)
 		}
-		var txPoolDB kv.RwDB
-		if t != nil {
-			txPoolDB = memdb.NewTestPoolDB(t)
-		} else {
-			txPoolDB = memdb.NewPoolDB()
-		}
+		txPoolDB = memdb.NewPoolDB()
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
@@ -405,6 +401,18 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			}
 		})
 	}
+
+	if t != nil {
+		t.Cleanup(func() {
+			fmt.Printf("cancel tx!!\n")
+			ctxCancel()
+			db.Close()
+			if txPoolDB != nil {
+				txPoolDB.Close()
+			}
+		})
+	}
+
 	return mock
 }
 
