@@ -16,7 +16,9 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
@@ -104,6 +106,9 @@ func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRe
 func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
+}
+func (ms *MockSentry) Peers(req *proto_sentry.PeersRequest, server proto_sentry.Sentry_PeersServer) error {
+	return nil
 }
 func (ms *MockSentry) SendMessageById(_ context.Context, r *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
@@ -204,6 +209,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte { return nil }
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
+	cfg.TxPool.V2 = true
 	if !cfg.TxPool.V2 {
 		mock.TxPool = core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
 		mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, sentries, mock.TxPool)
@@ -221,7 +227,32 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 		mock.TxPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(mock.TxPool.Has, mock.TxPool.AddRemotes, fetchTx)
 	} else {
+		poolCfg := txpool2.DefaultConfig
+		newTxs := make(chan txpool2.Hashes, 1024)
+		defer close(newTxs)
+		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
+		mock.TxPoolV2, err = txpool2.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		txPoolDB := memdb.NewTestPoolDB(t)
 
+		stateChangesClient := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(mock.Ctx, mock.DB))
+
+		mock.TxPoolV2Fetch = txpool2.NewFetch(mock.Ctx, sentries, mock.TxPoolV2, stateChangesClient, mock.DB, txPoolDB, *chainID)
+		mock.TxPoolV2Fetch.SetWaitGroup(&mock.ReceiveWg)
+		mock.TxPoolV2Send = txpool2.NewSend(mock.Ctx, sentries, mock.TxPoolV2)
+		mock.TxPoolV2GrpcServer = txpool2.NewGrpcServer(mock.Ctx, mock.TxPoolV2, txPoolDB, *chainID)
+		fmt.Printf("3\n")
+		mock.TxPoolV2Fetch.ConnectCore()
+		mock.TxPoolV2Fetch.ConnectSentries()
+		fmt.Printf("4\n")
+		mock.StreamWg.Add(1)
+		go txpool2.MainLoop(mock.Ctx,
+			txPoolDB, mock.DB,
+			mock.TxPoolV2, newTxs, mock.TxPoolV2Send, mock.TxPoolV2GrpcServer.NewSlotsStreams,
+			func() {})
+		mock.StreamWg.Wait()
 	}
 
 	// Committed genesis will be shared between download and mock sentry

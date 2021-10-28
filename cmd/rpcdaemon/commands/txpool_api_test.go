@@ -28,7 +28,7 @@ func TestTxPoolContent(t *testing.T) {
 	err = m.InsertChain(chain)
 	require.NoError(err)
 
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn2(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), false), m.DB, txPool)
