@@ -6,13 +6,13 @@ Has 2 modes: internal and external
 
 ## Internal mode
 
-Works inside Erigon: add `--txpool.v2` flags to Erigon, and `--txpool.v2 --txpool.api.addr localhost:9090` flags to
-RPCDaemon
+It's default. No special flags required. But if in RPCDaemon you using custom `--private.api.addr` flag, then set same
+value to `--txpool.api.addr` flag.
 
 ## External mode
 
-Works in separated process and **require** external Sentry. TxPool connect to Erigon and Sentry. RPCDaemon connect to
-TxPool. Build by:
+Add `--txpool.disable` to erigon. External TxPool works in separated process and **require** external Sentry. TxPool
+connect to Erigon and Sentry. RPCDaemon connect to TxPool. Build by:
 
 ```
 make txpool
@@ -21,7 +21,7 @@ make txpool
 Start by:
 
 ```
-# Add `--state.stream --txpool.disable` flags to Erigon.
+# Add `--txpool.disable` flags to Erigon.
 ./build/bin/sentry
 ./build/bin/txpool
 ```
@@ -34,22 +34,10 @@ To change address/port of Erigon or Sentry:
 
 ## Increase pool limits
 
-Will add this part soon [tbd]
+In `./build/bin/txpool --help` see flags: `--txpool.globalslots`, `--txpool.globalbasefeeeslots`, `--txpool.globalqueue`
 
 ## ToDo list
 
-[x] Remote-mode support - with coherent state cache
-[x] Persistence
-[x] Grafana board
-[x] Non-mainnet support
-[x] DevNet - doesn't send mined block notification on first mined block (because initialCycle = true)
-[x] DiscardReasons - user must understand clearly why tx were rejected
-[x] Notify about new pending transactions - we sending more than need
-[x] Handle "NewBlock" message with 200K transactions re-calculation - in under 50ms
-[x] Add --txpool.globalslots, --txpool.globalqueue,--txpool.globalbasefeeeslots
-[x] Add --txpool.accountslots
-[x] Add --txpool.pricelimit
-[] Add way for simple introspection - where is tx and why
 [] Hard-forks support (now rules are parsed ones on txPool start)
 [] Add pool to docker-compose
 [] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
