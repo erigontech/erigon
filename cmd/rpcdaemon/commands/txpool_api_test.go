@@ -52,7 +52,6 @@ func TestTxPoolContent(t *testing.T) {
 	require.NoError(err)
 
 	sender := m.Address.String()
-	fmt.Printf("%d,%d,%d\n", len(content["pending"][sender]), len(content["baseFee"][sender]), len(content["queued"][sender]))
 	require.Equal(1, len(content["pending"][sender]))
 	require.Equal(expectValue, content["pending"][sender]["0"].Value.ToInt().Uint64())
 
@@ -61,5 +60,4 @@ func TestTxPoolContent(t *testing.T) {
 	require.Len(status, 3)
 	require.Equal(status["pending"], hexutil.Uint(1))
 	require.Equal(status["queued"], hexutil.Uint(0))
-	fmt.Printf("test end\n")
 }
