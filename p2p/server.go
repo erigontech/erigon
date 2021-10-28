@@ -54,8 +54,7 @@ const (
 	discmixTimeout = 5 * time.Second
 
 	// Connectivity defaults.
-	defaultMaxPendingPeers = IntSlice{50, 50} // FIXME
-	defaultDialRatio       = 3
+	defaultDialRatio = 3
 
 	// This time limits inbound connection attempts per source IP.
 	inboundThrottleTime = 30 * time.Second
@@ -67,6 +66,8 @@ const (
 	// Maximum amount of time allowed for writing a complete message.
 	frameWriteTimeout = 20 * time.Second
 )
+
+var defaultMaxPendingPeers = IntSlice{50, 50}
 
 var EnodeAddressFileName = path.Join(os.TempDir(), "enode_address.tmp")
 
@@ -876,8 +877,10 @@ func (srv *Server) listenLoop() {
 
 	// The slots channel limits accepts of new connections.
 	tokens := defaultMaxPendingPeers
-	if srv.MaxPendingPeers > 0 { // FIXME
-		tokens = srv.MaxPendingPeers
+	for i := 0; i < len(defaultMaxPendingPeers); i++ {
+		if srv.MaxPendingPeers[i] > 0 {
+			tokens[i] = srv.MaxPendingPeers[i]
+		}
 	}
 	slots := make(chan struct{}, tokens)
 	for i := 0; i < tokens; i++ {

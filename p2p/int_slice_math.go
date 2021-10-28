@@ -28,6 +28,30 @@ func (a IntSlice) mul(b int) IntSlice {
 	return returnValue
 }
 
+func (a IntSlice) smaller_than(b IntSlice) BoolSlice {
+	len_a := len(a)
+	if len_a != len(b) {
+		panic("Error, operands must have the same lenght!")
+	}
+	returnValue := make(BoolSlice, len_a)
+	for i := 0; i < len_a; i++ {
+		returnValue[i] = a[i] < b[i]
+	}
+	return returnValue
+}
+
+func (a IntSlice) larger_than_or_equal(b IntSlice) BoolSlice {
+	len_a := len(a)
+	if len_a != len(b) {
+		panic("Error, operands must have the same lenght!")
+	}
+	returnValue := make(BoolSlice, len_a)
+	for i := 0; i < len_a; i++ {
+		returnValue[i] = a[i] >= b[i]
+	}
+	return returnValue
+}
+
 func (a IntSlice) larger_than(b IntSlice) BoolSlice {
 	len_a := len(a)
 	if len_a != len(b) {
@@ -48,4 +72,13 @@ func (a IntSlice) saturate(b IntSlice) IntSlice {
 		}
 	}
 	return a
+}
+
+func (a BoolSlice) all(signal bool) bool {
+	for i := 0; i < len(a); i++ {
+		if a[i] == !signal {
+			return false
+		}
+	}
+	return true
 }

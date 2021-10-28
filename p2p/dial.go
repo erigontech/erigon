@@ -43,12 +43,13 @@ const (
 
 	// Config for the "Looking for peers" message.
 	dialStatsLogInterval = 60 * time.Second // printed at most this often
-	dialStatsPeerLimit   = 20               // but not if more than this many dialed peers
 
 	// Endpoint resolution is throttled with bounded backoff.
 	initialResolveDelay = 60 * time.Second
 	maxResolveDelay     = time.Hour
 )
+
+var dialStatsPeerLimit = IntSlice{20, 20} // but not if more than this many dialed peers
 
 // NodeDialer is used to connect to nodes in the network, typically by using
 // an underlying net.Dialer but also using net.Pipe in tests.
@@ -146,8 +147,10 @@ type dialConfig struct {
 }
 
 func (cfg dialConfig) withDefaults() dialConfig {
-	if cfg.maxActiveDials == 0 { // FIXME
-		cfg.maxActiveDials = defaultMaxPendingPeers
+	for i := 0; i < len(cfg.maxActiveDials); i++ {
+		if cfg.maxActiveDials[i] == 0 {
+			cfg.maxActiveDials[i] = defaultMaxPendingPeers[i]
+		}
 	}
 	if cfg.log == nil {
 		cfg.log = log.Root()
@@ -345,7 +348,7 @@ func (d *dialScheduler) logStats() {
 	if d.lastStatsLog.Add(dialStatsLogInterval) > now {
 		return
 	}
-	if d.dialPeers < dialStatsPeerLimit && d.dialPeers < d.maxDialPeers { // FIXME
+	if d.dialPeers.smaller_than(dialStatsPeerLimit).all(true) && d.dialPeers.smaller_than(d.maxDialPeers).all(true) { // FIXME
 		d.log.Info("[p2p] Looking for peers", "protocol", d.subProtocolVersion, "peers", fmt.Sprintf("%d/%d", len(d.peers), d.maxDialPeers), "tried", d.doneSinceLastLog, "static", len(d.static))
 	}
 	d.doneSinceLastLog = 0
