@@ -247,7 +247,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if t != nil {
 			txPoolDB = memdb.NewTestPoolDB(t)
 		} else {
-			txPoolDB = memdb.New()
+			txPoolDB = memdb.NewPoolDB()
 		}
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
