@@ -24,6 +24,7 @@ import (
 )
 
 func TestBlockchain(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
