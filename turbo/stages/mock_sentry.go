@@ -89,10 +89,14 @@ type MockSentry struct {
 
 func (ms *MockSentry) Close() {
 	ms.cancel()
-	ms.DB.Close()
+	if ms.TxPool != nil {
+		ms.TxPool.Stop()
+		ms.TxPoolP2PServer.TxFetcher.Stop()
+	}
 	if ms.txPoolV2DB != nil {
 		ms.txPoolV2DB.Close()
 	}
+	ms.DB.Close()
 }
 
 // Stream returns stream, waiting if necessary
@@ -158,19 +162,19 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 }
 
 func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
-	return MockWithGenesisStorageMode(t, gspec, key, prune.DefaultMode)
+	return MockWithGenesisPruneMode(t, gspec, key, prune.DefaultMode)
 }
 
 func MockWithGenesisEngine(t *testing.T, gspec *core.Genesis, engine consensus.Engine) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine)
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, engine, false)
 }
 
-func MockWithGenesisStorageMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode) *MockSentry {
-	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker())
+func MockWithGenesisPruneMode(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode) *MockSentry {
+	return MockWithEverything(t, gspec, key, prune, ethash.NewFaker(), false)
 }
 
-func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine) *MockSentry {
+func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine consensus.Engine, withTxPool bool) *MockSentry {
 	var tmpdir string
 	if t != nil {
 		tmpdir = t.TempDir()
@@ -213,61 +217,64 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.BodyDownloadTimeoutSeconds = 10
+	cfg.TxPool.Disable = !withTxPool
 	cfg.TxPool.Journal = ""
 	cfg.TxPool.StartOnInit = true
-	txPoolConfig := cfg.TxPool
+
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte { return nil }
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
-	cfg.TxPool.V2 = true
-
-	if !cfg.TxPool.V2 {
-		mock.TxPool = core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
-		mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, sentries, mock.TxPool)
-		if err != nil {
-			if t != nil {
-				t.Fatal(err)
-			} else {
-				panic(err)
+	if !cfg.TxPool.Disable {
+		txPoolConfig := cfg.TxPool
+		cfg.TxPool.V2 = true
+		if !cfg.TxPool.V2 {
+			mock.TxPool = core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
+			mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, sentries, mock.TxPool)
+			if err != nil {
+				if t != nil {
+					t.Fatal(err)
+				} else {
+					panic(err)
+				}
 			}
+			fetchTx := func(PeerId string, hashes []common.Hash) error {
+				mock.TxPoolP2PServer.SendTxsRequest(context.TODO(), PeerId, hashes)
+				return nil
+			}
+
+			mock.TxPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(mock.TxPool.Has, mock.TxPool.AddRemotes, fetchTx)
+		} else {
+			poolCfg := txpool2.DefaultConfig
+			newTxs := make(chan txpool2.Hashes, 1024)
+			if t != nil {
+				t.Cleanup(func() {
+					close(newTxs)
+				})
+			}
+			chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
+			mock.TxPoolV2, err = txpool2.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mock.txPoolV2DB = memdb.NewPoolDB()
+
+			stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
+
+			mock.TxPoolV2Fetch = txpool2.NewFetch(mock.Ctx, sentries, mock.TxPoolV2, stateChangesClient, mock.DB, mock.txPoolV2DB, *chainID)
+			mock.TxPoolV2Fetch.SetWaitGroup(&mock.ReceiveWg)
+			mock.TxPoolV2Send = txpool2.NewSend(mock.Ctx, sentries, mock.TxPoolV2)
+			mock.TxPoolV2GrpcServer = txpool2.NewGrpcServer(mock.Ctx, mock.TxPoolV2, mock.txPoolV2DB, *chainID)
+
+			mock.TxPoolV2Fetch.ConnectCore()
+			mock.StreamWg.Add(1)
+			mock.TxPoolV2Fetch.ConnectSentries()
+			mock.StreamWg.Wait()
+
+			go txpool2.MainLoop(mock.Ctx, mock.txPoolV2DB, mock.DB, mock.TxPoolV2, newTxs, mock.TxPoolV2Send, mock.TxPoolV2GrpcServer.NewSlotsStreams, func() {})
 		}
-		fetchTx := func(PeerId string, hashes []common.Hash) error {
-			mock.TxPoolP2PServer.SendTxsRequest(context.TODO(), PeerId, hashes)
-			return nil
-		}
-
-		mock.TxPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(mock.TxPool.Has, mock.TxPool.AddRemotes, fetchTx)
-	} else {
-		poolCfg := txpool2.DefaultConfig
-		newTxs := make(chan txpool2.Hashes, 1024)
-		if t != nil {
-			t.Cleanup(func() {
-				close(newTxs)
-			})
-		}
-		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
-		mock.TxPoolV2, err = txpool2.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mock.txPoolV2DB = memdb.NewPoolDB()
-
-		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
-
-		mock.TxPoolV2Fetch = txpool2.NewFetch(mock.Ctx, sentries, mock.TxPoolV2, stateChangesClient, mock.DB, mock.txPoolV2DB, *chainID)
-		mock.TxPoolV2Fetch.SetWaitGroup(&mock.ReceiveWg)
-		mock.TxPoolV2Send = txpool2.NewSend(mock.Ctx, sentries, mock.TxPoolV2)
-		mock.TxPoolV2GrpcServer = txpool2.NewGrpcServer(mock.Ctx, mock.TxPoolV2, mock.txPoolV2DB, *chainID)
-
-		mock.TxPoolV2Fetch.ConnectCore()
-		mock.StreamWg.Add(1)
-		mock.TxPoolV2Fetch.ConnectSentries()
-		mock.StreamWg.Wait()
-
-		go txpool2.MainLoop(mock.Ctx, mock.txPoolV2DB, mock.DB, mock.TxPoolV2, newTxs, mock.TxPoolV2Send, mock.TxPoolV2GrpcServer.NewSlotsStreams, func() {})
 	}
 
 	// Committed genesis will be shared between download and mock sentry
@@ -399,17 +406,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.StreamWg.Add(1)
 	go download.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
-	if t != nil {
-		t.Cleanup(func() {
-			mock.cancel()
-			if cfg.TxPool.V2 {
-
-			} else {
-				mock.TxPool.Stop()
-				mock.TxPoolP2PServer.TxFetcher.Stop()
-			}
-		})
-	}
 
 	return mock
 }
@@ -427,6 +423,21 @@ func Mock(t *testing.T) *MockSentry {
 		},
 	}
 	return MockWithGenesis(t, gspec, key)
+}
+
+func MockWithTxPool(t *testing.T) *MockSentry {
+	funds := big.NewInt(1 * params.Ether)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	chainConfig := params.AllEthashProtocolChanges
+	gspec := &core.Genesis{
+		Config: chainConfig,
+		Alloc: core.GenesisAlloc{
+			address: {Balance: funds},
+		},
+	}
+
+	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true)
 }
 
 func (ms *MockSentry) EnableLogs() {
