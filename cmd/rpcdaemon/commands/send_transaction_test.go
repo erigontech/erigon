@@ -67,7 +67,7 @@ func TestSendRawTransaction(t *testing.T) {
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(err)
 
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn2(t, m)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)

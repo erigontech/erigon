@@ -35,7 +35,7 @@ func TestEthSubscribe(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn2(t, m)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	backend := services.NewRemoteBackend(conn)
 	ff := filters.New(ctx, backend, nil, nil)
 

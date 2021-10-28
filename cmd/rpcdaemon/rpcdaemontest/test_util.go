@@ -221,44 +221,6 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	server := grpc.NewServer()
 
 	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.Notifications.Events))
-	txpool.RegisterTxpoolServer(server, privateapi.NewTxPoolServer(ctx, m.TxPoolP2PServer.TxPool))
-	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
-	listener := bufconn.Listen(1024 * 1024)
-
-	dialer := func() func(context.Context, string) (net.Conn, error) {
-		go func() {
-			if err := server.Serve(listener); err != nil {
-				panic(err)
-			}
-		}()
-		return func(context.Context, string) (net.Conn, error) {
-			return listener.Dial()
-		}
-	}
-
-	conn, err := grpc.DialContext(ctx, "", grpc.WithInsecure(), grpc.WithContextDialer(dialer()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		cancel()
-		conn.Close()
-	})
-	return ctx, conn
-}
-
-func CreateTestGrpcConn2(t *testing.T, m *stages.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
-	ctx, cancel := context.WithCancel(context.Background())
-
-	apis := m.Engine.APIs(nil)
-	if len(apis) < 1 {
-		t.Fatal("couldn't instantiate Engine api")
-	}
-
-	ethashApi := apis[1].Service.(*ethash.API)
-	server := grpc.NewServer()
-
-	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.Notifications.Events))
 	txpool.RegisterTxpoolServer(server, m.TxPoolV2GrpcServer)
 	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
 	listener := bufconn.Listen(1024 * 1024)
