@@ -177,13 +177,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.Ctx, mock.cancel = context.WithCancel(context.Background())
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 	var err error
-	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) []byte {
-		return nil
-	}
-	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {
-	}
-	penalize := func(context.Context, []headerdownload.PenaltyItem) {
-	}
+
+	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) []byte { return nil }
+	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
+	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
@@ -191,15 +188,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.TxPool.Journal = ""
 	cfg.TxPool.StartOnInit = true
 	txPoolConfig := cfg.TxPool
+	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
+	sentries := []direct.SentryClient{mock.SentryClient}
 
-	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte {
-		return nil
-	}
-	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {
-	}
+	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte { return nil }
+	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 	txPool := core.NewTxPool(txPoolConfig, mock.ChainConfig, mock.DB)
-	txSentryClient := direct.NewSentryClientDirect(eth.ETH66, mock)
-	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, []direct.SentryClient{txSentryClient}, txPool)
+	mock.TxPoolP2PServer, err = txpool.NewP2PServer(mock.Ctx, sentries, txPool)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -225,8 +220,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
-	sentries := []direct.SentryClient{mock.SentryClient}
 	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
 		if t != nil {
