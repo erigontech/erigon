@@ -26,8 +26,15 @@ import (
 )
 
 func New() kv.RwDB {
-	logger := log.New() //TODO: move higher
-	return mdbx.NewMDBX(logger).InMem().MustOpen()
+	return mdbx.NewMDBX(log.New()).InMem().MustOpen()
+}
+
+func NewPoolDB() kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem().Label(kv.TxPoolDB).WithTablessCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+}
+
+func NewSentryDB() kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem().Label(kv.SentryDB).WithTablessCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.SentryTablesCfg }).MustOpen()
 }
 
 func NewTestDB(t testing.TB) kv.RwDB {
@@ -35,11 +42,28 @@ func NewTestDB(t testing.TB) kv.RwDB {
 	t.Cleanup(db.Close)
 	return db
 }
+
 func NewTestPoolDB(t testing.TB) kv.RwDB {
-	logger := log.New() //TODO: move higher
-	db := mdbx.NewMDBX(logger).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+	db := NewPoolDB()
 	t.Cleanup(db.Close)
 	return db
+}
+
+func NewTestSentrylDB(t testing.TB) kv.RwDB {
+	db := NewPoolDB()
+	t.Cleanup(db.Close)
+	return db
+}
+
+func NewTestTx(t testing.TB) (kv.RwDB, kv.RwTx) {
+	db := New()
+	t.Cleanup(db.Close)
+	tx, err := db.BeginRw(context.Background()) //nolint
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tx.Rollback)
+	return db, tx
 }
 
 func NewTestPoolTx(t testing.TB) (kv.RwDB, kv.RwTx) {
@@ -54,13 +78,14 @@ func NewTestPoolTx(t testing.TB) (kv.RwDB, kv.RwTx) {
 	return db, tx
 }
 
-func NewTestTx(t testing.TB) (kv.RwDB, kv.RwTx) {
-	db := New()
-	t.Cleanup(db.Close)
+func NewTestSentryTx(t testing.TB) (kv.RwDB, kv.RwTx) {
+	db := NewTestSentrylDB(t)
 	tx, err := db.BeginRw(context.Background()) //nolint
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(tx.Rollback)
+	if t != nil {
+		t.Cleanup(tx.Rollback)
+	}
 	return db, tx
 }

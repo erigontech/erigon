@@ -331,7 +331,6 @@ func (db *MdbxKV) Close() {
 	if db.env == nil {
 		return
 	}
-
 	db.wg.Wait()
 	db.env.Close()
 	db.env = nil

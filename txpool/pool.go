@@ -1163,6 +1163,10 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 					continue
 				}
+				if stopped := common.Stopped(ctx.Done()); stopped != nil {
+					continue
+				}
+
 				log.Error("[txpool] process batch remote txs", "err", err)
 			}
 		case <-commitEvery.C:

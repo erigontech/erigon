@@ -101,7 +101,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req65, &grpc.EmptyCallOption{})
 				if err != nil {
 					log.Warn("[txpool.send] BroadcastLocalPooledTxs", "err", err)
-				} else {
+				} else if peers != nil {
 					avgPeersPerSent65 += len(peers.Peers)
 				}
 			case direct.ETH66:
@@ -114,7 +114,7 @@ func (f *Send) BroadcastLocalPooledTxs(txs Hashes) (sentToPeers int) {
 				peers, err := sentryClient.SendMessageToAll(f.ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
 					log.Warn("[txpool.send] BroadcastLocalPooledTxs", "err", err)
-				} else {
+				} else if peers != nil {
 					avgPeersPerSent66 += len(peers.Peers)
 				}
 			}
