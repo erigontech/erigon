@@ -26,7 +26,6 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -57,12 +56,11 @@ type GrpcServer struct {
 	db              kv.RoDB
 	NewSlotsStreams *NewSlotsStreams
 
-	rules   chain.Rules
 	chainID uint256.Int
 }
 
-func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, rules chain.Rules, chainID uint256.Int) *GrpcServer {
-	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, rules: rules, chainID: chainID}
+func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, chainID uint256.Int) *GrpcServer {
+	return &GrpcServer{ctx: ctx, txPool: txPool, db: db, NewSlotsStreams: &NewSlotsStreams{}, chainID: chainID}
 }
 
 func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {

@@ -101,23 +101,22 @@ func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, 
 		return nil, nil, nil, nil, nil, err
 	}
 
-	chainConfig, blockNum, err := SaveChainConfigIfNeed(ctx, chainDB, txPoolDB, true)
+	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, txPoolDB, true)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 
-	rules := chain.NewRules(chainConfig, blockNum)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	txPool, err := txpool.New(newTxs, chainDB, cfg, cache, *chainID)
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
 
-	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, chainDB, txPoolDB, rules, *chainID)
+	fetch := txpool.NewFetch(ctx, sentryClients, txPool, stateChangesClient, chainDB, txPoolDB, *chainID)
 	//fetch.ConnectCore()
 	//fetch.ConnectSentries()
 
 	send := txpool.NewSend(ctx, sentryClients, txPool)
-	txpoolGrpcServer := txpool.NewGrpcServer(ctx, txPool, txPoolDB, rules, *chainID)
+	txpoolGrpcServer := txpool.NewGrpcServer(ctx, txPool, txPoolDB, *chainID)
 	return txPoolDB, txPool, fetch, send, txpoolGrpcServer, nil
 }
