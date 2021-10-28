@@ -233,15 +233,22 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		poolCfg := txpool2.DefaultConfig
 		newTxs := make(chan txpool2.Hashes, 1024)
-		t.Cleanup(func() {
-			close(newTxs)
-		})
+		if t != nil {
+			t.Cleanup(func() {
+				close(newTxs)
+			})
+		}
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
 		mock.TxPoolV2, err = txpool2.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		txPoolDB := memdb.NewTestPoolDB(t)
+		var txPoolDB kv.RwDB
+		if t != nil {
+			txPoolDB = memdb.NewTestPoolDB(t)
+		} else {
+			txPoolDB = memdb.New()
+		}
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
