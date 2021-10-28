@@ -38,7 +38,7 @@ In `./build/bin/txpool --help` see flags: `--txpool.globalslots`, `--txpool.glob
 
 ## ToDo list
 
-[] Hard-forks support (now rules are parsed ones on txPool start)
+[] Hard-forks support (now TxPool require restart - after hard-fork happens)
 [] Add pool to docker-compose
 [] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
 [] Save history of local transactions - with 1 day expiration
