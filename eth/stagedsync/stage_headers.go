@@ -163,7 +163,7 @@ Loop:
 			cfg.announceNewHashes(ctx, announces)
 		}
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
-			if !cfg.noP2PDiscovery && !initialCycle {
+			if !initialCycle {
 				// if this is not an initial cycle, we need to react quickly when new headers are coming in
 				break
 			}
