@@ -1695,7 +1695,7 @@ func compress1(chaindata string, name string) error {
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReader(f)
+	r := bufio.NewReaderSize(f, etl.BufIOSize)
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
 	ch := make(chan []byte, runtime.NumCPU())
@@ -1730,6 +1730,7 @@ func compress1(chaindata string, name string) error {
 			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
 		}
 	}
+	itemsCount := i
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
@@ -1774,7 +1775,17 @@ func compress1(chaindata string, name string) error {
 		return err
 	}
 	df.Close()
-	return reducedict(name)
+
+	if err := reducedict(name); err != nil {
+		return err
+	}
+	if err := createIdx(name, itemsCount); err != nil {
+		return err
+	}
+	if err := testLookup(name); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DynamicCell represents result of dynamic programming for certain starting position
@@ -2702,6 +2713,76 @@ func reducedict(name string) error {
 	return nil
 }
 
+func testLookup(name string) error {
+	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	idx, err := recsplit.NewIndex(name + ".idx")
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	var word = make([]byte, 0, 256)
+	wc := 0
+	g := d.MakeGetter()
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		offset := idx.Lookup(word)
+		_ = idx.Lookup2(offset)
+
+		wc++
+		if wc%10_000_000 == 0 {
+			log.Info("Decompressed", "millions", wc/1_000_000)
+		}
+	}
+	return nil
+}
+
+func createIdx(name string, count int) error {
+	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   int(count),
+		BucketSize: 2000,
+		Salt:       0,
+		LeafSize:   8,
+		TmpDir:     "",
+		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
+			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
+		IndexFile: "state.idx",
+	})
+	if err != nil {
+		return err
+	}
+
+	var word = make([]byte, 0, 256)
+	g := d.MakeGetter()
+	wc := 0
+	var pos uint64
+	for g.HasNext() {
+		word, pos = g.Next(word[:0])
+		if err := rs.AddKey(word, pos); err != nil {
+			return err
+		}
+		wc++
+		if wc%10_000_000 == 0 {
+			log.Info("Decompressed", "millions", wc/1_000_000)
+		}
+	}
+	log.Info("Building recsplit...")
+	if err = rs.Build(); err != nil {
+		return err
+	}
+	return nil
+}
 func decompress(name string) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
@@ -3441,8 +3522,14 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	blockEncoded := dbutils.EncodeBlockNumber(block)
-	k, v, e := bodies.Seek(blockEncoded)
-	for ; k != nil && e == nil; k, v, e = bodies.Next() {
+	for k, v, e := bodies.Seek(blockEncoded); k != nil; k, v, e = bodies.Next() {
+		if e != nil {
+			if errors.Is(e, io.EOF) {
+				break
+			}
+			return e
+		}
+
 		bodyNum := binary.BigEndian.Uint64(k)
 		if bodyNum >= block+uint64(*blockTotal) {
 			break
@@ -3453,8 +3540,13 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 		}
 		if body.TxAmount > 0 {
 			binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
-			tk, tv, te := txs.Seek(numBuf[:8])
-			for ; tk != nil && te == nil; tk, tv, te = txs.Next() {
+			for tk, tv, te := txs.Seek(numBuf[:8]); tk != nil && te == nil; tk, tv, te = txs.Next() {
+				if te != nil {
+					if !errors.Is(te, io.EOF) {
+						break
+					}
+					return te
+				}
 				txId := binary.BigEndian.Uint64(tk)
 				if txId >= body.BaseTxId+uint64(body.TxAmount) {
 					break
@@ -3473,13 +3565,7 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 					log.Info("Wrote into file", "million txs", i/1_000_000, "block num", bodyNum)
 				}
 			}
-			if te != nil && !errors.Is(te, io.EOF) {
-				return te
-			}
 		}
-	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
 	}
 	return nil
 }
