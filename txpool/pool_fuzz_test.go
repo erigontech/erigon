@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -140,16 +139,6 @@ func u8Slice(in []byte) ([]uint64, bool) {
 	}
 	return res, true
 }
-func u16Slice(in []byte) ([]uint64, bool) {
-	if len(in) < 2 {
-		return nil, false
-	}
-	res := make([]uint64, len(in)/2)
-	for i := 0; i < len(res); i++ {
-		res[i] = uint64(binary.BigEndian.Uint16(in[i*2:]))
-	}
-	return res, true
-}
 func u256Slice(in []byte) ([]uint256.Int, bool) {
 	if len(in) < 1 {
 		return nil, false
@@ -169,19 +158,6 @@ func parseSenders(in []byte) (nonces []uint64, balances []uint256.Int) {
 		}
 		nonces = append(nonces, nonce)
 		balances = append(balances, *uint256.NewInt(uint64(in[i+1])))
-	}
-	return
-}
-
-func parseTxs(in []byte) (nonces, tips []uint64, values []uint256.Int) {
-	for i := 0; i < len(in)-(1+1+1-1); i += 1 + 1 + 1 {
-		nonce := uint64(in[i])
-		if nonce == 0 {
-			nonce = 1
-		}
-		nonces = append(nonces, nonce)
-		tips = append(tips, uint64(in[i+1]))
-		values = append(values, *uint256.NewInt(uint64(in[i+1+1])))
 	}
 	return
 }
@@ -320,16 +296,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 
 		assert, require := assert.New(t), require.New(t)
-		err := txs.Valid()
-		assert.NoError(err)
+		assert.NoError(txs.Valid())
 
 		var prevHashes Hashes
-
 		ch := make(chan Hashes, 100)
-
-		db := mdbx.NewMDBX(log.New()).InMem().WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
-		t.Cleanup(db.Close)
-		coreDB := memdb.NewTestDB(t)
+		db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 		cfg := DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -353,9 +324,6 @@ func FuzzOnNewBlocks(f *testing.F) {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg, i.senderID)
-				}
-				if tx.subPool&EnoughBalance > 0 {
-					//assert.True(tx.SenderHasEnoughBalance)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
 					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
@@ -393,9 +361,6 @@ func FuzzOnNewBlocks(f *testing.F) {
 				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
 				}
-				if tx.subPool&EnoughBalance != 0 {
-					//assert.True(tx.SenderHasEnoughBalance, msg)
-				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
 					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
 				}
@@ -412,16 +377,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 			assert.LessOrEqual(queued.Len(), cfg.QueuedSubPoolLimit)
 			assert.False(worst != nil && best == nil, msg)
 			assert.False(worst == nil && best != nil, msg)
-			//if worst != nil && worst.subPool <= 0b1111 {
-			//	t.Fatalf("queued worst too small %b", worst.subPool)
-			//}
 			iterateSubPoolUnordered(queued, func(tx *metaTx) {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg, i.senderID, senders[i.senderID].nonce)
-				}
-				if tx.subPool&EnoughBalance > 0 {
-					//assert.True(tx.SenderHasEnoughBalance, msg)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
 					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
@@ -467,11 +426,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 
 		checkNotify := func(unwindTxs, minedTxs TxSlots, msg string) {
-			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
-			_, _ = baseFee, queued
 			select {
 			case newHashes := <-ch:
-				//assert.Equal(len(txs1.txs), newHashes.Len())
 				assert.Greater(len(newHashes), 0)
 				for i := 0; i < newHashes.Len(); i++ {
 					newHash := newHashes.At(i)
@@ -489,13 +445,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 					}
 				}
 			default: // no notifications - means pools must be unchanged or drop some txs
-				pendingHashes := copyHashes(pending)
+				pendingHashes := copyHashes(pool.pending)
 				require.Zero(extractNewHashes(pendingHashes, prevHashes).Len())
 			}
-			prevHashes = copyHashes(pending)
-			_ = prevHashes
+			prevHashes = copyHashes(pool.pending)
 		}
-		//TODO: check that id=>addr and addr=>id mappings have same len
 
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
@@ -580,7 +534,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		err = pool.flushLocked(tx) // we don't test eviction here, because dedicated test exists
 		require.NoError(err)
 		check(p2pReceived, TxSlots{}, "after_flush")
-		//checkNotify(p2pReceived, TxSlots{}, "after_flush")
+		checkNotify(p2pReceived, TxSlots{}, "after_flush")
 
 		p2, err := New(ch, coreDB, DefaultConfig, sendersCache, *u256.N1)
 		assert.NoError(err)
@@ -590,10 +544,9 @@ func FuzzOnNewBlocks(f *testing.F) {
 		for _, txn := range p2.byHash {
 			assert.Nil(txn.Tx.rlp)
 		}
-		//todo: check that after load from db tx linked to same senderAddr
 
 		check(txs2, TxSlots{}, "fromDB")
-		//checkNotify(txs2, TxSlots{}, "fromDB")
+		checkNotify(txs2, TxSlots{}, "fromDB")
 		assert.Equal(pool.senders.senderID, p2.senders.senderID)
 		assert.Equal(pool.lastSeenBlock.Load(), p2.lastSeenBlock.Load())
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
