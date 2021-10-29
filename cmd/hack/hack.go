@@ -2750,6 +2750,7 @@ func createIdx(name string, count int) error {
 	defer d.Close()
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(count),
+		Enums:      true,
 		BucketSize: 2000,
 		Salt:       0,
 		LeafSize:   8,
