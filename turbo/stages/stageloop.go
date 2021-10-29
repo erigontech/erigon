@@ -52,18 +52,7 @@ func StageLoop(
 		start := time.Now()
 
 		// Estimate the current top height seen from the peer
-		height, err := TopSeenHeight(db, sync, initialCycle, hd)
-		if err != nil {
-			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
-				return
-			}
-			log.Error("Staged Sync", "error", err)
-			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downloader", "error", recoveryErr)
-			}
-			continue
-		}
-
+		height := hd.TopSeenHeight()
 		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -90,27 +79,6 @@ func StageLoop(
 			}
 		}
 	}
-}
-
-// TopSeenHeight - returns hd.TopSeenHeight() or run stages.Header once to set correct hd.TopSeenHeight()
-// because headers downloading process happening in the background - means if hd.TopSeenHeight() > 0 is a
-// good estimation for sync step size
-func TopSeenHeight(db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, hd *headerdownload.HeaderDownload) (uint64, error) {
-	height := hd.TopSeenHeight()
-	if height > 0 {
-		return height, nil
-	}
-	if !initialCycle {
-		return height, nil
-	}
-	stagesBackup := sync.DisableAllStages()
-	defer sync.EnableStages(stagesBackup...)
-
-	sync.EnableStages(stages.Headers)
-	if err := sync.Run(db, nil, true); err != nil {
-		return 0, err
-	}
-	return hd.TopSeenHeight(), nil
 }
 
 func StageLoopStep(
@@ -144,7 +112,7 @@ func StageLoopStep(
 		return err
 	}
 
-	canRunCycleInOneTransaction := highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
+	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
