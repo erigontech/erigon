@@ -3522,14 +3522,8 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	blockEncoded := dbutils.EncodeBlockNumber(block)
-	for k, v, e := bodies.Seek(blockEncoded); k != nil; k, v, e = bodies.Next() {
-		if e != nil {
-			if errors.Is(e, io.EOF) {
-				break
-			}
-			return e
-		}
-
+	k, v, e := bodies.Seek(blockEncoded)
+	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
 		if bodyNum >= block+uint64(*blockTotal) {
 			break
@@ -3540,13 +3534,8 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 		}
 		if body.TxAmount > 0 {
 			binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
-			for tk, tv, te := txs.Seek(numBuf[:8]); tk != nil && te == nil; tk, tv, te = txs.Next() {
-				if te != nil {
-					if !errors.Is(te, io.EOF) {
-						break
-					}
-					return te
-				}
+			tk, tv, te := txs.Seek(numBuf[:8])
+			for ; tk != nil && te == nil; tk, tv, te = txs.Next() {
 				txId := binary.BigEndian.Uint64(tk)
 				if txId >= body.BaseTxId+uint64(body.TxAmount) {
 					break
@@ -3565,7 +3554,13 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 					log.Info("Wrote into file", "million txs", i/1_000_000, "block num", bodyNum)
 				}
 			}
+			if te != nil && !errors.Is(te, io.EOF) {
+				return te
+			}
 		}
+	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
 	}
 	return nil
 }
