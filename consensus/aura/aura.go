@@ -763,6 +763,15 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 // method returns a quit channel to abort the operations and a results channel to
 // retrieve the async verifications (the order is that of the input slice).
 func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
+
+	for _, header := range headers {
+		
+		err := c.verifyHeader(chain, header, nil);
+
+		if err != nil{
+			return err
+		}
+	}
 	return nil
 }
 
