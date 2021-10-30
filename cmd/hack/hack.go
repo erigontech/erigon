@@ -3082,7 +3082,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 	return nil
 }
 
-func extractHeaders(chaindata string, block uint64) error {
+func extractHeaders(chaindata string, block uint64, blockTotal uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
@@ -3096,7 +3096,7 @@ func extractHeaders(chaindata string, block uint64) error {
 	}
 	defer c.Close()
 	blockEncoded := dbutils.EncodeBlockNumber(block)
-	for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+	for k, v, err := c.Seek(blockEncoded); k != nil && blockTotal > 0; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -3107,6 +3107,7 @@ func extractHeaders(chaindata string, block uint64) error {
 			return fmt.Errorf("decoding header from %x: %w", v, err)
 		}
 		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x, diff %d\n", blockNumber, blockHash, header.Root, header.ParentHash, header.Difficulty)
+		blockTotal--
 	}
 	return nil
 }
@@ -3984,7 +3985,7 @@ func main() {
 		err = mint(*chaindata, uint64(*block))
 
 	case "extractHeaders":
-		err = extractHeaders(*chaindata, uint64(*block))
+		err = extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal))
 
 	case "extractHashes":
 		err = extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name)
