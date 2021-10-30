@@ -6,16 +6,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"time"
-	"strconv"
 	"runtime"
+	"strconv"
+	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -136,9 +136,7 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 		keyTransformExtractAcc(transformPlainStateKey),
 		keyTransformExtractStorage(transformPlainStateKey),
 		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			Quit: quit,
-		},
+		quit,
 	); err != nil {
 		return err
 	}
@@ -166,13 +164,18 @@ func readPlainStateOnce(
 	extractAccFunc etl.ExtractFunc,
 	extractStorageFunc etl.ExtractFunc,
 	loadFunc etl.LoadFunc,
-	args etl.TransformArgs,
+	quit <-chan struct{},
 ) error {
 	bufferSize := etl.BufferOptimalSize
+	/*  I guess  I can remove this code block
 	if args.BufferSize > 0 {
 		bufferSize = datasize.ByteSize(args.BufferSize)
 	}
+	*/
 	// getBufferByType is declared in erigon-lib/etl.go as private, that is why I have to redeclare it here
+	
+	buffer := etl.NewSortableBuffer(bufferSize)
+	/*
 	buffer := func(tp int, size datasize.ByteSize) etl.Buffer {
 		switch tp {
 		case etl.SortableSliceBuffer:
@@ -184,7 +187,9 @@ func readPlainStateOnce(
 		default:
 			panic("unknown buffer type " + strconv.Itoa(tp))
 		}
+	// args.BufferType will be always zero, right?
 	}(args.BufferType, bufferSize)
+	*/
 
 	collector1 := etl.NewCollector(logPrefix, tmpdir, buffer)
 	collector2 := etl.NewCollector(logPrefix, tmpdir, buffer)
@@ -192,7 +197,7 @@ func readPlainStateOnce(
 		collector1.Close()
 		collector2.Close()
 	}()
-	
+
 	logEvery := time.NewTicker(30 * time.Second) // should we set longer ticker e.g. 1m?
 	defer logEvery.Stop()
 	var m runtime.MemStats
@@ -203,10 +208,8 @@ func readPlainStateOnce(
 	}
 	defer c.Close()
 
-	startkey := args.ExtractStartKey
-	endkey := args.ExtractEndKey
-	quit := args.Quit
-	additionalLogArguments := args.LogDetailsExtract
+	var startkey,endkey []byte
+	
 
 	// reading kv.PlainState
 	for k, v, e := c.Seek(startkey); k != nil; k, v, e = c.Next() {
@@ -220,6 +223,7 @@ func readPlainStateOnce(
 		default:
 		case <-logEvery.C:
 			logArs := []interface{}{"from", fromBucket}
+			var additionalLogArguments etl.AdditionalLogArguments
 			if additionalLogArguments != nil {
 				logArs = append(logArs, additionalLogArguments(k, v)...)
 			} else {
@@ -263,6 +267,10 @@ func readPlainStateOnce(
 		log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
 	}(time.Now())
 
+	args := etl.TransformArgs{
+		Quit: quit,
+	}
+
 	//  filling up 2 collectors
 	if err := collector1.Load(db, kv.HashedAccounts, loadFunc, args); err != nil {
 		return err
@@ -275,8 +283,6 @@ func readPlainStateOnce(
 	return nil
 }
 
-
-
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
 		newK, err := transformKey(k)
@@ -286,7 +292,6 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 		return next(k, newK, v)
 	}
 }
-
 
 func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
