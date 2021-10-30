@@ -80,7 +80,7 @@ type TxSlot struct {
 	feeCap         uint64      // Maximum fee that transaction burns and gives to the miner/block proposer
 	gas            uint64      // Gas limit of the transaction
 	value          uint256.Int // Value transferred by the transaction
-	idHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
+	IdHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
 	senderID       uint64      // SenderID - require external mapping to it's address
 	creation       bool        // Set to true if "To" field of the transation is not set
 	dataLen        int         // Length of transaction's data (for calculation of intrinsic gas)
@@ -153,7 +153,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !legacy {
 		txType = int(payload[p])
 		if _, err = ctx.keccak1.Write(payload[p : p+1]); err != nil {
-			return 0, fmt.Errorf("%s: computing idHash (hashing type Prefix): %w", ParseTransactionErrorPrefix, err)
+			return 0, fmt.Errorf("%s: computing IdHash (hashing type Prefix): %w", ParseTransactionErrorPrefix, err)
 		}
 		if _, err = ctx.keccak2.Write(payload[p : p+1]); err != nil {
 			return 0, fmt.Errorf("%s: computing signHash (hashing type Prefix): %w", ParseTransactionErrorPrefix, err)
@@ -168,7 +168,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		// Hash the envelope, not the full payload
 		if _, err = ctx.keccak1.Write(payload[p : dataPos+dataLen]); err != nil {
-			return 0, fmt.Errorf("%s: computing idHash (hashing the envelope): %w", ParseTransactionErrorPrefix, err)
+			return 0, fmt.Errorf("%s: computing IdHash (hashing the envelope): %w", ParseTransactionErrorPrefix, err)
 		}
 		p = dataPos
 	}
@@ -356,16 +356,16 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// For legacy transactions, hash the full payload
 	if legacy {
 		if _, err = ctx.keccak1.Write(payload[pos:p]); err != nil {
-			return 0, fmt.Errorf("%s: computing idHash: %w", ParseTransactionErrorPrefix, err)
+			return 0, fmt.Errorf("%s: computing IdHash: %w", ParseTransactionErrorPrefix, err)
 		}
 	}
-	//ctx.keccak1.Sum(slot.idHash[:0])
-	_, _ = ctx.keccak1.(io.Reader).Read(slot.idHash[:32])
+	//ctx.keccak1.Sum(slot.IdHash[:0])
+	_, _ = ctx.keccak1.(io.Reader).Read(slot.IdHash[:32])
 	if !ctx.withSender {
 		return p, nil
 	}
 	if ctx.checkHash != nil {
-		if err := ctx.checkHash(slot.idHash[:32]); err != nil {
+		if err := ctx.checkHash(slot.IdHash[:32]); err != nil {
 			return p, err
 		}
 	}
@@ -617,7 +617,7 @@ func bytesToUint64(buf []byte) (x uint64) {
 //nolint
 func (tx *TxSlot) printDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.value.Uint64())
-	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.idHash)
+	//fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,hash=%x\n", prefix, tx.senderID, tx.nonce, tx.tip, tx.IdHash)
 }
 
 // AccessList is an EIP-2930 access list.

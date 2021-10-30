@@ -535,7 +535,7 @@ func (p *TxPool) Best(n uint16, txs *TxsRlp, tx kv.Tx) error {
 
 	best := p.pending.best
 	for i := 0; i < int(n) && i < len(best); i++ {
-		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, best[i].Tx.idHash[:])
+		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, best[i].Tx.IdHash[:])
 		if err != nil {
 			return err
 		}
@@ -559,7 +559,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs TxSlots) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for i := range newTxs.txs {
-		_, ok := p.unprocessedRemoteByHash[string(newTxs.txs[i].idHash[:])]
+		_, ok := p.unprocessedRemoteByHash[string(newTxs.txs[i].IdHash[:])]
 		if ok {
 			continue
 		}
@@ -635,7 +635,7 @@ func fillDiscardReasons(reasons []DiscardReason, newTxs TxSlots, discardReasonsL
 		if reasons[i] != NotSet {
 			continue
 		}
-		reason, ok := discardReasonsLRU.Get(string(newTxs.txs[i].idHash[:]))
+		reason, ok := discardReasonsLRU.Get(string(newTxs.txs[i].IdHash[:]))
 		if ok {
 			reasons[i] = reason.(DiscardReason)
 		} else {
@@ -682,7 +682,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 	reasons = fillDiscardReasons(reasons, newTxs, p.discardReasonsLRU)
 	for i := range reasons {
 		if reasons[i] == Success {
-			p.promoted = append(p.promoted, newTxs.txs[i].idHash[:]...)
+			p.promoted = append(p.promoted, newTxs.txs[i].IdHash[:]...)
 		}
 	}
 	p.newPendingTxs <- common.Copy(p.promoted)
@@ -723,7 +723,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	for i, txn := range newTxs.txs {
-		if _, ok := byHash[string(txn.idHash[:])]; ok {
+		if _, ok := byHash[string(txn.IdHash[:])]; ok {
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.isLocal[i], blockNum)
@@ -773,7 +773,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	for i, txn := range newTxs.txs {
-		if _, ok := byHash[string(txn.idHash[:])]; ok {
+		if _, ok := byHash[string(txn.IdHash[:])]; ok {
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.isLocal[i], blockNum)
@@ -852,7 +852,7 @@ func (p *TxPool) addLocked(mt *metaTx) bool {
 		p.discardLocked(found, ReplacedByHigherTip)
 	}
 
-	p.byHash[string(mt.Tx.idHash[:])] = mt
+	p.byHash[string(mt.Tx.IdHash[:])] = mt
 
 	if replaced := p.all.replaceOrInsert(mt); replaced != nil {
 		if ASSERT {
@@ -861,7 +861,7 @@ func (p *TxPool) addLocked(mt *metaTx) bool {
 	}
 
 	if mt.subPool&IsLocal != 0 {
-		p.isLocalLRU.Add(string(mt.Tx.idHash[:]), struct{}{})
+		p.isLocalLRU.Add(string(mt.Tx.IdHash[:]), struct{}{})
 	}
 	p.queued.Add(mt)
 	return true
@@ -870,10 +870,10 @@ func (p *TxPool) addLocked(mt *metaTx) bool {
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTx, reason DiscardReason) {
-	delete(p.byHash, string(mt.Tx.idHash[:]))
+	delete(p.byHash, string(mt.Tx.IdHash[:]))
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt)
-	p.discardReasonsLRU.Add(string(mt.Tx.idHash[:]), reason)
+	p.discardReasonsLRU.Add(string(mt.Tx.IdHash[:]), reason)
 }
 
 // removeMined - apply new highest block (or batch of blocks)
@@ -1263,12 +1263,12 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 			}
 		}
 		//fmt.Printf("del:%d,%d,%d\n", p.deletedTxs[i].Tx.senderID, p.deletedTxs[i].Tx.nonce, p.deletedTxs[i].Tx.tip)
-		has, err := tx.Has(kv.PoolTransaction, p.deletedTxs[i].Tx.idHash[:])
+		has, err := tx.Has(kv.PoolTransaction, p.deletedTxs[i].Tx.IdHash[:])
 		if err != nil {
 			return err
 		}
 		if has {
-			if err := tx.Delete(kv.PoolTransaction, p.deletedTxs[i].Tx.idHash[:], nil); err != nil {
+			if err := tx.Delete(kv.PoolTransaction, p.deletedTxs[i].Tx.IdHash[:], nil); err != nil {
 				return err
 			}
 		}
@@ -1525,7 +1525,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte,
 		slot := mt.Tx
 		slotRlp := slot.rlp
 		if slot.rlp == nil {
-			v, err := tx.GetOne(kv.PoolTransaction, slot.idHash[:])
+			v, err := tx.GetOne(kv.PoolTransaction, slot.IdHash[:])
 			if err != nil {
 				log.Error("[txpool] get tx from db", "err", err)
 				return false
@@ -1899,7 +1899,7 @@ func (p *PendingPool) UnsafeRemove(i *metaTx) {
 }
 func (p *PendingPool) UnsafeAdd(i *metaTx) {
 	if p.added != nil {
-		*p.added = append(*p.added, i.Tx.idHash[:]...)
+		*p.added = append(*p.added, i.Tx.IdHash[:]...)
 	}
 	i.currentSubPool = p.t
 	p.worst.Push(i)
@@ -1907,7 +1907,7 @@ func (p *PendingPool) UnsafeAdd(i *metaTx) {
 }
 func (p *PendingPool) Add(i *metaTx) {
 	if p.added != nil {
-		*p.added = append(*p.added, i.Tx.idHash[:]...)
+		*p.added = append(*p.added, i.Tx.IdHash[:]...)
 	}
 	i.currentSubPool = p.t
 	heap.Push(p.worst, i)
