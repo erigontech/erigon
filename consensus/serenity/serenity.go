@@ -6,24 +6,23 @@ import (
 	"fmt"
 	"math/big"
 
-
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc"
 
 	"golang.org/x/crypto/sha3"
 )
 
 // Constants for Serenity as specified into https://eips.ethereum.org/EIPS/eip-2982
 var (
-	serenityDiff   = common.Big0                // Serenity block's difficulty is always 0.
-	serenityNonce  = types.BlockNonce{}         // Serenity chain's nonces are 0.
-	serenityCap    = uint64(0x7fffffffffffffff) // Serenity's difficulty cap.
+	serenityDiff  = common.Big0                // Serenity block's difficulty is always 0.
+	serenityNonce = types.BlockNonce{}         // Serenity chain's nonces are 0.
+	serenityCap   = uint64(0x7fffffffffffffff) // Serenity's difficulty cap.
 )
 
 var (
@@ -38,9 +37,10 @@ var (
 	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
 	errInvalidUncleHash = errors.New("non empty uncle hash")
 )
+
 // Serenity Consensus Engine for the Execution Layer.
 // Note: the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
-type Serenity struct {}
+type Serenity struct{}
 
 // New creates a new instance of the Serenity Engine
 func New() *Serenity {
@@ -57,7 +57,7 @@ func (s *Serenity) Author(header *types.Header) (common.Address, error) {
 // stock Ethereum serenity engine.
 func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 	// Retrieve parent from the chain
-	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64() - 1)
+	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
@@ -92,10 +92,10 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	return nil
 }
 
-func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, 
-		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, 
-		receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, 
-		syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
+func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header,
+	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header,
+	receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
+	syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 	return types.NewBlock(header, txs, uncles, receipts), nil
 }
 
@@ -137,8 +137,12 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return fmt.Errorf("extra-data longer than 32 bytes (%d)", len(header.Extra))
 	}
 
-	if header.Difficulty != serenityDiff {
-		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, serenityDiff)
+	if header.Difficulty.Cmp(serenityDiff) != 0 {
+		return errInvalidDifficulty
+	}
+
+	if !bytes.Equal(header.Nonce[:], serenityNonce[:]) {
+		return errInvalidNonce
 	}
 
 	// Verify that the gas limit is within cap
@@ -177,9 +181,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	if header.MixDigest != (common.Hash{}) {
 		return errInvalidMixDigest
 	}
-	if !bytes.Equal(header.Nonce[:], serenityNonce[:]) {
-		return errInvalidNonce
-	}
+
 	if header.UncleHash != types.EmptyUncleHash {
 		return errInvalidUncleHash
 	}
@@ -190,8 +192,8 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 //                                     |
 //                                     v
 
-func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, 
-	txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, 
+func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall) error {
 	return nil
 }
