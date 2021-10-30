@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/flanglet/kanzi-go/transform"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -34,14 +35,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/wcharczuk/go-chart/v2"
-
-	"github.com/flanglet/kanzi-go/transform"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -1688,6 +1688,24 @@ const minPatternScore = 1024
 const maxDictPatterns = 1024 * 1024
 
 func compress1(chaindata string, name string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	var chainConfig *params.ChainConfig
+	if err := database.View(context.Background(), func(tx kv.Tx) error {
+		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+		if err != nil {
+			return err
+		}
+		chainConfig, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+
 	var superstring []byte
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
@@ -1779,10 +1797,11 @@ func compress1(chaindata string, name string) error {
 	if err := reducedict(name); err != nil {
 		return err
 	}
-	if err := createIdx(name, itemsCount); err != nil {
+	if err := createIdx(*chainID, name, itemsCount); err != nil {
 		return err
 	}
-	if err := testLookup(name); err != nil {
+
+	if err := testLookup(*chainID, name); err != nil {
 		return err
 	}
 	return nil
@@ -2713,7 +2732,7 @@ func reducedict(name string) error {
 	return nil
 }
 
-func testLookup(name string) error {
+func testLookup(chainID uint256.Int, name string) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
@@ -2729,9 +2748,17 @@ func testLookup(name string) error {
 	var word = make([]byte, 0, 256)
 	wc := 0
 	g := d.MakeGetter()
+
+	parseCtx := txpool.NewTxParseContext(chainID)
+	parseCtx.WithSender(false)
+	slot := txpool.TxSlot{}
+	var sender [20]byte
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
-		offset := idx.Lookup(word)
+		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
+			return err
+		}
+		offset := idx.Lookup(slot.IdHash[:])
 		_ = idx.Lookup2(offset)
 
 		wc++
@@ -2742,7 +2769,7 @@ func testLookup(name string) error {
 	return nil
 }
 
-func createIdx(name string, count int) error {
+func createIdx(chainID uint256.Int, name string, count int) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
@@ -2764,13 +2791,23 @@ func createIdx(name string, count int) error {
 		return err
 	}
 
+RETRY:
+
 	var word = make([]byte, 0, 256)
 	g := d.MakeGetter()
 	wc := 0
 	var pos uint64
+	parseCtx := txpool.NewTxParseContext(chainID)
+	parseCtx.WithSender(false)
+	slot := txpool.TxSlot{}
+	var sender [20]byte
+
 	for g.HasNext() {
 		word, pos = g.Next(word[:0])
-		if err := rs.AddKey(word, pos); err != nil {
+		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
+			return err
+		}
+		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {
 			return err
 		}
 		wc++
@@ -2779,8 +2816,14 @@ func createIdx(name string, count int) error {
 		}
 	}
 	log.Info("Building recsplit...")
+
 	if err = rs.Build(); err != nil {
 		return err
+	}
+
+	if rs.Collision() {
+		rs.ResetNextSalt()
+		goto RETRY
 	}
 	return nil
 }
@@ -2997,33 +3040,25 @@ func iterateOverCode(chaindata string) error {
 	defer db.Close()
 	hashes := make(map[common.Hash][]byte)
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.Code)
-		if err != nil {
-			return err
-		}
 		// This is a mapping of CodeHash => Byte code
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
+		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
 			if len(v) > 0 && v[0] == 0xef {
 				fmt.Printf("Found code with hash %x: %x\n", k, v)
 				hashes[common.BytesToHash(k)] = common.CopyBytes(v)
 			}
-		}
-		c, err = tx.Cursor(kv.PlainContractCode)
-		if err != nil {
+			return nil
+		}); err != nil {
 			return err
 		}
 		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
+		if err := tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
 			hash := common.BytesToHash(v)
 			if code, ok := hashes[hash]; ok {
 				fmt.Printf("address: %x: %x\n", k[:20], code)
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		return nil
 	}); err1 != nil {
