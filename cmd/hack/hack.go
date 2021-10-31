@@ -2759,6 +2759,8 @@ func recsplitLookup(chaindata, name string) error {
 		recID := idx.Lookup(slot.IdHash[:])
 		l1 += time.Since(t)
 		offset := idx.Lookup2(recID)
+		l2 += time.Since(t)
+
 		offsets = append(offsets, offset)
 		if len(offsets) > 50_000 {
 			bm2.AddMany(offsets)
@@ -2766,7 +2768,6 @@ func recsplitLookup(chaindata, name string) error {
 			offsets = offsets[:0]
 		}
 
-		l2 += time.Since(t)
 		select {
 		default:
 		case <-logEvery.C:
