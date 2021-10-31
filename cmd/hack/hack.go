@@ -36,13 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/wcharczuk/go-chart/v2"
-
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -50,6 +43,9 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -58,10 +54,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/wcharczuk/go-chart/v2"
 )
 
 var (
@@ -1348,9 +1347,7 @@ func mphf(chaindata string, block int) error {
 	s1, s2 := rs.Stats()
 	log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
 	var idx *recsplit.Index
-	if idx, err = recsplit.NewIndex("state.idx"); err != nil {
-		return err
-	}
+	idx = recsplit.MustOpen("state.idx")
 	defer idx.Close()
 	log.Info("Testing bijection")
 	bitCount := (count + 63) / 64
@@ -1690,20 +1687,7 @@ const maxDictPatterns = 1024 * 1024
 func compress1(chaindata string, name string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
-	var chainConfig *params.ChainConfig
-	if err := database.View(context.Background(), func(tx kv.Tx) error {
-		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
-		if err != nil {
-			return err
-		}
-		chainConfig, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
+	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	var superstring []byte
@@ -1801,7 +1785,7 @@ func compress1(chaindata string, name string) error {
 		return err
 	}
 
-	if err := testLookup(*chainID, name); err != nil {
+	if err := _testLookup(*chainID, name); err != nil {
 		return err
 	}
 	return nil
@@ -2731,18 +2715,22 @@ func reducedict(name string) error {
 	}
 	return nil
 }
+func testLookup(chaindata, name string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	return _testLookup(*chainID, name)
+}
 
-func testLookup(chainID uint256.Int, name string) error {
+func _testLookup(chainID uint256.Int, name string) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 
-	idx, err := recsplit.NewIndex(name + ".idx")
-	if err != nil {
-		return err
-	}
+	idx := recsplit.MustOpen(name + ".idx")
 	defer idx.Close()
 
 	var word = make([]byte, 0, 256)
@@ -2753,19 +2741,26 @@ func testLookup(chainID uint256.Int, name string) error {
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	var sender [20]byte
+	var l1, l2, total time.Duration
+	start := time.Now()
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
 			return err
 		}
-		offset := idx.Lookup(slot.IdHash[:])
-		_ = idx.Lookup2(offset)
-
 		wc++
+
+		t := time.Now()
+		offset := idx.Lookup(slot.IdHash[:])
+		l1 += time.Since(t)
+		_ = idx.Lookup2(offset)
+		l2 += time.Since(t)
 		if wc%10_000_000 == 0 {
-			log.Info("Decompressed", "millions", wc/1_000_000)
+			log.Info("Checked", "millions", wc/1_000_000)
 		}
 	}
+	total = time.Since(start)
+	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
 	return nil
 }
 
@@ -3839,14 +3834,7 @@ func scanReceipts(chaindata string, block uint64) error {
 		blockNum = block
 	}
 
-	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
-	if err != nil {
-		return err
-	}
-	chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-	if cerr != nil {
-		return cerr
-	}
+	chainConfig := tool.ChainConfig(tx)
 	vmConfig := vm.Config{}
 	noOpWriter := state.NewNoopWriter()
 	var buf bytes.Buffer
@@ -4003,10 +3991,7 @@ func devTx(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	b, err := rawdb.ReadBlockByNumber(tx, 0)
-	tool.Check(err)
-	cc, err := rawdb.ReadChainConfig(tx, b.Hash())
-	tool.Check(err)
+	cc := tool.ChainConfig(tx)
 	txn := types.NewTransaction(2, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
 	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
 	tool.Check(err)
@@ -4016,6 +4001,7 @@ func devTx(chaindata string) error {
 	fmt.Printf("%x\n", buf.Bytes())
 	return nil
 }
+
 func main() {
 	flag.Parse()
 
@@ -4179,6 +4165,8 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress1(*chaindata, *name)
+	case "testLookup":
+		err = testLookup(*chaindata, *name)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":
