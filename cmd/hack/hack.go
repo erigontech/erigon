@@ -2744,6 +2744,7 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
+	bm2 := roaring64.New()
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
@@ -2752,9 +2753,11 @@ func recsplitLookup(chaindata, name string) error {
 		wc++
 
 		t := time.Now()
-		offset := idx.Lookup(slot.IdHash[:])
+		recID := idx.Lookup(slot.IdHash[:])
 		l1 += time.Since(t)
-		_ = idx.Lookup2(offset)
+		offset := idx.Lookup2(recID)
+		bm2.Add(offset)
+
 		l2 += time.Since(t)
 		if wc%10_000_000 == 0 {
 			log.Info("Checked", "millions", wc/1_000_000)
@@ -2762,6 +2765,9 @@ func recsplitLookup(chaindata, name string) error {
 	}
 	total = time.Since(start)
 	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
+	bm2.RunOptimize()
+	bbb := bm2.GetSizeInBytes()
+	log.Info("Roaring sz decoding time", "bbb_m", bbb/1024/1024)
 	return nil
 }
 
