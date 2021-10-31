@@ -2812,7 +2812,7 @@ RETRY:
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Processed", "millions", wc/1_000_000)
+			log.Info("[Creating index] Processed", "millions", wc/1_000_000)
 		}
 	}
 	log.Info("Building recsplit...")
