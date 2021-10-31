@@ -2773,8 +2773,12 @@ func recsplitLookup(chaindata, name string) error {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
+			sz := bm2.GetSizeInBytes()
+			sz2 := bm2.GetSerializedSizeInBytes()
 			log.Info("Checked", "millions", float64(wc)/1_000_000,
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+				"sz_mb", sz/1024/1024, "sz2_mb", sz2/1024/1024,
+			)
 		}
 	}
 	bm2.AddMany(offsets)
