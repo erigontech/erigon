@@ -1784,10 +1784,6 @@ func compress1(chaindata string, name string) error {
 	if err := createIdx(*chainID, name, itemsCount); err != nil {
 		return err
 	}
-
-	if err := _testLookup(*chainID, name); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -2715,15 +2711,12 @@ func reducedict(name string) error {
 	}
 	return nil
 }
-func testLookup(chaindata, name string) error {
+func recsplitLookup(chaindata, name string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
 	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	return _testLookup(*chainID, name)
-}
 
-func _testLookup(chainID uint256.Int, name string) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
@@ -2737,7 +2730,7 @@ func _testLookup(chainID uint256.Int, name string) error {
 	wc := 0
 	g := d.MakeGetter()
 
-	parseCtx := txpool.NewTxParseContext(chainID)
+	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	var sender [20]byte
@@ -4165,8 +4158,8 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress1(*chaindata, *name)
-	case "testLookup":
-		err = testLookup(*chaindata, *name)
+	case "recsplitLookup":
+		err = recsplitLookup(*chaindata, *name)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":
