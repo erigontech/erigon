@@ -1346,8 +1346,7 @@ func mphf(chaindata string, block int) error {
 	}
 	s1, s2 := rs.Stats()
 	log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
-	var idx *recsplit.Index
-	idx = recsplit.MustOpen("state.idx")
+	idx := recsplit.MustOpen("state.idx")
 	defer idx.Close()
 	log.Info("Testing bijection")
 	bitCount := (count + 63) / 64
