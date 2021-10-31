@@ -153,41 +153,16 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 	)
 }
 
-// should I pass kv.HashedAccounts and kv.HashedStorage as arguments in readPlainStateOnce?
 func readPlainStateOnce(
 	logPrefix string,
 	db kv.RwTx,
 	fromBucket string,
 	tmpdir string,
-//	extractAccFunc etl.ExtractFunc,
-//	extractStorageFunc etl.ExtractFunc,
 	loadFunc etl.LoadFunc,
 	quit <-chan struct{},
 ) error {
 	bufferSize := etl.BufferOptimalSize
-	/*  I guess  I can remove this code block
-	if args.BufferSize > 0 {
-		bufferSize = datasize.ByteSize(args.BufferSize)
-	}
-	*/
-	// getBufferByType is declared in erigon-lib/etl.go as private, that is why I have to redeclare it here
-	
 	buffer := etl.NewSortableBuffer(bufferSize)
-	/*
-	buffer := func(tp int, size datasize.ByteSize) etl.Buffer {
-		switch tp {
-		case etl.SortableSliceBuffer:
-			return etl.NewSortableBuffer(size)
-		case etl.SortableAppendBuffer:
-			return etl.NewAppendBuffer(size)
-		case etl.SortableOldestAppearedBuffer:
-			return etl.NewOldestEntryBuffer(size)
-		default:
-			panic("unknown buffer type " + strconv.Itoa(tp))
-		}
-	// args.BufferType will be always zero, right?
-	}(args.BufferType, bufferSize)
-	*/
 
 	collector1 := etl.NewCollector(logPrefix, tmpdir, buffer)
 	collector2 := etl.NewCollector(logPrefix, tmpdir, buffer)
@@ -196,7 +171,7 @@ func readPlainStateOnce(
 		collector2.Close()
 	}()
 
-	logEvery := time.NewTicker(30 * time.Second) // should we set longer ticker e.g. 1m?
+	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
@@ -263,14 +238,9 @@ func readPlainStateOnce(
 			if additionalLogArguments != nil {
 				logArs = append(logArs, additionalLogArguments(k, v)...)
 			} else {
-				// makeCurrentKeyStr is declared in erigon-lib/etl.go as private. That's why I have to redeclare it.
 				makeCurrentKeyStr := func(k []byte) string {
 					var currentKeyStr string
-					if k == nil {
-						currentKeyStr = "final"
-					} else if len(k) < 4 {
-						currentKeyStr = fmt.Sprintf("%x", k)
-					} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
+					if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 { // if key has leading zeroes, show a bit more info
 						currentKeyStr = fmt.Sprintf("%x", k)
 					} else {
 						currentKeyStr = fmt.Sprintf("%x...", k[:4])
@@ -287,17 +257,6 @@ func readPlainStateOnce(
 		if endkey != nil && bytes.Compare(k, endkey) > 0 {
 			return nil
 		}
-
-		// should we make extractNextFunc public?
-		/*
-		if err := extractAccFunc(k, v, collector1.extractNextFunc); err != nil {
-			return err
-		}
-
-		if err := extractStorageFunc(k, v, collector2.extractNextFunc); err != nil {
-			return err
-		}
-		*/
 	}
 
 	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
