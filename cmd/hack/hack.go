@@ -2774,9 +2774,12 @@ func recsplitLookup(chaindata, name string) error {
 			log.Info("Checked", "millions", float64(wc)/1_000_000)
 		}
 	}
+	bm2.AddMany(offsets)
+	bm2.RunOptimize()
+	fmt.Printf("%d\n", bm2.ToArray())
+
 	total = time.Since(start)
 	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
-	bm2.RunOptimize()
 	sz := bm2.GetSizeInBytes()
 	sz2 := bm2.GetSerializedSizeInBytes()
 	log.Info("Roaring sz decoding time", "sz_mb", sz/1024/1024, "sz_mb", sz2/1024/1024)
