@@ -2282,11 +2282,6 @@ func (hf *HuffmanCoder) flush() error {
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict(name string) error {
-	go func() {
-		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
-			log.Error("Failure in running pprof server", "err", err)
-		}
-	}()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	// Read up the dictionary
@@ -4082,6 +4077,11 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
+	go func() {
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			log.Error("Failure in running pprof server", "err", err)
+		}
+	}()
 
 	var err error
 	switch *action {
