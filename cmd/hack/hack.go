@@ -2724,6 +2724,8 @@ func recsplitLookup(chaindata, name string) error {
 	defer database.Close()
 	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
@@ -2759,7 +2761,9 @@ func recsplitLookup(chaindata, name string) error {
 		bm2.Add(offset)
 
 		l2 += time.Since(t)
-		if wc%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			log.Info("Checked", "millions", wc/1_000_000)
 		}
 	}
