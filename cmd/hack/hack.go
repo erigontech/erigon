@@ -1785,7 +1785,7 @@ func compress1(chaindata string, name string) error {
 	if err := reducedict(name); err != nil {
 		return err
 	}
-	if err := createIdx(*chainID, name, itemsCount); err != nil {
+	if err := _createIdx(*chainID, name, itemsCount); err != nil {
 		return err
 	}
 	return nil
@@ -2765,7 +2765,33 @@ func recsplitLookup(chaindata, name string) error {
 	return nil
 }
 
-func createIdx(chainID uint256.Int, name string, count int) error {
+func createIdx(chaindata string, name string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	g := d.MakeGetter()
+	var word = make([]byte, 0, 4*1024)
+	wc := 0
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		wc++
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
+		}
+	}
+	return _createIdx(*chainID, name, wc)
+}
+func _createIdx(chainID uint256.Int, name string, count int) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
@@ -4175,6 +4201,8 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress1(*chaindata, *name)
+	case "createIdx":
+		err = createIdx(*chaindata, *name)
 	case "recsplitLookup":
 		err = recsplitLookup(*chaindata, *name)
 	case "decompress":
