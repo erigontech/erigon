@@ -2771,8 +2771,9 @@ func recsplitLookup(chaindata, name string) error {
 			sz := bm2.GetSizeInBytes()
 			sz2 := bm2.GetSerializedSizeInBytes()
 			log.Info("Checked", "millions", float64(wc)/1_000_000,
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)),
 				"sz_mb", sz/1024/1024, "sz2_mb", sz2/1024/1024,
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 			)
 		}
 	}
