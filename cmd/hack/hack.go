@@ -2812,7 +2812,7 @@ RETRY:
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("[Creating index] Processed", "millions", wc/1_000_000)
+			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
 		}
 	}
 	log.Info("Building recsplit...")
@@ -2822,6 +2822,7 @@ RETRY:
 	}
 
 	if rs.Collision() {
+		log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 		rs.ResetNextSalt()
 		goto RETRY
 	}
