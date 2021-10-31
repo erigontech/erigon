@@ -1689,6 +1689,8 @@ func compress1(chaindata string, name string) error {
 	defer database.Close()
 	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	var superstring []byte
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
@@ -1728,9 +1730,12 @@ func compress1(chaindata string, name string) error {
 		}
 		superstring = append(superstring, 0, 0)
 		i++
-		if i%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
 		}
+
 	}
 	itemsCount := i
 	if e != nil && !errors.Is(e, io.EOF) {
@@ -3761,6 +3766,7 @@ func scanReceipts2(chaindata string) error {
 	fixedCount := 0
 	logInterval := 30 * time.Second
 	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 	var key [8]byte
 	var v []byte
 	for ; true; blockNum++ {
