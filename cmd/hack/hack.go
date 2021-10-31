@@ -2762,6 +2762,7 @@ func recsplitLookup(chaindata, name string) error {
 		offsets = append(offsets, offset)
 		if len(offsets) > 50_000 {
 			bm2.AddMany(offsets)
+			bm2.RunOptimize()
 			offsets = offsets[:0]
 		}
 
