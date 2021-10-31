@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/flanglet/kanzi-go/transform"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -34,15 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/wcharczuk/go-chart/v2"
-
-	"github.com/flanglet/kanzi-go/transform"
-
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -50,6 +43,9 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -58,10 +54,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/wcharczuk/go-chart/v2"
 )
 
 var (
@@ -1347,10 +1346,7 @@ func mphf(chaindata string, block int) error {
 	}
 	s1, s2 := rs.Stats()
 	log.Info("Done", "time", time.Since(start), "s1", s1, "s2", s2)
-	var idx *recsplit.Index
-	if idx, err = recsplit.NewIndex("state.idx"); err != nil {
-		return err
-	}
+	idx := recsplit.MustOpen("state.idx")
 	defer idx.Close()
 	log.Info("Testing bijection")
 	bitCount := (count + 63) / 64
@@ -1688,6 +1684,13 @@ const minPatternScore = 1024
 const maxDictPatterns = 1024 * 1024
 
 func compress1(chaindata string, name string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
 	var superstring []byte
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
@@ -1695,7 +1698,7 @@ func compress1(chaindata string, name string) error {
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReader(f)
+	r := bufio.NewReaderSize(f, etl.BufIOSize)
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
 	ch := make(chan []byte, runtime.NumCPU())
@@ -1726,10 +1729,14 @@ func compress1(chaindata string, name string) error {
 		}
 		superstring = append(superstring, 0, 0)
 		i++
-		if i%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
 		}
+
 	}
+	itemsCount := i
 	if e != nil && !errors.Is(e, io.EOF) {
 		return e
 	}
@@ -1774,7 +1781,14 @@ func compress1(chaindata string, name string) error {
 		return err
 	}
 	df.Close()
-	return reducedict(name)
+
+	if err := reducedict(name); err != nil {
+		return err
+	}
+	if err := createIdx(*chainID, name, itemsCount); err != nil {
+		return err
+	}
+	return nil
 }
 
 // DynamicCell represents result of dynamic programming for certain starting position
@@ -2273,6 +2287,8 @@ func reducedict(name string) error {
 			log.Error("Failure in running pprof server", "err", err)
 		}
 	}()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	// Read up the dictionary
 	df, err := os.Open(name + ".dictionary.txt")
 	if err != nil {
@@ -2341,7 +2357,9 @@ func reducedict(name string) error {
 		copy(input[8:], buf[:l])
 		ch <- input
 		i++
-		if i%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
@@ -2701,13 +2719,122 @@ func reducedict(name string) error {
 	}
 	return nil
 }
+func recsplitLookup(chaindata, name string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
+	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	idx := recsplit.MustOpen(name + ".idx")
+	defer idx.Close()
+
+	var word = make([]byte, 0, 256)
+	wc := 0
+	g := d.MakeGetter()
+
+	parseCtx := txpool.NewTxParseContext(*chainID)
+	parseCtx.WithSender(false)
+	slot := txpool.TxSlot{}
+	var sender [20]byte
+	var l1, l2, total time.Duration
+	start := time.Now()
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
+			return err
+		}
+		wc++
+
+		t := time.Now()
+		offset := idx.Lookup(slot.IdHash[:])
+		l1 += time.Since(t)
+		_ = idx.Lookup2(offset)
+		l2 += time.Since(t)
+		if wc%10_000_000 == 0 {
+			log.Info("Checked", "millions", wc/1_000_000)
+		}
+	}
+	total = time.Since(start)
+	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
+	return nil
+}
+
+func createIdx(chainID uint256.Int, name string, count int) error {
+	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   int(count),
+		Enums:      true,
+		BucketSize: 2000,
+		Salt:       0,
+		LeafSize:   8,
+		TmpDir:     "",
+		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
+			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
+		IndexFile: name + ".idx",
+	})
+	if err != nil {
+		return err
+	}
+
+RETRY:
+
+	var word = make([]byte, 0, 256)
+	g := d.MakeGetter()
+	wc := 0
+	var pos uint64
+	parseCtx := txpool.NewTxParseContext(chainID)
+	parseCtx.WithSender(false)
+	slot := txpool.TxSlot{}
+	var sender [20]byte
+
+	for g.HasNext() {
+		word, pos = g.Next(word[:0])
+		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
+			return err
+		}
+		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {
+			return err
+		}
+		wc++
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("[Creating index] Processed", "millions", wc/1_000_000)
+		}
+	}
+	log.Info("Building recsplit...")
+
+	if err = rs.Build(); err != nil {
+		return err
+	}
+
+	if rs.Collision() {
+		rs.ResetNextSalt()
+		goto RETRY
+	}
+	return nil
+}
 func decompress(name string) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
 	}
 	defer d.Close()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	var df *os.File
 	if df, err = os.Create(name + ".decompressed.dat"); err != nil {
 		return err
@@ -2732,7 +2859,9 @@ func decompress(name string) error {
 			}
 		}
 		wc++
-		if wc%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			log.Info("Decompressed", "millions", wc/1_000_000)
 		}
 		start = time.Now()
@@ -2915,33 +3044,25 @@ func iterateOverCode(chaindata string) error {
 	defer db.Close()
 	hashes := make(map[common.Hash][]byte)
 	if err1 := db.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.Code)
-		if err != nil {
-			return err
-		}
 		// This is a mapping of CodeHash => Byte code
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
+		if err := tx.ForEach(kv.Code, nil, func(k, v []byte) error {
 			if len(v) > 0 && v[0] == 0xef {
 				fmt.Printf("Found code with hash %x: %x\n", k, v)
 				hashes[common.BytesToHash(k)] = common.CopyBytes(v)
 			}
-		}
-		c, err = tx.Cursor(kv.PlainContractCode)
-		if err != nil {
+			return nil
+		}); err != nil {
 			return err
 		}
 		// This is a mapping of contractAddress + incarnation => CodeHash
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-			if err != nil {
-				return err
-			}
+		if err := tx.ForEach(kv.PlainContractCode, nil, func(k, v []byte) error {
 			hash := common.BytesToHash(v)
 			if code, ok := hashes[hash]; ok {
 				fmt.Printf("address: %x: %x\n", k[:20], code)
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		return nil
 	}); err1 != nil {
@@ -3082,7 +3203,7 @@ func extractHashes(chaindata string, blockStep uint64, blockTotal uint64, name s
 	return nil
 }
 
-func extractHeaders(chaindata string, block uint64) error {
+func extractHeaders(chaindata string, block uint64, blockTotal uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err := db.BeginRo(context.Background())
@@ -3096,7 +3217,7 @@ func extractHeaders(chaindata string, block uint64) error {
 	}
 	defer c.Close()
 	blockEncoded := dbutils.EncodeBlockNumber(block)
-	for k, v, err := c.Seek(blockEncoded); k != nil; k, v, err = c.Next() {
+	for k, v, err := c.Seek(blockEncoded); k != nil && blockTotal > 0; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -3107,6 +3228,7 @@ func extractHeaders(chaindata string, block uint64) error {
 			return fmt.Errorf("decoding header from %x: %w", v, err)
 		}
 		fmt.Printf("Header %d %x: stateRoot %x, parentHash %x, diff %d\n", blockNumber, blockHash, header.Root, header.ParentHash, header.Difficulty)
+		blockTotal--
 	}
 	return nil
 }
@@ -3653,8 +3775,8 @@ func scanReceipts2(chaindata string) error {
 		return err
 	}
 	fixedCount := 0
-	logInterval := 30 * time.Second
-	logEvery := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	var key [8]byte
 	var v []byte
 	for ; true; blockNum++ {
@@ -3721,14 +3843,7 @@ func scanReceipts(chaindata string, block uint64) error {
 		blockNum = block
 	}
 
-	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
-	if err != nil {
-		return err
-	}
-	chainConfig, cerr := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-	if cerr != nil {
-		return cerr
-	}
+	chainConfig := tool.ChainConfig(tx)
 	vmConfig := vm.Config{}
 	noOpWriter := state.NewNoopWriter()
 	var buf bytes.Buffer
@@ -3885,10 +4000,7 @@ func devTx(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	b, err := rawdb.ReadBlockByNumber(tx, 0)
-	tool.Check(err)
-	cc, err := rawdb.ReadChainConfig(tx, b.Hash())
-	tool.Check(err)
+	cc := tool.ChainConfig(tx)
 	txn := types.NewTransaction(2, common.Address{}, uint256.NewInt(100), 100_000, uint256.NewInt(1), []byte{1})
 	signedTx, err := types.SignTx(txn, *types.LatestSigner(cc), core.DevnetSignPrivateKey)
 	tool.Check(err)
@@ -3898,6 +4010,7 @@ func devTx(chaindata string) error {
 	fmt.Printf("%x\n", buf.Bytes())
 	return nil
 }
+
 func main() {
 	flag.Parse()
 
@@ -3984,7 +4097,7 @@ func main() {
 		err = mint(*chaindata, uint64(*block))
 
 	case "extractHeaders":
-		err = extractHeaders(*chaindata, uint64(*block))
+		err = extractHeaders(*chaindata, uint64(*block), uint64(*blockTotal))
 
 	case "extractHashes":
 		err = extractHashes(*chaindata, uint64(*block), uint64(*blockTotal), *name)
@@ -4061,6 +4174,8 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress1(*chaindata, *name)
+	case "recsplitLookup":
+		err = recsplitLookup(*chaindata, *name)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":
