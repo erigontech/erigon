@@ -2812,7 +2812,7 @@ RETRY:
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Decompressed", "millions", wc/1_000_000)
+			log.Info("Processed", "millions", wc/1_000_000)
 		}
 	}
 	log.Info("Building recsplit...")
@@ -2833,6 +2833,8 @@ func decompress(name string) error {
 		return err
 	}
 	defer d.Close()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	var df *os.File
 	if df, err = os.Create(name + ".decompressed.dat"); err != nil {
 		return err
@@ -2857,7 +2859,9 @@ func decompress(name string) error {
 			}
 		}
 		wc++
-		if wc%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			log.Info("Decompressed", "millions", wc/1_000_000)
 		}
 		start = time.Now()
