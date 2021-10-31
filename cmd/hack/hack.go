@@ -2770,7 +2770,7 @@ func recsplitLookup(chaindata, name string) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Checked", "millions", wc/1_000_000)
+			log.Info("Checked", "millions", float64(wc)/1_000_000)
 		}
 	}
 	total = time.Since(start)
