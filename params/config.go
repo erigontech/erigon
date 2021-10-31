@@ -421,6 +421,7 @@ type ChainConfig struct {
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
+	TerminalTotalDifficulty *big.Int `json: "terminalTotalDifficulty, omitempty"` // EIP-3675: Upgrade consensus to Proof-of-Stake when terminal total difficulty is reached
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
