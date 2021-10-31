@@ -2287,6 +2287,8 @@ func reducedict(name string) error {
 			log.Error("Failure in running pprof server", "err", err)
 		}
 	}()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	// Read up the dictionary
 	df, err := os.Open(name + ".dictionary.txt")
 	if err != nil {
@@ -2355,7 +2357,9 @@ func reducedict(name string) error {
 		copy(input[8:], buf[:l])
 		ch <- input
 		i++
-		if i%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
@@ -2767,6 +2771,8 @@ func createIdx(chainID uint256.Int, name string, count int) error {
 		return err
 	}
 	defer d.Close()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(count),
 		Enums:      true,
@@ -2803,7 +2809,9 @@ RETRY:
 			return err
 		}
 		wc++
-		if wc%10_000_000 == 0 {
+		select {
+		default:
+		case <-logEvery.C:
 			log.Info("Decompressed", "millions", wc/1_000_000)
 		}
 	}
@@ -3763,8 +3771,7 @@ func scanReceipts2(chaindata string) error {
 		return err
 	}
 	fixedCount := 0
-	logInterval := 30 * time.Second
-	logEvery := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	var key [8]byte
 	var v []byte
