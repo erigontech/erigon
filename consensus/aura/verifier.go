@@ -24,6 +24,10 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		return errTooOldOfBlock
 	}
 
+	if header.Number.Uint64() < 20 {
+		return errTooOldOfBlock
+	}
+
 	now := time.Now()
 	unixTime := now.Unix()
 
