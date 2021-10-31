@@ -26,7 +26,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/holiman/uint256"
@@ -2747,8 +2746,8 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
-	bm2 := roaring.New()
-	offsets := make([]uint32, 0, 100_000)
+	bm2 := roaring64.New()
+	offsets := make([]uint64, 0, 100_000)
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
@@ -2762,7 +2761,7 @@ func recsplitLookup(chaindata, name string) error {
 		offset := idx.Lookup2(recID)
 		l2 += time.Since(t)
 
-		offsets = append(offsets, uint32(offset))
+		offsets = append(offsets, offset)
 		if len(offsets) > 50_000 {
 			bm2.AddMany(offsets)
 			bm2.RunOptimize()
@@ -2772,7 +2771,10 @@ func recsplitLookup(chaindata, name string) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Checked", "millions", float64(wc)/1_000_000)
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Checked", "millions", float64(wc)/1_000_000,
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		}
 	}
 	bm2.AddMany(offsets)
@@ -2780,11 +2782,9 @@ func recsplitLookup(chaindata, name string) error {
 
 	total = time.Since(start)
 	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
-	bm3 := roaring.New()
-	bm3.AddMany(bm2.ToArray())
-	sz := bm3.GetFrozenSizeInBytes()
-	sz2 := bm3.GetSerializedSizeInBytes()
-	log.Info("Roaring sz decoding time", "sz_mb", sz/1024, "sz_mb", sz2/1024)
+	sz := bm2.GetSizeInBytes()
+	sz2 := bm2.GetSerializedSizeInBytes()
+	log.Info("Roaring sz decoding time", "sz_mb", sz/1024/1024, "sz_mb", sz2/1024/1024)
 	return nil
 }
 
