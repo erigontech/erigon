@@ -128,10 +128,7 @@ func TestIndexLookup(t *testing.T) {
 	if err := rs.Build(); err != nil {
 		t.Fatal(err)
 	}
-	var idx *Index
-	if idx, err = NewIndex(indexFile); err != nil {
-		t.Fatal(err)
-	}
+	idx := MustOpen(indexFile)
 	defer idx.Close()
 	for i := 0; i < 100; i++ {
 		offset := idx.Lookup([]byte(fmt.Sprintf("key %d", i)))
@@ -167,10 +164,8 @@ func TestTwoLayerIndex(t *testing.T) {
 	if err := rs.Build(); err != nil {
 		t.Fatal(err)
 	}
-	var idx *Index
-	if idx, err = NewIndex(indexFile); err != nil {
-		t.Fatal(err)
-	}
+
+	idx := MustOpen(indexFile)
 	defer idx.Close()
 	for i := 0; i < 100; i++ {
 		e := idx.Lookup([]byte(fmt.Sprintf("key %d", i)))

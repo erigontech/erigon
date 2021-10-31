@@ -51,6 +51,14 @@ type Index struct {
 	golombRice         []uint32
 }
 
+func MustOpen(indexFile string) *Index {
+	idx, err := NewIndex(indexFile)
+	if err != nil {
+		panic(err)
+	}
+	return idx
+}
+
 func NewIndex(indexFile string) (*Index, error) {
 	idx := &Index{
 		indexFile: indexFile,

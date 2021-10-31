@@ -27,7 +27,7 @@ import (
 // gotip test -trimpath -v -fuzz=FuzzRecSplit -fuzztime=10s ./recsplit
 
 func FuzzRecSplit(f *testing.F) {
-	f.Add(2, "1stkey2ndkey")
+	f.Add(2, []byte("1stkey2ndkey"))
 	f.Fuzz(func(t *testing.T, count int, in []byte) {
 		if count < 1 {
 			t.Skip()
@@ -73,10 +73,7 @@ func FuzzRecSplit(f *testing.F) {
 			t.Fatal(err)
 		}
 		// Check that there is a bijection
-		var idx *Index
-		if idx, err = NewIndex(indexFile); err != nil {
-			t.Fatal(err)
-		}
+		idx := MustOpen(indexFile)
 		bitCount := (count + 63) / 64
 		bits := make([]uint64, bitCount)
 		for i = 0; i < len(in)-l; i += l {
