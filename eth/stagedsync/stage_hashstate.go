@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -133,8 +131,8 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 		db,
 		kv.PlainState,
 		cfg.tmpDir,
-		keyTransformExtractAcc(transformPlainStateKey),
-		keyTransformExtractStorage(transformPlainStateKey),
+	//	keyTransformExtractAcc(transformPlainStateKey),
+	//	keyTransformExtractStorage(transformPlainStateKey),
 		etl.IdentityLoadFunc,
 		quit,
 	); err != nil {
@@ -161,8 +159,8 @@ func readPlainStateOnce(
 	db kv.RwTx,
 	fromBucket string,
 	tmpdir string,
-	extractAccFunc etl.ExtractFunc,
-	extractStorageFunc etl.ExtractFunc,
+//	extractAccFunc etl.ExtractFunc,
+//	extractStorageFunc etl.ExtractFunc,
 	loadFunc etl.LoadFunc,
 	quit <-chan struct{},
 ) error {
@@ -208,8 +206,27 @@ func readPlainStateOnce(
 	}
 	defer c.Close()
 
+
+	convertAccFunc := func(key []byte) ([]byte, error) {
+		hash, err := common.HashData(key)
+		return hash[:], err
+	}
+
+	convertStorageFunc := func(key []byte) ([]byte, error) {
+		addrHash, err := common.HashData(key[:length.Addr])
+		if err != nil {
+			return nil, err
+		}
+		inc := binary.BigEndian.Uint64(key[length.Addr:])
+		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
+		if err != nil {
+			return nil, err
+		}
+		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
+		return compositeKey, nil
+	}
+
 	var startkey,endkey []byte
-	
 
 	// reading kv.PlainState
 	for k, v, e := c.Seek(startkey); k != nil; k, v, e = c.Next() {
@@ -219,6 +236,25 @@ func readPlainStateOnce(
 		if err := libcommon.Stopped(quit); err != nil {
 			return err
 		}
+
+		if len(k) == 20 {
+			newK, err := convertAccFunc(k)
+			if err != nil {
+				return err
+			}
+			if err := collector1.Collect(newK, v); err != nil {
+				return err
+			}
+		} else {
+			newK, err := convertStorageFunc(k)
+			if err != nil {
+				return err
+			}
+			if err := collector2.Collect(newK, v); err != nil {
+				return err
+			}
+		}
+
 		select {
 		default:
 		case <-logEvery.C:
@@ -253,6 +289,7 @@ func readPlainStateOnce(
 		}
 
 		// should we make extractNextFunc public?
+		/*
 		if err := extractAccFunc(k, v, collector1.extractNextFunc); err != nil {
 			return err
 		}
@@ -260,6 +297,7 @@ func readPlainStateOnce(
 		if err := extractStorageFunc(k, v, collector2.extractNextFunc); err != nil {
 			return err
 		}
+		*/
 	}
 
 	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
