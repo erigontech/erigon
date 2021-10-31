@@ -765,10 +765,10 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
 
 	for _, header := range headers {
-		
-		err := c.verifyHeader(chain, header, nil);
 
-		if err != nil{
+		err := c.verifyHeader(chain, header, nil)
+
+		if err != nil {
 			return err
 		}
 	}
