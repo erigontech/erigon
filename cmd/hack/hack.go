@@ -2747,7 +2747,7 @@ func recsplitLookup(chaindata, name string) error {
 	var l1, l2, total time.Duration
 	start := time.Now()
 	bm2 := roaring64.New()
-	offsets := make([]uint64, 100_000)
+	offsets := make([]uint64, 0, 100_000)
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
