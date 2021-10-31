@@ -44,11 +44,10 @@ type Config struct {
 	ConstantinopleBlock *big.Int `json:"constantinopleBlock,omitempty"` // Constantinople switch block (nil = no fork, 0 = already activated)
 	PetersburgBlock     *big.Int `json:"petersburgBlock,omitempty"`     // Petersburg switch block (nil = same as Constantinople)
 	IstanbulBlock       *big.Int `json:"istanbulBlock,omitempty"`       // Istanbul switch block (nil = no fork, 0 = already on istanbul)
-	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // EIP-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
-
-	CatalystBlock *big.Int `json:"catalystBlock,omitempty"` // Catalyst switch block (nil = no fork, 0 = already on catalyst)
+	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 }
 
 // Rules wraps Config and is merely syntactic sugar or can be used for functions
@@ -59,7 +58,7 @@ type Config struct {
 type Rules struct {
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, isCatalyst                          bool
+	IsBerlin, IsLondon                                      bool
 }
 
 func NewRules(c *Config, num uint64) Rules {
@@ -74,13 +73,11 @@ func NewRules(c *Config, num uint64) Rules {
 		IsIstanbul:       isForked(c.IstanbulBlock, num),
 		IsBerlin:         isForked(c.BerlinBlock, num),
 		IsLondon:         isForked(c.LondonBlock, num),
-		isCatalyst:       isForked(c.CatalystBlock, num),
 	}
 }
 
 func (r Rules) Changed(c *Config, num uint64) bool {
-	return r.isCatalyst != isForked(c.CatalystBlock, num) ||
-		r.IsLondon != isForked(c.LondonBlock, num) ||
+	return r.IsLondon != isForked(c.LondonBlock, num) ||
 		r.IsBerlin != isForked(c.BerlinBlock, num) ||
 		r.IsIstanbul != isForked(c.IstanbulBlock, num) ||
 		r.IsPetersburg != isForked(c.PetersburgBlock, num) ||
@@ -107,7 +104,6 @@ var (
 		IsIstanbul:       true,
 		IsBerlin:         true,
 		IsLondon:         true,
-		isCatalyst:       false,
 	}
 	CliqueRules = Rules{
 		IsHomestead:      true,
@@ -120,7 +116,6 @@ var (
 		IsIstanbul:       true,
 		IsBerlin:         true,
 		IsLondon:         false,
-		isCatalyst:       false,
 	}
 	DevRules = CliqueRules
 )
