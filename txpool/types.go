@@ -44,7 +44,8 @@ type TxParseContext struct {
 	keccak2          hash.Hash
 	chainId, r, s, v uint256.Int // Signature values
 	chainIDMul       uint256.Int
-	buf              [65]byte // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
+	deriveChainID    uint256.Int // pre-allocated variable to calculate Sub(&ctx.v, &ctx.chainIDMul)
+	buf              [65]byte    // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
 	sighash          [32]byte
 	sig              [65]byte
 	withSender       bool
@@ -322,8 +323,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			sigHashLen += 2                // For two extra zeros
 
 			//vByte = byte(1 - (ctx.v.Uint64() & 1))
-			v := uint256.NewInt(0).Sub(&ctx.v, &ctx.chainIDMul)
-			vByte = v.Sub(v, u256.N8).Bytes()[0] - 27
+			ctx.deriveChainID.Sub(&ctx.v, &ctx.chainIDMul)
+			vByte = ctx.deriveChainID.Sub(&ctx.deriveChainID, u256.N8).Bytes()[0] - 27
 		}
 	} else {
 		var v uint64
