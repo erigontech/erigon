@@ -82,3 +82,12 @@ func (a BoolSlice) all(signal bool) bool {
 	}
 	return true
 }
+
+func (a BoolSlice) any(signal bool) bool {
+	for i := 0; i < len(a); i++ {
+		if a[i] == signal {
+			return true
+		}
+	}
+	return false
+}
