@@ -2741,8 +2741,6 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
-	bm2 := roaring64.New()
-	offsets := make([]uint64, 0, 100_000)
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
@@ -2753,38 +2751,24 @@ func recsplitLookup(chaindata, name string) error {
 		t := time.Now()
 		recID := idx.Lookup(slot.IdHash[:])
 		l1 += time.Since(t)
-		offset := idx.Lookup2(recID)
+		t = time.Now()
+		_ = idx.Lookup2(recID)
 		l2 += time.Since(t)
-
-		offsets = append(offsets, offset)
-		if len(offsets) > 50_000 {
-			bm2.AddMany(offsets)
-			bm2.RunOptimize()
-			offsets = offsets[:0]
-		}
 
 		select {
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			sz := bm2.GetSizeInBytes()
-			sz2 := bm2.GetSerializedSizeInBytes()
 			log.Info("Checked", "millions", float64(wc)/1_000_000,
-				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)),
-				"sz_mb", sz/1024/1024, "sz2_mb", sz2/1024/1024,
+				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 			)
 		}
 	}
-	bm2.AddMany(offsets)
-	bm2.RunOptimize()
 
 	total = time.Since(start)
 	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
-	sz := bm2.GetSizeInBytes()
-	sz2 := bm2.GetSerializedSizeInBytes()
-	log.Info("Roaring sz decoding time", "sz_mb", sz/1024/1024, "sz_mb", sz2/1024/1024)
 	return nil
 }
 
