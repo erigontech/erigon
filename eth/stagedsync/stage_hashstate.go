@@ -238,16 +238,7 @@ func readPlainStateOnce(
 			if additionalLogArguments != nil {
 				logArs = append(logArs, additionalLogArguments(k, v)...)
 			} else {
-				makeCurrentKeyStr := func(k []byte) string {
-					var currentKeyStr string
-					if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 { // if key has leading zeroes, show a bit more info
-						currentKeyStr = fmt.Sprintf("%x", k)
-					} else {
-						currentKeyStr = fmt.Sprintf("%x...", k[:4])
-					}
-					return currentKeyStr
-				}
-				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+				logArs = append(logArs, "current key", fmt.Sprintf("%x...", k[:6]))
 			}
 
 			runtime.ReadMemStats(&m)
