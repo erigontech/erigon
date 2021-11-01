@@ -18,6 +18,7 @@ package recsplit
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math/bits"
 	"unsafe"
@@ -238,8 +239,10 @@ func (g *GolombRice) Write(w io.Writer) error {
 	}
 	p := (*[maxDataSize]byte)(unsafe.Pointer(&g.data[0]))
 	b := (*p)[:]
-	if _, e := w.Write(b[:len(g.data)*8]); e != nil {
+	if l, e := w.Write(b[:len(g.data)*8]); e != nil {
 		return e
+	} else {
+		fmt.Printf("GolombRice len: %dKb\n", l/1024)
 	}
 	return nil
 }

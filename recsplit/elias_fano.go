@@ -53,6 +53,7 @@ type EliasFano struct {
 }
 
 func NewEliasFano(count uint64, maxOffset, minDelta uint64) *EliasFano {
+	//fmt.Printf("count=%d,maxOffset=%d,minDelta=%d\n", count, maxOffset, minDelta)
 	ef := &EliasFano{
 		count:     count - 1,
 		maxOffset: maxOffset,
@@ -64,6 +65,7 @@ func NewEliasFano(count uint64, maxOffset, minDelta uint64) *EliasFano {
 }
 
 func (ef *EliasFano) AddOffset(offset uint64) {
+	//fmt.Printf("0x%x,\n", offset)
 	if ef.l != 0 {
 		set_bits(ef.lowerBits, ef.i*ef.l, int(ef.l), (offset-ef.delta)&ef.lowerBitsMask)
 	}
@@ -117,6 +119,12 @@ func (ef *EliasFano) Build() {
 					var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
 					// offset needs to be encoded as 16-bit integer, therefore the following check
 					if offset >= (1 << 16) {
+						fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
+						fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
+						fmt.Printf("ef.minDelta=%x\n", ef.minDelta)
+						//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
+						//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
+						//fmt.Printf("ef.wordsUpperBits=%x\n", ef.wordsUpperBits)
 						panic("")
 					}
 					// c % superQ is the bit index inside the group of 4096 bits
