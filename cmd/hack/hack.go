@@ -1785,7 +1785,7 @@ func compress1(chaindata string, name string) error {
 	if err := reducedict(name); err != nil {
 		return err
 	}
-	if err := createIdx(*chainID, name, itemsCount); err != nil {
+	if err := _createIdx(*chainID, name, itemsCount); err != nil {
 		return err
 	}
 	return nil
@@ -2282,11 +2282,6 @@ func (hf *HuffmanCoder) flush() error {
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
 func reducedict(name string) error {
-	go func() {
-		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
-			log.Error("Failure in running pprof server", "err", err)
-		}
-	}()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	// Read up the dictionary
@@ -2724,6 +2719,8 @@ func recsplitLookup(chaindata, name string) error {
 	defer database.Close()
 	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
@@ -2752,20 +2749,56 @@ func recsplitLookup(chaindata, name string) error {
 		wc++
 
 		t := time.Now()
-		offset := idx.Lookup(slot.IdHash[:])
+		recID := idx.Lookup(slot.IdHash[:])
 		l1 += time.Since(t)
-		_ = idx.Lookup2(offset)
+		t = time.Now()
+		_ = idx.Lookup2(recID)
 		l2 += time.Since(t)
-		if wc%10_000_000 == 0 {
-			log.Info("Checked", "millions", wc/1_000_000)
+
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Checked", "millions", float64(wc)/1_000_000,
+				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+			)
 		}
 	}
+
 	total = time.Since(start)
 	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
 	return nil
 }
 
-func createIdx(chainID uint256.Int, name string, count int) error {
+func createIdx(chaindata string, name string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	g := d.MakeGetter()
+	var word = make([]byte, 0, 4*1024)
+	wc := 0
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		wc++
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
+		}
+	}
+	return _createIdx(*chainID, name, wc)
+}
+func _createIdx(chainID uint256.Int, name string, count int) error {
 	d, err := compress.NewDecompressor(name + ".compressed.dat")
 	if err != nil {
 		return err
@@ -2812,7 +2845,7 @@ RETRY:
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("[Creating index] Processed", "millions", wc/1_000_000)
+			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
 		}
 	}
 	log.Info("Building recsplit...")
@@ -2822,6 +2855,7 @@ RETRY:
 	}
 
 	if rs.Collision() {
+		log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 		rs.ResetNextSalt()
 		goto RETRY
 	}
@@ -4028,6 +4062,11 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
+	go func() {
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			log.Error("Failure in running pprof server", "err", err)
+		}
+	}()
 
 	var err error
 	switch *action {
@@ -4174,6 +4213,8 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress1(*chaindata, *name)
+	case "createIdx":
+		err = createIdx(*chaindata, *name)
 	case "recsplitLookup":
 		err = recsplitLookup(*chaindata, *name)
 	case "decompress":
