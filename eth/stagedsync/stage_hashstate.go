@@ -169,6 +169,7 @@ func readPlainStateOnce(
 		collector2.Close()
 	}()
 
+	t := time.Now()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
@@ -178,7 +179,6 @@ func readPlainStateOnce(
 		return err
 	}
 	defer c.Close()
-
 
 	convertAccFunc := func(key []byte) ([]byte, error) {
 		hash, err := common.HashData(key)
@@ -199,7 +199,7 @@ func readPlainStateOnce(
 		return compositeKey, nil
 	}
 
-	var startkey,endkey []byte
+	var startkey, endkey []byte
 
 	// reading kv.PlainState
 	for k, v, e := c.Seek(startkey); k != nil; k, v, e = c.Next() {
@@ -271,32 +271,6 @@ func readPlainStateOnce(
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
-		newK, err := transformKey(k)
-		if err != nil {
-			return err
-		}
-		return next(k, newK, v)
-	}
-}
-
-func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
-	return func(k, v []byte, next etl.ExtractNextFunc) error {
-		if len(k) != 20 {
-			return nil
-		}
-		newK, err := transformKey(k)
-		if err != nil {
-			return err
-		}
-		return next(k, newK, v)
-	}
-}
-
-func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
-	return func(k, v []byte, next etl.ExtractNextFunc) error {
-		if len(k) == 20 {
-			return nil
-		}
 		newK, err := transformKey(k)
 		if err != nil {
 			return err
