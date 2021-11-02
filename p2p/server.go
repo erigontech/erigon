@@ -846,24 +846,16 @@ running:
 }
 
 func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount int, c *conn) error {
-	// keys := make([]enode.ID, 0, len(peers))
-	values := make([]*Peer, 0, len(peers))
-	for k := range peers {
-		// keys = append(keys, k)
-		values = append(values, peers[k])
-	}
-	classifiedPeers := make([][]*Peer, 0, len(srv.EnabledProtocols))
-	for _, protocol := range srv.EnabledProtocols {
-		peersByProtocol := funk.Filter(values, func(peer *Peer) bool {
+	peersSlice := funk.Values(peers).([]*Peer)
+	classifiedPeers := funk.Map(srv.EnabledProtocols, func(protocol int) []*Peer {
+		return funk.Filter(peersSlice, func(peer *Peer) bool {
 			return peer.running["eth"].Protocol.Version == uint(protocol)
 		}).([]*Peer)
-		classifiedPeers = append(classifiedPeers, peersByProtocol)
-	}
+	}).([][]*Peer)
 	// fmt.Printf("%+v\n", classifiedPeers)
-	numberOfGivenProtocolPeers := make(IntSlice, 0, len(classifiedPeers))
-	for _, peersByProtocol := range classifiedPeers {
-		numberOfGivenProtocolPeers = append(numberOfGivenProtocolPeers, len(peersByProtocol))
-	}
+	numberOfGivenProtocolPeers := IntSlice(funk.Map(classifiedPeers, func(peersByProtocol []*Peer) int {
+		return len(peersByProtocol)
+	}).([]int))
 	// fmt.Printf("%+v\n", numberOfGivenProtocolPeers)
 	switch {
 	case !c.is(trustedConn) && numberOfGivenProtocolPeers.larger_than_or_equal(srv.MaxPeers).any(true):
