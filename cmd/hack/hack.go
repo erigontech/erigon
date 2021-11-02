@@ -3572,7 +3572,7 @@ func fixState(chaindata string) error {
 func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	chainConfig := tool.ChainConfigFromDB(database)
+	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	tx, err := db.BeginRo(context.Background())
