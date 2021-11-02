@@ -59,6 +59,8 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/wcharczuk/go-chart/v2"
 )
 
 var (
