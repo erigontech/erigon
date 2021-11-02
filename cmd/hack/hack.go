@@ -3595,7 +3595,7 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 		return err
 	}
 	defer f.Close()
-	w := bufio.NewWriterSize(f, etl.BufIOSize)
+	w := bufio.NewWriterSize(f, etl.BufIOSize*2)
 	defer w.Flush()
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
