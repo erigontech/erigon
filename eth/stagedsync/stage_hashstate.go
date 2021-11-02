@@ -131,8 +131,6 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 		db,
 		kv.PlainState,
 		cfg.tmpDir,
-	//	keyTransformExtractAcc(transformPlainStateKey),
-	//	keyTransformExtractStorage(transformPlainStateKey),
 		etl.IdentityLoadFunc,
 		quit,
 	); err != nil {
