@@ -734,19 +734,16 @@ func (db *DB) commitCache(logit bool) {
 	entriesUpdated := 0
 	entriesDeleted := 0
 	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.Inodes)
-		if err != nil {
-			return err
-		}
+		var err error
 		db.kvCache.Ascend(func(i btree.Item) bool {
 			di := i.(*DbItem)
 			if di.val == nil {
-				if err = c.Delete(di.key, nil); err != nil {
+				if err = tx.Delete(kv.Inodes, di.key, nil); err != nil {
 					return false
 				}
 				entriesUpdated++
 			} else {
-				if err = c.Put(di.key, di.val); err != nil {
+				if err = tx.Put(kv.Inodes, di.key, di.val); err != nil {
 					return false
 				}
 				entriesDeleted++

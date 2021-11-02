@@ -36,8 +36,8 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20211029011610-d1cbec49bb37
-	github.com/ledgerwatch/log/v3 v3.3.1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20211102145739-607ab3a85bf7
+	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/pelletier/go-toml v1.9.4
@@ -57,7 +57,7 @@ require (
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20211002104244-808efd93c36d
+	golang.org/x/sys v0.0.0-20211030160813-b3129d9d1021
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	golang.org/x/tools v0.1.7
 	google.golang.org/grpc v1.41.0
