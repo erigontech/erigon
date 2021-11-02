@@ -3572,6 +3572,9 @@ func fixState(chaindata string) error {
 func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
@@ -3618,7 +3621,7 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 				if txId >= body.BaseTxId+uint64(body.TxAmount) {
 					break
 				}
-				if _, err := parseCtx.ParseTransaction(word, 0, &slot, nil); err != nil {
+				if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
 					return err
 				}
 				tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
