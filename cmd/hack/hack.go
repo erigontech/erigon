@@ -59,8 +59,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/wcharczuk/go-chart/v2"
 )
 
 var (
@@ -2835,7 +2833,7 @@ RETRY:
 
 	for g.HasNext() {
 		word, pos = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
+		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
 			return err
 		}
 		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {
@@ -3597,6 +3595,9 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	blockEncoded := dbutils.EncodeBlockNumber(block)
+	parseCtx := txpool.NewTxParseContext(*chainID)
+	parseCtx.WithSender(false)
+	slot := txpool.TxSlot{}
 	k, v, e := bodies.Seek(blockEncoded)
 	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
@@ -3615,6 +3616,10 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 				if txId >= body.BaseTxId+uint64(body.TxAmount) {
 					break
 				}
+				if _, err := parseCtx.ParseTransaction(word, 0, &slot, nil); err != nil {
+					return err
+				}
+				tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
 				n := binary.PutUvarint(numBuf, uint64(len(tv)))
 				if _, e = w.Write(numBuf[:n]); e != nil {
 					return err
