@@ -3603,28 +3603,6 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
-	ch := make(chan []byte, 1024)
-	go func() {
-		for {
-			tv, ok := <-ch
-			if !ok {
-				break
-			}
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
-				panic(err)
-			}
-			tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
-			n := binary.PutUvarint(numBuf, uint64(len(tv)))
-			if _, e := w.Write(numBuf[:n]); e != nil {
-				panic(e)
-			}
-			if len(tv) > 0 {
-				if _, e := w.Write(tv); e != nil {
-					panic(e)
-				}
-			}
-		}
-	}()
 	k, v, e := bodies.Seek(blockEncoded)
 	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
@@ -3643,7 +3621,19 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 				if txId >= body.BaseTxId+uint64(body.TxAmount) {
 					break
 				}
-				ch <- tv
+				if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
+					panic(err)
+				}
+				tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
+				n := binary.PutUvarint(numBuf, uint64(len(tv)))
+				if _, e = w.Write(numBuf[:n]); e != nil {
+					return err
+				}
+				if len(tv) > 0 {
+					if _, e = w.Write(tv); e != nil {
+						return e
+					}
+				}
 				i++
 				if i%1_000_000 == 0 {
 					log.Info("Wrote into file", "million txs", i/1_000_000, "block num", bodyNum)
