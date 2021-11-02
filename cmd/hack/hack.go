@@ -2741,7 +2741,7 @@ func recsplitLookup(chaindata, name string) error {
 	start := time.Now()
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word, 0, &slot, sender[:]); err != nil {
+		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
 			return err
 		}
 		wc++
