@@ -38,7 +38,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/ledgerwatch/erigon-lib v0.0.0-20211102145739-607ab3a85bf7
 	github.com/ledgerwatch/log/v3 v3.4.0
-	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
+	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/pelletier/go-toml v1.9.4
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
@@ -68,3 +68,5 @@ require (
 	gotest.tools v2.2.0+incompatible // indirect
 	pgregory.net/rapid v0.4.7
 )
+
+replace github.com/ledgerwatch/erigon-lib => github.com/iszubok/erigon-lib v0.0.0-20211103123001-12f30c032548
