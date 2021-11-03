@@ -2758,6 +2758,7 @@ func recsplitLookup(chaindata, name string) error {
 		dataGetter.Reset(offset)
 		word2, _ = dataGetter.Next(word2[:0])
 		if !bytes.Equal(word, word2) {
+			fmt.Printf("%x,%x\n", word, word2)
 			panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
 		}
 		select {
