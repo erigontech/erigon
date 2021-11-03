@@ -34,14 +34,13 @@ docker-compose:
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-geth: erigon
+geth: turbo
 
-erigon: go-version
-	@echo "Building Erigon"
-	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+turbo: go-version
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
+	mkdir -p $(GOPATH)/bin/
+	cp $(GOBIN)/erigon $(GOBIN)/turbo-bor
+	cp $(GOBIN)/* $(GOPATH)/bin/
 
 hack:
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
