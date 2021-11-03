@@ -1019,7 +1019,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	snapshotDir = path.Join(datadir, "snapshot")
 	logger := log.New()
 
 	var pm prune.Mode
