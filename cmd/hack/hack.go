@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -53,6 +54,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -2760,7 +2763,7 @@ func recsplitLookup(chaindata, name string) error {
 			word2, dataP = dataGetter.Next(word2[:0])
 			if !bytes.Equal(prev, word2) {
 				fmt.Printf("%d,%d\n", offset, dataP)
-				fmt.Printf("%x,%x,%x\n", word, word2, word3)
+				fmt.Printf("%x,%x\n", prev, word2)
 				panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
 			}
 		}
