@@ -2742,6 +2742,7 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
+	var prev []byte
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
@@ -2757,22 +2758,27 @@ func recsplitLookup(chaindata, name string) error {
 		l2 += time.Since(t)
 		dataGetter.Reset(offset)
 		var dataP uint64
+		if prev == nil {
+			prev = common.CopyBytes(word)
+		} else {
+			if !bytes.Equal(word, word2) {
+				fmt.Printf("%d,%d\n", offset, dataP)
+				fmt.Printf("%x,%x\n", word, word2)
+				panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+			}
+			select {
+			default:
+			case <-logEvery.C:
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				log.Info("Checked", "millions", float64(wc)/1_000_000,
+					"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
+					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+				)
+			}
+		}
 		word2, dataP = dataGetter.Next(word2[:0])
-		if !bytes.Equal(word, word2) {
-			fmt.Printf("%d,%d\n", offset, dataP)
-			fmt.Printf("%x,%x\n", word, word2)
-			panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
-		}
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Checked", "millions", float64(wc)/1_000_000,
-				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
-			)
-		}
+
 	}
 
 	total = time.Since(start)
