@@ -2750,6 +2750,7 @@ func recsplitLookup(chaindata, name string) error {
 			return err
 		}
 		wc++
+		fmt.Printf("a: %x\n\n", word)
 
 		t := time.Now()
 		recID := idx.Lookup(slot.IdHash[:])
