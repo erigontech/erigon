@@ -2757,7 +2757,7 @@ func recsplitLookup(chaindata, name string) error {
 		offset := idx.Lookup2(recID)
 		l2 += time.Since(t)
 		var dataP uint64
-		if wc > 0 {
+		if wc > 1 {
 			dataGetter.Reset(offset)
 			word2, dataP = dataGetter.Next(word2[:0])
 			if !bytes.Equal(word, word2) {
