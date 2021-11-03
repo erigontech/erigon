@@ -26,7 +26,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -54,8 +53,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -2742,7 +2739,8 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
-	var word3 []byte
+	var prev, word3 []byte
+	var prevOffset uint64
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
@@ -2756,13 +2754,18 @@ func recsplitLookup(chaindata, name string) error {
 		t = time.Now()
 		offset := idx.Lookup2(recID)
 		l2 += time.Since(t)
-		dataGetter.Reset(offset)
-		word2, _ = dataGetter.Next(word2[:0])
-		if !bytes.Equal(word, word2) {
-			word3, _ = g.Next(word3[:0])
-			fmt.Printf("%x,%x,%x\n", word, word2, word3)
-			panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+		var dataP uint64
+		if prev != nil {
+			dataGetter.Reset(prevOffset)
+			word2, dataP = dataGetter.Next(word2[:0])
+			if !bytes.Equal(prev, word2) {
+				fmt.Printf("%d,%d\n", offset, dataP)
+				fmt.Printf("%x,%x,%x\n", word, word2, word3)
+				panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+			}
 		}
+		prev = common.CopyBytes(word)
+		prevOffset = offset
 
 		select {
 		default:
