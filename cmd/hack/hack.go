@@ -2731,9 +2731,10 @@ func recsplitLookup(chaindata, name string) error {
 	idx := recsplit.MustOpen(name + ".idx")
 	defer idx.Close()
 
-	var word = make([]byte, 0, 256)
+	var word, word2 = make([]byte, 0, 4096), make([]byte, 0, 4096)
 	wc := 0
 	g := d.MakeGetter()
+	dataGetter := d.MakeGetter()
 
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
@@ -2752,9 +2753,13 @@ func recsplitLookup(chaindata, name string) error {
 		recID := idx.Lookup(slot.IdHash[:])
 		l1 += time.Since(t)
 		t = time.Now()
-		_ = idx.Lookup2(recID)
+		offset := idx.Lookup2(recID)
 		l2 += time.Since(t)
-
+		dataGetter.Reset(offset)
+		word2, _ = dataGetter.Next(word2[:0])
+		if !bytes.Equal(word, word2) {
+			panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+		}
 		select {
 		default:
 		case <-logEvery.C:
