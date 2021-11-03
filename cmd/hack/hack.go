@@ -2742,7 +2742,7 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
-	var prev, word3 []byte
+	var prev []byte
 	var prevOffset uint64
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
