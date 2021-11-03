@@ -12,13 +12,10 @@ func DefaultStages(ctx context.Context,
 	sm prune.Mode,
 	headers HeadersCfg,
 	blockHashCfg BlockHashesCfg,
-	snapshotHeaders SnapshotHeadersCfg,
 	bodies BodiesCfg,
-	snapshotBodies SnapshotBodiesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
 	trans TranspileCfg,
-	snapshotState SnapshotStateCfg,
 	hashState HashStateCfg,
 	trieCfg TrieCfg,
 	history HistoryCfg,
@@ -60,21 +57,6 @@ func DefaultStages(ctx context.Context,
 			},
 		},
 		{
-			ID:                  stages.CreateHeadersSnapshot,
-			Description:         "Create headers snapshot",
-			Disabled:            true,
-			DisabledDescription: "Enable by --snapshot.layout",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnHeadersSnapshotGenerationStage(s, tx, snapshotHeaders, firstCycle, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindHeadersSnapshotGenerationStage(u, tx, snapshotHeaders, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneHeadersSnapshotGenerationStage(p, tx, snapshotHeaders, ctx)
-			},
-		},
-		{
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
@@ -85,21 +67,6 @@ func DefaultStages(ctx context.Context,
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneBodiesStage(p, tx, bodies, ctx)
-			},
-		},
-		{
-			ID:                  stages.CreateBodiesSnapshot,
-			Description:         "Create bodies snapshot",
-			Disabled:            true,
-			DisabledDescription: "Enable by --snapshot.layout",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnBodiesSnapshotGenerationStage(s, tx, snapshotBodies, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindBodiesSnapshotGenerationStage(u, tx, snapshotBodies, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneBodiesSnapshotGenerationStage(p, tx, snapshotBodies, ctx)
 			},
 		},
 		{
@@ -141,21 +108,6 @@ func DefaultStages(ctx context.Context,
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneTranspileStage(p, tx, trans, firstCycle, ctx)
-			},
-		},
-		{
-			ID:                  stages.CreateStateSnapshot,
-			Description:         "Create state snapshot",
-			Disabled:            true,
-			DisabledDescription: "Enable by --snapshot.layout",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnStateSnapshotGenerationStage(s, tx, snapshotState, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindStateSnapshotGenerationStage(u, tx, snapshotState, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneStateSnapshotGenerationStage(p, tx, snapshotState, ctx)
 			},
 		},
 		{
@@ -284,15 +236,12 @@ func DefaultStages(ctx context.Context,
 var DefaultForwardOrder = UnwindOrder{
 	stages.Headers,
 	stages.BlockHashes,
-	stages.CreateHeadersSnapshot,
 	stages.Bodies,
-	stages.CreateBodiesSnapshot,
 
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
 	stages.Translation,
-	stages.CreateStateSnapshot,
 	stages.HashState,
 	stages.IntermediateHashes,
 	stages.CallTraces,
@@ -323,7 +272,6 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.HashState,
 	stages.IntermediateHashes,
 
-	stages.CreateStateSnapshot,
 	stages.Translation,
 	stages.Execution,
 	stages.Senders,
@@ -332,9 +280,7 @@ var DefaultUnwindOrder = UnwindOrder{
 	// also tx pool is before senders because senders unwind is inside cycle transaction
 	stages.TxPool,
 
-	stages.CreateBodiesSnapshot,
 	stages.Bodies,
-	stages.CreateHeadersSnapshot,
 	stages.BlockHashes,
 	stages.Headers,
 }
@@ -351,7 +297,6 @@ var DefaultPruneOrder = PruneOrder{
 	stages.HashState,
 	stages.IntermediateHashes,
 
-	stages.CreateStateSnapshot,
 	stages.Translation,
 	stages.Execution,
 	stages.Senders,
@@ -360,9 +305,7 @@ var DefaultPruneOrder = PruneOrder{
 	// also tx pool is before senders because senders unwind is inside cycle transaction
 	stages.TxPool,
 
-	stages.CreateBodiesSnapshot,
 	stages.Bodies,
-	stages.CreateHeadersSnapshot,
 	stages.BlockHashes,
 	stages.Headers,
 }
