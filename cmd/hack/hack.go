@@ -2745,7 +2745,9 @@ func recsplitLookup(chaindata, name string) error {
 	var prev []byte
 	var prevOffset uint64
 	for g.HasNext() {
-		word, _ = g.Next(word[:0])
+		var a uint64
+		word, a = g.Next(word[:0])
+		fmt.Printf("a: %d\n", a)
 		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
 			return err
 		}
@@ -2766,20 +2768,20 @@ func recsplitLookup(chaindata, name string) error {
 				fmt.Printf("%x,%x\n", word, word2)
 				panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
 			}
-			select {
-			default:
-			case <-logEvery.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				log.Info("Checked", "millions", float64(wc)/1_000_000,
-					"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
-					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
-				)
-			}
 		}
 		prev = common.CopyBytes(word)
 		prevOffset = offset
 
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Checked", "millions", float64(wc)/1_000_000,
+				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+			)
+		}
 	}
 
 	total = time.Since(start)
