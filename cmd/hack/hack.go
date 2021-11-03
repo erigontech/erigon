@@ -2743,7 +2743,6 @@ func recsplitLookup(chaindata, name string) error {
 	var l1, l2, total time.Duration
 	start := time.Now()
 	var prev []byte
-	var prevOffset uint64
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
