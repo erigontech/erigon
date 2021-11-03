@@ -2742,7 +2742,6 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
-	var prev []byte
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
@@ -2767,8 +2766,6 @@ func recsplitLookup(chaindata, name string) error {
 				panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
 			}
 		}
-		prev = common.CopyBytes(word)
-		prevOffset = offset
 
 		select {
 		default:
