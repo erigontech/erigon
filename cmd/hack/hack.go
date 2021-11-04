@@ -63,6 +63,8 @@ import (
 	"github.com/wcharczuk/go-chart/v2"
 )
 
+const ASSERT = false
+
 var (
 	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
@@ -2731,9 +2733,10 @@ func recsplitLookup(chaindata, name string) error {
 	idx := recsplit.MustOpen(name + ".idx")
 	defer idx.Close()
 
-	var word = make([]byte, 0, 256)
+	var word, word2 = make([]byte, 0, 4096), make([]byte, 0, 4096)
 	wc := 0
 	g := d.MakeGetter()
+	dataGetter := d.MakeGetter()
 
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
@@ -2741,6 +2744,8 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
+	var prev []byte
+	var prevOffset uint64
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
@@ -2752,8 +2757,22 @@ func recsplitLookup(chaindata, name string) error {
 		recID := idx.Lookup(slot.IdHash[:])
 		l1 += time.Since(t)
 		t = time.Now()
-		_ = idx.Lookup2(recID)
+		offset := idx.Lookup2(recID)
 		l2 += time.Since(t)
+		if ASSERT {
+			var dataP uint64
+			if prev != nil {
+				dataGetter.Reset(prevOffset)
+				word2, dataP = dataGetter.Next(word2[:0])
+				if !bytes.Equal(word, word2) {
+					fmt.Printf("wc=%d, %d,%d\n", wc, offset, dataP-uint64(len(word2)))
+					fmt.Printf("word: %x,%x\n\n", word, word2)
+					panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+				}
+			}
+			prev = common.CopyBytes(word)
+			prevOffset = offset
+		}
 
 		select {
 		default:
