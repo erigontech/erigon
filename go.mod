@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.7.0
-	github.com/VictoriaMetrics/metrics v1.18.0
+	github.com/VictoriaMetrics/metrics v1.18.1
 	github.com/anacrolix/log v0.8.0
 	github.com/anacrolix/torrent v1.25.1
 	github.com/btcsuite/btcd v0.21.0-beta
