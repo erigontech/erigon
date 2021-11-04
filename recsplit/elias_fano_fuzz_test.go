@@ -25,7 +25,7 @@ import (
 
 // gotip test -trimpath -v -fuzz=FuzzEliasFano -fuzztime=10s ./recsplit
 
-func FuzzEliasFano(f *testing.F) {
+func FuzzSingleEliasFano(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
 		if len(in)%2 == 1 {
 			t.Skip()
@@ -33,6 +33,47 @@ func FuzzEliasFano(f *testing.F) {
 		if len(in) == 0 {
 			t.Skip()
 		}
+		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
+			in = append(in, in...)
+		}
+
+		// Treat each byte of the sequence as difference between previous value and the next
+		count := len(in)
+		keys := make([]uint64, count+1)
+		var minDeltaCumKeys uint64
+		for i, b := range in {
+			keys[i+1] = keys[i] + uint64(b)
+			if i == 0 || uint64(b) < minDeltaCumKeys {
+				minDeltaCumKeys = uint64(b)
+			}
+		}
+		ef := NewEliasFano(uint64(count+1), keys[count], minDeltaCumKeys)
+		for _, c := range keys {
+			ef.AddOffset(c)
+		}
+		ef.Build()
+
+		// Try to read from ef
+		for i := 0; i < count; i++ {
+			if ef.Get(uint64(i)) != keys[i] {
+				t.Fatalf("i %d: got %d, expected %d", i, ef.Get(uint64(i)), keys[i])
+			}
+		}
+	})
+}
+
+func FuzzDoubleEliasFano(f *testing.F) {
+	f.Fuzz(func(t *testing.T, in []byte) {
+		if len(in)%2 == 1 {
+			t.Skip()
+		}
+		if len(in) == 0 {
+			t.Skip()
+		}
+		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
+			in = append(in, in...)
+		}
+
 		var ef DoubleEliasFano
 		// Treat each byte of the sequence as difference between previous value and the next
 		numBuckets := len(in) / 2

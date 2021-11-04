@@ -25,6 +25,10 @@ import (
 	"unsafe"
 )
 
+// EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
+// P. Elias. Efficient storage and retrieval by content and address of static files. J. ACM, 21(2):246–260, 1974.
+// Partitioned Elias-Fano Indexes http://groups.di.unipi.it/~ottavian/files/elias_fano_sigir14.pdf
+
 const (
 	log2q      uint64 = 8
 	q          uint64 = 1 << log2q
@@ -69,7 +73,9 @@ func (ef *EliasFano) AddOffset(offset uint64) {
 	if ef.l != 0 {
 		set_bits(ef.lowerBits, ef.i*ef.l, int(ef.l), (offset-ef.delta)&ef.lowerBitsMask)
 	}
+	//pos := ((offset - ef.delta) >> ef.l) + ef.i
 	set(ef.upperBits, ((offset-ef.delta)>>ef.l)+ef.i)
+	//fmt.Printf("add:%x, pos=%x, set=%x, res=%x\n", offset, pos, pos/64, uint64(1)<<(pos%64))
 	ef.i++
 	ef.delta += ef.minDelta
 }
@@ -77,7 +83,7 @@ func (ef *EliasFano) AddOffset(offset uint64) {
 func (ef EliasFano) jumpSizeWords() int {
 	size := ((ef.count + 1) / superQ) * superQSize // Whole blocks
 	if (ef.count+1)%superQ != 0 {
-		size += (1 + (((ef.count+1)%superQ+q-1)/q+3)/4) // Partial block
+		size += 1 + (((ef.count+1)%superQ+q-1)/q+3)/4 // Partial block
 	}
 	return int(size)
 }
@@ -86,7 +92,8 @@ func (ef *EliasFano) deriveFields() int {
 	if ef.u/(ef.count+1) == 0 {
 		ef.l = 0
 	} else {
-		ef.l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1)))
+		ef.l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1))) // pos of first non-zero bit
+		//fmt.Printf("lllllllll: %d, %d\n", 63^uint64(bits.LeadingZeros64(24/7)), msb(ef.u/(ef.count+1)))
 	}
 	ef.lowerBitsMask = (uint64(1) << ef.l) - 1
 	wordsLowerBits := int(((ef.count+1)*ef.l+63)/64 + 1)
@@ -98,6 +105,7 @@ func (ef *EliasFano) deriveFields() int {
 	} else {
 		ef.data = ef.data[:totalWords]
 	}
+
 	ef.lowerBits = ef.data[:wordsLowerBits]
 	ef.upperBits = ef.data[wordsLowerBits : wordsLowerBits+wordsUpperBits]
 	ef.jump = ef.data[wordsLowerBits+wordsUpperBits:]
@@ -123,14 +131,15 @@ func (ef *EliasFano) Build() {
 						fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
 						fmt.Printf("ef.minDelta=%x\n", ef.minDelta)
 						//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
-						//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
-						//fmt.Printf("ef.wordsUpperBits=%x\n", ef.wordsUpperBits)
+						//fmt.Printf("ef.lowerBits=%x\n", ef.lowerBits)
+						//fmt.Printf("ef.wordsUpperBits=%b\n", ef.wordsUpperBits)
 						panic("")
 					}
 					// c % superQ is the bit index inside the group of 4096 bits
-					idx16 := (c % superQ) / q
-					idx64 := (c/superQ)*superQSize + 1 + (idx16 >> 2)
-					shift := 16 * (idx16 % 4)
+					jumpSuperQ := (c / superQ) * superQSize
+					jumpInsideSuperQ := (c % superQ) / q
+					idx64 := jumpSuperQ + 1 + (jumpInsideSuperQ >> 2)
+					shift := 16 * (jumpInsideSuperQ % 4)
 					mask := uint64(0xffff) << shift
 					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
 				}
@@ -151,9 +160,8 @@ func (ef EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord 
 
 	jumpSuperQ := (i / superQ) * superQSize
 	jumpInsideSuperQ := (i % superQ) / q
-	idx16 := 2*(jumpSuperQ+2) + jumpInsideSuperQ
-	idx64 = idx16 / 4
-	shift = 16 * (idx16 % 4)
+	idx64 = jumpSuperQ + 1 + (jumpInsideSuperQ >> 2)
+	shift = 16 * (jumpInsideSuperQ % 4)
 	mask := uint64(0xffff) << shift
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
@@ -356,9 +364,10 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 						panic("")
 					}
 					// c % superQ is the bit index inside the group of 4096 bits
-					idx16 := 2 * ((c % superQ) / q)
-					idx64 := (c/superQ)*(superQSize*2) + 2 + (idx16 >> 2)
-					shift := 16 * (idx16 % 4)
+					jumpSuperQ := (c / superQ) * (superQSize * 2)
+					jumpInsideSuperQ := 2 * (c % superQ) / q
+					idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 2)
+					shift := 16 * (jumpInsideSuperQ % 4)
 					mask := uint64(0xffff) << shift
 					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
 				}
@@ -379,9 +388,10 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 					if offset >= (1 << 16) {
 						panic("")
 					}
-					idx16 := 2*((c%superQ)/q) + 1
-					idx64 := (c/superQ)*(superQSize*2) + 2 + (idx16 >> 2)
-					shift := 16 * (idx16 % 4)
+					jumpSuperQ := (c / superQ) * (superQSize * 2)
+					jumpInsideSuperQ := 2*((c%superQ)/q) + 1
+					idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 2)
+					shift := 16 * (jumpInsideSuperQ % 4)
 					mask := uint64(0xffff) << shift
 					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
 				}
@@ -408,7 +418,8 @@ func set_bits(bits []uint64, start uint64, width int, value uint64) {
 }
 
 func set(bits []uint64, pos uint64) {
-	bits[pos>>6] |= uint64(1) << (pos & 63)
+	//bits[pos>>6] |= uint64(1) << (pos & 63)
+	bits[pos/64] |= uint64(1) << (pos % 64)
 }
 
 func (ef DoubleEliasFano) jumpSizeWords() int {
