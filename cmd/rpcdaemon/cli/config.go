@@ -100,9 +100,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 	if err := rootCmd.MarkPersistentFlagDirname("chaindata"); err != nil {
 		panic(err)
 	}
-	if err := rootCmd.MarkPersistentFlagDirname("snapshot.dir"); err != nil {
-		panic(err)
-	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := utils.SetupCobra(cmd); err != nil {
