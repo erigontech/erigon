@@ -41,7 +41,6 @@ require (
 	github.com/ledgerwatch/secp256k1 v0.0.0-20210626115225-cd5cd00ed72d
 	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/pelletier/go-toml v1.9.4
-	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
 	github.com/rs/cors v1.8.0
 	github.com/shirou/gopsutil/v3 v3.21.9
