@@ -107,6 +107,7 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 
 			if _, err = sentry.SendMessageToRandomPeers(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
 				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+					log.Debug("broadcastNewBlock", "error", err)
 					continue
 				}
 				log.Error("broadcastNewBlock", "error", err)
@@ -124,6 +125,7 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 			}
 			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+					log.Debug("broadcastNewBlock", "error", err)
 					continue
 				}
 				log.Error("broadcastNewBlock", "error", err)
@@ -175,6 +177,7 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 				peers, err := sentry.SendMessageToAll(ctx, req65, &grpc.EmptyCallOption{})
 				if err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+						log.Debug("BroadcastLocalPooledTxs", "error", err)
 						continue
 					}
 					log.Error("BroadcastLocalPooledTxs", "error", err)
@@ -191,6 +194,7 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 				peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+						log.Debug("BroadcastLocalPooledTxs", "error", err)
 						continue
 					}
 					log.Error("BroadcastLocalPooledTxs", "error", err)
@@ -247,6 +251,7 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 
 				if _, err = sentry.SendMessageToRandomPeers(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+						log.Debug("BroadcastRemotePooledTxs", "error", err)
 						continue
 					}
 					log.Error("BroadcastRemotePooledTxs", "error", err)
@@ -264,6 +269,7 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 				}
 				if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+						log.Debug("BroadcastRemotePooledTxs", "error", err)
 						continue
 					}
 					log.Error("BroadcastRemotePooledTxs", "error", err)
@@ -312,6 +318,7 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 
 					if _, err = sentry.SendMessageById(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
 						if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+							log.Debug("broadcastNewBlock", "error", err)
 							continue
 						}
 						log.Error("broadcastNewBlock", "error", err)
@@ -327,6 +334,7 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 					}
 					if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 						if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+							log.Debug("PropagatePooledTxsToPeersList", "error", err)
 							continue
 						}
 						log.Error("PropagatePooledTxsToPeersList", "error", err)
