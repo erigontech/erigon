@@ -96,8 +96,6 @@ type Ethereum struct {
 
 	networkID uint64
 
-	torrentClient *snapshotsync.Client
-
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	chainConfig       *params.ChainConfig
 	genesisHash       common.Hash
@@ -148,43 +146,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	var torrentClient *snapshotsync.Client
-	config.Snapshot.Dir = stack.Config().ResolvePath("snapshots")
-	if config.Snapshot.Enabled {
-		var peerID string
-		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			v, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
-			if err != nil {
-				return err
-			}
-			peerID = string(v)
-			return nil
-		}); err != nil {
-			log.Error("Get bittorrent peer", "err", err)
-		}
-		torrentClient, err = snapshotsync.New(config.Snapshot.Dir, config.Snapshot.Seeding, peerID)
-		if err != nil {
-			return nil, err
-		}
-		if len(peerID) == 0 {
-			log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
-			if err = chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-				return torrentClient.SavePeerID(tx)
-			}); err != nil {
-				log.Error("Bittorrent peerID haven't saved", "err", err)
-			}
-		}
-
-		chainKv, err = snapshotsync.WrapSnapshots(chainKv, config.Snapshot.Dir)
-		if err != nil {
-			return nil, err
-		}
-		err = snapshotsync.SnapshotSeeding(chainKv, torrentClient, "headers", config.Snapshot.Dir)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -216,7 +177,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
@@ -512,19 +472,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(
-		backend.downloadCtx,
-		backend.logger,
-		backend.chainDB,
-		stack.Config().P2P,
-		*config,
-		backend.downloadServer,
-		tmpdir,
-		backend.txPool,
-		backend.txPoolP2PServer,
-
-		torrentClient, mg, backend.notifications.Accumulator,
-	)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.downloadCtx, backend.logger, backend.chainDB, stack.Config().P2P, *config, backend.downloadServer, tmpdir, backend.txPool, backend.txPoolP2PServer, backend.notifications.Accumulator)
 	if err != nil {
 		return nil, err
 	}

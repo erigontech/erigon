@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
@@ -225,80 +224,56 @@ func NewStagedSync(
 	tmpdir string,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
-
-	client *snapshotsync.Client,
-	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
-		stagedsync.DefaultStages(
-			ctx,
+		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
+			db,
+			controlServer.Hd,
+			*controlServer.ChainConfig,
+			controlServer.SendHeaderRequest,
+			controlServer.PropagateNewBlockHashes,
+			controlServer.Penalize,
+			cfg.BatchSize,
+			p2pCfg.NoDiscovery,
+		), stagedsync.StageBlockHashesCfg(db, tmpdir), stagedsync.StageBodiesCfg(
+			db,
+			controlServer.Bd,
+			controlServer.SendBodyRequest,
+			controlServer.Penalize,
+			controlServer.BroadcastNewBlock,
+			cfg.BodyDownloadTimeoutSeconds,
+			*controlServer.ChainConfig,
+			cfg.BatchSize,
+		), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
+			db,
 			cfg.Prune,
-			stagedsync.StageHeadersCfg(
-				db,
-				controlServer.Hd,
-				*controlServer.ChainConfig,
-				controlServer.SendHeaderRequest,
-				controlServer.PropagateNewBlockHashes,
-				controlServer.Penalize,
-				cfg.BatchSize,
-				p2pCfg.NoDiscovery,
-			),
-			stagedsync.StageBlockHashesCfg(db, tmpdir),
-			stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator, logger),
-			stagedsync.StageBodiesCfg(
-				db,
-				controlServer.Bd,
-				controlServer.SendBodyRequest,
-				controlServer.Penalize,
-				controlServer.BroadcastNewBlock,
-				cfg.BodyDownloadTimeoutSeconds,
-				*controlServer.ChainConfig,
-				cfg.BatchSize,
-			),
-			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune),
-			stagedsync.StageExecuteBlocksCfg(
-				db,
-				cfg.Prune,
-				cfg.BatchSize,
-				nil,
-				controlServer.ChainConfig,
-				controlServer.Engine,
-				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
-				accumulator,
-				cfg.StateStream,
-				tmpdir,
-			),
-			stagedsync.StageTranspileCfg(
-				db,
-				cfg.BatchSize,
-				controlServer.ChainConfig,
-			),
-			stagedsync.StageSnapshotStateCfg(db, cfg.Snapshot, tmpdir, client, snapshotMigrator),
-			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, tmpdir),
-			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
-				if cfg.TxPool.V2 {
-				} else {
-					for i := range txPoolServer.Sentries {
-						go func(i int) {
-							txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
-						}(i)
-						go func(i int) {
-							txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
-						}(i)
-					}
-					txPoolServer.TxFetcher.Start()
+			cfg.BatchSize,
+			nil,
+			controlServer.ChainConfig,
+			controlServer.Engine,
+			&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+			accumulator,
+			cfg.StateStream,
+			tmpdir,
+		), stagedsync.StageTranspileCfg(
+			db,
+			cfg.BatchSize,
+			controlServer.ChainConfig,
+		), stagedsync.StageHashStateCfg(db, tmpdir), stagedsync.StageTrieCfg(db, true, true, tmpdir), stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir), stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir), stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir), stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir), stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
+			if cfg.TxPool.V2 {
+			} else {
+				for i := range txPoolServer.Sentries {
+					go func(i int) {
+						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
+					}(i)
+					go func(i int) {
+						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
+					}(i)
 				}
-			}),
-			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger),
-			false, /* test */
-		),
+				txPoolServer.TxFetcher.Start()
+			}
+		}), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil

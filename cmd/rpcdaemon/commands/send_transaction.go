@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -35,13 +35,13 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 	hash := txn.Hash()
-	res, err := api.txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{encodedTx}})
+	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {
 		return common.Hash{}, err
 	}
 
-	if res.Imported[0] != txpool.ImportResult_SUCCESS {
-		return hash, fmt.Errorf("%s: %s", txpool.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
+	if res.Imported[0] != txPoolProto.ImportResult_SUCCESS {
+		return hash, fmt.Errorf("%s: %s", txPoolProto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
 	}
 
 	tx, err := api.db.BeginRo(ctx)
