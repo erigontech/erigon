@@ -162,11 +162,11 @@ func readPlainStateOnce(
 	bufferSize := etl.BufferOptimalSize
 	buffer := etl.NewSortableBuffer(bufferSize)
 
-	collector1 := etl.NewCollector(logPrefix, tmpdir, buffer)
-	collector2 := etl.NewCollector(logPrefix, tmpdir, buffer)
+	accCollector := etl.NewCollector(logPrefix, tmpdir, buffer)
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, buffer)
 	defer func() {
-		collector1.Close()
-		collector2.Close()
+		accCollector.Close()
+		storageCollector.Close()
 	}()
 
 	t := time.Now()
@@ -215,7 +215,7 @@ func readPlainStateOnce(
 			if err != nil {
 				return err
 			}
-			if err := collector1.Collect(newK, v); err != nil {
+			if err := accCollector.Collect(newK, v); err != nil {
 				return err
 			}
 		} else {
@@ -223,7 +223,7 @@ func readPlainStateOnce(
 			if err != nil {
 				return err
 			}
-			if err := collector2.Collect(newK, v); err != nil {
+			if err := storageCollector.Collect(newK, v); err != nil {
 				return err
 			}
 		}
@@ -258,11 +258,11 @@ func readPlainStateOnce(
 	}
 
 	//  filling up 2 collectors
-	if err := collector1.Load(db, kv.HashedAccounts, loadFunc, args); err != nil {
+	if err := accCollector.Load(db, kv.HashedAccounts, loadFunc, args); err != nil {
 		return err
 	}
 
-	if err := collector1.Load(db, kv.HashedStorage, loadFunc, args); err != nil {
+	if err := storageCollector.Load(db, kv.HashedStorage, loadFunc, args); err != nil {
 		return err
 	}
 
