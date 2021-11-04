@@ -129,7 +129,6 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 	if err := readPlainStateOnce(
 		logPrefix,
 		db,
-		kv.PlainState,
 		cfg.tmpDir,
 		etl.IdentityLoadFunc,
 		quit,
@@ -154,7 +153,6 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 func readPlainStateOnce(
 	logPrefix string,
 	db kv.RwTx,
-	fromBucket string,
 	tmpdir string,
 	loadFunc etl.LoadFunc,
 	quit <-chan struct{},
@@ -174,7 +172,8 @@ func readPlainStateOnce(
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
-	c, err := db.Cursor(fromBucket)
+	fromBucket := kv.PlainState
+	c, err := db.Cursor(kv.PlainState)
 	if err != nil {
 		return err
 	}
@@ -232,12 +231,7 @@ func readPlainStateOnce(
 		default:
 		case <-logEvery.C:
 			logArs := []interface{}{"from", fromBucket}
-			var additionalLogArguments etl.AdditionalLogArguments
-			if additionalLogArguments != nil {
-				logArs = append(logArs, additionalLogArguments(k, v)...)
-			} else {
-				logArs = append(logArs, "current key", fmt.Sprintf("%x...", k[:6]))
-			}
+			logArs = append(logArs, "current key", fmt.Sprintf("%x...", k[:6]))
 
 			runtime.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
@@ -257,7 +251,6 @@ func readPlainStateOnce(
 		Quit: quit,
 	}
 
-	//  filling up 2 collectors
 	if err := accCollector.Load(db, kv.HashedAccounts, loadFunc, args); err != nil {
 		return err
 	}
