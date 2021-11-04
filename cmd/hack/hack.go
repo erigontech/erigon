@@ -63,6 +63,8 @@ import (
 	"github.com/wcharczuk/go-chart/v2"
 )
 
+const ASSERT = false
+
 var (
 	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
@@ -2757,27 +2759,29 @@ func recsplitLookup(chaindata, name string) error {
 		t = time.Now()
 		offset := idx.Lookup2(recID)
 		l2 += time.Since(t)
-		var dataP uint64
-		if prev != nil {
-			dataGetter.Reset(prevOffset)
-			word2, dataP = dataGetter.Next(word2[:0])
-			if !bytes.Equal(word, word2) {
-				fmt.Printf("wc=%d, %d,%d\n", wc, offset, dataP-uint64(len(word2)))
-				fmt.Printf("word: %x,%x\n\n", word, word2)
-
-				word, _ = g.Next(word[:0])
+		if ASSERT {
+			var dataP uint64
+			if prev != nil {
+				dataGetter.Reset(prevOffset)
 				word2, dataP = dataGetter.Next(word2[:0])
-				fmt.Printf("next word: %x,%x\n\n", word, word2)
+				if !bytes.Equal(word, word2) {
+					fmt.Printf("wc=%d, %d,%d\n", wc, offset, dataP-uint64(len(word2)))
+					fmt.Printf("word: %x,%x\n\n", word, word2)
 
-				word, _ = g.Next(word[:0])
-				word2, dataP = dataGetter.Next(word2[:0])
-				fmt.Printf("next word: %x,%x\n\n", word, word2)
+					word, _ = g.Next(word[:0])
+					word2, dataP = dataGetter.Next(word2[:0])
+					fmt.Printf("next word: %x,%x\n\n", word, word2)
 
-				panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+					word, _ = g.Next(word[:0])
+					word2, dataP = dataGetter.Next(word2[:0])
+					fmt.Printf("next word: %x,%x\n\n", word, word2)
+
+					panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+				}
 			}
+			prev = common.CopyBytes(word)
+			prevOffset = offset
 		}
-		prev = common.CopyBytes(word)
-		prevOffset = offset
 
 		select {
 		default:
