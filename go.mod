@@ -36,7 +36,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20211104042003-182de9f4806b
+	github.com/ledgerwatch/erigon-lib v0.0.0-20211104083555-bf3ea94f7774
 	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/logrusorgru/aurora/v3 v3.0.0
@@ -67,5 +67,3 @@ require (
 	gotest.tools v2.2.0+incompatible // indirect
 	pgregory.net/rapid v0.4.7
 )
-
-replace github.com/ledgerwatch/erigon-lib => github.com/iszubok/erigon-lib v0.0.0-20211103123001-12f30c032548
