@@ -125,9 +125,8 @@ func (b *SimulatedBackend) DB() kv.RwDB {
 }
 
 // Close terminates the underlying blockchain's update loop.
-func (b *SimulatedBackend) Close() error {
-	b.m.DB.Close()
-	return nil
+func (b *SimulatedBackend) Close() {
+	b.m.Close()
 }
 
 // Commit imports all the pending transactions as a single block and starts a

@@ -15,7 +15,7 @@ import (
 // 		    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 //                  recordFile stores all eth_call returned with success
 //                  errorFile stores information when erigon and geth doesn't return same data
-func BenchEthCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
+func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
 		Timeout: time.Second * 600,
@@ -103,7 +103,12 @@ func BenchEthCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64,
 			reqGen.reqID++
 			nTransactions = nTransactions + 1
 
-			request := reqGen.ethCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
+			var request string
+			if latest {
+				request = reqGen.ethCallLatest(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input)
+			} else {
+				request = reqGen.ethCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
+			}
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, tx.Hash)
 
 			if err := requestAndCompare(request, "eth_call", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {

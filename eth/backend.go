@@ -33,9 +33,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -49,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -60,7 +57,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node"
@@ -99,8 +95,6 @@ type Ethereum struct {
 	etherbase common.Address
 
 	networkID uint64
-
-	torrentClient *snapshotsync.Client
 
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	chainConfig       *params.ChainConfig
@@ -152,43 +146,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	var torrentClient *snapshotsync.Client
-	config.Snapshot.Dir = stack.Config().ResolvePath("snapshots")
-	if config.Snapshot.Enabled {
-		var peerID string
-		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			v, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
-			if err != nil {
-				return err
-			}
-			peerID = string(v)
-			return nil
-		}); err != nil {
-			log.Error("Get bittorrent peer", "err", err)
-		}
-		torrentClient, err = snapshotsync.New(config.Snapshot.Dir, config.Snapshot.Seeding, peerID)
-		if err != nil {
-			return nil, err
-		}
-		if len(peerID) == 0 {
-			log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
-			if err = chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-				return torrentClient.SavePeerID(tx)
-			}); err != nil {
-				log.Error("Bittorrent peerID haven't saved", "err", err)
-			}
-		}
-
-		chainKv, err = snapshotsync.WrapSnapshots(chainKv, config.Snapshot.Dir)
-		if err != nil {
-			return nil, err
-		}
-		err = snapshotsync.SnapshotSeeding(chainKv, torrentClient, "headers", config.Snapshot.Dir)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -207,6 +164,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
+	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -219,7 +177,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
@@ -371,8 +328,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
 		cfg.MinFeeCap = config.TxPool.PriceLimit
 		cfg.AccountSlots = config.TxPool.AccountSlots
-		cfg.LogEvery = 1 * time.Minute    //5 * time.Minute
-		cfg.CommitEvery = 1 * time.Minute //5 * time.Minute
+		cfg.LogEvery = 1 * time.Minute
+		cfg.CommitEvery = 5 * time.Minute
 
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
@@ -482,43 +439,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				}
 			}()
 		}
-
-		// start pool on non-mainnet immediately
-		if backend.chainConfig.ChainID.Uint64() != params.MainnetChainConfig.ChainID.Uint64() && !backend.config.TxPool.Disable {
-			var execution uint64
-			var hh *types.Header
-			if err := chainKv.View(ctx, func(tx kv.Tx) error {
-				execution, err = stages.GetStageProgress(tx, stages.Execution)
-				if err != nil {
-					return err
-				}
-				hh = rawdb.ReadCurrentHeader(tx)
-				return nil
-			}); err != nil {
-				return nil, err
-			}
-
-			if backend.config.TxPool.V2 {
-				if err := backend.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-					pendingBaseFee := misc.CalcBaseFee(chainConfig, hh)
-					return backend.txPool2.OnNewBlock(context.Background(), &remote.StateChangeBatch{
-						PendingBlockBaseFee: pendingBaseFee.Uint64(),
-						DatabaseViewID:      tx.ViewID(),
-						ChangeBatch: []*remote.StateChange{
-							{BlockHeight: hh.Number.Uint64(), BlockHash: gointerfaces.ConvertHashToH256(hh.Hash())},
-						},
-					}, txpool2.TxSlots{}, txpool2.TxSlots{}, tx)
-				}); err != nil {
-					return nil, err
-				}
-			} else {
-				if hh != nil {
-					if err := backend.txPool.Start(hh.GasLimit, execution); err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
 	}
 	go func() {
 		defer debug.LogPanic()
@@ -552,19 +472,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(
-		backend.downloadCtx,
-		backend.logger,
-		backend.chainDB,
-		stack.Config().P2P,
-		*config,
-		backend.downloadServer,
-		tmpdir,
-		backend.txPool,
-		backend.txPoolP2PServer,
-
-		torrentClient, mg, backend.notifications.Accumulator,
-	)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.downloadCtx, backend.logger, backend.chainDB, stack.Config().P2P, *config, backend.downloadServer, tmpdir, backend.txPool, backend.txPoolP2PServer, backend.notifications.Accumulator)
 	if err != nil {
 		return nil, err
 	}
@@ -680,7 +588,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 	if s.chainConfig.ChainID.Uint64() > 10 {
 		go func() {
-			skipCycleEvery := time.NewTicker(3 * time.Second)
+			skipCycleEvery := time.NewTicker(4 * time.Second)
 			defer skipCycleEvery.Stop()
 			for range skipCycleEvery.C {
 				select {

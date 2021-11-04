@@ -140,8 +140,8 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 	checkFlushEvery := time.NewTicker(cfg.flushEvery)
 	defer checkFlushEvery.Stop()
 
-	collectorUpdates := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorUpdates.Close(logPrefix)
+	collectorUpdates := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorUpdates.Close()
 
 	if err := changeset.ForRange(tx, changesetBucket, start, stop, func(blockN uint64, k, v []byte) error {
 		if err := libcommon.Stopped(quit); err != nil {
@@ -219,7 +219,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		return nil
 	}
 
-	if err := collectorUpdates.Load(logPrefix, tx, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorUpdates.Load(tx, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -416,10 +416,18 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	collector := etl.NewCollector(tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-	defer collector.Close(logPrefix)
+	collector := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
 
 	if err := changeset.ForRange(tx, csTable, 0, pruneTo, func(blockNum uint64, k, _ []byte) error {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", csTable, "block_num", blockNum)
+		case <-ctx.Done():
+			return libcommon.ErrStopped
+		default:
+		}
+
 		return collector.Collect(k, nil)
 	}); err != nil {
 		return err
@@ -434,7 +442,7 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	if csTable == kv.StorageChangeSet {
 		prefixLen = length.Hash
 	}
-	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := collector.Load(tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))

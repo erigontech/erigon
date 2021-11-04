@@ -890,10 +890,11 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneAccountHistoryIndex(ps, tx, cfg, ctx)
+		err = stagedsync.PruneStorageHistoryIndex(ps, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
+		_ = printStages(tx)
 	} else {
 		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
 			return err
@@ -1018,7 +1019,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	snapshotDir = path.Join(datadir, "snapshot")
 	logger := log.New()
 
 	var pm prune.Mode
@@ -1041,7 +1041,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	var engine consensus.Engine
 	engine = ethash.NewFaker()
 	switch chain {
-	case params.SokolChainName, params.KovanChainName, params.FermionChainName:
+	case params.SokolChainName, params.KovanChainName:
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
 	}
 
@@ -1083,13 +1083,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
-		downloadServer,
-		tmpdir,
-		txPool,
-		txPoolP2PServer,
-		nil, nil, nil,
-	)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, downloadServer, tmpdir, txPool, txPoolP2PServer, nil)
 	if err != nil {
 		panic(err)
 	}

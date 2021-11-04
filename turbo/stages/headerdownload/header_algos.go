@@ -159,7 +159,7 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) markPreverified(link *Link) {
 	// Go through all parent links that are not preveried and mark them too
-	for link != nil && !link.preverified {
+	for link != nil && !link.persisted {
 		link.preverified = true
 		link = hd.links[link.header.ParentHash]
 	}
@@ -237,10 +237,8 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 				prevLink.next = append(prevLink.next, link)
 			}
 			prevLink = link
-			if !anchorPreverified {
-				if _, ok := hd.preverifiedHashes[link.hash]; ok {
-					hd.markPreverified(link)
-				}
+			if _, ok := hd.preverifiedHashes[link.hash]; ok {
+				hd.markPreverified(link)
 			}
 		}
 		prevLink.next = anchor.links
@@ -288,10 +286,8 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
-		if !anchorPreverified {
-			if _, ok := hd.preverifiedHashes[link.hash]; ok {
-				hd.markPreverified(link)
-			}
+		if _, ok := hd.preverifiedHashes[link.hash]; ok {
+			hd.markPreverified(link)
 		}
 	}
 	prevLink.next = anchor.links
@@ -309,6 +305,20 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 		hd.insertList = append(hd.insertList, link)
 	}
 	return penalties, nil
+}
+
+func (hd *HeaderDownload) removeAnchor(segment *ChainSegment, start int) error {
+	// Find attachement anchors again
+	anchorHeader := segment.Headers[start]
+	anchor, ok := hd.anchors[anchorHeader.Hash()]
+	if !ok {
+		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
+	}
+	// Anchor is removed from the map, but not from the anchorQueue
+	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
+	// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
+	delete(hd.anchors, anchor.parentHash)
+	return nil
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
@@ -553,23 +563,27 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 	}
 	anchor.timeouts++
 	anchor.timestamp = currentTime + timeout
-	heap.Fix(hd.anchorQueue, 0)
+	heap.Fix(hd.anchorQueue, anchor.idx)
 }
 
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
-	if len(hd.anchors) > 16 {
-		return nil // Need to be below anchor threshold to produce skeleton request
-	}
 	stride := uint64(8 * 192)
-	if hd.topSeenHeight < hd.highestInDb+stride {
-		return nil
+	queryRange := hd.topSeenHeight
+	// Determine the query range as the height of lowest anchor
+	for _, anchor := range hd.anchors {
+		if anchor.blockHeight > hd.highestInDb && anchor.blockHeight < queryRange {
+			queryRange = anchor.blockHeight
+		}
 	}
-	length := (hd.topSeenHeight - hd.highestInDb) / stride
+	length := (queryRange - hd.highestInDb) / stride
 	if length > 192 {
 		length = 192
+	}
+	if length == 0 {
+		return nil
 	}
 	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
 }
@@ -715,9 +729,6 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 		// Skip duplicates
 		return nil
 	}
-	if blockHeight < hi.prevHeight {
-		return fmt.Errorf("[%s] headers are unexpectedly unsorted, got %d after %d", hi.logPrefix, blockHeight, hi.prevHeight)
-	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
 		return nil
@@ -725,9 +736,8 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	// Load parent header
 	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
 	if parent == nil {
-		log.Warn(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
-		// Skip headers without parents
-		return nil
+		// Fail on headers without parent
+		return fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
@@ -848,6 +858,13 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 	foundTip, end := hd.findLink(segment, start) // We ignore penalty because we will check it as part of PoW check
 	if end == 0 {
 		log.Trace("Duplicate segment")
+		if foundAnchor {
+			// If duplicate segment is extending from the anchor, the anchor needs to be deleted,
+			// otherwise it will keep producing requests that will be found duplicate
+			if err := hd.removeAnchor(segment, start); err != nil {
+				log.Warn("removal of anchor failed", "error", err)
+			}
+		}
 		return
 	}
 	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()

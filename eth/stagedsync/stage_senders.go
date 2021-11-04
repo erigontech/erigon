@@ -133,8 +133,8 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		}(i)
 	}
 
-	collectorSenders := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorSenders.Close(logPrefix)
+	collectorSenders := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorSenders.Close()
 
 	errCh := make(chan senderRecoveryError)
 	go func() {
@@ -242,16 +242,12 @@ Loop:
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
 	} else {
-		if err := collectorSenders.Load(logPrefix, tx,
-			kv.Senders,
-			etl.IdentityLoadFunc,
-			etl.TransformArgs{
-				Quit: quitCh,
-				LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-					return []interface{}{"block", binary.BigEndian.Uint64(k)}
-				},
+		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
+			Quit: quitCh,
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+				return []interface{}{"block", binary.BigEndian.Uint64(k)}
 			},
-		); err != nil {
+		}); err != nil {
 			return err
 		}
 		if err = s.Update(tx, to); err != nil {

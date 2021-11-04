@@ -151,10 +151,6 @@ var (
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
 	// Transaction pool settings
-	TxPoolV2Flag = cli.BoolFlag{
-		Name:  "txpool.v2",
-		Usage: "experimental internal pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
-	}
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
 		Usage: "experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
@@ -198,7 +194,7 @@ var (
 		Value: ethconfig.Defaults.TxPool.GlobalSlots,
 	}
 	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
-		Name:  "txpool.globalbasefeeeslots",
+		Name:  "txpool.globalbasefeeslots",
 		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
 		Value: ethconfig.Defaults.TxPool.GlobalQueue,
 	}
@@ -804,9 +800,33 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	if etherbase == "" && ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
-		cfg.Miner.SigKey = core.DevnetSignPrivateKey
-		cfg.Miner.Etherbase = core.DevnetEtherbase
+	setSigKey := func(ctx *cli.Context, cfg *ethconfig.Config) {
+		if ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
+			signingKeyFileName := ctx.GlobalString(MinerSigningKeyFileFlag.Name)
+			key, err := crypto.LoadECDSA(signingKeyFileName)
+			if err != nil {
+				panic(err)
+			}
+			cfg.Miner.SigKey = key
+		}
+	}
+
+	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+		if etherbase == "" {
+			cfg.Miner.SigKey = core.DevnetSignPrivateKey
+			cfg.Miner.Etherbase = core.DevnetEtherbase
+		}
+		setSigKey(ctx, cfg)
+	}
+
+	if ctx.GlobalString(ChainFlag.Name) == params.FermionChainName {
+		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
+			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, params.FermionChainName, MiningEnabledFlag.Name))
+		}
+		setSigKey(ctx, cfg)
+		if cfg.Miner.SigKey != nil {
+			cfg.Miner.Etherbase = crypto.PubkeyToAddress(cfg.Miner.SigKey.PublicKey)
+		}
 	}
 }
 
@@ -847,7 +867,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 
 	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
 		// --dev mode can't use p2p networking.
-		cfg.MaxPeers = 0
+		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		cfg.ListenAddr = ":0"
 		cfg.NoDiscovery = true
 		cfg.DiscoveryV5 = false
@@ -947,9 +967,7 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 }
 
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
-	if ctx.GlobalIsSet(TxPoolV2Flag.Name) {
-		cfg.V2 = true
-	}
+	cfg.V2 = true
 	if ctx.GlobalIsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
@@ -1269,7 +1287,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.Genesis = core.DefaultKovanGenesisBlock()
 	case params.FermionChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 102
+			cfg.NetworkID = 1212120
 		}
 		cfg.Genesis = core.DefaultFermionGenesisBlock()
 	case params.DevChainName:
@@ -1285,6 +1303,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 
 		// Create a new developer genesis block or reuse existing one
 		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), developer)
+		log.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}

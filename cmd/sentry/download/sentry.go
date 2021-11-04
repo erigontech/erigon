@@ -17,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -213,13 +212,7 @@ func handShake(
 			return fmt.Errorf("%w", err1)
 		}
 
-		td, overflow := uint256.FromBig(reply.TD)
-		if overflow {
-			return fmt.Errorf("reply.TD higher than 2^256-1")
-		}
-
-		startSyncWithThisPeer := td.Cmp(ourTD) > 0 && startSync != nil
-		if startSyncWithThisPeer {
+		if startSync != nil {
 			if err := startSync(reply.Head); err != nil {
 				return err
 			}
@@ -429,10 +422,10 @@ func rootContext() context.Context {
 
 func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
-	log.Info("Starting Sentry P2P server", "on", sentryAddr)
+	log.Info("Starting Sentry gRPC server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
-			log.Info("Sentry P2P received connection", "via", network, "from", address)
+			log.Info("Sentry gRPC received connection", "via", network, "from", address)
 			return nil
 		},
 	}
@@ -444,7 +437,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
-			log.Error("Sentry P2P server fail", "err", err1)
+			log.Error("Sentry gRPC server fail", "err", err1)
 		}
 	}()
 	return grpcServer, nil
@@ -780,6 +773,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 		if peerInfo == nil {
 			return true
 		}
+
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
 			peerInfo.Remove()
 			ss.GoodPeers.Delete(peerID)
@@ -889,7 +883,7 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID string, b 
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
 		if len(ch) > MessagesQueueSize/2 {
-			log.Warn("[sentry] consuming is slow", "msgID", msgID.String())
+			log.Debug("[sentry] consuming is slow, drop 50% of old messages", "msgID", msgID.String())
 			// evict old messages from channel
 			for j := 0; j < MessagesQueueSize/4; j++ {
 				select {

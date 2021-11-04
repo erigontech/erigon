@@ -37,6 +37,14 @@ const (
 	FermionChainName = "fermion"
 )
 
+type ConsensusType string
+
+const (
+	AuRaConsensus   ConsensusType = "aura"
+	EtHashConsensus ConsensusType = "ethash"
+	CliqueConsensus ConsensusType = "clique"
+)
+
 // Genesis hashes to enforce below configs on.
 var (
 	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
@@ -46,7 +54,7 @@ var (
 	ErigonGenesisHash  = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
-	FermionGenesisHash = common.HexToHash("0xcb6399165d4b9460d2462a71f4574984df2a92fe513b1ab64d69573426ecc75f")
+	FermionGenesisHash = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 )
 
 var (
@@ -64,6 +72,7 @@ var (
 	MainnetChainConfig = &ChainConfig{
 		ChainName:           MainnetChainName,
 		ChainID:             big.NewInt(1),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(1_150_000),
 		DAOForkBlock:        big.NewInt(1_920_000),
 		DAOForkSupport:      true,
@@ -78,6 +87,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(9_200_000),
 		BerlinBlock:         big.NewInt(12_244_000),
 		LondonBlock:         big.NewInt(12_965_000),
+		ArrowGlacierBlock:   big.NewInt(13_773_000),
 		Ethash:              new(EthashConfig),
 	}
 
@@ -85,6 +95,7 @@ var (
 	RopstenChainConfig = &ChainConfig{
 		ChainName:           RopstenChainName,
 		ChainID:             big.NewInt(3),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -106,6 +117,7 @@ var (
 	RinkebyChainConfig = &ChainConfig{
 		ChainName:           RinkebyChainName,
 		ChainID:             big.NewInt(4),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(1),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -130,6 +142,7 @@ var (
 	GoerliChainConfig = &ChainConfig{
 		ChainName:           GoerliChainName,
 		ChainID:             big.NewInt(5),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -153,6 +166,7 @@ var (
 	ErigonChainConfig = &ChainConfig{
 		ChainName:           ErigonMineName,
 		ChainID:             new(big.Int).SetBytes([]byte("erigon-mine")),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -165,12 +179,15 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         nil,
+		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
 	}
 
 	SokolChainConfig = &ChainConfig{
 		ChainName:      SokolChainName,
 		ChainID:        big.NewInt(77),
+		Consensus:      AuRaConsensus,
 		HomesteadBlock: big.NewInt(0),
 		DAOForkBlock:   nil,
 		DAOForkSupport: false,
@@ -227,13 +244,14 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(21050600),
 		//LondonBlock:         big.NewInt(21050600),
-		CatalystBlock: nil,
-		Aura:          &AuRaConfig{},
+		ArrowGlacierBlock: nil,
+		Aura:              &AuRaConfig{},
 	}
 
 	KovanChainConfig = &ChainConfig{
 		ChainName:           KovanChainName,
 		ChainID:             big.NewInt(42),
+		Consensus:           AuRaConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
@@ -247,37 +265,39 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(24770900),
 		LondonBlock:         big.NewInt(26741100),
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Aura:                &AuRaConfig{},
 	}
 
 	FermionChainConfig = &ChainConfig{
 		ChainName:           FermionChainName,
-		ChainID:             big.NewInt(102),
+		ChainID:             big.NewInt(1212120),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
 		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(5067000),
-		ConstantinopleBlock: big.NewInt(9200000),
-		PetersburgBlock:     big.NewInt(10255201),
-		IstanbulBlock:       big.NewInt(14111141),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(24770900),
-		LondonBlock:         big.NewInt(26741100),
-		CatalystBlock:       nil,
-		Aura:                &AuRaConfig{},
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArrowGlacierBlock:   nil,
+		Clique: &CliqueConfig{
+			Period: 15,
+			Epoch:  30000,
+		},
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Ethash consensus.
-	//
-	// This configuration is intentionally not using keyed fields to force anyone
-	// adding flags to the config to also have to set these fields.
 	AllEthashProtocolChanges = &ChainConfig{
 		ChainID:             big.NewInt(1337),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
@@ -292,18 +312,16 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
-	//
-	// This configuration is intentionally not using keyed fields to force anyone
-	// adding flags to the config to also have to set these fields.
 	AllCliqueProtocolChanges = &ChainConfig{
 		ChainID:             big.NewInt(1337),
+		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
@@ -317,8 +335,8 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         nil,
-		CatalystBlock:       nil,
+		LondonBlock:         big.NewInt(0),
+		ArrowGlacierBlock:   nil,
 		Ethash:              nil,
 		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
 	}
@@ -327,6 +345,7 @@ var (
 
 	TestChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(1),
+		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      false,
@@ -341,9 +360,30 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
+	}
+
+	TestChainAuraConfig = &ChainConfig{
+		ChainID:             big.NewInt(1),
+		Consensus:           AuRaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      false,
+		EIP150Block:         big.NewInt(0),
+		EIP150Hash:          common.Hash{},
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         nil,
+		ArrowGlacierBlock:   nil,
+		Aura:                &AuRaConfig{},
 	}
 
 	TestRules = TestChainConfig.Rules(0)
@@ -357,6 +397,8 @@ var (
 type ChainConfig struct {
 	ChainName string
 	ChainID   *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
+
+	Consensus ConsensusType `json:"consensus,omitempty"` // aura, ethash or clique
 
 	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"` // Homestead switch block (nil = no fork, 0 = already homestead)
 
@@ -374,11 +416,13 @@ type ChainConfig struct {
 	ConstantinopleBlock *big.Int `json:"constantinopleBlock,omitempty"` // Constantinople switch block (nil = no fork, 0 = already activated)
 	PetersburgBlock     *big.Int `json:"petersburgBlock,omitempty"`     // Petersburg switch block (nil = same as Constantinople)
 	IstanbulBlock       *big.Int `json:"istanbulBlock,omitempty"`       // Istanbul switch block (nil = no fork, 0 = already on istanbul)
-	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // EIP-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
-	CatalystBlock       *big.Int `json:"catalystBlock,omitempty"`       // Catalyst switch block (nil = no fork, 0 = already on catalyst)
+	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
+	// EIP-3675: Upgrade consensus to Proof-of-Stake
+	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
@@ -422,7 +466,7 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -437,8 +481,13 @@ func (c *ChainConfig) String() string {
 		c.MuirGlacierBlock,
 		c.BerlinBlock,
 		c.LondonBlock,
+		c.ArrowGlacierBlock,
 		engine,
 	)
+}
+
+func (c *ChainConfig) IsHeaderWithSeal() bool {
+	return c.Consensus == AuRaConsensus
 }
 
 type SnapshotConfig struct {
@@ -527,9 +576,9 @@ func (c *ChainConfig) IsLondon(num uint64) bool {
 	return isForked(c.LondonBlock, num)
 }
 
-// IsCatalyst returns whether num is either equal to the Merge fork block or greater.
-func (c *ChainConfig) IsCatalyst(num uint64) bool {
-	return isForked(c.CatalystBlock, num)
+// IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
+func (c *ChainConfig) IsArrowGlacier(num uint64) bool {
+	return isForked(c.ArrowGlacierBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -575,6 +624,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "muirGlacierBlock", block: c.MuirGlacierBlock, optional: true},
 		{name: "berlinBlock", block: c.BerlinBlock},
 		{name: "londonBlock", block: c.LondonBlock},
+		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -644,6 +694,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.LondonBlock, newcfg.LondonBlock, head) {
 		return newCompatError("London fork block", c.LondonBlock, newcfg.LondonBlock)
 	}
+	if isForkIncompatible(c.ArrowGlacierBlock, newcfg.ArrowGlacierBlock, head) {
+		return newCompatError("Arrow Glacier fork block", c.ArrowGlacierBlock, newcfg.ArrowGlacierBlock)
+	}
 	return nil
 }
 
@@ -711,7 +764,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsCatalyst                          bool
+	IsBerlin, IsLondon                                      bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -732,6 +785,5 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsIstanbul:       c.IsIstanbul(num),
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
-		IsCatalyst:       c.IsCatalyst(num),
 	}
 }

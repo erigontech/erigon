@@ -83,4 +83,8 @@ var (
 	// ErrFeeCapTooLow is returned if the transaction fee cap is less than the
 	// the base fee of the block.
 	ErrFeeCapTooLow = errors.New("fee cap less than block base fee")
+
+	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
+	// See EIP-3607: Reject transactions from senders with deployed code.
+	ErrSenderNoEOA = errors.New("sender not an eoa")
 )
