@@ -13,25 +13,20 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type FinishCfg struct {
-	db        kv.RwDB
-	tmpDir    string
-	btClient  *snapshotsync.Client
-	snBuilder *snapshotsync.SnapshotMigrator
-	log       log.Logger
+	db     kv.RwDB
+	tmpDir string
+	log    log.Logger
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, btClient *snapshotsync.Client, snBuilder *snapshotsync.SnapshotMigrator, logger log.Logger) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger) FinishCfg {
 	return FinishCfg{
-		db:        db,
-		log:       logger,
-		tmpDir:    tmpDir,
-		btClient:  btClient,
-		snBuilder: snBuilder,
+		db:     db,
+		log:    logger,
+		tmpDir: tmpDir,
 	}
 }
 
@@ -55,19 +50,6 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		return nil
 	}
 
-	if cfg.snBuilder != nil && useExternalTx {
-		snBlock := snapshotsync.CalculateEpoch(executionAt, snapshotsync.EpochSize)
-		err = cfg.snBuilder.AsyncStages(snBlock, cfg.log, cfg.db, tx, cfg.btClient, true)
-		if err != nil {
-			return err
-		}
-		if cfg.snBuilder.Replaced() {
-			err = cfg.snBuilder.SyncStages(snBlock, cfg.db, tx)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
 	err = s.Update(tx, executionAt)
 	if err != nil {

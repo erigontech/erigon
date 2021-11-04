@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
@@ -225,9 +224,6 @@ func NewStagedSync(
 	tmpdir string,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
-
-	client *snapshotsync.Client,
-	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
@@ -277,7 +273,7 @@ func NewStagedSync(
 				}
 				txPoolServer.TxFetcher.Start()
 			}
-		}), stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger), false),
+		}), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil
