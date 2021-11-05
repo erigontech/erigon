@@ -2716,6 +2716,23 @@ func reducedict(name string) error {
 	}
 	return nil
 }
+func recsplitWholeChain(chaindata string) error {
+	blocksPerFile := 500_000
+	blockTotal = &blocksPerFile
+	for i := 0; i < 13_500_000; i += *blockTotal {
+		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
+		block = &i
+		if err := dumpTxs(chaindata, uint64(*block), *blockTotal, *name); err != nil {
+			return err
+		}
+		if err := compress1(chaindata, *name); err != nil {
+			return err
+		}
+		_ = os.Remove(*name + ".dat")
+	}
+	return nil
+}
+
 func recsplitLookup(chaindata, name string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
@@ -3588,7 +3605,7 @@ func fixState(chaindata string) error {
 	return tx.Commit()
 }
 
-func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error {
+func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	chainConfig := tool.ChainConfigFromDB(db)
@@ -3625,7 +3642,7 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 	k, v, e := bodies.Seek(blockEncoded)
 	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
-		if bodyNum >= block+uint64(*blockTotal) {
+		if bodyNum >= block+uint64(blockTotal) {
 			break
 		}
 		var body types.BodyForStorage
@@ -4244,6 +4261,8 @@ func main() {
 		err = compress1(*chaindata, *name)
 	case "createIdx":
 		err = createIdx(*chaindata, *name)
+	case "recsplitWholeChain":
+		err = recsplitWholeChain(*chaindata)
 	case "recsplitLookup":
 		err = recsplitLookup(*chaindata, *name)
 	case "decompress":
