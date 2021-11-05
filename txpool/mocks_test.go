@@ -35,11 +35,14 @@ var _ Pool = &PoolMock{}
 // 			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
 // 				panic("mock out the IdHashKnown method")
 // 			},
-// 			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots) error {
+// 			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots, tx kv.Tx) error {
 // 				panic("mock out the OnNewBlock method")
 // 			},
 // 			StartedFunc: func() bool {
 // 				panic("mock out the Started method")
+// 			},
+// 			ValidateSerializedTxnFunc: func(serializedTxn []byte) error {
+// 				panic("mock out the ValidateSerializedTxn method")
 // 			},
 // 		}
 //
@@ -64,10 +67,13 @@ type PoolMock struct {
 	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots) error
+	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots, tx kv.Tx) error
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
+
+	// ValidateSerializedTxnFunc mocks the ValidateSerializedTxn method.
+	ValidateSerializedTxnFunc func(serializedTxn []byte) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -114,18 +120,26 @@ type PoolMock struct {
 			UnwindTxs TxSlots
 			// MinedTxs is the minedTxs argument value.
 			MinedTxs TxSlots
+			// Tx is the tx argument value.
+			Tx kv.Tx
 		}
 		// Started holds details about calls to the Started method.
 		Started []struct {
 		}
+		// ValidateSerializedTxn holds details about calls to the ValidateSerializedTxn method.
+		ValidateSerializedTxn []struct {
+			// SerializedTxn is the serializedTxn argument value.
+			SerializedTxn []byte
+		}
 	}
-	lockAddLocalTxs    sync.RWMutex
-	lockAddNewGoodPeer sync.RWMutex
-	lockAddRemoteTxs   sync.RWMutex
-	lockGetRlp         sync.RWMutex
-	lockIdHashKnown    sync.RWMutex
-	lockOnNewBlock     sync.RWMutex
-	lockStarted        sync.RWMutex
+	lockAddLocalTxs           sync.RWMutex
+	lockAddNewGoodPeer        sync.RWMutex
+	lockAddRemoteTxs          sync.RWMutex
+	lockGetRlp                sync.RWMutex
+	lockIdHashKnown           sync.RWMutex
+	lockOnNewBlock            sync.RWMutex
+	lockStarted               sync.RWMutex
+	lockValidateSerializedTxn sync.RWMutex
 }
 
 // AddLocalTxs calls AddLocalTxsFunc.
@@ -312,17 +326,19 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs TxSlots, tx kv.Tx) error {
+func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots, tx kv.Tx) error {
 	callInfo := struct {
 		Ctx          context.Context
 		StateChanges *remote.StateChangeBatch
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
+		Tx           kv.Tx
 	}{
 		Ctx:          ctx,
 		StateChanges: stateChanges,
 		UnwindTxs:    unwindTxs,
 		MinedTxs:     minedTxs,
+		Tx:           tx,
 	}
 	mock.lockOnNewBlock.Lock()
 	mock.calls.OnNewBlock = append(mock.calls.OnNewBlock, callInfo)
@@ -333,7 +349,7 @@ func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.State
 		)
 		return errOut
 	}
-	return mock.OnNewBlockFunc(ctx, stateChanges, unwindTxs, minedTxs)
+	return mock.OnNewBlockFunc(ctx, stateChanges, unwindTxs, minedTxs, tx)
 }
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
@@ -344,12 +360,14 @@ func (mock *PoolMock) OnNewBlockCalls() []struct {
 	StateChanges *remote.StateChangeBatch
 	UnwindTxs    TxSlots
 	MinedTxs     TxSlots
+	Tx           kv.Tx
 } {
 	var calls []struct {
 		Ctx          context.Context
 		StateChanges *remote.StateChangeBatch
 		UnwindTxs    TxSlots
 		MinedTxs     TxSlots
+		Tx           kv.Tx
 	}
 	mock.lockOnNewBlock.RLock()
 	calls = mock.calls.OnNewBlock
@@ -383,5 +401,39 @@ func (mock *PoolMock) StartedCalls() []struct {
 	mock.lockStarted.RLock()
 	calls = mock.calls.Started
 	mock.lockStarted.RUnlock()
+	return calls
+}
+
+// ValidateSerializedTxn calls ValidateSerializedTxnFunc.
+func (mock *PoolMock) ValidateSerializedTxn(serializedTxn []byte) error {
+	callInfo := struct {
+		SerializedTxn []byte
+	}{
+		SerializedTxn: serializedTxn,
+	}
+	mock.lockValidateSerializedTxn.Lock()
+	mock.calls.ValidateSerializedTxn = append(mock.calls.ValidateSerializedTxn, callInfo)
+	mock.lockValidateSerializedTxn.Unlock()
+	if mock.ValidateSerializedTxnFunc == nil {
+		var (
+			errOut error
+		)
+		return errOut
+	}
+	return mock.ValidateSerializedTxnFunc(serializedTxn)
+}
+
+// ValidateSerializedTxnCalls gets all the calls that were made to ValidateSerializedTxn.
+// Check the length with:
+//     len(mockedPool.ValidateSerializedTxnCalls())
+func (mock *PoolMock) ValidateSerializedTxnCalls() []struct {
+	SerializedTxn []byte
+} {
+	var calls []struct {
+		SerializedTxn []byte
+	}
+	mock.lockValidateSerializedTxn.RLock()
+	calls = mock.calls.ValidateSerializedTxn
+	mock.lockValidateSerializedTxn.RUnlock()
 	return calls
 }

@@ -95,6 +95,8 @@ var DefaultConfig = Config{
 // This interface exists for the convinience of testing, and not yet because
 // there are multiple implementations
 type Pool interface {
+	ValidateSerializedTxn(serializedTxn []byte) error
+
 	// Handle 3 main events - new remote txs from p2p, new local txs from RPC, new blocks from execution layer
 	AddRemoteTxs(ctx context.Context, newTxs TxSlots)
 	AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
@@ -146,6 +148,7 @@ const (
 	QueuedPoolOverflow  DiscardReason = 14
 	GasUintOverflow     DiscardReason = 15
 	IntrinsicGas        DiscardReason = 16
+	RLPTooLong          DiscardReason = 17
 )
 
 func (r DiscardReason) String() string {
@@ -178,6 +181,12 @@ func (r DiscardReason) String() string {
 		return "baseFee sub-pool is full"
 	case QueuedPoolOverflow:
 		return "queued sub-pool is full"
+	case GasUintOverflow:
+		return "GasUintOverflow"
+	case IntrinsicGas:
+		return "IntrinsicGas"
+	case RLPTooLong:
+		return "RLPTooLong"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -584,7 +593,25 @@ func (p *TxPool) validateTx(txn *TxSlot, isLocal bool) DiscardReason {
 	}
 	return Success
 }
+func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
+	const (
+		// txSlotSize is used to calculate how many data slots a single transaction
+		// takes up based on its size. The slots are used as DoS protection, ensuring
+		// that validating a new transaction remains a constant operation (in reality
+		// O(maxslots), where max slots are 4 currently).
+		txSlotSize = 32 * 1024
 
+		// txMaxSize is the maximum size a single transaction can have. This field has
+		// non-trivial consequences: larger transactions are significantly harder and
+		// more expensive to propagate; larger transactions also take more resources
+		// to validate whether they fit into the pool or not.
+		txMaxSize = 4 * txSlotSize // 128KB
+	)
+	if len(serializedTxn) > txMaxSize {
+		return fmt.Errorf(RLPTooLong.String())
+	}
+	return nil
+}
 func (p *TxPool) validateTxs(txs TxSlots) (reasons []DiscardReason, goodTxs TxSlots, err error) {
 	reasons = make([]DiscardReason, len(txs.txs))
 

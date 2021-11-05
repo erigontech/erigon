@@ -61,7 +61,7 @@ type StateChangesClient interface {
 // SentryClient here is an interface, it is suitable for mocking in tests (mock will need
 // to implement all the functions of the SentryClient interface).
 func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Pool, stateChangesClient StateChangesClient, coreDB kv.RoDB, db kv.RwDB, chainID uint256.Int) *Fetch {
-	return &Fetch{
+	f := &Fetch{
 		ctx:                  ctx,
 		sentryClients:        sentryClients,
 		pool:                 pool,
@@ -71,6 +71,10 @@ func NewFetch(ctx context.Context, sentryClients []direct.SentryClient, pool Poo
 		stateChangesParseCtx: NewTxParseContext(chainID), //TODO: change ctx if rules changed
 		pooledTxsParseCtx:    NewTxParseContext(chainID),
 	}
+	f.pooledTxsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
+	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
+
+	return f
 }
 
 func (f *Fetch) SetWaitGroup(wg *sync.WaitGroup) {
@@ -317,7 +321,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 	case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_65, sentry.MessageId_TRANSACTIONS_66:
 		txs := TxSlots{}
-		f.pooledTxsParseCtx.Reject(func(hash []byte) error {
+		f.pooledTxsParseCtx.ValidateHash(func(hash []byte) error {
 			known, err := f.pool.IdHashKnown(tx, hash)
 			if err != nil {
 				return err
@@ -327,6 +331,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 			return nil
 		})
+
 		switch req.Id {
 		case sentry.MessageId_POOLED_TRANSACTIONS_65, sentry.MessageId_TRANSACTIONS_65, sentry.MessageId_TRANSACTIONS_66:
 			if _, err := ParsePooledTransactions65(req.Data, 0, f.pooledTxsParseCtx, &txs); err != nil {

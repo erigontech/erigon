@@ -23,6 +23,7 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
@@ -43,7 +44,7 @@ type Encoder interface {
 	Reset(writer io.Writer)
 }
 
-func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, tmpdir string) (dataProvider, error) {
+func FlushToDisk(encoder Encoder, logPrefix string, b Buffer, tmpdir string) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
@@ -55,7 +56,8 @@ func FlushToDisk(encoder Encoder, currentKey []byte, b Buffer, tmpdir string) (d
 		}
 	}
 
-	bufferFile, err := ioutil.TempFile(tmpdir, "tg-sync-sortable-buf")
+	suffix := strings.ToLower(strings.ReplaceAll(logPrefix, " ", "-"))
+	bufferFile, err := ioutil.TempFile(tmpdir, "sortable-buf-"+suffix+"-")
 	if err != nil {
 		return nil, err
 	}

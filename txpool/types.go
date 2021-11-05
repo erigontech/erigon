@@ -50,7 +50,8 @@ type TxParseContext struct {
 	sig              [65]byte
 	withSender       bool
 	isProtected      bool
-	checkHash        func([]byte) error
+	validateHash     func([]byte) error
+	validateRlp      func([]byte) error
 
 	cfg TxParsseConfig
 }
@@ -105,26 +106,15 @@ const ParseTransactionErrorPrefix = "parse transaction payload"
 
 var ErrRejected = errors.New("rejected")
 var ErrAlreadyKnown = errors.New("already known")
+var ErrRlpTooBig = errors.New("txn rlp too big")
 
-func (ctx *TxParseContext) Reject(f func(hash []byte) error) { ctx.checkHash = f }
-func (ctx *TxParseContext) WithSender(v bool)                { ctx.withSender = v }
+func (ctx *TxParseContext) ValidateHash(f func(hash []byte) error)  { ctx.validateHash = f }
+func (ctx *TxParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateHash = f }
+func (ctx *TxParseContext) WithSender(v bool)                       { ctx.withSender = v }
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
 func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte) (p int, err error) {
-	const (
-		// txSlotSize is used to calculate how many data slots a single transaction
-		// takes up based on its size. The slots are used as DoS protection, ensuring
-		// that validating a new transaction remains a constant operation (in reality
-		// O(maxslots), where max slots are 4 currently).
-		txSlotSize = 32 * 1024
-
-		// txMaxSize is the maximum size a single transaction can have. This field has
-		// non-trivial consequences: larger transactions are significantly harder and
-		// more expensive to propagate; larger transactions also take more resources
-		// to validate whether they fit into the pool or not.
-		txMaxSize = 4 * txSlotSize // 128KB
-	)
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%s: empty rlp", ParseTransactionErrorPrefix)
 	}
@@ -140,10 +130,11 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if err != nil {
 		return 0, fmt.Errorf("%s: size Prefix: %w", ParseTransactionErrorPrefix, err)
 	}
-	if dataLen > txMaxSize {
-		return 0, fmt.Errorf("%s: too large tx.size=%dKb", ParseTransactionErrorPrefix, len(payload)/1024)
+	if ctx.validateRlp != nil {
+		if err := ctx.validateRlp(payload[dataPos : dataPos+dataLen]); err != nil {
+			return p, err
+		}
 	}
-
 	if dataLen == 0 {
 		return 0, fmt.Errorf("%s: transaction must be either 1 list or 1 string", ParseTransactionErrorPrefix)
 	}
@@ -364,8 +355,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !ctx.withSender {
 		return p, nil
 	}
-	if ctx.checkHash != nil {
-		if err := ctx.checkHash(slot.IdHash[:32]); err != nil {
+	if ctx.validateHash != nil {
+		if err := ctx.validateHash(slot.IdHash[:32]); err != nil {
 			return p, err
 		}
 	}

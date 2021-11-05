@@ -42,6 +42,8 @@ import (
 var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type txPool interface {
+	ValidateSerializedTxn(serializedTxn []byte) error
+
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error
@@ -128,12 +130,14 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 
 	var slots TxSlots
 	parseCtx := NewTxParseContext(s.chainID)
-	parseCtx.Reject(func(hash []byte) error {
+	parseCtx.ValidateHash(func(hash []byte) error {
 		if known, _ := s.txPool.IdHashKnown(tx, hash); known {
 			return ErrAlreadyKnown
 		}
 		return nil
 	})
+	parseCtx.ValidateRLP(s.txPool.ValidateSerializedTxn)
+
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 
 	j := 0
@@ -146,6 +150,9 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 			case ErrAlreadyKnown: // Noop, but need to handle to not count these
 				reply.Errors[i] = AlreadyKnown.String()
 				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
+			case ErrRlpTooBig: // Noop, but need to handle to not count these
+				reply.Errors[i] = RLPTooLong.String()
+				reply.Imported[i] = txpool_proto.ImportResult_INVALID
 			default:
 				reply.Errors[i] = err.Error()
 				reply.Imported[i] = txpool_proto.ImportResult_INTERNAL_ERROR
