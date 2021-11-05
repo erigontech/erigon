@@ -2379,7 +2379,7 @@ func reducedict(name string) error {
 			posMap[l] += c
 		}
 	}
-	fmt.Printf("posMap = %v\n", posMap)
+	//fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
 	for _, p := range code2pattern {
 		if p.uses > 0 {
@@ -2721,6 +2721,8 @@ func recsplitWholeChain(chaindata string) error {
 	blockTotal = &blocksPerFile
 	for i := 0; i < 13_500_000; i += *blockTotal {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
+		log.Info("Creating", "file", *name)
+
 		block = &i
 		if err := dumpTxs(chaindata, uint64(*block), *blockTotal, *name); err != nil {
 			return err
