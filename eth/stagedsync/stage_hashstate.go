@@ -158,10 +158,9 @@ func readPlainStateOnce(
 	quit <-chan struct{},
 ) error {
 	bufferSize := etl.BufferOptimalSize
-	buffer := etl.NewSortableBuffer(bufferSize)
 
-	accCollector := etl.NewCollector(logPrefix, tmpdir, buffer)
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, buffer)
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
 	defer func() {
 		accCollector.Close()
 		storageCollector.Close()
@@ -198,7 +197,7 @@ func readPlainStateOnce(
 		return compositeKey, nil
 	}
 
-	var startkey, endkey []byte
+	var startkey []byte
 
 	// reading kv.PlainState
 	for k, v, e := c.Seek(startkey); k != nil; k, v, e = c.Next() {
@@ -236,9 +235,6 @@ func readPlainStateOnce(
 			runtime.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
-		}
-		if endkey != nil && bytes.Compare(k, endkey) > 0 {
-			return nil
 		}
 	}
 
