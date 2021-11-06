@@ -171,7 +171,6 @@ func readPlainStateOnce(
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
-	fromBucket := kv.PlainState
 	c, err := db.Cursor(kv.PlainState)
 	if err != nil {
 		return err
@@ -229,12 +228,8 @@ func readPlainStateOnce(
 		select {
 		default:
 		case <-logEvery.C:
-			logArs := []interface{}{"from", fromBucket}
-			logArs = append(logArs, "current key", fmt.Sprintf("%x...", k[:6]))
-
 			runtime.ReadMemStats(&m)
-			logArs = append(logArs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
+			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current key", fmt.Sprintf("%x...", k[:6]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
 	}
 
