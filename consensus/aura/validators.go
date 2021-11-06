@@ -2,6 +2,7 @@ package aura
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -232,8 +233,22 @@ func (s *Multi) defaultCaller(blockHash common.Hash) (Call, error) {
 }
 
 func (s *Multi) getWithCaller(parentHash common.Hash, nonce uint, caller consensus.Call) (common.Address, error) {
-	panic("not implemented")
+	validatorSet, ok := s.correctSet(parentHash)
+	if !ok{
+		return common.Address{}, errors.New("correct set not found")
+	}
+
+	numberOfValidators, err := validatorSet.countWithCaller(parentHash, caller)
+	if err != nil{
+		return common.Address{}, err
+	}
+
+	indexOfValidator := nonce % uint(numberOfValidators)
+	_ = indexOfValidator
+
+	return common.Address{}, nil
 }
+
 func (s *Multi) countWithCaller(parentHash common.Hash, caller consensus.Call) (uint64, error) {
 	set, ok := s.correctSet(parentHash)
 	if !ok {
