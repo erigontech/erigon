@@ -23,7 +23,6 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
-	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
@@ -56,8 +55,7 @@ func FlushToDisk(encoder Encoder, logPrefix string, b Buffer, tmpdir string) (da
 		}
 	}
 
-	suffix := strings.ToLower(strings.ReplaceAll(logPrefix, " ", "-"))
-	bufferFile, err := ioutil.TempFile(tmpdir, "sortable-buf-"+suffix+"-")
+	bufferFile, err := ioutil.TempFile(tmpdir, "erigon-sortable-buf-")
 	if err != nil {
 		return nil, err
 	}
