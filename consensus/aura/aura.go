@@ -92,6 +92,19 @@ var (
 
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
+
+	// errFutureStep is returned if the current step is a step after the supposed step
+	errFutureStep = errors.New("Current step is ahead of the supposed step")
+
+	// errMultipleBlocksInStep is returned when		 multiple blocks are assigned at the same step
+	errMultipleBlocksInStep = errors.New("Multiple blocks were assigned at the same step")
+
+
+	// errInvalidPrimary will be returned when the primary 
+	// validator of the step is not the correct one to assign the block
+	errInvalidPrimary = errors.New("The primary validator of this block is not the correct for this step")
+
+
 )
 
 /*
@@ -587,173 +600,173 @@ func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash
 	return false
 }
 
-//nolint
-func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
-	/*
-	   	    self.received_step_hashes
-	                      .write()
-	                      .insert(received_step_key, new_hash);
-	*/
-}
+// //nolint
+// func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
+// 	/*
+// 	   	    self.received_step_hashes
+// 	                      .write()
+// 	                      .insert(received_step_key, new_hash);
+// 	*/
+// }
 
-//nolint
-func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
-	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
+// //nolint
+// func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, call consensus.Call, syscall consensus.SystemCall) error {
+// 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
-	//nolint
-	step, err := headerStep(header)
-	if err != nil {
-		return err
-	}
-	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-	//nolint
-	parentStep, err := headerStep(parent)
-	if err != nil {
-		return err
-	}
-	//nolint
-	validators, setNumber, err := c.epochSet(chain, e, header, syscall)
-	if err != nil {
-		return err
-	}
-	return nil
+// 	//nolint
+// 	step, err := headerStep(header)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+// 	//nolint
+// 	parentStep, err := headerStep(parent)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	//nolint
+// 	validators, setNumber, err := c.epochSet(chain, e, header, syscall)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
 
-	// Ensure header is from the step after parent.
-	//nolint
-	if step == parentStep ||
-		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
-		log.Trace("[aura] Multiple blocks proposed for step", "num", parentStep)
-		_ = setNumber
-		/*
-			self.validators.report_malicious(
-				header.author(),
-				set_number,
-				header.number(),
-				Default::default(),
-			);
-			Err(EngineError::DoubleVote(*header.author()))?;
-		*/
-		return fmt.Errorf("double vote: %x", header.Coinbase)
-	}
+// 	// Ensure header is from the step after parent.
+// 	//nolint
+// 	if step == parentStep ||
+// 		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
+// 		log.Trace("[aura] Multiple blocks proposed for step", "num", parentStep)
+// 		_ = setNumber
+// 		/*
+// 			self.validators.report_malicious(
+// 				header.author(),
+// 				set_number,
+// 				header.number(),
+// 				Default::default(),
+// 			);
+// 			Err(EngineError::DoubleVote(*header.author()))?;
+// 		*/
+// 		return fmt.Errorf("double vote: %x", header.Coinbase)
+// 	}
 
-	// Report malice if the validator produced other sibling blocks in the same step.
-	if !c.hasReceivedStepHashes(step, header.Coinbase, header.Hash()) {
-		/*
-		   trace!(target: "engine", "Validator {} produced sibling blocks in the same step", header.author());
-		   self.validators.report_malicious(
-		       header.author(),
-		       set_number,
-		       header.number(),
-		       Default::default(),
-		   );
-		*/
-	} else {
-		c.insertReceivedStepHashes(step, header.Coinbase, header.Hash())
-	}
+// 	// Report malice if the validator produced other sibling blocks in the same step.
+// 	if !c.hasReceivedStepHashes(step, header.Coinbase, header.Hash()) {
+// 		/*
+// 		   trace!(target: "engine", "Validator {} produced sibling blocks in the same step", header.author());
+// 		   self.validators.report_malicious(
+// 		       header.author(),
+// 		       set_number,
+// 		       header.number(),
+// 		       Default::default(),
+// 		   );
+// 		*/
+// 	} else {
+// 		c.insertReceivedStepHashes(step, header.Coinbase, header.Hash())
+// 	}
 
-	// Remove hash records older than two full rounds of steps (picked as a reasonable trade-off between
-	// memory consumption and fault-tolerance).
-	cnt, err := count(validators, parent.Hash(), call)
-	if err != nil {
-		return err
-	}
-	siblingMaliceDetectionPeriod := 2 * cnt
-	oldestStep := uint64(0) //  let oldest_step = parent_step.saturating_sub(sibling_malice_detection_period);
-	if parentStep > siblingMaliceDetectionPeriod {
-		oldestStep = parentStep - siblingMaliceDetectionPeriod
-	}
-	//nolint
-	if oldestStep > 0 {
-		/*
-		   let mut rsh = self.received_step_hashes.write();
-		   let new_rsh = rsh.split_off(&(oldest_step, Address::zero()));
-		   *rsh = new_rsh;
-		*/
-	}
+// 	// Remove hash records older than two full rounds of steps (picked as a reasonable trade-off between
+// 	// memory consumption and fault-tolerance).
+// 	cnt, err := count(validators, parent.Hash(), call)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	siblingMaliceDetectionPeriod := 2 * cnt
+// 	oldestStep := uint64(0) //  let oldest_step = parent_step.saturating_sub(sibling_malice_detection_period);
+// 	if parentStep > siblingMaliceDetectionPeriod {
+// 		oldestStep = parentStep - siblingMaliceDetectionPeriod
+// 	}
+// 	//nolint
+// 	if oldestStep > 0 {
+// 		/*
+// 		   let mut rsh = self.received_step_hashes.write();
+// 		   let new_rsh = rsh.split_off(&(oldest_step, Address::zero()));
+// 		   *rsh = new_rsh;
+// 		*/
+// 	}
 
-	emptyStepLen := uint64(0)
-	//self.report_skipped(header, step, parent_step, &*validators, set_number);
+// 	emptyStepLen := uint64(0)
+// 	//self.report_skipped(header, step, parent_step, &*validators, set_number);
 
-	/*
-	   // If empty step messages are enabled we will validate the messages in the seal, missing messages are not
-	   // reported as there's no way to tell whether the empty step message was never sent or simply not included.
-	   let empty_steps_len = if header.number() >= self.empty_steps_transition {
-	       let validate_empty_steps = || -> Result<usize, Error> {
-	           let strict_empty_steps = header.number() >= self.strict_empty_steps_transition;
-	           let empty_steps = header_empty_steps(header)?;
-	           let empty_steps_len = empty_steps.len();
-	           let mut prev_empty_step = 0;
+// 	/*
+// 	   // If empty step messages are enabled we will validate the messages in the seal, missing messages are not
+// 	   // reported as there's no way to tell whether the empty step message was never sent or simply not included.
+// 	   let empty_steps_len = if header.number() >= self.empty_steps_transition {
+// 	       let validate_empty_steps = || -> Result<usize, Error> {
+// 	           let strict_empty_steps = header.number() >= self.strict_empty_steps_transition;
+// 	           let empty_steps = header_empty_steps(header)?;
+// 	           let empty_steps_len = empty_steps.len();
+// 	           let mut prev_empty_step = 0;
 
-	           for empty_step in empty_steps {
-	               if empty_step.step <= parent_step || empty_step.step >= step {
-	                   Err(EngineError::InsufficientProof(format!(
-	                       "empty step proof for invalid step: {:?}",
-	                       empty_step.step
-	                   )))?;
-	               }
+// 	           for empty_step in empty_steps {
+// 	               if empty_step.step <= parent_step || empty_step.step >= step {
+// 	                   Err(EngineError::InsufficientProof(format!(
+// 	                       "empty step proof for invalid step: {:?}",
+// 	                       empty_step.step
+// 	                   )))?;
+// 	               }
 
-	               if empty_step.parent_hash != *header.parent_hash() {
-	                   Err(EngineError::InsufficientProof(format!(
-	                       "empty step proof for invalid parent hash: {:?}",
-	                       empty_step.parent_hash
-	                   )))?;
-	               }
+// 	               if empty_step.parent_hash != *header.parent_hash() {
+// 	                   Err(EngineError::InsufficientProof(format!(
+// 	                       "empty step proof for invalid parent hash: {:?}",
+// 	                       empty_step.parent_hash
+// 	                   )))?;
+// 	               }
 
-	               if !empty_step.verify(&*validators).unwrap_or(false) {
-	                   Err(EngineError::InsufficientProof(format!(
-	                       "invalid empty step proof: {:?}",
-	                       empty_step
-	                   )))?;
-	               }
+// 	               if !empty_step.verify(&*validators).unwrap_or(false) {
+// 	                   Err(EngineError::InsufficientProof(format!(
+// 	                       "invalid empty step proof: {:?}",
+// 	                       empty_step
+// 	                   )))?;
+// 	               }
 
-	               if strict_empty_steps {
-	                   if empty_step.step <= prev_empty_step {
-	                       Err(EngineError::InsufficientProof(format!(
-	                           "{} empty step: {:?}",
-	                           if empty_step.step == prev_empty_step {
-	                               "duplicate"
-	                           } else {
-	                               "unordered"
-	                           },
-	                           empty_step
-	                       )))?;
-	                   }
+// 	               if strict_empty_steps {
+// 	                   if empty_step.step <= prev_empty_step {
+// 	                       Err(EngineError::InsufficientProof(format!(
+// 	                           "{} empty step: {:?}",
+// 	                           if empty_step.step == prev_empty_step {
+// 	                               "duplicate"
+// 	                           } else {
+// 	                               "unordered"
+// 	                           },
+// 	                           empty_step
+// 	                       )))?;
+// 	                   }
 
-	                   prev_empty_step = empty_step.step;
-	               }
-	           }
+// 	                   prev_empty_step = empty_step.step;
+// 	               }
+// 	           }
 
-	           Ok(empty_steps_len)
-	       };
+// 	           Ok(empty_steps_len)
+// 	       };
 
-	       match validate_empty_steps() {
-	           Ok(len) => len,
-	           Err(err) => {
-	               trace!(
-	                   target: "engine",
-	                   "Reporting benign misbehaviour (cause: invalid empty steps) \
-	                   at block #{}, epoch set number {}. Own address: {}",
-	                   header.number(), set_number, self.address().unwrap_or_default()
-	               );
-	               self.validators
-	                   .report_benign(header.author(), set_number, header.number());
-	               return Err(err);
-	           }
-	       }
-	   } else {
-	       self.report_skipped(header, step, parent_step, &*validators, set_number);
+// 	       match validate_empty_steps() {
+// 	           Ok(len) => len,
+// 	           Err(err) => {
+// 	               trace!(
+// 	                   target: "engine",
+// 	                   "Reporting benign misbehaviour (cause: invalid empty steps) \
+// 	                   at block #{}, epoch set number {}. Own address: {}",
+// 	                   header.number(), set_number, self.address().unwrap_or_default()
+// 	               );
+// 	               self.validators
+// 	                   .report_benign(header.author(), set_number, header.number());
+// 	               return Err(err);
+// 	           }
+// 	       }
+// 	   } else {
+// 	       self.report_skipped(header, step, parent_step, &*validators, set_number);
 
-	       0
-	   };
-	*/
-	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
-		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
-		if header.Difficulty.Cmp(expectedDifficulty.ToBig()) != 0 {
-			return fmt.Errorf("invlid difficulty: expect=%s, found=%s\n", expectedDifficulty, header.Difficulty)
-		}
-	}
-	return nil
-}
+// 	       0
+// 	   };
+// 	*/
+// 	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
+// 		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
+// 		if header.Difficulty.Cmp(expectedDifficulty.ToBig()) != 0 {
+// 			return fmt.Errorf("invlid difficulty: expect=%s, found=%s\n", expectedDifficulty, header.Difficulty)
+// 		}
+// 	}
+// 	return nil
+// }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
 // method returns a quit channel to abort the operations and a results channel to
