@@ -58,16 +58,45 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		return errInvalidMixDigest
 	}
 
-	return nil
+	return c.verifyCascadingFields(chain,header,parents)
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
 // rather depend on a batch of previous headers. The caller may optionally pass
 // in a batch of parents (ascending order) to avoid looking those up from the
 // database. This is useful for concurrently verifying a batch of new headers.
-// func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+	// checking if the step is correct
+	currentStep, err := headerStep(header)
 
-// }
+	if err != nil{
+		return err
+	}
+	
+	step := c.step.inner.inner.Load() // getting the step value
+	
+	// making sure our currentStep is not a future step
+	if currentStep > step{
+		return errFutureStep
+	}
+	
+	// checking if multiple blocks are being put out in the same step
+	parent := chain.GetHeaderByHash(header.ParentHash)
+	
+	parentStep, err := headerStep(parent)
+	if err != nil {
+		return err
+	}
+	
+	
+	if parentStep == step{
+		return errMultipleBlocksInStep
+	}
+	
+	// TODO checking if the validator is correct 
+
+	return nil
+}
 
 func (c *AuRa) verifyUncle(chain consensus.ChainReader, uncle *types.Header) error {
 
