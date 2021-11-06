@@ -37,8 +37,6 @@ type Flags struct {
 	SingleNodeMode       bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	Datadir              string
 	Chaindata            string
-	SnapshotDir          string
-	SnapshotMode         string
 	HttpListenAddress    string
 	TLSCertfile          string
 	TLSCACert            string
@@ -73,13 +71,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
-	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
-	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot.mode", "", `Configures the storage mode of the app(only for chaindata mode):
-* h - use headers snapshot
-* b - use bodies snapshot
-* s - use state snapshot
-* r - use receipts snapshot
-`)
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
@@ -107,9 +98,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 		panic(err)
 	}
 	if err := rootCmd.MarkPersistentFlagDirname("chaindata"); err != nil {
-		panic(err)
-	}
-	if err := rootCmd.MarkPersistentFlagDirname("snapshot.dir"); err != nil {
 		panic(err)
 	}
 

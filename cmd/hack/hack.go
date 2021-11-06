@@ -63,6 +63,8 @@ import (
 	"github.com/wcharczuk/go-chart/v2"
 )
 
+const ASSERT = true
+
 var (
 	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
@@ -2377,7 +2379,7 @@ func reducedict(name string) error {
 			posMap[l] += c
 		}
 	}
-	fmt.Printf("posMap = %v\n", posMap)
+	//fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
 	for _, p := range code2pattern {
 		if p.uses > 0 {
@@ -2714,6 +2716,25 @@ func reducedict(name string) error {
 	}
 	return nil
 }
+func recsplitWholeChain(chaindata string) error {
+	blocksPerFile := 500_000
+	blockTotal = &blocksPerFile
+	for i := 0; i < 13_500_000; i += *blockTotal {
+		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
+		log.Info("Creating", "file", *name)
+
+		block = &i
+		if err := dumpTxs(chaindata, uint64(*block), *blockTotal, *name); err != nil {
+			return err
+		}
+		if err := compress1(chaindata, *name); err != nil {
+			return err
+		}
+		_ = os.Remove(*name + ".dat")
+	}
+	return nil
+}
+
 func recsplitLookup(chaindata, name string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
@@ -2731,9 +2752,10 @@ func recsplitLookup(chaindata, name string) error {
 	idx := recsplit.MustOpen(name + ".idx")
 	defer idx.Close()
 
-	var word = make([]byte, 0, 256)
+	var word, word2 = make([]byte, 0, 4096), make([]byte, 0, 4096)
 	wc := 0
 	g := d.MakeGetter()
+	dataGetter := d.MakeGetter()
 
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
@@ -2741,6 +2763,8 @@ func recsplitLookup(chaindata, name string) error {
 	var sender [20]byte
 	var l1, l2, total time.Duration
 	start := time.Now()
+	var prev []byte
+	var prevOffset uint64
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
@@ -2752,8 +2776,22 @@ func recsplitLookup(chaindata, name string) error {
 		recID := idx.Lookup(slot.IdHash[:])
 		l1 += time.Since(t)
 		t = time.Now()
-		_ = idx.Lookup2(recID)
+		offset := idx.Lookup2(recID)
 		l2 += time.Since(t)
+		if ASSERT {
+			var dataP uint64
+			if prev != nil {
+				dataGetter.Reset(prevOffset)
+				word2, dataP = dataGetter.Next(word2[:0])
+				if !bytes.Equal(word, word2) {
+					fmt.Printf("wc=%d, %d,%d\n", wc, offset, dataP-uint64(len(word2)))
+					fmt.Printf("word: %x,%x\n\n", word, word2)
+					panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
+				}
+			}
+			prev = common.CopyBytes(word)
+			prevOffset = offset
+		}
 
 		select {
 		default:
@@ -3569,7 +3607,7 @@ func fixState(chaindata string) error {
 	return tx.Commit()
 }
 
-func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error {
+func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	chainConfig := tool.ChainConfigFromDB(db)
@@ -3606,7 +3644,7 @@ func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error
 	k, v, e := bodies.Seek(blockEncoded)
 	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
-		if bodyNum >= block+uint64(*blockTotal) {
+		if bodyNum >= block+uint64(blockTotal) {
 			break
 		}
 		var body types.BodyForStorage
@@ -4225,6 +4263,8 @@ func main() {
 		err = compress1(*chaindata, *name)
 	case "createIdx":
 		err = createIdx(*chaindata, *name)
+	case "recsplitWholeChain":
+		err = recsplitWholeChain(*chaindata)
 	case "recsplitLookup":
 		err = recsplitLookup(*chaindata, *name)
 	case "decompress":

@@ -78,23 +78,11 @@ This stage promotes local HEAD pointer.
 
 Creates an index of blockHash -> blockNumber extracted from the headers for faster lookups and making the sync friendlier for HDDs.
 
-### Stage 3: [Create headers snapshot](/eth/stagedsync/stage_headers_snapshot.go)
-
-Not enabled by default.
-
-Enable by --snapshot.layout
-
 ### Stage 4: [Download Block Bodies Stage](/eth/stagedsync/stage_bodies.go)
 
 At that stage, we download bodies for block headers that we already downloaded.
 
 That is the most intensive stage for the network connection, the vast majority of data is downloaded here.
-
-### Stage 5: [Create bodies snapshot](/eth/stagedsync/stage_bodies_snapshot.go)
-
-Not enabled by default.
-
-Enable by --snapshot.layout
 
 ### Stage 6: [Recover Senders Stage](/eth/stagedsync/stage_senders.go)
 
@@ -121,12 +109,6 @@ This stage can spawn unwinds if the block execution fails.
 ### Stage 8: [Transpile marked VM contracts to TEVM](/eth/stagedsync/stage_tevm.go)
 
 [TODO]
-
-### Stage 9: [Create state snapshot](/eth/stagedsync/stage_state_snapshot.go)
-
-Not enabled by default.
-
-Enable by --snapshot.layout
 
 ### Stage 10: [Generate Hashed State Stage](/eth/stagedsync/stage_hashstate.go)
 

@@ -178,9 +178,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	}
 
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders,
-		stages.CreateHeadersSnapshot,
-		stages.CreateBodiesSnapshot,
-		stages.CreateStateSnapshot,
 		stages.TxPool, // TODO: enable TxPoolDB stage
 		stages.Finish)
 

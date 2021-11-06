@@ -39,8 +39,13 @@ var storageMode = Migration{
 			if err != nil {
 				return err
 			}
+			if v == nil { // if no records in db - means Erigon just started first time and nothing to migrate. Noop.
+				if err := BeforeCommit(tx, nil, true); err != nil {
+					return err
+				}
+				return tx.Commit()
+			}
 			pm.History = castToPruneDistance(v)
-
 		}
 		{
 			v, err := tx.GetOne(kv.DatabaseInfo, StorageModeReceipts)
