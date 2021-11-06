@@ -9,10 +9,10 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
@@ -52,18 +51,7 @@ func StageLoop(
 		start := time.Now()
 
 		// Estimate the current top height seen from the peer
-		height, err := TopSeenHeight(db, sync, initialCycle, hd)
-		if err != nil {
-			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
-				return
-			}
-			log.Error("Staged Sync", "error", err)
-			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downloader", "error", recoveryErr)
-			}
-			continue
-		}
-
+		height := hd.TopSeenHeight()
 		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -92,27 +80,6 @@ func StageLoop(
 	}
 }
 
-// TopSeenHeight - returns hd.TopSeenHeight() or run stages.Header once to set correct hd.TopSeenHeight()
-// because headers downloading process happening in the background - means if hd.TopSeenHeight() > 0 is a
-// good estimation for sync step size
-func TopSeenHeight(db kv.RwDB, sync *stagedsync.Sync, initialCycle bool, hd *headerdownload.HeaderDownload) (uint64, error) {
-	height := hd.TopSeenHeight()
-	if height > 0 {
-		return height, nil
-	}
-	if !initialCycle {
-		return height, nil
-	}
-	stagesBackup := sync.DisableAllStages()
-	defer sync.EnableStages(stagesBackup...)
-
-	sync.EnableStages(stages.Headers)
-	if err := sync.Run(db, nil, true); err != nil {
-		return 0, err
-	}
-	return hd.TopSeenHeight(), nil
-}
-
 func StageLoopStep(
 	ctx context.Context,
 	db kv.RwDB,
@@ -123,7 +90,11 @@ func StageLoopStep(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx kv.Tx) error,
 ) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 
 	var origin, finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
@@ -140,7 +111,7 @@ func StageLoopStep(
 		return err
 	}
 
-	canRunCycleInOneTransaction := highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
+	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
@@ -209,6 +180,9 @@ func StageLoopStep(
 			}
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
+			if header.Number.Uint64() == 0 {
+				notifications.Accumulator.StartChange(0, header.Hash(), nil, false)
+			}
 			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
 
 			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
@@ -222,7 +196,11 @@ func StageLoopStep(
 }
 
 func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things -
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
@@ -246,80 +224,56 @@ func NewStagedSync(
 	tmpdir string,
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
-
-	client *snapshotsync.Client,
-	snapshotMigrator *snapshotsync.SnapshotMigrator,
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
-		stagedsync.DefaultStages(
-			ctx,
+		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
+			db,
+			controlServer.Hd,
+			*controlServer.ChainConfig,
+			controlServer.SendHeaderRequest,
+			controlServer.PropagateNewBlockHashes,
+			controlServer.Penalize,
+			cfg.BatchSize,
+			p2pCfg.NoDiscovery,
+		), stagedsync.StageBlockHashesCfg(db, tmpdir), stagedsync.StageBodiesCfg(
+			db,
+			controlServer.Bd,
+			controlServer.SendBodyRequest,
+			controlServer.Penalize,
+			controlServer.BroadcastNewBlock,
+			cfg.BodyDownloadTimeoutSeconds,
+			*controlServer.ChainConfig,
+			cfg.BatchSize,
+		), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
+			db,
 			cfg.Prune,
-			stagedsync.StageHeadersCfg(
-				db,
-				controlServer.Hd,
-				*controlServer.ChainConfig,
-				controlServer.SendHeaderRequest,
-				controlServer.PropagateNewBlockHashes,
-				controlServer.Penalize,
-				cfg.BatchSize,
-				p2pCfg.NoDiscovery,
-			),
-			stagedsync.StageBlockHashesCfg(db, tmpdir),
-			stagedsync.StageSnapshotHeadersCfg(db, cfg.Snapshot, client, snapshotMigrator, logger),
-			stagedsync.StageBodiesCfg(
-				db,
-				controlServer.Bd,
-				controlServer.SendBodyRequest,
-				controlServer.Penalize,
-				controlServer.BroadcastNewBlock,
-				cfg.BodyDownloadTimeoutSeconds,
-				*controlServer.ChainConfig,
-				cfg.BatchSize,
-			),
-			stagedsync.StageSnapshotBodiesCfg(db, cfg.Snapshot, client, snapshotMigrator, tmpdir),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune),
-			stagedsync.StageExecuteBlocksCfg(
-				db,
-				cfg.Prune,
-				cfg.BatchSize,
-				nil,
-				controlServer.ChainConfig,
-				controlServer.Engine,
-				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
-				accumulator,
-				cfg.StateStream,
-				tmpdir,
-			),
-			stagedsync.StageTranspileCfg(
-				db,
-				cfg.BatchSize,
-				controlServer.ChainConfig,
-			),
-			stagedsync.StageSnapshotStateCfg(db, cfg.Snapshot, tmpdir, client, snapshotMigrator),
-			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, tmpdir),
-			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
-			stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
-				if cfg.TxPool.V2 {
-				} else {
-					for i := range txPoolServer.Sentries {
-						go func(i int) {
-							txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
-						}(i)
-						go func(i int) {
-							txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
-						}(i)
-					}
-					txPoolServer.TxFetcher.Start()
+			cfg.BatchSize,
+			nil,
+			controlServer.ChainConfig,
+			controlServer.Engine,
+			&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+			accumulator,
+			cfg.StateStream,
+			tmpdir,
+		), stagedsync.StageTranspileCfg(
+			db,
+			cfg.BatchSize,
+			controlServer.ChainConfig,
+		), stagedsync.StageHashStateCfg(db, tmpdir), stagedsync.StageTrieCfg(db, true, true, tmpdir), stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir), stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir), stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir), stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir), stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
+			if cfg.TxPool.V2 {
+			} else {
+				for i := range txPoolServer.Sentries {
+					go func(i int) {
+						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
+					}(i)
+					go func(i int) {
+						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
+					}(i)
 				}
-			}),
-			stagedsync.StageFinishCfg(db, tmpdir, client, snapshotMigrator, logger),
-			false, /* test */
-		),
+				txPoolServer.TxFetcher.Start()
+			}
+		}), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil

@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -113,31 +112,6 @@ var (
 		Value: "default",
 	}
 
-	SnapshotModeFlag = cli.StringFlag{
-		Name: "snapshot.mode",
-		Usage: `Configures the snapshot mode of the app:
-* h - download headers snapshot
-* b - download bodies snapshot
-* s - download state snapshot
-* r - download receipts snapshot
-`,
-		Value: snapshotsync.DefaultSnapshotMode.ToString(),
-	}
-	SeedSnapshotsFlag = cli.BoolTFlag{
-		Name:  "snapshot.seed",
-		Usage: `Seed snapshot seeding(default: true)`,
-	}
-	//todo replace to BoolT
-	SnapshotDatabaseLayoutFlag = cli.BoolFlag{
-		Name:  "snapshot.layout",
-		Usage: `Enable snapshot db layout(default: false)`,
-	}
-
-	ExternalSnapshotDownloaderAddrFlag = cli.StringFlag{
-		Name:  "snapshot.downloader.addr",
-		Usage: `enable external snapshot downloader`,
-	}
-
 	// mTLS flags
 	TLSFlag = cli.BoolFlag{
 		Name:  "tls",
@@ -195,14 +169,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	cfg.Prune = mode
 
-	snMode, err := snapshotsync.SnapshotModeFromString(ctx.GlobalString(SnapshotModeFlag.Name))
-	if err != nil {
-		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-	}
-	cfg.Snapshot.Mode = snMode
-	cfg.Snapshot.Seeding = ctx.GlobalBool(SeedSnapshotsFlag.Name)
-	cfg.Snapshot.Enabled = ctx.GlobalBool(SnapshotDatabaseLayoutFlag.Name)
-
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
 		if err != nil {
@@ -220,7 +186,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		etl.BufferOptimalSize = *size
 	}
 
-	cfg.ExternalSnapshotDownloaderAddr = ctx.GlobalString(ExternalSnapshotDownloaderAddrFlag.Name)
 	cfg.StateStream = !ctx.GlobalBool(StateStreamDisableFlag.Name)
 	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
 
@@ -282,16 +247,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		}
 		cfg.Prune = mode
 	}
-	if v := f.String(SnapshotModeFlag.Name, SnapshotModeFlag.Value, SnapshotModeFlag.Usage); v != nil {
-		snMode, err := snapshotsync.SnapshotModeFromString(*v)
-		if err != nil {
-			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
-		}
-		cfg.Snapshot.Mode = snMode
-	}
-	if v := f.Bool(SeedSnapshotsFlag.Name, false, SeedSnapshotsFlag.Usage); v != nil {
-		cfg.Snapshot.Seeding = *v
-	}
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
 		if err != nil {
@@ -308,9 +263,6 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		etl.BufferOptimalSize = *size
 	}
 
-	if v := f.String(ExternalSnapshotDownloaderAddrFlag.Name, ExternalSnapshotDownloaderAddrFlag.Value, ExternalSnapshotDownloaderAddrFlag.Usage); v != nil {
-		cfg.ExternalSnapshotDownloaderAddr = *v
-	}
 	cfg.StateStream = true
 	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
 		cfg.StateStream = false

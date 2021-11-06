@@ -563,7 +563,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 	}
 	anchor.timeouts++
 	anchor.timestamp = currentTime + timeout
-	heap.Fix(hd.anchorQueue, 0)
+	heap.Fix(hd.anchorQueue, anchor.idx)
 }
 
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
@@ -574,7 +574,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	queryRange := hd.topSeenHeight
 	// Determine the query range as the height of lowest anchor
 	for _, anchor := range hd.anchors {
-		if anchor.blockHeight < queryRange {
+		if anchor.blockHeight > hd.highestInDb && anchor.blockHeight < queryRange {
 			queryRange = anchor.blockHeight
 		}
 	}

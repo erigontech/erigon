@@ -134,8 +134,7 @@ Windows users may run erigon in 3 possible ways:
 ### Beacon Chain
 
 Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
-rely on availability of receipts - don't prune them: don't add character `r` to `--prune` flag or set
-large `--prune.r.older=2_000_000`.
+relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipes are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
 
 You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
 

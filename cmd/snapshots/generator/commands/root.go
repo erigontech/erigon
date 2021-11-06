@@ -87,8 +87,6 @@ func withDatadir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 
 	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
-	must(cmd.MarkFlagDirname("snapshot.dir"))
 }
 
 func withSnapshotFile(cmd *cobra.Command) {
