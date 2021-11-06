@@ -349,7 +349,7 @@ func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
 	if err != nil {
 		return err
 	}
-	if len(mode) == 0 || binary.BigEndian.Uint64(mode) == math.MaxUint64 {
+	if len(mode) == 0 {
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, blockAmount.toValue())
 		if err = db.Put(kv.DatabaseInfo, key, v); err != nil {
