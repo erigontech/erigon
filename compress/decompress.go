@@ -202,33 +202,34 @@ func (g *Getter) HasNext() bool {
 func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	l := g.nextPos(true)
 	l--
-	if l > 0 {
-		if int(l) > len(g.word) {
-			g.word = make([]byte, l)
-		}
-		var pos uint64
-		var lastPos int
-		var lastUncovered int
-		g.uncovered = g.uncovered[:0]
-		for pos = g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
-			intPos := lastPos + int(pos) - 1
-			lastPos = intPos
-			pattern := g.nextPattern()
-			copy(g.word[intPos:], pattern)
-			if intPos > lastUncovered {
-				g.uncovered = append(g.uncovered, lastUncovered, intPos)
-			}
-			lastUncovered = intPos + len(pattern)
-		}
-		if int(l) > lastUncovered {
-			g.uncovered = append(g.uncovered, lastUncovered, int(l))
-		}
-		// Uncovered characters
-		for i := 0; i < len(g.uncovered); i += 2 {
-			copy(g.word[g.uncovered[i]:g.uncovered[i+1]], g.data[g.dataP:])
-			g.dataP += uint64(g.uncovered[i+1] - g.uncovered[i])
-		}
-		buf = append(buf, g.word[:l]...)
+	if l == 0 {
+		return buf, g.dataP
 	}
+	if int(l) > len(g.word) {
+		g.word = make([]byte, l)
+	}
+	var pos uint64
+	var lastPos int
+	var lastUncovered int
+	g.uncovered = g.uncovered[:0]
+	for pos = g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
+		intPos := lastPos + int(pos) - 1
+		lastPos = intPos
+		pattern := g.nextPattern()
+		copy(g.word[intPos:], pattern)
+		if intPos > lastUncovered {
+			g.uncovered = append(g.uncovered, lastUncovered, intPos)
+		}
+		lastUncovered = intPos + len(pattern)
+	}
+	if int(l) > lastUncovered {
+		g.uncovered = append(g.uncovered, lastUncovered, int(l))
+	}
+	// Uncovered characters
+	for i := 0; i < len(g.uncovered); i += 2 {
+		copy(g.word[g.uncovered[i]:g.uncovered[i+1]], g.data[g.dataP:])
+		g.dataP += uint64(g.uncovered[i+1] - g.uncovered[i])
+	}
+	buf = append(buf, g.word[:l]...)
 	return buf, g.dataP
 }

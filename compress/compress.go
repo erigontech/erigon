@@ -505,7 +505,7 @@ func NewCompressor(logPrefix, outputFile string, tmpDir string, minPatternScore 
 	if c.wordFile, err = ioutil.TempFile(c.tmpDir, "words-"); err != nil {
 		return nil, err
 	}
-	c.wordW = bufio.NewWriter(c.wordFile)
+	c.wordW = bufio.NewWriterSize(c.wordFile, etl.BufIOSize)
 	c.collector = etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	return c, nil
 }
@@ -564,13 +564,13 @@ func (c *Compressor) findMatches() error {
 	if c.interFile, err = ioutil.TempFile(c.tmpDir, "inter-compress-"); err != nil {
 		return err
 	}
-	c.interW = bufio.NewWriter(c.interFile)
+	c.interW = bufio.NewWriterSize(c.interFile, etl.BufIOSize)
 	if _, err := c.wordFile.Seek(0, 0); err != nil {
 		return err
 	}
 	defer os.Remove(c.wordFile.Name())
 	defer c.wordFile.Close()
-	r := bufio.NewReader(c.wordFile)
+	r := bufio.NewReaderSize(c.wordFile, etl.BufIOSize)
 	var readBuf []byte
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
@@ -792,7 +792,7 @@ func (c *Compressor) optimiseCodes() error {
 	if err != nil {
 		return err
 	}
-	cw := bufio.NewWriter(cf)
+	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
 	// First, output dictionary size
 	binary.BigEndian.PutUint64(c.numBuf[:], offset) // Dictionary size
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
@@ -958,7 +958,7 @@ func (c *Compressor) optimiseCodes() error {
 			return err
 		}
 	}
-	r := bufio.NewReader(c.interFile)
+	r := bufio.NewReaderSize(c.interFile, etl.BufIOSize)
 	var hc HuffmanCoder
 	hc.w = cw
 	l, e := binary.ReadUvarint(r)
