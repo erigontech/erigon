@@ -3671,6 +3671,7 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
+	valueBuf := make([]byte, 16*4096)
 	k, v, e := bodies.Seek(blockEncoded)
 	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
@@ -3692,13 +3693,14 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 				if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
 					panic(err)
 				}
-				tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
-				n := binary.PutUvarint(numBuf, uint64(len(tv)))
+				valueBuf = valueBuf[:0]
+				valueBuf = append(append(valueBuf, slot.IdHash[:1]...), tv...)
+				n := binary.PutUvarint(numBuf, uint64(len(valueBuf)))
 				if _, e = w.Write(numBuf[:n]); e != nil {
 					return err
 				}
-				if len(tv) > 0 {
-					if _, e = w.Write(tv); e != nil {
+				if len(valueBuf) > 0 {
+					if _, e = w.Write(valueBuf); e != nil {
 						return e
 					}
 				}
