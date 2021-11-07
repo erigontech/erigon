@@ -712,7 +712,12 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 			p.promoted = append(p.promoted, newTxs.txs[i].IdHash[:]...)
 		}
 	}
-	p.newPendingTxs <- common.Copy(p.promoted)
+	if p.promoted.Len() > 0 {
+		select {
+		case p.newPendingTxs <- common.Copy(p.promoted):
+		default:
+		}
+	}
 	return reasons, nil
 }
 
@@ -1210,19 +1215,21 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 		case h := <-newTxs:
 			t := time.Now()
 			notifyMiningAboutNewSlots()
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				slotsRlp := make([][]byte, 0, h.Len())
-				for i := 0; i < h.Len(); i++ {
-					slotRlp, err := p.GetRlp(tx, h.At(i))
-					if err != nil {
-						return err
+			if h.Len() > 0 {
+				if err := db.View(ctx, func(tx kv.Tx) error {
+					slotsRlp := make([][]byte, 0, h.Len())
+					for i := 0; i < h.Len(); i++ {
+						slotRlp, err := p.GetRlp(tx, h.At(i))
+						if err != nil {
+							return err
+						}
+						slotsRlp = append(slotsRlp, slotRlp)
 					}
-					slotsRlp = append(slotsRlp, slotRlp)
+					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
+					return nil
+				}); err != nil {
+					log.Error("[txpool] send new slots by grpc", "err", err)
 				}
-				newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
-				return nil
-			}); err != nil {
-				log.Error("[txpool] send new slots by grpc", "err", err)
 			}
 
 			// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
