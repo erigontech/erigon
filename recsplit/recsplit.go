@@ -30,6 +30,8 @@ import (
 	"github.com/spaolacci/murmur3"
 )
 
+var ErrCollision = fmt.Errorf("duplicate key")
+
 const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
@@ -298,7 +300,7 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 		for i, key := range rs.currentBucket[1:] {
 			if key == rs.currentBucket[i] {
 				rs.collision = true
-				return fmt.Errorf("duplicate key %x", key)
+				return fmt.Errorf("%w: %x", ErrCollision, key)
 			}
 		}
 		bitPos := rs.gr.bitCount
