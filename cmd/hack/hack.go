@@ -2731,6 +2731,11 @@ func recsplitWholeChain(chaindata string) error {
 			return err
 		}
 		last = binary.BigEndian.Uint64(k)
+		if last > params.FullImmutabilityThreshold {
+			last -= params.FullImmutabilityThreshold
+		} else {
+			last = 0
+		}
 		return nil
 	}); err != nil {
 		return err
