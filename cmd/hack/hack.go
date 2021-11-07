@@ -2718,27 +2718,38 @@ func reducedict(name string) error {
 	return nil
 }
 func recsplitWholeChain(chaindata string) error {
-	database := mdbx.MustOpen(chaindata)
-	defer database.Close()
-	var last uint64
-	if err := database.View(context.Background(), func(tx kv.Tx) error {
+	blocksPerFile := uint64(500_000)
+	lastChunk := func(tx kv.Tx, blocksPerFile uint64) (uint64, error) {
 		c, err := tx.Cursor(kv.BlockBody)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		k, _, err := c.Last()
 		if err != nil {
-			return err
+			return 0, err
 		}
-		last = binary.BigEndian.Uint64(k)
-		return nil
+		last := binary.BigEndian.Uint64(k)
+		if last > params.FullImmutabilityThreshold {
+			last -= params.FullImmutabilityThreshold
+		} else {
+			last = 0
+		}
+		last = last - last%blocksPerFile
+		return last, nil
+	}
+
+	var last uint64
+
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	if err := database.View(context.Background(), func(tx kv.Tx) (err error) {
+		last, err = lastChunk(tx, blocksPerFile)
+		return err
 	}); err != nil {
 		return err
 	}
 	database.Close()
 
-	blocksPerFile := uint64(500_000)
-	last = last - last%blocksPerFile
 	for i := uint64(*block); i < last; i += blocksPerFile {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
 		log.Info("Creating", "file", *name)
@@ -3660,6 +3671,7 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
+	valueBuf := make([]byte, 16*4096)
 	k, v, e := bodies.Seek(blockEncoded)
 	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
@@ -3681,13 +3693,14 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 				if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
 					panic(err)
 				}
-				tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
-				n := binary.PutUvarint(numBuf, uint64(len(tv)))
+				valueBuf = valueBuf[:0]
+				valueBuf = append(append(valueBuf, slot.IdHash[:1]...), tv...)
+				n := binary.PutUvarint(numBuf, uint64(len(valueBuf)))
 				if _, e = w.Write(numBuf[:n]); e != nil {
 					return err
 				}
-				if len(tv) > 0 {
-					if _, e = w.Write(tv); e != nil {
+				if len(valueBuf) > 0 {
+					if _, e = w.Write(valueBuf); e != nil {
 						return e
 					}
 				}
