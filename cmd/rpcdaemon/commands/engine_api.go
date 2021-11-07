@@ -17,7 +17,7 @@ import (
 // - "SYNCING": Execution layer is still syncing and trying to catch up to the block head.
 const (
 	engineSuccessCode = "SUCCESS"
-//	engineInvalidCode = "INVALID"
+	//	engineInvalidCode = "INVALID"
 	engineSyncingCode = "SYNCING"
 )
 
