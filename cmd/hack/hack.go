@@ -2720,6 +2720,7 @@ func reducedict(name string) error {
 func recsplitWholeChain(chaindata string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
+	blocksPerFile := uint64(500_000)
 	var last uint64
 	if err := database.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.BlockBody)
@@ -2736,14 +2737,13 @@ func recsplitWholeChain(chaindata string) error {
 		} else {
 			last = 0
 		}
+		last = last - last%blocksPerFile
 		return nil
 	}); err != nil {
 		return err
 	}
 	database.Close()
 
-	blocksPerFile := uint64(500_000)
-	last = last - last%blocksPerFile
 	for i := uint64(*block); i < last; i += blocksPerFile {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
 		log.Info("Creating", "file", *name)
