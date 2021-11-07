@@ -571,21 +571,22 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	defer hd.lock.RUnlock()
 	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
-	maxHeight := hd.topSeenHeight
-	if maxHeight <= hd.highestInDb {
+	nextHeight := hd.highestInDb + stride
+	maxHeight := hd.topSeenHeight + 1 // Inclusive upper bound
+	if maxHeight <= nextHeight {
 		return nil
 	}
 	// Determine the query range as the height of lowest anchor
 	for _, anchor := range hd.anchors {
-		if anchor.blockHeight > hd.highestInDb && anchor.blockHeight < maxHeight {
-			maxHeight = anchor.blockHeight
+		if anchor.blockHeight > nextHeight && anchor.blockHeight < maxHeight {
+			maxHeight = anchor.blockHeight // Exclusive upper bound
 		}
 	}
-	length := (maxHeight - hd.highestInDb) / stride
+	length := (maxHeight - nextHeight) / stride
 	if length > 192 {
 		length = 192
 	}
-	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
+	return &HeaderRequest{Number: nextHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
