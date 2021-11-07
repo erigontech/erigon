@@ -2718,27 +2718,33 @@ func reducedict(name string) error {
 	return nil
 }
 func recsplitWholeChain(chaindata string) error {
-	database := mdbx.MustOpen(chaindata)
-	defer database.Close()
 	blocksPerFile := uint64(500_000)
-	var last uint64
-	if err := database.View(context.Background(), func(tx kv.Tx) error {
+	lastChunk := func(tx kv.Tx, blocksPerFile uint64) (uint64, error) {
 		c, err := tx.Cursor(kv.BlockBody)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		k, _, err := c.Last()
 		if err != nil {
-			return err
+			return 0, err
 		}
-		last = binary.BigEndian.Uint64(k)
+		last := binary.BigEndian.Uint64(k)
 		if last > params.FullImmutabilityThreshold {
 			last -= params.FullImmutabilityThreshold
 		} else {
 			last = 0
 		}
 		last = last - last%blocksPerFile
-		return nil
+		return last, nil
+	}
+
+	var last uint64
+
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	if err := database.View(context.Background(), func(tx kv.Tx) (err error) {
+		last, err = lastChunk(tx, blocksPerFile)
+		return err
 	}); err != nil {
 		return err
 	}
