@@ -2718,14 +2718,32 @@ func reducedict(name string) error {
 	return nil
 }
 func recsplitWholeChain(chaindata string) error {
-	blocksPerFile := 500_000
-	blockTotal = &blocksPerFile
-	for i := 0; i < 13_500_000; i += *blockTotal {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	var last uint64
+	if err := database.View(context.Background(), func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.BlockBody)
+		if err != nil {
+			return err
+		}
+		k, _, err := c.Last()
+		if err != nil {
+			return err
+		}
+		last = binary.BigEndian.Uint64(k)
+		return nil
+	}); err != nil {
+		return err
+	}
+	database.Close()
+
+	blocksPerFile := uint64(500_000)
+	last = last - last%blocksPerFile
+	for i := uint64(*block); i < last; i += blocksPerFile {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
 		log.Info("Creating", "file", *name)
 
-		block = &i
-		if err := dumpTxs(chaindata, uint64(*block), *blockTotal, *name); err != nil {
+		if err := dumpTxs(chaindata, i, *blockTotal, *name); err != nil {
 			return err
 		}
 		if err := compress1(chaindata, *name); err != nil {
@@ -2890,14 +2908,14 @@ RETRY:
 	log.Info("Building recsplit...")
 
 	if err = rs.Build(); err != nil {
+		if errors.Is(err, recsplit.ErrCollision) {
+			log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
+			rs.ResetNextSalt()
+			goto RETRY
+		}
 		return err
 	}
 
-	if rs.Collision() {
-		log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-		rs.ResetNextSalt()
-		goto RETRY
-	}
 	return nil
 }
 func decompress(name string) error {
