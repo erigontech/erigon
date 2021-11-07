@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -70,10 +69,6 @@ var rootCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p := eth.ETH66
-		switch strings.ToLower(protocol) {
-		case "eth65":
-			p = eth.ETH65
-		}
 
 		nodeConfig := node2.NewNodeConfig()
 		p2pConfig, err := utils.NewP2PConfig(nodiscover, datadir, netRestrict, natSetting, nodeConfig.NodeName(), staticPeers, uint(port), uint(p))

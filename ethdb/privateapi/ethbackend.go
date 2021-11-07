@@ -70,6 +70,10 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 	return &remote.NetPeerCountReply{Count: id}, nil
 }
 
+func (s *EthBackendServer) EngineExecutePayloadV1(_ context.Context, _ *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+	return nil, nil
+}
+
 func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
 	log.Trace("Establishing event subscription channel with the RPC daemon ...")
 	s.events.AddHeaderSubscription(func(h *types.Header) error {

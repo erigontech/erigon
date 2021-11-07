@@ -698,8 +698,6 @@ func SetStaticPeers(cfg *p2p.Config, urls []string) error {
 func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, port, protocol uint) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
-	case eth.ETH65:
-		enodeDBPath = path.Join(datadir, "nodes", "eth65")
 	case eth.ETH66:
 		enodeDBPath = path.Join(datadir, "nodes", "eth66")
 	default:

@@ -99,9 +99,6 @@ func RecvUploadMessage(ctx context.Context,
 	defer cancel()
 
 	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH65][eth.GetBlockBodiesMsg],
-		eth.ToProto[eth.ETH65][eth.GetReceiptsMsg],
-
 		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
 		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
 	}}, grpc.WaitForReady(true))
@@ -194,8 +191,6 @@ func RecvUploadHeadersMessage(ctx context.Context,
 	defer cancel()
 
 	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH65][eth.GetBlockHeadersMsg],
-
 		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
 	}}, grpc.WaitForReady(true))
 	if err != nil {
@@ -292,11 +287,6 @@ func RecvMessage(
 	defer sentry.MarkDisconnected()
 
 	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH65][eth.BlockHeadersMsg],
-		eth.ToProto[eth.ETH65][eth.BlockBodiesMsg],
-		eth.ToProto[eth.ETH65][eth.NewBlockHashesMsg],
-		eth.ToProto[eth.ETH65][eth.NewBlockMsg],
-
 		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
 		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
 		eth.ToProto[eth.ETH66][eth.NewBlockHashesMsg],
