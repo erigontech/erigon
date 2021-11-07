@@ -14,6 +14,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
+	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"os/signal"
 	"runtime"
