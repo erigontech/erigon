@@ -58,7 +58,7 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		return errInvalidMixDigest
 	}
 
-	return c.verifyCascadingFields(chain,header,parents)
+	return c.verifyCascadingFields(chain, header, parents)
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
@@ -69,31 +69,45 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 	// checking if the step is correct
 	currentStep, err := headerStep(header)
 
-	if err != nil{
+	if err != nil {
 		return err
 	}
-	
+
 	step := c.step.inner.inner.Load() // getting the step value
-	
+
 	// making sure our currentStep is not a future step
-	if currentStep > step{
+	if currentStep > step {
 		return errFutureStep
 	}
-	
+
 	// checking if multiple blocks are being put out in the same step
 	parent := chain.GetHeaderByHash(header.ParentHash)
-	
+
 	parentStep, err := headerStep(parent)
 	if err != nil {
 		return err
 	}
-	
-	
-	if parentStep == step{
+
+	if parentStep == step {
 		return errMultipleBlocksInStep
 	}
-	
-	// TODO checking if the validator is correct 
+
+	// TODO checking if the validator is correct
+	validators, _, err := c.epochSet(chain, nil, header, nil)
+
+	if err != nil {
+		return err
+	}
+
+	validatorAddress, err := stepProposer(validators, header.Hash(), step, nil)
+
+	if err != nil {
+		return err
+	}
+
+	if validatorAddress != header.Coinbase {
+		return errInvalidPrimary
+	}
 
 	return nil
 }
