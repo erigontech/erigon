@@ -33,7 +33,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
+
+	// "github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura/aurainterfaces"
 	"github.com/ledgerwatch/erigon/consensus/aura/contracts"
@@ -45,7 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
 	"go.uber.org/atomic"
 )
 
@@ -57,18 +57,20 @@ const (
 	ExtraSeal            = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
 	warmupCacheSnapshots = 20
 
-	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
+	/*
+		wiggleTime = 500 * time.Millisecond  //Random delay (per signer) to allow concurrent signers
+	*/
 )
 
+/*
 var (
 	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
-	emptyUncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
-
 	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
 )
+*/
 
 var (
 	// errUnknownBlock is returned when the list of signers is requested for a block
@@ -76,7 +78,7 @@ var (
 	errUnknownBlock = errors.New("unknown block")
 
 	// errTooOldOfBlock is returned when the block number requested for is below 20
-	errTooOldOfBlock = errors.New("The block requested is too old")
+	errTooOldOfBlock = errors.New("the block requested is too old")
 
 	// errMissingVanity is returned if a block's extra-data section is shorter than
 	// 32 bytes, which is required to store the signer vanity.
@@ -94,17 +96,14 @@ var (
 	errInvalidMixDigest = errors.New("non-zero mix digest")
 
 	// errFutureStep is returned if the current step is a step after the supposed step
-	errFutureStep = errors.New("Current step is ahead of the supposed step")
+	errFutureStep = errors.New("current step is ahead of the supposed step")
 
 	// errMultipleBlocksInStep is returned when		 multiple blocks are assigned at the same step
-	errMultipleBlocksInStep = errors.New("Multiple blocks were assigned at the same step")
+	errMultipleBlocksInStep = errors.New("multiple blocks were assigned at the same step")
 
-
-	// errInvalidPrimary will be returned when the primary 
+	// errInvalidPrimary will be returned when the primary
 	// validator of the step is not the correct one to assign the block
-	errInvalidPrimary = errors.New("The primary validator of this block is not the correct for this step")
-
-
+	errInvalidPrimary = errors.New("the primary validator of this block is not the correct for this step")
 )
 
 /*
@@ -199,6 +198,7 @@ type PermissionedStep struct {
 type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
 
 //nolint
+/*
 func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
 	res, ok := r[step]
 	if !ok {
@@ -207,8 +207,10 @@ func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash
 	result, ok := res[author]
 	return result, ok
 }
+*/
 
 //nolint
+/*
 func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash common.Hash) {
 	res, ok := r[step]
 	if !ok {
@@ -217,8 +219,10 @@ func (r ReceivedStepHashes) insert(step uint64, author common.Address, blockHash
 	}
 	res[author] = blockHash
 }
+*/
 
 //nolint
+/*
 func (r ReceivedStepHashes) dropAncient(step uint64) {
 	for i := range r {
 		if i < step {
@@ -226,6 +230,7 @@ func (r ReceivedStepHashes) dropAncient(step uint64) {
 		}
 	}
 }
+*/
 
 //nolint
 type EpochManager struct {
@@ -327,6 +332,7 @@ func epochTransitionFor2(chain consensus.ChainHeaderReader, e consensus.EpochRea
 }
 
 //nolint
+/*
 func epochTransitionFor(chain consensus.ChainHeaderReader, e consensus.EpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
 	// slow path: loop back block by block
 	for {
@@ -365,18 +371,19 @@ func epochTransitionFor(chain consensus.ChainHeaderReader, e consensus.EpochRead
 				BlockHash:   common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f"),
 				ProofRlp:    params.SokolGenesisEpochProof,
 			}, true
-			/* TODO:
-			   return self
-			       .epoch_transitions()
-			       .map(|(_, t)| t)
-			       .take_while(|t| t.block_number <= details.number)
-			       .last();
-			*/
+			//  TODO:
+			//    return self
+			//        .epoch_transitions()
+			//        .map(|(_, t)| t)
+			//        .take_while(|t| t.block_number <= details.number)
+			//        .last();
+
 		}
 
 		parentHash = h.Hash()
 	}
 }
+*/
 
 // AuRa
 //nolint
@@ -589,16 +596,17 @@ func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, u
 }
 
 //nolint
+/*
 func (c *AuRa) hasReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) bool {
-	/*
+
 		self
 			       .received_step_hashes
 			       .read()
 			       .get(&received_step_key)
 			       .map_or(false, |h| *h != new_hash)
-	*/
 	return false
 }
+*/
 
 // //nolint
 // func (c *AuRa) insertReceivedStepHashes(step uint64, author common.Address, newHash common.Hash) {
@@ -1334,6 +1342,7 @@ func (c *AuRa) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 }
 
 //nolint
+/*
 func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []EmptyStep {
 	from := EmptyStep{step: fromStep + 1, parentHash: parentHash}
 	to := EmptyStep{step: toStep}
@@ -1354,6 +1363,7 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 	})
 	return res
 }
+*/
 
 // AccumulateRewards returns rewards for a given block. The mining reward consists
 // of the static blockReward plus a reward for each included uncle (if any). Individual
@@ -1440,13 +1450,14 @@ func blockRewardAbi() abi.ABI {
 // An empty step message that is included in a seal, the only difference is that it doesn't include
 // the `parent_hash` in order to save space. The included signature is of the original empty step
 // message, which can be reconstructed by using the parent hash of the block in which this sealed
-// empty message is inc    luded.
+// empty message is included.
 //nolint
+/*
 type SealedEmptyStep struct {
 	signature []byte // H520
 	step      uint64
 }
-
+*/
 /*
 // extracts the empty steps from the header seal. should only be called when there are 3 fields in the seal
 // (i.e. header.number() >= self.empty_steps_transition).
@@ -1529,6 +1540,7 @@ func (s *EmptyStep) LessOrEqual(other *EmptyStep) bool {
 }
 
 // Returns `true` if the message has a valid signature by the expected proposer in the message's step.
+/*
 func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 	//sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	//if err != nil {
@@ -1536,16 +1548,18 @@ func (s *EmptyStep) verify(validators ValidatorSet) (bool, error) { //nolint
 	//}
 	//message := crypto.Keccak256(sRlp)
 
-	/*
-		let correct_proposer = step_proposer(validators, &self.parent_hash, self.step);
 
-		publickey::verify_address(&correct_proposer, &self.signature.into(), &message)
-		.map_err(|e| e.into())
-	*/
+		// let correct_proposer = step_proposer(validators, &self.parent_hash, self.step);
+
+		// publickey::verify_address(&correct_proposer, &self.signature.into(), &message)
+		// .map_err(|e| e.into())
+
 	return true, nil
 }
+*/
 
 //nolint
+/*
 func (s *EmptyStep) author() (common.Address, error) {
 	sRlp, err := EmptyStepRlp(s.step, s.parentHash)
 	if err != nil {
@@ -1562,6 +1576,7 @@ func (s *EmptyStep) author() (common.Address, error) {
 	}
 	return crypto.PubkeyToAddress(*ecdsa), nil
 }
+*/
 
 type EmptyStepSet struct {
 	lock sync.Mutex

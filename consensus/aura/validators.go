@@ -234,12 +234,12 @@ func (s *Multi) defaultCaller(blockHash common.Hash) (Call, error) {
 
 func (s *Multi) getWithCaller(parentHash common.Hash, nonce uint, caller consensus.Call) (common.Address, error) {
 	validatorSet, ok := s.correctSet(parentHash)
-	if !ok{
+	if !ok {
 		return common.Address{}, errors.New("correct set not found")
 	}
 
 	numberOfValidators, err := validatorSet.countWithCaller(parentHash, caller)
-	if err != nil{
+	if err != nil {
 		return common.Address{}, err
 	}
 

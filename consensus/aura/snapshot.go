@@ -1,5 +1,6 @@
 package aura
 
+/*
 import (
 	"bytes"
 	"context"
@@ -12,12 +13,14 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
+*/
 
 // Snapshot is the state of the authorization voting at a given point in time.
 
 const BLOCKS_FOR_CRITICAL_SNAPSHOT uint64 = 5000
 const CHUNK_SIZE int64 = 4194304 // highest possible encoded chunk size
 
+/*
 type Snapshot struct {
 	config *params.AuRaConfig // Consensus engine parameters to fine tune behavior
 
@@ -239,3 +242,4 @@ func generateBlockChunks(ctx context.Context, chain ethereum.ChainReader, mostRe
 
 	return BlockChunks{blockChunk: blockChunks}, nil
 }
+*/
