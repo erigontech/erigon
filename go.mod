@@ -6,15 +6,14 @@ require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.7.0
 	github.com/VictoriaMetrics/metrics v1.18.1
-	github.com/anacrolix/log v0.8.0
-	github.com/anacrolix/torrent v1.25.1
+	github.com/anacrolix/log v0.10.0
+	github.com/anacrolix/torrent v1.35.0
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/consensys/gnark-crypto v0.4.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
 	github.com/dlclark/regexp2 v1.4.0 // indirect
-	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200721192441-a695b0cdd498
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.16.0
@@ -36,7 +35,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20211106103131-8c7f3a4cf4b1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20211108033615-b426ff2271f0
 	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/logrusorgru/aurora/v3 v3.0.0
@@ -64,6 +63,5 @@ require (
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
-	gotest.tools v2.2.0+incompatible // indirect
 	pgregory.net/rapid v0.4.7
 )

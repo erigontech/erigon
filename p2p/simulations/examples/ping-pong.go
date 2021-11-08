@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -61,15 +60,6 @@ func main() {
 	case "sim":
 		log.Info("using sim adapter")
 		adapter = adapters.NewSimAdapter(services)
-
-	case "exec":
-		tmpdir, err := ioutil.TempDir("", "p2p-example")
-		if err != nil {
-			log.Crit("error creating temp dir", "err", err)
-		}
-		defer os.RemoveAll(tmpdir)
-		log.Info("using exec adapter", "tmpdir", tmpdir)
-		adapter = adapters.NewExecAdapter(tmpdir)
 
 	default:
 		log.Crit(fmt.Sprintf("unknown node adapter %q", *adapterType))

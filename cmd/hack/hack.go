@@ -13,7 +13,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math/big"
-	"net/http"
+	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"os/signal"
 	"runtime"
@@ -55,6 +55,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -1491,7 +1492,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
-		/*
+		if ASSERT {
 			for i := 0; i < n-1; i++ {
 				var prefixLen int
 				p1 := int(filtered[i])
@@ -1512,7 +1513,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				fmt.Printf("%d %d %s\n", filtered[i], lcp[i], dictKey)
 			}
-		*/
+		}
 		//log.Info("LCP array checked")
 		// Walk over LCP array and compute the scores of the strings
 		b := inv
@@ -2717,14 +2718,43 @@ func reducedict(name string) error {
 	return nil
 }
 func recsplitWholeChain(chaindata string) error {
-	blocksPerFile := 500_000
-	blockTotal = &blocksPerFile
-	for i := 0; i < 13_500_000; i += *blockTotal {
+	blocksPerFile := uint64(500_000)
+	lastChunk := func(tx kv.Tx, blocksPerFile uint64) (uint64, error) {
+		c, err := tx.Cursor(kv.BlockBody)
+		if err != nil {
+			return 0, err
+		}
+		k, _, err := c.Last()
+		if err != nil {
+			return 0, err
+		}
+		last := binary.BigEndian.Uint64(k)
+		if last > params.FullImmutabilityThreshold {
+			last -= params.FullImmutabilityThreshold
+		} else {
+			last = 0
+		}
+		last = last - last%blocksPerFile
+		return last, nil
+	}
+
+	var last uint64
+
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	if err := database.View(context.Background(), func(tx kv.Tx) (err error) {
+		last, err = lastChunk(tx, blocksPerFile)
+		return err
+	}); err != nil {
+		return err
+	}
+	database.Close()
+
+	for i := uint64(*block); i < last; i += blocksPerFile {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
 		log.Info("Creating", "file", *name)
 
-		block = &i
-		if err := dumpTxs(chaindata, uint64(*block), *blockTotal, *name); err != nil {
+		if err := dumpTxs(chaindata, i, int(i)+*blockTotal, *name); err != nil {
 			return err
 		}
 		if err := compress1(chaindata, *name); err != nil {
@@ -2889,14 +2919,14 @@ RETRY:
 	log.Info("Building recsplit...")
 
 	if err = rs.Build(); err != nil {
+		if errors.Is(err, recsplit.ErrCollision) {
+			log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
+			rs.ResetNextSalt()
+			goto RETRY
+		}
 		return err
 	}
 
-	if rs.Collision() {
-		log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-		rs.ResetNextSalt()
-		goto RETRY
-	}
 	return nil
 }
 func decompress(name string) error {
@@ -3641,6 +3671,7 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
+	valueBuf := make([]byte, 16*4096)
 	k, v, e := bodies.Seek(blockEncoded)
 	for ; k != nil && e == nil; k, v, e = bodies.Next() {
 		bodyNum := binary.BigEndian.Uint64(k)
@@ -3662,13 +3693,14 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 				if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
 					panic(err)
 				}
-				tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
-				n := binary.PutUvarint(numBuf, uint64(len(tv)))
+				valueBuf = valueBuf[:0]
+				valueBuf = append(append(valueBuf, slot.IdHash[:1]...), tv...)
+				n := binary.PutUvarint(numBuf, uint64(len(valueBuf)))
 				if _, e = w.Write(numBuf[:n]); e != nil {
 					return err
 				}
-				if len(tv) > 0 {
-					if _, e = w.Write(tv); e != nil {
+				if len(valueBuf) > 0 {
+					if _, e = w.Write(valueBuf); e != nil {
 						return e
 					}
 				}
@@ -4110,11 +4142,7 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	go func() {
-		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
-			log.Error("Failure in running pprof server", "err", err)
-		}
-	}()
+	exp.Setup("0.0.0.0:6060")
 
 	var err error
 	switch *action {

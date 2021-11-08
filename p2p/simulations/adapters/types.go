@@ -22,10 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
-
-	"github.com/docker/docker/pkg/reexec"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/node"
@@ -287,13 +284,6 @@ func RegisterLifecycles(lifecycles LifecycleConstructors) {
 			panic(fmt.Sprintf("node service already exists: %q", name))
 		}
 		lifecycleConstructorFuncs[name] = f
-	}
-
-	// now we have registered the services, run reexec.Init() which will
-	// potentially start one of the services if the current binary has
-	// been exec'd with argv[0] set to "p2p-node"
-	if reexec.Init() {
-		os.Exit(0)
 	}
 }
 
