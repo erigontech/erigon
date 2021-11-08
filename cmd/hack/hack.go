@@ -1492,7 +1492,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
-		/*
+		if ASSERT {
 			for i := 0; i < n-1; i++ {
 				var prefixLen int
 				p1 := int(filtered[i])
@@ -1513,7 +1513,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				fmt.Printf("%d %d %s\n", filtered[i], lcp[i], dictKey)
 			}
-		*/
+		}
 		//log.Info("LCP array checked")
 		// Walk over LCP array and compute the scores of the strings
 		b := inv
