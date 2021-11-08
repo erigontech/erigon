@@ -42,3 +42,6 @@ In `./build/bin/txpool --help` see flags: `--txpool.globalslots`, `--txpool.glob
 [] Add pool to docker-compose
 [] Add pool (db table) - where store recently mined txs - for faster unwind/reorg.
 [] Save history of local transactions - with 1 day expiration
+[] move tx.rlp field to separated map, to make tx immutable
+[] Fetcher.go - can’t work with multiple sentries (has single parseContext)
+

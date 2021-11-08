@@ -1,4 +1,4 @@
-package commands
+package main
 
 import (
 	"context"
@@ -8,10 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/anacrolix/torrent/bencode"
@@ -35,29 +33,14 @@ func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 }
 
-func Execute() {
-	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
+func main() {
+	ctx, cancel := utils.RootContext()
+	defer cancel()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-}
-
-func rootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-
-		cancel()
-	}()
-	return ctx
 }
 
 var rootCmd = &cobra.Command{
@@ -176,11 +159,11 @@ type AnnounceReq struct {
 	Compact       bool
 }
 
-type Peer struct {
-	IP     string
-	Port   int
-	PeerID []byte
-}
+//type Peer struct {
+//	IP     string
+//	Port   int
+//	PeerID []byte
+//}
 
 func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Info("call", "url", r.RequestURI)

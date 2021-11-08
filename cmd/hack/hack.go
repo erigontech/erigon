@@ -13,7 +13,6 @@ import (
 	"io"
 	"io/ioutil"
 	"math/big"
-	"net/http"
 	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"os/signal"
@@ -56,6 +55,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -4142,11 +4142,7 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	go func() {
-		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
-			log.Error("Failure in running pprof server", "err", err)
-		}
-	}()
+	exp.Setup("0.0.0.0:6060")
 
 	var err error
 	switch *action {
