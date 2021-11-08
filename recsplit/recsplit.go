@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/bits"
 	"os"
@@ -29,6 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/spaolacci/murmur3"
 )
+
+var ASSERT = false
 
 var ErrCollision = fmt.Errorf("duplicate key")
 
@@ -296,6 +299,7 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 		rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
 	}
 	rs.bucketSizeAcc[int(rs.currentBucketIdx)+1] += uint64(len(rs.currentBucket))
+	// Sets of size 0 and 1 are not further processed, just write them to index
 	if len(rs.currentBucket) > 1 {
 		for i, key := range rs.currentBucket[1:] {
 			if key == rs.currentBucket[i] {
@@ -320,6 +324,13 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 		rs.gr.appendUnaryAll(unary)
 		if rs.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
+		}
+	} else {
+		for _, offset := range rs.currentBucketOffs {
+			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
+			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+				return err
+			}
 		}
 	}
 	// Extend rs.bucketPosAcc to accomodate current bucket index + 1
@@ -494,6 +505,16 @@ func (rs *RecSplit) Build() error {
 			return err
 		}
 	}
+
+	if ASSERT {
+		rs.indexW.Flush()
+		rs.indexF.Seek(0, 0)
+		b, _ := ioutil.ReadAll(rs.indexF)
+		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
+			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.indexFile))
+		}
+	}
+
 	if rs.enums {
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset, rs.minDelta)
 		defer rs.offsetCollector.Close()

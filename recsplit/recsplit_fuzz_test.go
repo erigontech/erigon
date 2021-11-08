@@ -35,9 +35,6 @@ func FuzzRecSplit(f *testing.F) {
 		if len(in) < count {
 			t.Skip()
 		}
-		for len(in) < 1_000 {
-			in = append(in, in...)
-		}
 
 		// split in into count keys
 		dups := make(map[string]struct{})
@@ -55,6 +52,7 @@ func FuzzRecSplit(f *testing.F) {
 		indexFile := path.Join(tmpDir, "index")
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:   count,
+			Enums:      true,
 			BucketSize: 10,
 			Salt:       0,
 			TmpDir:     tmpDir,
@@ -69,10 +67,14 @@ func FuzzRecSplit(f *testing.F) {
 		}
 		var off uint64
 		for i = 0; i < len(in)-l; i += l {
-			rs.AddKey(in[i:i+l], off)
+			if err := rs.AddKey(in[i:i+l], off); err != nil {
+				t.Fatal(err)
+			}
 			off++
 		}
-		rs.AddKey(in[i:], off)
+		if err := rs.AddKey(in[i:], off); err != nil {
+			t.Fatal(err)
+		}
 		if err = rs.Build(); err != nil {
 			t.Fatal(err)
 		}

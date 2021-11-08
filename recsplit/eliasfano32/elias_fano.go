@@ -59,6 +59,12 @@ type EliasFano struct {
 }
 
 func NewEliasFano(count uint64, maxOffset, minDelta uint64) *EliasFano {
+	if minDelta > (1 << 32) {
+		panic(fmt.Sprintf("too big minDelat: %d", minDelta))
+	}
+	if count == 0 {
+		panic(fmt.Sprintf("too small count: %d", count))
+	}
 	//fmt.Printf("count=%d,maxOffset=%d,minDelta=%d\n", count, maxOffset, minDelta)
 	ef := &EliasFano{
 		count:     count - 1,
@@ -97,12 +103,13 @@ func (ef *EliasFano) deriveFields() int {
 		ef.l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1))) // pos of first non-zero bit
 		//fmt.Printf("lllllllll: %d, %d\n", 63^uint64(bits.LeadingZeros64(24/7)), msb(ef.u/(ef.count+1)))
 	}
+	//fmt.Printf("EF: %d, %d,%d\n", ef.count, ef.u, ef.l)
 	ef.lowerBitsMask = (uint64(1) << ef.l) - 1
 	wordsLowerBits := int(((ef.count+1)*ef.l+63)/64 + 1)
 	wordsUpperBits := int((ef.count + 1 + (ef.u >> ef.l) + 63) / 64)
 	jumpWords := ef.jumpSizeWords()
 	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
-	fmt.Printf("EF: %d, %d,%d,%d\n", totalWords/1024/1024, wordsLowerBits/1024, wordsUpperBits/1024, jumpWords/1024)
+	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if ef.data == nil {
 		ef.data = make([]uint64, totalWords)
 	} else {
@@ -212,6 +219,7 @@ func (ef EliasFano) Get2(i uint64) (val uint64, valNext uint64) {
 func (ef *EliasFano) Write(w io.Writer) error {
 	var numBuf [8]byte
 	binary.BigEndian.PutUint64(numBuf[:], ef.count)
+	//fmt.Printf("write: %d,%x\n", ef.count, numBuf)
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
@@ -237,6 +245,7 @@ const maxDataSize = 0xFFFFFFFFFFFF
 func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef := &EliasFano{}
 	ef.count = binary.BigEndian.Uint64(r[:8])
+	//fmt.Printf("read: %d,%x\n", ef.count, r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.minDelta = binary.BigEndian.Uint64(r[16:24])
 	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[24]))
