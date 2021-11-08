@@ -18,6 +18,7 @@ package compress
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/mmap"
