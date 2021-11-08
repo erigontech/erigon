@@ -55,7 +55,7 @@ func TestCompressEmptyDict(t *testing.T) {
 
 func TestCompressDict1(t *testing.T) {
 	tmpDir := t.TempDir()
-	file := path.Join(tmpDir, t.Name())
+	file := path.Join(tmpDir, "compressed")
 	t.Name()
 	c, err := NewCompressor(t.Name(), file, tmpDir, 1)
 	if err != nil {
@@ -81,16 +81,7 @@ func TestCompressDict1(t *testing.T) {
 		if string(word) != expected {
 			t.Errorf("expected %s, got (hex) %x", expected, word)
 		}
-
 		i++
 	}
-	g.Reset(0)
-	word, a := g.Current(nil)
-	fmt.Printf("a:%d\n", a)
-	expected := fmt.Sprintf("longlongword %d", 0)
-	if string(word) != expected {
-		t.Errorf("expected %s, got (hex) %x", expected, word)
-	}
-
 	defer d.Close()
 }
