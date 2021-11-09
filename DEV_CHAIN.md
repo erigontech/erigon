@@ -1,4 +1,4 @@
-teps to setup and run Erigon dev chain. This tutorial is made for macOS.
+Steps to setup and run Erigon dev chain. This tutorial is made for macOS.
 
 
 ## 1. Clone and Build Erigon 
