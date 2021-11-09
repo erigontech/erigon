@@ -233,20 +233,13 @@ func (s *Multi) defaultCaller(blockHash common.Hash) (Call, error) {
 }
 
 func (s *Multi) getWithCaller(parentHash common.Hash, step uint, caller consensus.Call) (common.Address, error) {
+
 	validatorSet, ok := s.correctSet(parentHash)
 	if !ok {
 		return common.Address{}, errors.New("correct set not found")
 	}
 
-	numberOfValidators, err := validatorSet.countWithCaller(parentHash, caller)
-	if err != nil {
-		return common.Address{}, err
-	}
-
-	indexOfValidator := step % uint(numberOfValidators)
-	_ = indexOfValidator
-
-	return common.Address{}, nil
+	return validatorSet.getWithCaller(parentHash, step, caller)
 }
 
 func (s *Multi) countWithCaller(parentHash common.Hash, caller consensus.Call) (uint64, error) {
