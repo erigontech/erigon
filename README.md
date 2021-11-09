@@ -14,7 +14,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain)
-    + [Dev Chain](#beacon-chain)
+    + [Dev Chain](#local-devnet)
 
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
@@ -148,7 +148,8 @@ where <ip address> is either localhost or the IP address of the device running t
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
     
-### Local devnet
+
+### Local Devnet
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
 Key features
