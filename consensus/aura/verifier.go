@@ -24,10 +24,6 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 		return errTooOldOfBlock
 	}
 
-	if header.Number.Uint64() < 20 {
-		return errTooOldOfBlock
-	}
-
 	now := time.Now()
 	unixTime := now.Unix()
 
@@ -76,8 +72,8 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 	step := c.step.inner.inner.Load() // getting the step value
 
 	// making sure our currentStep is not a future step
-	if currentStep > step {
-		return errFutureStep
+	if currentStep != step {
+		return errIncorrectStep
 	}
 
 	// checking if multiple blocks are being put out in the same step
@@ -86,6 +82,10 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 	parentStep, err := headerStep(parent)
 	if err != nil {
 		return err
+	}
+
+	if parentStep > step {
+		return errFutureStep
 	}
 
 	if parentStep == step {

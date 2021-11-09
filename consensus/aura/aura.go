@@ -95,8 +95,11 @@ var (
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
 
-	// errFutureStep is returned if the current step is a step after the supposed step
+	// errFutureStep is returned if the parent step is a step after the supposed step
 	errFutureStep = errors.New("current step is ahead of the supposed step")
+
+	// errIncorrectStep is returned if the header step is not the current step
+	errIncorrectStep = errors.New("header step is not equal to the current step")
 
 	// errMultipleBlocksInStep is returned when		 multiple blocks are assigned at the same step
 	errMultipleBlocksInStep = errors.New("multiple blocks were assigned at the same step")
