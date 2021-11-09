@@ -1502,7 +1502,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					prefixLen++
 				}
 				if prefixLen != int(lcp[i]) {
-					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i])
+					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i], "i", i)
 					panic(1)
 					break
 				}
