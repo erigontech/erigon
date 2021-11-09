@@ -1485,9 +1485,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 
 			lcp[inv[i]] = int32(k) // lcp for the present suffix.
 
-			if k > 260 {
-				fmt.Printf("k: %d\n", k)
-			}
 			// Deleting the starting character from the string.
 			if k > 0 {
 				k--
