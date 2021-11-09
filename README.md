@@ -14,6 +14,8 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain)
+    + [Dev Chain](#dev-chain)
+
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
     + [Faster Initial Sync](#faster-initial-sync)
@@ -145,6 +147,10 @@ Once the JSON-RPC daemon is running, all you need to do is point your beacon cha
 where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
+    
+
+### Dev Chain
+<code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
 Key features
 ============ 
@@ -322,6 +328,9 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
   run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
 - Get RAM profiling: add `--pprof flag`
   run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+    
+### How to run local devnet?
+<code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
 
 Getting in touch
 ================
