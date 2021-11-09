@@ -1492,7 +1492,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
-		fmt.Printf("c.lcp: %d\n", lcp[1196])
 
 		if ASSERT {
 			for i := 0; i < n-1; i++ {
@@ -1506,13 +1505,8 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
 					prefixLen++
 				}
-				if i > 1100 && i < 1200 {
-					fmt.Printf("pp: %d,%d,%d\n", p1, p2, prefixLen)
-				}
 				if prefixLen != int(lcp[i]) {
-					fmt.Printf("%x\n\n %x\n", superstring[p1:(p1+prefixLen)*2+1], superstring[p2:(p2+prefixLen)*2+1])
 					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i], "i", i)
-					panic(1)
 					break
 				}
 				l := int(lcp[i]) // Length of potential dictionary word
