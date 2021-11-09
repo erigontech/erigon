@@ -214,3 +214,86 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	assert.Equal(t, length.Hash, len(hashes2))
 	assert.Equal(t, 0, len(rootHash2))
 }
+
+func TestStorageDeletion(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+
+	address := common.HexToAddress("0x1000000000000000000000000000000000000000")
+	hashedAddress, err := common.HashData(address[:])
+	assert.Nil(t, err)
+	incarnation := uint64(1)
+	assert.Nil(t, addTestAccount(tx, hashedAddress, params.Ether, incarnation))
+
+	plainLocation1 := common.HexToHash("0x1000000000000000000000000000000000000000000000000000000000000000")
+	hashedLocation1, err := common.HashData(plainLocation1[:])
+	assert.Nil(t, err)
+
+	plainLocation2 := common.HexToHash("0x1A00000000000000000000000000000000000000000000000000000000000000")
+	hashedLocation2, err := common.HashData(plainLocation2[:])
+	assert.Nil(t, err)
+
+	plainLocation3 := common.HexToHash("0x1E00000000000000000000000000000000000000000000000000000000000000")
+	hashedLocation3, err := common.HashData(plainLocation3[:])
+	assert.Nil(t, err)
+
+	value1 := common.FromHex("0xABCD")
+	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation1), value1))
+
+	value2 := common.FromHex("0x4321")
+	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation2), value2))
+
+	value3 := common.FromHex("0x4444")
+	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation3), value3))
+
+	// ----------------------------------------------------------------
+	// Populate account & storage trie DB tables
+	// ----------------------------------------------------------------
+
+	cfg := StageTrieCfg(nil, false, true, t.TempDir())
+	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	assert.Nil(t, err)
+
+	// ----------------------------------------------------------------
+	// Check storage trie
+	// ----------------------------------------------------------------
+
+	storageTrieA := make(map[string][]byte)
+	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
+		storageTrieA[string(k)] = common.CopyBytes(v)
+		return nil
+	})
+	assert.Nil(t, err)
+
+	assert.Equal(t, 1, len(storageTrieA))
+
+	// ----------------------------------------------------------------
+	// Delete storage and increment the trie
+	// ----------------------------------------------------------------
+
+	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation1), value1))
+	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation2), value2))
+	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation3), value3))
+
+	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation1[:])
+	assert.Nil(t, err)
+
+	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation2[:])
+	assert.Nil(t, err)
+
+	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation3[:])
+	assert.Nil(t, err)
+
+	var s StageState
+	s.BlockNumber = 0
+	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	assert.Nil(t, err)
+
+	storageTrieB := make(map[string][]byte)
+	err = tx.ForEach(kv.TrieOfStorage, nil, func(k, v []byte) error {
+		storageTrieB[string(k)] = common.CopyBytes(v)
+		return nil
+	})
+	assert.Nil(t, err)
+
+	assert.Equal(t, 0, len(storageTrieB))
+}
