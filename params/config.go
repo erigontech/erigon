@@ -31,6 +31,7 @@ const (
 	RinkebyChainName = "rinkeby"
 	GoerliChainName  = "goerli"
 	DevChainName     = "dev"
+	PrivateChainName = "private"
 	ErigonMineName   = "erigonmine"
 	SokolChainName   = "sokol"
 	KovanChainName   = "kovan"

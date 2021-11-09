@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -665,6 +666,27 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 			faucet:                           {Balance: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(9))},
 		},
 	}
+}
+
+// ReadGenesis will read the given JSON format genesis file and return
+// the initialized Genesis structure
+func ReadGenesis(genesisPath string) (*Genesis, error) {
+	// Make sure we have a valid genesis JSON
+	if len(genesisPath) == 0 {
+		return nil, errors.New("must supply path to genesis JSON file")
+	}
+	file, err := os.Open(genesisPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	genesis := new(Genesis)
+	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+		return nil, err
+	}
+
+	return genesis, nil
 }
 
 func readPrealloc(filename string) GenesisAlloc {

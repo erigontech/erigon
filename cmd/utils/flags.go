@@ -96,6 +96,10 @@ var (
 		Usage: "Data directory for the databases",
 		Value: DirectoryString(paths.DefaultDataDir()),
 	}
+	GenesisFlag = DirectoryFlag{
+		Name:  "genesis",
+		Usage: "Genesis file location for the custom chain",
+	}
 	MdbxAugmentLimitFlag = DirectoryFlag{
 		Name:  "mdbx.augment.limit",
 		Usage: "Data directory for the databases",
@@ -1307,6 +1311,19 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
+	case params.PrivateChainName:
+		customGenesis, err := core.ReadGenesis(ctx.GlobalString(GenesisFlag.Name))
+		if err != nil {
+			Fatalf("Failed to read genesis file: %v", err)
+		}
+
+		genesisNetworkID := customGenesis.Config.ChainID.Uint64()
+		if ctx.GlobalIsSet(NetworkIdFlag.Name) && cfg.NetworkID != genesisNetworkID {
+			Fatalf("Network ID as per genesis is %d but specified %d", genesisNetworkID, cfg.NetworkID)
+		}
+
+		cfg.NetworkID = genesisNetworkID
+		cfg.Genesis = customGenesis
 	default:
 		Fatalf("ChainDB name is not recognized: %s", chain)
 	}

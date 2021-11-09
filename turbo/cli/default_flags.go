@@ -9,6 +9,7 @@ import (
 // DefaultFlags contains all flags that are used and supported by Erigon binary.
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
+	utils.GenesisFlag,
 	utils.MdbxAugmentLimitFlag,
 	utils.EthashDatasetDirFlag,
 	utils.TxPoolDisableFlag,
