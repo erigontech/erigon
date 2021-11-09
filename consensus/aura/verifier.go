@@ -152,7 +152,7 @@ func (c *AuRa) verifyUncle(chain consensus.ChainReader, uncle *types.Header) err
 		return errInvalidMixDigest
 	}
 
-	return nil
+	return c.verifyCascadingFields(chain, uncle, nil)
 
 }
 

@@ -232,7 +232,7 @@ func (s *Multi) defaultCaller(blockHash common.Hash) (Call, error) {
 	return set.defaultCaller(blockHash)
 }
 
-func (s *Multi) getWithCaller(parentHash common.Hash, nonce uint, caller consensus.Call) (common.Address, error) {
+func (s *Multi) getWithCaller(parentHash common.Hash, step uint, caller consensus.Call) (common.Address, error) {
 	validatorSet, ok := s.correctSet(parentHash)
 	if !ok {
 		return common.Address{}, errors.New("correct set not found")
@@ -243,7 +243,7 @@ func (s *Multi) getWithCaller(parentHash common.Hash, nonce uint, caller consens
 		return common.Address{}, err
 	}
 
-	indexOfValidator := nonce % uint(numberOfValidators)
+	indexOfValidator := step % uint(numberOfValidators)
 	_ = indexOfValidator
 
 	return common.Address{}, nil
@@ -342,7 +342,7 @@ func (s *SimpleList) signalEpochEnd(_ bool, header *types.Header, r types.Receip
 	return nil, nil
 }
 
-// Draws an validator nonce modulo number of validators.
+// Draws an validator step modulo number of validators.
 
 func NewSimpleList(validators []common.Address) *SimpleList {
 	return &SimpleList{validators: validators}
