@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 
 	// "github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -41,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -52,14 +52,14 @@ import (
 const DEBUG_LOG_FROM = 999_999_999
 
 const (
-	epochLength          = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
-	ExtraVanity          = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
-	ExtraSeal            = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
-	warmupCacheSnapshots = 20
+	// epochLength          = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
+	ExtraVanity = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
+	ExtraSeal   = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
+	// warmupCacheSnapshots = 20
 
-	/*
-		wiggleTime = 500 * time.Millisecond  //Random delay (per signer) to allow concurrent signers
-	*/
+/*
+	wiggleTime = 500 * time.Millisecond  //Random delay (per signer) to allow concurrent signers
+*/
 )
 
 /*

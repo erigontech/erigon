@@ -92,7 +92,7 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 		return errMultipleBlocksInStep
 	}
 
-	// TODO checking if the validator is correct
+	// checking if the validator is correct
 	validators, _, err := c.epochSet(chain, nil, header, nil)
 
 	if err != nil {
