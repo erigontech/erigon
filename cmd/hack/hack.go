@@ -56,6 +56,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -1459,7 +1460,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			inv[filtered[i]] = i
 		}
 		//log.Info("Inverted array done")
-		lcp := make([]byte, n)
+		lcp := make([]int32, n)
 		var k int
 		// Process all suffixes one by one starting from
 		// first suffix in txt[]
@@ -1483,7 +1484,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				k++
 			}
 
-			lcp[inv[i]] = byte(k) // lcp for the present suffix.
+			lcp[inv[i]] = int32(k) // lcp for the present suffix.
 
 			// Deleting the starting character from the string.
 			if k > 0 {
@@ -1498,11 +1499,15 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				var prefixLen int
 				p1 := int(filtered[i])
 				p2 := int(filtered[i+1])
-				for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+				for p1+prefixLen < n &&
+					p2+prefixLen < n &&
+					superstring[(p1+prefixLen)*2] != 0 &&
+					superstring[(p2+prefixLen)*2] != 0 &&
+					superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
 					prefixLen++
 				}
 				if prefixLen != int(lcp[i]) {
-					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i])
+					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i], "i", i)
 					break
 				}
 				l := int(lcp[i]) // Length of potential dictionary word
@@ -1617,10 +1622,6 @@ const minPatternLen = 5
 // minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const minPatternScore = 1024
 
-// maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
-// Large values increase memory consumption of dictionary reduction phase
-const maxDictPatterns = 1024 * 1024
-
 func compress1(chaindata string, name string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
@@ -1662,6 +1663,8 @@ func compress1(chaindata string, name string) error {
 			ch <- superstring
 			superstring = nil
 		}
+		//fmt.Printf("\"%x\",\n", buf[:l])
+
 		for _, a := range buf[:l] {
 			superstring = append(superstring, 1, a)
 		}
@@ -2673,7 +2676,7 @@ func recsplitWholeChain(chaindata string) error {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
 		log.Info("Creating", "file", *name)
 
-		if err := dumpTxs(chaindata, i, int(i)+*blockTotal, *name); err != nil {
+		if err := dumpTxs(chaindata, i, *blockTotal, *name); err != nil {
 			return err
 		}
 		if err := compress1(chaindata, *name); err != nil {
@@ -4045,8 +4048,8 @@ func devTx(chaindata string) error {
 }
 
 func main() {
+	debug.RaiseFdLimit()
 	flag.Parse()
-
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*verbosity), log.StderrHandler))
 
 	if *cpuprofile != "" {
