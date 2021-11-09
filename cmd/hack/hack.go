@@ -64,7 +64,7 @@ import (
 	"github.com/wcharczuk/go-chart/v2"
 )
 
-const ASSERT = false
+const ASSERT = true
 
 var (
 	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
@@ -1503,6 +1503,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				if prefixLen != int(lcp[i]) {
 					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i])
+					panic(1)
 					break
 				}
 				l := int(lcp[i]) // Length of potential dictionary word
