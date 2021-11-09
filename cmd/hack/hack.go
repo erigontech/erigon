@@ -1459,7 +1459,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			inv[filtered[i]] = i
 		}
 		//log.Info("Inverted array done")
-		lcp := make([]byte, n)
+		lcp := make([]int32, n)
 		var k int
 		// Process all suffixes one by one starting from
 		// first suffix in txt[]
@@ -1483,7 +1483,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				k++
 			}
 
-			lcp[inv[i]] = byte(k) // lcp for the present suffix.
+			lcp[inv[i]] = int32(k) // lcp for the present suffix.
 
 			// Deleting the starting character from the string.
 			if k > 0 {
@@ -1492,16 +1492,25 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
+		fmt.Printf("c.lcp: %d\n", lcp[1196])
 
 		if ASSERT {
 			for i := 0; i < n-1; i++ {
 				var prefixLen int
 				p1 := int(filtered[i])
 				p2 := int(filtered[i+1])
-				for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+				for p1+prefixLen < n &&
+					p2+prefixLen < n &&
+					superstring[(p1+prefixLen)*2] != 0 &&
+					superstring[(p2+prefixLen)*2] != 0 &&
+					superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
 					prefixLen++
 				}
+				if i > 1100 && i < 1200 {
+					fmt.Printf("pp: %d,%d,%d\n", p1, p2, prefixLen)
+				}
 				if prefixLen != int(lcp[i]) {
+					fmt.Printf("%x\n\n %x\n", superstring[p1:(p1+prefixLen)*2+1], superstring[p2:(p2+prefixLen)*2+1])
 					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i], "i", i)
 					panic(1)
 					break
@@ -1663,6 +1672,8 @@ func compress1(chaindata string, name string) error {
 			ch <- superstring
 			superstring = nil
 		}
+		//fmt.Printf("\"%x\",\n", buf[:l])
+
 		for _, a := range buf[:l] {
 			superstring = append(superstring, 1, a)
 		}
