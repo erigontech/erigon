@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -29,9 +30,12 @@ import (
 	"sort"
 
 	"github.com/flanglet/kanzi-go/transform"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/patricia"
 )
+
+const ASSERT = false
 
 // Compressor is the main operating type for performing per-word compression
 // After creating a compression, one needs to add words to it, using `AddWord` function
@@ -88,10 +92,10 @@ const maxDictPatterns = 1024 * 1024
 const compressLogPrefix = "compress"
 
 type DictionaryBuilder struct {
-	limit     int
-	lastChars []byte
-	lastScore uint64
-	items     []*Pattern
+	limit         int
+	lastWord      []byte
+	lastWordScore uint64
+	items         []*Pattern
 }
 
 func (db *DictionaryBuilder) Reset(limit int) {
@@ -105,7 +109,7 @@ func (db DictionaryBuilder) Len() int {
 
 func (db DictionaryBuilder) Less(i, j int) bool {
 	if db.items[i].score == db.items[j].score {
-		return bytes.Compare(db.items[i].chars, db.items[j].chars) < 0
+		return bytes.Compare(db.items[i].word, db.items[j].word) < 0
 	}
 	return db.items[i].score < db.items[j].score
 }
@@ -126,8 +130,8 @@ func (db *DictionaryBuilder) Pop() interface{} {
 	return x
 }
 
-func (db *DictionaryBuilder) processPattern(chars []byte, score uint64) {
-	heap.Push(db, &Pattern{chars: chars, score: score})
+func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
+	heap.Push(db, &Pattern{word: chars, score: score})
 	if db.Len() > db.limit {
 		// Remove the element with smallest score
 		heap.Pop(db)
@@ -136,24 +140,30 @@ func (db *DictionaryBuilder) processPattern(chars []byte, score uint64) {
 
 func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	score := binary.BigEndian.Uint64(v)
-	if bytes.Equal(k, db.lastChars) {
-		db.lastScore += score
+	if bytes.Equal(k, db.lastWord) {
+		db.lastWordScore += score
 	} else {
-		if db.lastChars != nil {
-			db.processPattern(db.lastChars, db.lastScore)
+		if db.lastWord != nil {
+			db.processWord(db.lastWord, db.lastWordScore)
 		}
-		if cap(db.lastChars) < len(k) {
-			db.lastChars = make([]byte, 0, len(k))
+		if cap(db.lastWord) < len(k) {
+			db.lastWord = make([]byte, 0, len(k))
 		}
-		db.lastChars = append(db.lastChars[:0], k...)
-		db.lastScore = score
+		db.lastWord = append(db.lastWord[:0], k...)
+		db.lastWordScore = score
 	}
 	return nil
 }
 
 func (db *DictionaryBuilder) finish() {
-	if db.lastChars != nil {
-		db.processPattern(db.lastChars, db.lastScore)
+	if db.lastWord != nil {
+		db.processWord(db.lastWord, db.lastWordScore)
+	}
+}
+
+func (db *DictionaryBuilder) ForEach(f func(score uint64, word []byte)) {
+	for i := len(db.items); i > 0; i-- {
+		f(db.items[i-1].score, db.items[i-1].word)
 	}
 }
 
@@ -165,7 +175,7 @@ type Pattern struct {
 	uses     uint64 // How many times this pattern has been used during search and optimisation
 	code     uint64 // Allocated numerical code
 	codeBits int    // Number of bits in the code
-	chars    []byte // Pattern characters
+	word     []byte // Pattern characters
 	offset   uint64 // Offset of this patten in the dictionary representation
 }
 
@@ -558,7 +568,7 @@ func (c *Compressor) findMatches() error {
 	// This helps reduce the size of intermediate compression
 	for i, p := range c.dictBuilder.items {
 		p.code = uint64(len(c.dictBuilder.items) - i - 1)
-		c.pt.Insert(p.chars, p)
+		c.pt.Insert(p.word, p)
 	}
 	var err error
 	if c.interFile, err = ioutil.TempFile(c.tmpDir, "inter-compress-"); err != nil {
@@ -730,8 +740,8 @@ func (c *Compressor) optimiseCodes() error {
 	var offset uint64
 	for _, p := range patternList {
 		p.offset = offset
-		n := binary.PutUvarint(c.numBuf[:], uint64(len(p.chars)))
-		offset += uint64(n + len(p.chars))
+		n := binary.PutUvarint(c.numBuf[:], uint64(len(p.word)))
+		offset += uint64(n + len(p.word))
 	}
 	patternCutoff := offset // All offsets below this will be considered patterns
 	i := 0                  // Will be going over the patternList
@@ -814,11 +824,11 @@ func (c *Compressor) optimiseCodes() error {
 	}
 	// Write all the pattens
 	for _, p := range patternList {
-		n := binary.PutUvarint(c.numBuf[:], uint64(len(p.chars)))
+		n := binary.PutUvarint(c.numBuf[:], uint64(len(p.word)))
 		if _, err = cw.Write(c.numBuf[:n]); err != nil {
 			return err
 		}
-		if _, err = cw.Write(p.chars); err != nil {
+		if _, err = cw.Write(p.word); err != nil {
 			return err
 		}
 	}
@@ -998,7 +1008,7 @@ func (c *Compressor) optimiseCodes() error {
 				if int(pos) > lastUncovered {
 					uncoveredCount += int(pos) - lastUncovered
 				}
-				lastUncovered = int(pos) + len(patternCode.chars)
+				lastUncovered = int(pos) + len(patternCode.word)
 				if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
 					return e
 				}
@@ -1152,4 +1162,67 @@ func (c *Compressor) processSuperstring() error {
 	}
 	c.superstring = c.superstring[:0]
 	return nil
+}
+
+type DictAggregator struct {
+	lastWord      []byte
+	lastWordScore uint64
+	collector     *etl.Collector
+}
+
+func (da *DictAggregator) processWord(word []byte, score uint64) error {
+	var scoreBuf [8]byte
+	binary.BigEndian.PutUint64(scoreBuf[:], score)
+	return da.collector.Collect(word, scoreBuf[:])
+}
+
+func (da *DictAggregator) Load(loadFunc etl.LoadFunc, args etl.TransformArgs) error {
+	defer da.collector.Close()
+	return da.collector.Load(nil, "", loadFunc, args)
+}
+
+func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	score := binary.BigEndian.Uint64(v)
+	if bytes.Equal(k, da.lastWord) {
+		da.lastWordScore += score
+	} else {
+		if da.lastWord != nil {
+			if err := da.processWord(da.lastWord, da.lastWordScore); err != nil {
+				return err
+			}
+		}
+		da.lastWord = common.Copy(k)
+		da.lastWordScore = score
+	}
+	return nil
+}
+
+func (da *DictAggregator) finish() error {
+	if da.lastWord != nil {
+		return da.processWord(da.lastWord, da.lastWordScore)
+	}
+	return nil
+}
+
+func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir string, collectors []*etl.Collector) (*DictionaryBuilder, error) {
+	dictCollector := etl.NewCollector(logPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer dictCollector.Close()
+	dictAggregator := &DictAggregator{collector: dictCollector}
+	for _, collector := range collectors {
+		if err := collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return nil, err
+		}
+		collector.Close()
+	}
+	if err := dictAggregator.finish(); err != nil {
+		return nil, err
+	}
+	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
+	if err := dictCollector.Load(nil, "", db.loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return nil, err
+	}
+	db.finish()
+
+	sort.Sort(db)
+	return db, nil
 }
