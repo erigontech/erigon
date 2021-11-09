@@ -14,7 +14,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
 	github.com/dlclark/regexp2 v1.4.0 // indirect
-	github.com/docker/docker v20.10.10+incompatible
 	github.com/dop251/goja v0.0.0-20200721192441-a695b0cdd498
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.16.0
@@ -64,6 +63,5 @@ require (
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
-	gotest.tools/v3 v3.0.3 // indirect
 	pgregory.net/rapid v0.4.7
 )
