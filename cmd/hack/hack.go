@@ -1485,6 +1485,9 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 
 			lcp[inv[i]] = int32(k) // lcp for the present suffix.
 
+			if k > 260 {
+				fmt.Printf("k: %d\n", k)
+			}
 			// Deleting the starting character from the string.
 			if k > 0 {
 				k--
@@ -2679,7 +2682,7 @@ func recsplitWholeChain(chaindata string) error {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
 		log.Info("Creating", "file", *name)
 
-		if err := dumpTxs(chaindata, i, int(i)+*blockTotal, *name); err != nil {
+		if err := dumpTxs(chaindata, i, *blockTotal, *name); err != nil {
 			return err
 		}
 		if err := compress1(chaindata, *name); err != nil {
