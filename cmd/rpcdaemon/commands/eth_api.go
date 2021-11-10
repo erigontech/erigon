@@ -163,7 +163,9 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 	if err != nil {
 		return nil, err
 	}
-
+	if block == nil { // don't save nil's to cache
+		return nil, nil
+	}
 	if api.blocksLRU != nil {
 		api.blocksLRU.Add(hash, block)
 	}
