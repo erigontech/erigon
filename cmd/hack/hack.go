@@ -2640,7 +2640,7 @@ func recsplitWholeChain(chaindata string) error {
 		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
 		log.Info("Creating", "file", *name)
 
-		if err := dumpTxs(chaindata, i, i+*blockTotal, *name); err != nil {
+		if err := dumpTxs(chaindata, i, int(i)+*blockTotal, *name); err != nil {
 			return err
 		}
 		if err := compress1(chaindata, *name); err != nil {
