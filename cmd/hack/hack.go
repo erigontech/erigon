@@ -1531,7 +1531,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				continue
 			}
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
-				if l < minPatternLen || (l > maxPatternLen && l != 128) {
+				if l < minPatternLen || l > maxPatternLen {
 					continue
 				}
 				// Go back
@@ -1556,7 +1556,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				score := uint64(repeats * int(l-4))
 				if score > minPatternScore {
-					// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
 					dictKey := make([]byte, l)
 					for s := 0; s < l; s++ {
 						dictKey[s] = superstring[(filtered[i]+s)*2+1]
