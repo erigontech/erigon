@@ -1483,9 +1483,9 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
 				k++
 			}
-
-			lcp[inv[i]] = int32(k) // lcp for the present suffix.
-
+			if k < 128 {
+				lcp[inv[i]] = int32(k) // lcp for the present suffix.
+			}
 			// Deleting the starting character from the string.
 			if k > 0 {
 				k--
@@ -1620,7 +1620,7 @@ const superstringLimit = 16 * 1024 * 1024
 const minPatternLen = 5
 
 // minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
-const minPatternScore = 2 * 1024
+const minPatternScore = 1024
 
 func compress1(chaindata string, name string) error {
 	database := mdbx.MustOpen(chaindata)
