@@ -1483,7 +1483,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
 				k++
 			}
-			if k < 128 {
+			if k < 300 {
 				lcp[inv[i]] = int32(k) // lcp for the present suffix.
 			}
 			// Deleting the starting character from the string.
