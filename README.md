@@ -285,7 +285,6 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 |  Port |  Protocol |      Purpose     |  Expose |
 |:-----:|:---------:|:----------------:|:-------:|
 | 30303 | TCP & UDP |  eth/66 peering  |  Public |
-| 30304 | TCP & UDP |  eth/65 peering  |  Public |
 |  9090 |    TCP    | gRPC Connections | Private |
 
 Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only

@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+
 	"github.com/ledgerwatch/log/v3"
 )
 
