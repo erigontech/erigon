@@ -1573,41 +1573,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 	completion.Done()
 }
 
-type DictAggregator struct {
-	lastWord      []byte
-	lastWordScore uint64
-	collector     *etl.Collector
-}
-
-func (da *DictAggregator) processWord(word []byte, score uint64) error {
-	var scoreBuf [8]byte
-	binary.BigEndian.PutUint64(scoreBuf[:], score)
-	return da.collector.Collect(word, scoreBuf[:])
-}
-
-func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	score := binary.BigEndian.Uint64(v)
-	if bytes.Equal(k, da.lastWord) {
-		da.lastWordScore += score
-	} else {
-		if da.lastWord != nil {
-			if err := da.processWord(da.lastWord, da.lastWordScore); err != nil {
-				return err
-			}
-		}
-		da.lastWord = common.CopyBytes(k)
-		da.lastWordScore = score
-	}
-	return nil
-}
-
-func (da *DictAggregator) finish() error {
-	if da.lastWord != nil {
-		return da.processWord(da.lastWord, da.lastWordScore)
-	}
-	return nil
-}
-
 const CompressLogPrefix = "compress"
 
 // superstringLimit limits how large can one "superstring" get before it is processed
