@@ -1531,7 +1531,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				continue
 			}
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
-				if l < minPatternLen || l > maxPatternLen {
+				if l < minPatternLen || (l > maxPatternLen && l != 128) {
 					continue
 				}
 				// Go back
