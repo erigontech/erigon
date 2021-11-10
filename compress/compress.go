@@ -83,10 +83,11 @@ const superstringLimit = 16 * 1024 * 1024
 
 // minPatternLen is minimum length of pattern we consider to be included into the dictionary
 const minPatternLen = 5
+const maxPatternLen = 64
 
 // maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
 // Large values increase memory consumption of dictionary reduction phase
-const maxDictPatterns = 1024 * 1024
+const maxDictPatterns = 2 * 1024 * 1024
 
 //nolint
 const compressLogPrefix = "compress"
@@ -1120,7 +1121,7 @@ func (c *Compressor) processSuperstring() error {
 			continue
 		}
 		for l := c.lcp[i]; l > c.lcp[i+1]; l-- {
-			if l < minPatternLen {
+			if l < minPatternLen || l > maxPatternLen {
 				continue
 			}
 			// Go back
