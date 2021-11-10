@@ -1483,9 +1483,8 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
 				k++
 			}
-			if k < 300 {
-				lcp[inv[i]] = int32(k) // lcp for the present suffix.
-			}
+			lcp[inv[i]] = int32(k) // lcp for the present suffix.
+
 			// Deleting the starting character from the string.
 			if k > 0 {
 				k--
@@ -1532,7 +1531,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				continue
 			}
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
-				if l < minPatternLen {
+				if l < minPatternLen || l > 256 {
 					continue
 				}
 				// Go back
@@ -1622,6 +1621,10 @@ const minPatternLen = 5
 // minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const minPatternScore = 1024
 
+// maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
+// Large values increase memory consumption of dictionary reduction phase
+const maxDictPatterns = 1024 * 1024
+
 func compress1(chaindata string, name string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
@@ -1689,19 +1692,35 @@ func compress1(chaindata string, name string) error {
 	}
 	close(ch)
 	wg.Wait()
-
-	db, err := compress.DictionaryBuilderFromCollectors(context.Background(), CompressLogPrefix, tmpDir, collectors)
-	if err != nil {
+	dictCollector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	dictAggregator := &DictAggregator{collector: dictCollector}
+	for _, collector := range collectors {
+		if err = collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
+		collector.Close()
+	}
+	if err = dictAggregator.finish(); err != nil {
 		return err
 	}
-
+	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
+	if err = dictCollector.Load(nil, "", db.compressLoadFunc, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	db.finish()
+	dictCollector.Close()
 	var df *os.File
 	df, err = os.Create(name + ".dictionary.txt")
 	if err != nil {
 		return err
 	}
 	w := bufio.NewWriterSize(df, etl.BufIOSize)
-	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
+	// Sort dictionary builder
+	sort.Sort(db)
+
+	for i := len(db.items); i > 0; i-- {
+		fmt.Fprintf(w, "%d %x\n", db.items[i-1].score, db.items[i-1].word)
+	}
 	if err = w.Flush(); err != nil {
 		return err
 	}
