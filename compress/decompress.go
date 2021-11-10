@@ -201,7 +201,7 @@ func (g *Getter) HasNext() bool {
 // After extracting next word, it moves to the beginning of the next one
 func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	l := g.nextPos(true)
-	l--
+	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	if l == 0 {
 		return buf, g.dataP
 	}

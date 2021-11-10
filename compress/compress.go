@@ -131,7 +131,7 @@ func (db *DictionaryBuilder) Pop() interface{} {
 }
 
 func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
-	heap.Push(db, &Pattern{word: chars, score: score})
+	heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
 	if db.Len() > db.limit {
 		// Remove the element with smallest score
 		heap.Pop(db)
@@ -146,9 +146,6 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 		if db.lastWord != nil {
 			db.processWord(db.lastWord, db.lastWordScore)
 		}
-		if cap(db.lastWord) < len(k) {
-			db.lastWord = make([]byte, 0, len(k))
-		}
 		db.lastWord = append(db.lastWord[:0], k...)
 		db.lastWordScore = score
 	}
@@ -162,7 +159,7 @@ func (db *DictionaryBuilder) finish() {
 }
 
 func (db *DictionaryBuilder) ForEach(f func(score uint64, word []byte)) {
-	for i := len(db.items); i > 0; i-- {
+	for i := db.Len(); i > 0; i-- {
 		f(db.items[i-1].score, db.items[i-1].word)
 	}
 }
@@ -1191,7 +1188,7 @@ func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader,
 				return err
 			}
 		}
-		da.lastWord = common.Copy(k)
+		da.lastWord = append(da.lastWord[:0], k...)
 		da.lastWordScore = score
 	}
 	return nil
