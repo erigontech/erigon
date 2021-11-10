@@ -1531,7 +1531,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				continue
 			}
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
-				if l < minPatternLen || l > 256 {
+				if l < minPatternLen || l > 128 {
 					continue
 				}
 				// Go back
@@ -1620,10 +1620,6 @@ const minPatternLen = 5
 
 // minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const minPatternScore = 1024
-
-// maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
-// Large values increase memory consumption of dictionary reduction phase
-const maxDictPatterns = 1024 * 1024
 
 func compress1(chaindata string, name string) error {
 	database := mdbx.MustOpen(chaindata)
