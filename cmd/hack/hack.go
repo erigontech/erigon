@@ -1620,7 +1620,7 @@ const superstringLimit = 16 * 1024 * 1024
 const minPatternLen = 5
 
 // minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
-const minPatternScore = 1024
+const minPatternScore = 2 * 1024
 
 func compress1(chaindata string, name string) error {
 	database := mdbx.MustOpen(chaindata)
