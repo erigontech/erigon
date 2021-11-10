@@ -1483,7 +1483,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
 				k++
 			}
-
 			lcp[inv[i]] = int32(k) // lcp for the present suffix.
 
 			// Deleting the starting character from the string.
@@ -1532,7 +1531,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				continue
 			}
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
-				if l < minPatternLen {
+				if l < minPatternLen || l > maxPatternLen {
 					continue
 				}
 				// Go back
@@ -1557,7 +1556,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				score := uint64(repeats * int(l-4))
 				if score > minPatternScore {
-					// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
 					dictKey := make([]byte, l)
 					for s := 0; s < l; s++ {
 						dictKey[s] = superstring[(filtered[i]+s)*2+1]
@@ -1574,41 +1572,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 	completion.Done()
 }
 
-type DictAggregator struct {
-	lastWord      []byte
-	lastWordScore uint64
-	collector     *etl.Collector
-}
-
-func (da *DictAggregator) processWord(word []byte, score uint64) error {
-	var scoreBuf [8]byte
-	binary.BigEndian.PutUint64(scoreBuf[:], score)
-	return da.collector.Collect(word, scoreBuf[:])
-}
-
-func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	score := binary.BigEndian.Uint64(v)
-	if bytes.Equal(k, da.lastWord) {
-		da.lastWordScore += score
-	} else {
-		if da.lastWord != nil {
-			if err := da.processWord(da.lastWord, da.lastWordScore); err != nil {
-				return err
-			}
-		}
-		da.lastWord = common.CopyBytes(k)
-		da.lastWordScore = score
-	}
-	return nil
-}
-
-func (da *DictAggregator) finish() error {
-	if da.lastWord != nil {
-		return da.processWord(da.lastWord, da.lastWordScore)
-	}
-	return nil
-}
-
 const CompressLogPrefix = "compress"
 
 // superstringLimit limits how large can one "superstring" get before it is processed
@@ -1618,6 +1581,7 @@ const superstringLimit = 16 * 1024 * 1024
 
 // minPatternLen is minimum length of pattern we consider to be included into the dictionary
 const minPatternLen = 5
+const maxPatternLen = 64
 
 // minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const minPatternScore = 1024
