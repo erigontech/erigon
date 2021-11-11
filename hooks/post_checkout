@@ -4,4 +4,6 @@
 git status
 ls .git
 git submodule update --init --recursive --force
+ls .git/modules/
 ls ./libmdbx/.git
+ls .git/modules/libmdbx
