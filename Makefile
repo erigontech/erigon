@@ -116,6 +116,8 @@ db-tools:
 	ls .git/modules/
 	ls ./libmdbx/.git
 	ls .git/modules/libmdbx
+	cat libmdbx/.git
+	cat .git
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make -V=1 tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
