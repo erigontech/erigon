@@ -106,7 +106,7 @@ func (cs *ControlServerImpl) SendHeaderRequest(ctx context.Context, req *headerd
 			}
 			minBlock := req.Number
 			if !req.Reverse {
-				minBlock = req.Number + req.Length*req.Skip
+				minBlock = req.Number + (req.Length-1)*(req.Skip+1)
 			}
 
 			outreq := proto_sentry.SendMessageByMinBlockRequest{
