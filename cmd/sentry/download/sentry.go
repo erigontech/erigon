@@ -602,8 +602,7 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 	now := time.Now()
 	ss.GoodPeers.Range(func(key, value interface{}) bool {
 		peerID := key.(string)
-		x, _ := ss.GoodPeers.Load(peerID)
-		peerInfo, _ := x.(*PeerInfo)
+		peerInfo, _ := value.(*PeerInfo)
 		if peerInfo == nil {
 			return true
 		}
@@ -807,9 +806,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 
 func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
 	ss.GoodPeers.Range(func(key, value interface{}) bool {
-		peerID := key.(string)
-		x, _ := ss.GoodPeers.Load(peerID)
-		peerInfo, _ := x.(*PeerInfo)
+		peerInfo, _ := value.(*PeerInfo)
 		if peerInfo == nil {
 			return true
 		}
