@@ -117,6 +117,11 @@ db-tools:
 	ls ./libmdbx/.git
 	ls .git/modules/libmdbx
 	cat libmdbx/.git
+	rm libmdbx/.git
+	rm -rf libmdbx
+	git reset --hard
+	git submodule update --init --recursive --force
+	cat libmdbx/.git
 	cat .git
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make -V=1 tools
 	cp libmdbx/mdbx_chk $(GOBIN)
