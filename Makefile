@@ -110,7 +110,7 @@ tracker:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
-db-tools: libmdbx
+db-tools:
 	@echo "Building db-tools"
 	ls .git
 	ls .git/modules/
