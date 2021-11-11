@@ -112,6 +112,10 @@ tracker:
 
 db-tools: libmdbx
 	@echo "Building db-tools"
+	ls .git
+	ls .git/modules/
+	ls ./libmdbx/.git
+	ls .git/modules/libmdbx
 	git submodule update --init --recursive
 	ls .git
 	ls .git/modules/
