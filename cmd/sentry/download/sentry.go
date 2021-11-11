@@ -562,14 +562,7 @@ func (ss *SentryServerImpl) getPeer(peerID string) (peerInfo *PeerInfo) {
 	return nil
 }
 
-func (ss *SentryServerImpl) removePeer(peerID string, peerInfo *PeerInfo) {
-	if peerInfo != nil {
-		peerInfo.Remove()
-	}
-	ss.GoodPeers.Delete(peerID)
-}
-
-func (ss *SentryServerImpl) removePeerID(peerID string) {
+func (ss *SentryServerImpl) removePeer(peerID string) {
 	if value, ok := ss.GoodPeers.LoadAndDelete(peerID); ok {
 		peerInfo := value.(*PeerInfo)
 		if peerInfo != nil {
@@ -581,7 +574,8 @@ func (ss *SentryServerImpl) removePeerID(peerID string) {
 func (ss *SentryServerImpl) writePeer(peerID string, peerInfo *PeerInfo, msgcode uint64, data []byte) error {
 	err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 	if err != nil {
-		ss.removePeer(peerID, peerInfo)
+		peerInfo.Remove()
+		ss.GoodPeers.Delete(peerID)
 	}
 	return err
 }
@@ -617,7 +611,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	peerID := string(gointerfaces.ConvertH512ToBytes(req.PeerId))
-	ss.removePeerID(peerID)
+	ss.removePeer(peerID)
 	return &emptypb.Empty{}, nil
 }
 
