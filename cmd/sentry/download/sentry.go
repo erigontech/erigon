@@ -540,6 +540,17 @@ type SentryServerImpl struct {
 	p2p                  *p2p.Config
 }
 
+func (ss *SentryServerImpl) rangePeers(f func(peerID string, peerInfo *PeerInfo) bool) {
+	ss.GoodPeers.Range(func(key, value interface{}) bool {
+		peerInfo, _ := value.(*PeerInfo)
+		if peerInfo == nil {
+			return true
+		}
+		peerID := key.(string)
+		return f(peerID, peerInfo)
+	})
+}
+
 func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID string) error {
 	switch ss.Protocol.Version {
 	case eth.ETH66:
@@ -600,12 +611,7 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 	var foundPeerInfo *PeerInfo
 	var maxPermits int
 	now := time.Now()
-	ss.GoodPeers.Range(func(key, value interface{}) bool {
-		peerID := key.(string)
-		peerInfo, _ := value.(*PeerInfo)
-		if peerInfo == nil {
-			return true
-		}
+	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		if peerInfo.Height() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
@@ -691,7 +697,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	}
 
 	amount := uint64(0)
-	ss.GoodPeers.Range(func(key, value interface{}) bool {
+	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		amount++
 		return true
 	})
@@ -704,12 +710,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	i := 0
 	var innerErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
-	ss.GoodPeers.Range(func(key, value interface{}) bool {
-		peerID := key.(string)
-		peerInfo, _ := value.(*PeerInfo)
-		if peerInfo == nil {
-			return true
-		}
+	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data.Data)), Payload: bytes.NewReader(req.Data.Data)}); err != nil {
 			peerInfo.Remove()
 			ss.GoodPeers.Delete(peerID)
@@ -736,13 +737,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 
 	var innerErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
-	ss.GoodPeers.Range(func(key, value interface{}) bool {
-		peerID := key.(string)
-		peerInfo, _ := value.(*PeerInfo)
-		if peerInfo == nil {
-			return true
-		}
-
+	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		if err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(req.Data)), Payload: bytes.NewReader(req.Data)}); err != nil {
 			peerInfo.Remove()
 			ss.GoodPeers.Delete(peerID)
@@ -805,11 +800,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 }
 
 func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
-	ss.GoodPeers.Range(func(key, value interface{}) bool {
-		peerInfo, _ := value.(*PeerInfo)
-		if peerInfo == nil {
-			return true
-		}
+	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		pc++
 		return true
 	})
