@@ -421,6 +421,11 @@ var (
 		Usage: "Comma separated enode URLs to connect to",
 		Value: "",
 	}
+	TrustedPeersFlag = cli.StringFlag{
+		Name:  "trustedpeers",
+		Usage: "Comma separated enode URLs which are always allowed to connect, even above the peer limit",
+		Value: "",
+	}
 	NodeKeyFileFlag = cli.StringFlag{
 		Name:  "nodekey",
 		Usage: "P2P node key file",
@@ -647,6 +652,10 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 	cfg.StaticNodes, _ = appendCfgUrlListNodes(cfg.StaticNodes, ctx, StaticPeersFlag.Name, log.Error)
 }
 
+func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {
+	cfg.TrustedNodes, _ = appendCfgUrlListNodes(cfg.TrustedNodes, ctx, TrustedPeersFlag.Name, log.Error)
+}
+
 func appendCfgUrlListNodes(nodes []*enode.Node, ctx *cli.Context, flagName string, logFn func(msg string, ctx ...interface{})) ([]*enode.Node, error) {
 	if ctx.GlobalIsSet(flagName) {
 		urls := SplitAndTrim(ctx.GlobalString(flagName))
@@ -681,7 +690,7 @@ func appendUrlListNodes(nodes []*enode.Node, urls []string, nodeType string, log
 
 // NewP2PConfig
 //  - doesn't setup bootnodes - they will set when genesisHash will know
-func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, port, protocol uint) (*p2p.Config, error) {
+func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, trustedPeers []string, port, protocol uint) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH66:
@@ -711,6 +720,13 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 			return nil, err
 		}
 		cfg.StaticNodes = staticNodes
+	}
+	if trustedPeers != nil {
+		trustedNodes, err := GetUrlListNodes(trustedPeers, TrustedPeersFlag.Name, log.Error)
+		if err != nil {
+			return nil, err
+		}
+		cfg.TrustedNodes = trustedNodes
 	}
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
@@ -820,6 +836,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	setBootstrapNodes(ctx, cfg)
 	setBootstrapNodesV5(ctx, cfg)
 	setStaticPeers(ctx, cfg)
+	setTrustedPeers(ctx, cfg)
 
 	if ctx.GlobalIsSet(MaxPeersFlag.Name) {
 		cfg.MaxPeers = ctx.GlobalInt(MaxPeersFlag.Name)
