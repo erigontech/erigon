@@ -114,7 +114,7 @@ db-tools:
 	@echo "Building db-tools"
 	rm -rf libmdbx
 	git submodule update --init --recursive --force
-	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make -V=1 tools
+	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
 	cp libmdbx/mdbx_dump $(GOBIN)
