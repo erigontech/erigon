@@ -166,6 +166,11 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 	if block == nil { // don't save nil's to cache
 		return nil, nil
 	}
+	// don't save empty blocks to cache, because in Erigon
+	// if block become non-canonical - we remove it's transactions, but block can become canonical in future
+	if block.Transactions().Len() == 0 {
+		return block, nil
+	}
 	if api.blocksLRU != nil {
 		api.blocksLRU.Add(hash, block)
 	}
