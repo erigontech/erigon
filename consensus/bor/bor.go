@@ -643,12 +643,11 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
-	// stateSyncData := []*types.StateSyncData{}
 
 	// Update sysCall
 	c.sysCall = syscall
 
-	// var err error
+	var err error
 	headerNumber := header.Number.Uint64()
 	if headerNumber%c.config.Sprint == 0 {
 		cx := chainContext{Chain: chain, Bor: c}
@@ -658,14 +657,14 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 			return err
 		}
 
-		// if !c.WithoutHeimdall {
-		// 	// commit statees
-		// 	stateSyncData, err = c.CommitStates(state, header, cx)
-		// 	if err != nil {
-		// 		log.Error("Error while committing states", "error", err)
-		// 		return
-		// 	}
-		// }
+		if !c.WithoutHeimdall {
+			// commit states
+			_, err = c.CommitStates(state, header, cx)
+			if err != nil {
+				log.Error("Error while committing states", "error", err)
+				return err
+			}
+		}
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -698,14 +697,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 			return nil, err
 		}
 
-		// if !c.WithoutHeimdall {
-		// 	// commit states
-		// 	stateSyncData, err = c.CommitStates(state, header, cx)
-		// 	if err != nil {
-		// 		log.Error("Error while committing states", "error", err)
-		// 		return nil, err
-		// 	}
-		// }
+		if !c.WithoutHeimdall {
+			// commit states
+			_, err = c.CommitStates(state, header, cx)
+			if err != nil {
+				log.Error("Error while committing states", "error", err)
+				return nil, err
+			}
+		}
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
