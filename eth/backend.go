@@ -463,7 +463,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.downloadCtx, backend.logger, backend.chainDB, stack.Config().P2P, *config, backend.downloadServer, tmpdir, backend.txPool, backend.txPoolP2PServer, backend.notifications.Accumulator)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.downloadCtx, backend.logger, backend.chainDB, stack.Config().P2P, *config, *chainConfig, backend.downloadServer, tmpdir, backend.txPool, backend.txPoolP2PServer, backend.notifications.Accumulator)
 	if err != nil {
 		return nil, err
 	}

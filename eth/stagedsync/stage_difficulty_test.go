@@ -2,11 +2,11 @@ package stagedsync
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -18,8 +18,8 @@ func TestDifficultyComputation(t *testing.T) {
 	// 3 Headers
 	// 3 Canonical Hashes
 	ctx, assert := context.Background(), assert.New(t)
-	_, tx := memdb.NewTestTx(t)
-
+	db := memdb.New()
+	tx, _ := db.BeginRw(ctx)
 	// Create the 3 headers, body is irrelevant we just need to have difficulty
 	var header1, header2, header3 types.Header
 	// First header
@@ -42,7 +42,7 @@ func TestDifficultyComputation(t *testing.T) {
 	// save progress for headers
 	_ = stages.SaveStageProgress(tx, stages.Headers, 3)
 	// Code
-	err := SpawnDifficultyStage(&StageState{ID: stages.TotalDifficulty}, tx, "", ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", common.Big0), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())
@@ -55,7 +55,6 @@ func TestDifficultyComputation(t *testing.T) {
 
 	actual_td, err = rawdb.ReadTd(tx, header3.Hash(), header3.Number.Uint64())
 	assert.NoError(err)
-	fmt.Println(actual_td.Uint64())
 	assert.Equalf(uint64(354), actual_td.Uint64(), "Wrong total difficulty")
 }
 
@@ -64,7 +63,8 @@ func TestDifficultyComputationNonCanonical(t *testing.T) {
 	// 3 Headers
 	// 3 Canonical Hashes
 	ctx, assert := context.Background(), assert.New(t)
-	_, tx := memdb.NewTestTx(t)
+	db := memdb.New()
+	tx, _ := db.BeginRw(ctx)
 
 	// Create the 3 headers, body is irrelevant we just need to have difficulty
 	var header1, header2, noncanonicalHeader2, header3 types.Header
@@ -91,7 +91,7 @@ func TestDifficultyComputationNonCanonical(t *testing.T) {
 	// save progress for headers
 	_ = stages.SaveStageProgress(tx, stages.Headers, 3)
 	// Code
-	err := SpawnDifficultyStage(&StageState{ID: stages.TotalDifficulty}, tx, "", ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", common.Big0), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())
@@ -104,7 +104,6 @@ func TestDifficultyComputationNonCanonical(t *testing.T) {
 
 	actual_td, err = rawdb.ReadTd(tx, header3.Hash(), header3.Number.Uint64())
 	assert.NoError(err)
-	fmt.Println(actual_td.Uint64())
 	assert.Equalf(uint64(354), actual_td.Uint64(), "Wrong total difficulty")
 }
 
@@ -113,8 +112,8 @@ func TestDifficultyProgress(t *testing.T) {
 	// 3 Headers
 	// 3 Canonical Hashes
 	ctx, assert := context.Background(), assert.New(t)
-	_, tx := memdb.NewTestTx(t)
-
+	db := memdb.New()
+	tx, _ := db.BeginRw(ctx)
 	// Create the 3 headers, body is irrelevant we just need to have difficulty
 	var header1, header2, noncanonicalHeader2, header3 types.Header
 	// First header
@@ -142,7 +141,7 @@ func TestDifficultyProgress(t *testing.T) {
 	_ = stages.SaveStageProgress(tx, stages.Headers, 3)
 	_ = stages.SaveStageProgress(tx, stages.TotalDifficulty, 1)
 	// Code
-	err := SpawnDifficultyStage(&StageState{ID: stages.TotalDifficulty}, tx, "", ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", common.Big0), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())
@@ -155,6 +154,5 @@ func TestDifficultyProgress(t *testing.T) {
 
 	actual_td, err = rawdb.ReadTd(tx, header3.Hash(), header3.Number.Uint64())
 	assert.NoError(err)
-	fmt.Println(actual_td.Uint64())
 	assert.Equalf(uint64(354), actual_td.Uint64(), "Wrong total difficulty")
 }

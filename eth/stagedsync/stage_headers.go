@@ -342,6 +342,10 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		if err = s.Update(tx, maxNum); err != nil {
 			return err
 		}
+		// When we forward sync, total difficulty is updated within headers processing
+		if err = stages.SaveStageProgress(tx, stages.TotalDifficulty, maxNum); err != nil {
+			return err
+		}
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {

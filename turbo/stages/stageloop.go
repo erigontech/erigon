@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
@@ -220,6 +221,7 @@ func NewStagedSync(
 	db kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
+	chainCfg params.ChainConfig,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
 	txPool *core.TxPool,
@@ -245,7 +247,7 @@ func NewStagedSync(
 			cfg.BodyDownloadTimeoutSeconds,
 			*controlServer.ChainConfig,
 			cfg.BatchSize,
-		), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
+		), stagedsync.StageDifficultyCfg(db, tmpdir, chainCfg.TerminalTotalDifficulty), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,

@@ -286,7 +286,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			cfg.BodyDownloadTimeoutSeconds,
 			*mock.ChainConfig,
 			cfg.BatchSize,
-		), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune), stagedsync.StageExecuteBlocksCfg(
+		), stagedsync.StageDifficultyCfg(mock.DB, mock.tmpdir, nil), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune), stagedsync.StageExecuteBlocksCfg(
 			mock.DB,
 			prune,
 			cfg.BatchSize,
