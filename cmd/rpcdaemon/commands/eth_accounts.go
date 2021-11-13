@@ -49,7 +49,10 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		if err != nil {
 			return nil, err
 		}
-		return (*hexutil.Uint64)(&reply.Nonce), nil
+		if reply.Found {
+			reply.Nonce++
+			return (*hexutil.Uint64)(&reply.Nonce), nil
+		}
 	}
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
