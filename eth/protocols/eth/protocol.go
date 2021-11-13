@@ -33,12 +33,10 @@ import (
 
 // Constants to match up protocol versions and messages
 const (
-	ETH65 = 65
 	ETH66 = 66
 )
 
 var ProtocolToString = map[uint]string{
-	ETH65: "eth65",
 	ETH66: "eth66",
 }
 
@@ -48,11 +46,11 @@ const ProtocolName = "eth"
 
 // ProtocolVersions are the supported versions of the `eth` protocol (first
 // is primary).
-var ProtocolVersions = []uint{ETH66, ETH65}
+var ProtocolVersions = []uint{ETH66}
 
 // protocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{ETH66: 17, ETH65: 17}
+var protocolLengths = map[uint]uint64{ETH66: 17}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
@@ -99,22 +97,6 @@ var ToString = map[uint]string{
 }
 
 var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
-	ETH65: {
-		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_65,
-		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_65,
-		GetBlockBodiesMsg:             proto_sentry.MessageId_GET_BLOCK_BODIES_65,
-		BlockBodiesMsg:                proto_sentry.MessageId_BLOCK_BODIES_65,
-		GetNodeDataMsg:                proto_sentry.MessageId_GET_NODE_DATA_65,
-		NodeDataMsg:                   proto_sentry.MessageId_NODE_DATA_65,
-		GetReceiptsMsg:                proto_sentry.MessageId_GET_RECEIPTS_65,
-		ReceiptsMsg:                   proto_sentry.MessageId_RECEIPTS_65,
-		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_65,
-		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_65,
-		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_65,
-		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
-		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65,
-		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_65,
-	},
 	ETH66: {
 		GetBlockHeadersMsg:            proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 		BlockHeadersMsg:               proto_sentry.MessageId_BLOCK_HEADERS_66,
@@ -134,22 +116,6 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 }
 
 var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
-	ETH65: {
-		proto_sentry.MessageId_GET_BLOCK_HEADERS_65:             GetBlockHeadersMsg,
-		proto_sentry.MessageId_BLOCK_HEADERS_65:                 BlockHeadersMsg,
-		proto_sentry.MessageId_GET_BLOCK_BODIES_65:              GetBlockBodiesMsg,
-		proto_sentry.MessageId_BLOCK_BODIES_65:                  BlockBodiesMsg,
-		proto_sentry.MessageId_GET_NODE_DATA_65:                 GetNodeDataMsg,
-		proto_sentry.MessageId_NODE_DATA_65:                     NodeDataMsg,
-		proto_sentry.MessageId_GET_RECEIPTS_65:                  GetReceiptsMsg,
-		proto_sentry.MessageId_RECEIPTS_65:                      ReceiptsMsg,
-		proto_sentry.MessageId_NEW_BLOCK_HASHES_65:              NewBlockHashesMsg,
-		proto_sentry.MessageId_NEW_BLOCK_65:                     NewBlockMsg,
-		proto_sentry.MessageId_TRANSACTIONS_65:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65: NewPooledTransactionHashesMsg,
-		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65:       GetPooledTransactionsMsg,
-		proto_sentry.MessageId_POOLED_TRANSACTIONS_65:           PooledTransactionsMsg,
-	},
 	ETH66: {
 		proto_sentry.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
 		proto_sentry.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,

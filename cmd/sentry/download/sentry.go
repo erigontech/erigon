@@ -450,7 +450,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 		peersStreams: NewPeersStreams(),
 	}
 
-	if protocol != eth.ETH65 && protocol != eth.ETH66 {
+	if protocol != eth.ETH66 {
 		panic(fmt.Errorf("unexpected p2p protocol: %d", protocol))
 	}
 
@@ -551,27 +551,6 @@ type SentryServerImpl struct {
 
 func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID string) error {
 	switch ss.Protocol.Version {
-	case eth.ETH65:
-		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
-			Amount:  1,
-			Reverse: false,
-			Skip:    0,
-			Origin:  eth.HashOrNumber{Hash: bestHash},
-		})
-		if err != nil {
-			return fmt.Errorf("startSync encode packet failed: %w", err)
-		}
-
-		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
-			PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_65,
-				Data: b,
-			},
-		}); err != nil {
-			return err
-		}
-
 	case eth.ETH66:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
 			RequestId: rand.Uint64(),
@@ -794,8 +773,6 @@ func (ss *SentryServerImpl) HandShake(context.Context, *emptypb.Empty) (*proto_s
 	switch ss.Protocol.Version {
 	case eth.ETH66:
 		reply.Protocol = proto_sentry.Protocol_ETH66
-	case eth.ETH65:
-		reply.Protocol = proto_sentry.Protocol_ETH65
 	}
 	return reply, nil
 }

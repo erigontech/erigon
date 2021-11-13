@@ -282,16 +282,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		server66 := download.NewSentryServer(backend.downloadCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
-		cfg65 := stack.Config().P2P
-		cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
-		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
-		}
-		cfg65.ListenAddr = cfg65.ListenAddr65
-		server65 := download.NewSentryServer(backend.downloadCtx, d65, readNodeInfo, &cfg65, eth.ETH65)
-		backend.sentryServers = append(backend.sentryServers, server65)
-		backend.sentries = append(backend.sentries, direct.NewSentryClientDirect(eth.ETH65, server65))
+
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()

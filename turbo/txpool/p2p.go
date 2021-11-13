@@ -151,7 +151,7 @@ func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_s
 }
 
 func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
-	var outreq65, outreq66 *proto_sentry.SendMessageByIdRequest
+	var outreq66 *proto_sentry.SendMessageByIdRequest
 
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := tp.randSentryIndex(); ok; i, ok = next() {
@@ -160,28 +160,6 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 		}
 
 		switch tp.Sentries[i].Protocol() {
-		case eth.ETH65:
-			if outreq65 == nil {
-				data65, err := rlp.EncodeToBytes(eth.GetPooledTransactionsPacket(hashes))
-				if err != nil {
-					log.Error("Could not encode transactions request", "err", err)
-					return nil
-				}
-
-				outreq65 = &proto_sentry.SendMessageByIdRequest{
-					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
-					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_65, Data: data65},
-				}
-			}
-
-			if sentPeers, err1 := tp.Sentries[i].SendMessageById(ctx, outreq65, &grpc.EmptyCallOption{}); err1 != nil {
-				if isPeerNotFoundErr(err1) {
-					continue
-				}
-				log.Error("[SendTxsRequest]", "err", err1)
-			} else if sentPeers != nil && len(sentPeers.Peers) != 0 {
-				return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
-			}
 		case eth.ETH66:
 			if outreq66 == nil {
 				data66, err := rlp.EncodeToBytes(&eth.GetPooledTransactionsPacket66{
@@ -296,11 +274,6 @@ func RecvTxMessage(ctx context.Context,
 	defer cancel()
 
 	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH65][eth.NewPooledTransactionHashesMsg],
-		eth.ToProto[eth.ETH65][eth.GetPooledTransactionsMsg],
-		eth.ToProto[eth.ETH65][eth.TransactionsMsg],
-		eth.ToProto[eth.ETH65][eth.PooledTransactionsMsg],
-
 		eth.ToProto[eth.ETH66][eth.NewPooledTransactionHashesMsg],
 		eth.ToProto[eth.ETH66][eth.GetPooledTransactionsMsg],
 		eth.ToProto[eth.ETH66][eth.TransactionsMsg],
