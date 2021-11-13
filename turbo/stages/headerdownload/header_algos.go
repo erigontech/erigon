@@ -812,9 +812,9 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	if err2 != nil {
 		return fmt.Errorf("[%s] failed to RLP encode header: %w", hi.logPrefix, err2)
 	}
-	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
-		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
-	}
+	// if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+	//	return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+	// }
 	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
