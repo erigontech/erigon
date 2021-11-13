@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
@@ -71,7 +72,7 @@ func TestSendRawTransaction(t *testing.T) {
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, false), m.DB, nil, txPool, nil, 5000000)
+	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, services.NewBlockReader(), false), m.DB, nil, txPool, nil, 5000000)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)

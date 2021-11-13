@@ -8,8 +8,12 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
@@ -32,13 +36,17 @@ type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
 	log              log.Logger
 	version          gointerfaces.Version
+	blockReader      *BlockReader
+	db               kv.RoDB
 }
 
-func NewRemoteBackend(cc grpc.ClientConnInterface) *RemoteBackend {
+func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
 		log:              log.New("remote_service", "eth_backend"),
+		blockReader:      NewBlockReader(),
+		db:               db,
 	}
 }
 
@@ -140,4 +148,54 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 		onNewEvent(event)
 	}
 	return nil
+}
+
+func (back *RemoteBackend) Block(ctx context.Context, req *remote.BlockRequest) (*remote.BlockReply, error) {
+	tx, err := back.db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	block, senders, err := back.blockReader.WithSenders(tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockHeight)
+	if err != nil {
+		return nil, err
+	}
+	blockRlp, err := rlp.EncodeToBytes(block)
+	if err != nil {
+		return nil, err
+	}
+	sendersBytes := make([]byte, 20*len(senders))
+	for i := range senders {
+		sendersBytes = append(sendersBytes, senders[i][:]...)
+	}
+	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
+}
+
+// BlockReader can read blocks from db and snapshots
+type BlockReader struct {
+}
+
+func NewBlockReader() *BlockReader {
+	return &BlockReader{}
+}
+
+func (back *BlockReader) WithSenders(tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
+	block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+	if err != nil {
+		return nil, nil, err
+	}
+	//blockRlp, err := rlp.EncodeToBytes(block)
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+	sendersBytes := make([]byte, 20*len(senders))
+	for i := range senders {
+		sendersBytes = append(sendersBytes, senders[i][:]...)
+	}
+	return block, senders, nil
+}
+
+func NewRemoteBlockReader() *BlockReader {
+	return &BlockReader{}
 }

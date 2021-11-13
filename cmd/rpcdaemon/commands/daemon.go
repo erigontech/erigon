@@ -16,10 +16,11 @@ import (
 func APIList(ctx context.Context, db kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
 	stateCache kvcache.Cache,
+	blockReader BlockReader,
 	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
-	base := NewBaseApi(filters, stateCache, cfg.SingleNodeMode)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.SingleNodeMode)
 	if cfg.TevmEnabled {
 		base.EnableTevmExperiment()
 	}

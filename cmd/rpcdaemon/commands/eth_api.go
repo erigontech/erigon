@@ -97,6 +97,10 @@ type EthAPI interface {
 	CompileSerpent(ctx context.Context, _ string) (hexutil.Bytes, error)
 }
 
+type BlockReader interface {
+	WithSenders(tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
+}
+
 type BaseAPI struct {
 	stateCache   kvcache.Cache // thread-safe
 	blocksLRU    *lru.Cache    // thread-safe
@@ -105,10 +109,11 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	TevmEnabled bool // experiment
+	_blockReader BlockReader
+	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader BlockReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -118,7 +123,7 @@ func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode boo
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
@@ -159,7 +164,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 			return it.(*types.Block), nil
 		}
 	}
-	block, _, err := rawdb.ReadBlockWithSenders(tx, hash, number)
+	block, _, err := api._blockReader.WithSenders(tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
