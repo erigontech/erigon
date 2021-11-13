@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -158,12 +159,20 @@ Loop:
 				u.UnwindTo(blockHeight-1, header.Hash())
 				break Loop
 			}
-			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
-				return fmt.Errorf("writing block body: %w", err)
+
+			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
+			exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(blockHeight, header.Hash()))
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
+					return fmt.Errorf("writing block body: %w", err)
+				}
 			}
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
-				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
+				if err = s.Update(tx, blockHeight); err != nil {
 					return fmt.Errorf("saving Bodies progress: %w", err)
 				}
 			}
