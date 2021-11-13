@@ -1,13 +1,13 @@
 package aura
 
 import (
+	"bytes"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -102,21 +102,21 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 	}
 
 	validatorAddress, err := stepProposer(validators, header.Hash(), step, nil)
-	signature := header.Extra[len(header.Extra)-ExtraSeal:]
 
 	if err != nil {
 		return err
 	}
 
-	// Recover the public key and the Ethereum address
-	pubkey, err := crypto.Ecrecover(clique.SealHash(header).Bytes(), signature)
+	var signature []byte
+
+	err = rlp.Decode(bytes.NewReader(header.Seal[1]), &signature)
 
 	if err != nil {
 		return err
 	}
 
 	var signer common.Address
-	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
+	copy(signer[:], signature)
 
 	// compares signer address from the header to the validator address gotten from the step
 	if validatorAddress != signer {
