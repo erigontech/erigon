@@ -185,14 +185,7 @@ func (back *BlockReader) WithSenders(tx kv.Tx, hash common.Hash, blockHeight uin
 	if err != nil {
 		return nil, nil, err
 	}
-	//blockRlp, err := rlp.EncodeToBytes(block)
-	//if err != nil {
-	//	return nil, nil, err
-	//}
-	sendersBytes := make([]byte, 20*len(senders))
-	for i := range senders {
-		sendersBytes = append(sendersBytes, senders[i][:]...)
-	}
+	//TODO: read snapshots
 	return block, senders, nil
 }
 

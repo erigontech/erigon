@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -97,10 +98,6 @@ type EthAPI interface {
 	CompileSerpent(ctx context.Context, _ string) (hexutil.Bytes, error)
 }
 
-type BlockReader interface {
-	WithSenders(tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
-}
-
 type BaseAPI struct {
 	stateCache   kvcache.Cache // thread-safe
 	blocksLRU    *lru.Cache    // thread-safe
@@ -109,11 +106,11 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_blockReader BlockReader
+	_blockReader interfaces.BlockReader
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader BlockReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
