@@ -580,6 +580,11 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 	return header.Coinbase, nil
 }
 
+// returns the current step the engine is at
+func (c *AuRa) GetStep() uint64 {
+	return c.step.inner.inner.Load()
+}
+
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	return c.verifyHeader(chain, header, nil)
