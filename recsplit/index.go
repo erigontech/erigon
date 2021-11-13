@@ -163,7 +163,17 @@ func (idx *Index) golombParam(m uint16) int {
 	return int(idx.golombRice[m] >> 27)
 }
 
+func (idx Index) Empty() bool {
+	return idx.keyCount == 0
+}
+
 func (idx Index) Lookup(key []byte) uint64 {
+	if idx.keyCount == 0 {
+		panic("no Lookup should be done when keyCount==0, please use Empty function to guard")
+	}
+	if idx.keyCount == 1 {
+		return 0
+	}
 	var gr GolombRiceReader
 	gr.data = idx.grData
 	idx.hasher.Reset()
