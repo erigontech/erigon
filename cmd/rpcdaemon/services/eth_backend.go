@@ -9,9 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -36,16 +35,16 @@ type RemoteBackend struct {
 	remoteEthBackend remote.ETHBACKENDClient
 	log              log.Logger
 	version          gointerfaces.Version
-	blockReader      *BlockReader
+	blockReader      interfaces.BlockReader
 	db               kv.RoDB
 }
 
-func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB) *RemoteBackend {
+func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB, blockReader interfaces.BlockReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
 		log:              log.New("remote_service", "eth_backend"),
-		blockReader:      NewBlockReader(),
+		blockReader:      blockReader,
 		db:               db,
 	}
 }
@@ -170,25 +169,4 @@ func (back *RemoteBackend) Block(ctx context.Context, req *remote.BlockRequest) 
 		sendersBytes = append(sendersBytes, senders[i][:]...)
 	}
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
-}
-
-// BlockReader can read blocks from db and snapshots
-type BlockReader struct {
-}
-
-func NewBlockReader() *BlockReader {
-	return &BlockReader{}
-}
-
-func (back *BlockReader) WithSenders(tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
-	block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
-	if err != nil {
-		return nil, nil, err
-	}
-	//TODO: read snapshots
-	return block, senders, nil
-}
-
-func NewRemoteBlockReader() *BlockReader {
-	return &BlockReader{}
 }

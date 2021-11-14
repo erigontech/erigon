@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -232,7 +233,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
-		blockReader = services.NewBlockReader()
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
@@ -240,7 +240,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			stateCache = kvcache.NewDummy()
 		}
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
-		blockReader = services.NewRemoteBlockReader()
 	}
 
 	if cfg.PrivateApiAddr == "" {
@@ -264,7 +263,14 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
-	remoteEth := services.NewRemoteBackend(conn, db)
+	if cfg.SingleNodeMode {
+		blockReader = snapshotsync.NewBlockReader()
+	} else {
+		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
+	}
+
+	remoteEth := services.NewRemoteBackend(conn, db, blockReader)
+
 	txpoolConn := conn
 	if cfg.TxPoolV2 {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)

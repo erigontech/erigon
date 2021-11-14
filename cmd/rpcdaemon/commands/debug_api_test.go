@@ -9,10 +9,10 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var debugTraceTransactionTests = []struct {
@@ -41,7 +41,7 @@ func TestTraceTransaction(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, services.NewBlockReader(), false),
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
 		db, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -73,7 +73,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, services.NewBlockReader(), false),
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
 		db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
