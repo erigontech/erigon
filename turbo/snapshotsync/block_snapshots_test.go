@@ -64,7 +64,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	_, _, _, err = ParseCompressedFileName("1-2-bodies.idx")
 	require.Error(err)
 
-	from, to, tt, err := ParseCompressedFileName("1-2-bodies")
+	from, to, tt, err := ParseCompressedFileName("1-2-bodies.seg")
 	require.NoError(err)
 	require.Equal(tt, Bodies)
 	require.Equal(1_000, int(from))
