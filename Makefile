@@ -112,7 +112,7 @@ tracker:
 
 db-tools:
 	@echo "Building db-tools"
-	rm -rf libmdbx
+	rm -rf libmdbx # hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
 	git submodule update --init --recursive --force
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
