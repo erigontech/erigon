@@ -54,16 +54,13 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 			return err
 		}
 	}
-	// fmt.Println(td.Uint64())
 	// If the chain does not have a proof of stake config or has reached terminalTotalDifficulty then we can skip this stage
 	if cfg.terminalTotalDifficulty == nil || td.Cmp(cfg.terminalTotalDifficulty) >= 0 {
 		if err = s.Update(tx, headNumber); err != nil {
 			return err
 		}
-		if !useExternalTx {
-			if err = tx.Commit(); err != nil {
-				return err
-			}
+		if err = tx.Commit(); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -71,11 +68,9 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
 
-	logPrefix := s.LogPrefix()
-
 	header := new(types.Header)
 	if err := etl.Transform(
-		logPrefix,
+		s.LogPrefix(),
 		tx,
 		kv.Headers,
 		kv.HeaderTD,
@@ -86,6 +81,9 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 			}
 
 			canonical, err := rawdb.ReadCanonicalHash(tx, binary.BigEndian.Uint64(k))
+			if err != nil {
+				return err
+			}
 
 			if !bytes.Equal(k[8:], canonical[:]) {
 				return nil
