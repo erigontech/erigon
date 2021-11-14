@@ -217,18 +217,18 @@ func ParseCompressedFileName(name string) (from, to uint64, snapshotType Snapsho
 	if len(parts) != 4 {
 		return 0, 0, "", fmt.Errorf("%w. Expected format: 001500-002000-bodies-v1.seg got: %s", ErrInvalidCompressedFileName, fileName)
 	}
-	if parts[3] != "v1" {
-		return 0, 0, "", fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[3])
+	if parts[0] != "v1" {
+		return 0, 0, "", fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[0])
 	}
-	from, err = strconv.ParseUint(parts[0], 10, 64)
+	from, err = strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
 		return
 	}
-	to, err = strconv.ParseUint(parts[1], 10, 64)
+	to, err = strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
 		return
 	}
-	switch SnapshotType(parts[2]) {
+	switch SnapshotType(parts[3]) {
 	case Headers:
 		snapshotType = Headers
 	case Bodies:
