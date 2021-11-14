@@ -51,6 +51,9 @@ func ParseCompressedFileName(name string) (from, to uint64, snapshotType Snapsho
 	}
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
+	if len(parts) != 4 {
+		return 0, 0, "", fmt.Errorf("%w. Expected format: 001500-002000-bodies-v1.seg got: %s", ErrInvalidCompressedFileName, fileName)
+	}
 	if parts[3] != "v1" {
 		return 0, 0, "", fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[3])
 	}
