@@ -301,7 +301,7 @@ type Pair struct {
 	K        []byte `protobuf:"bytes,1,opt,name=k,proto3" json:"k,omitempty"`
 	V        []byte `protobuf:"bytes,2,opt,name=v,proto3" json:"v,omitempty"`
 	CursorID uint32 `protobuf:"varint,3,opt,name=cursorID,proto3" json:"cursorID,omitempty"` // send once after new cursor open
-	TxID     uint64 `protobuf:"varint,4,opt,name=txID,proto3" json:"txID,omitempty"`         // send once after tx open
+	TxID     uint64 `protobuf:"varint,4,opt,name=txID,proto3" json:"txID,omitempty"`         // send once after tx open. mdbx's tx.ID() - id of write transaction in db - where this changes happened
 }
 
 func (x *Pair) Reset() {

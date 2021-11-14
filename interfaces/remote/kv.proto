@@ -20,6 +20,7 @@ service KV {
   rpc Tx(stream Cursor) returns (stream Pair);
 
   rpc StateChanges(StateChangeRequest) returns (stream StateChangeBatch);
+
 }
 
 enum Op {
@@ -55,7 +56,7 @@ message Pair {
   bytes k = 1;
   bytes v = 2;
   uint32 cursorID = 3; // send once after new cursor open
-  uint64 txID = 4;    // send once after tx open
+  uint64 txID = 4;     // send once after tx open. mdbx's tx.ID() - id of write transaction in db - where this changes happened
 }
 
 enum Action {
