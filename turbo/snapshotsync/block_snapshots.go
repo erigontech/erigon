@@ -33,10 +33,7 @@ func IdxFileName(from, to uint64, name SnapshotType) string {
 
 func IsCorrectFileName(name string) bool {
 	parts := strings.Split(name, "-")
-	if len(parts) != 4 {
-		return false
-	}
-	return true
+	return len(parts) == 4 && parts[3] != "v1"
 }
 
 var (
