@@ -52,7 +52,7 @@ import (
 const DEBUG_LOG_FROM = 999_999_999
 
 const (
-	// epochLength          = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
+	epochLength = uint64(30000)          // Default number of blocks after which to checkpoint and reset the pending votes
 	ExtraVanity = 32                     // Fixed number of extra-data prefix bytes reserved for signer vanity
 	ExtraSeal   = crypto.SignatureLength // Fixed number of extra-data suffix bytes reserved for signer seal
 	// warmupCacheSnapshots = 20
@@ -583,6 +583,10 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 // returns the current step the engine is at
 func (c *AuRa) GetStep() uint64 {
 	return c.step.inner.inner.Load()
+}
+
+func (c *AuRa) GetValidatorSet() ValidatorSet {
+	return c.cfg.Validators
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
@@ -1186,14 +1190,14 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 		log.Trace("[aura] Aborting seal generation. Can't propose.")
 		return nil
 	}
-	parentStep, err := headerStep(parent)
+	parentStep, err := HeaderStep(parent)
 	if err != nil {
 		panic(err)
 	}
 	step := c.step.inner.inner.Load()
 
 	// filter messages from old and future steps and different parents
-	expectedDiff := calculateScore(parentStep, step, 0)
+	expectedDiff := CalculateScore(parentStep, step, 0)
 	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
 		log.Trace(fmt.Sprintf("[aura] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
 		return nil
@@ -1282,7 +1286,7 @@ func (c *AuRa) epochSet(chain consensus.ChainHeaderReader, e consensus.EpochRead
 }
 
 //nolint
-func headerStep(current *types.Header) (val uint64, err error) {
+func HeaderStep(current *types.Header) (val uint64, err error) {
 	if len(current.Seal) < 1 {
 		panic("was either checked with verify_block_basic or is genesis; has 2 fields; qed (Make sure the spec file has a correct genesis seal)")
 	}
@@ -1301,7 +1305,7 @@ func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTim
 	}
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
-	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
+	return CalculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
 
 	/* TODO: do I need gasLimit override logic here ?
 	if let Some(gas_limit) = self.gas_limit_override(header) {
@@ -1317,7 +1321,7 @@ func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTim
 
 // calculateScore - analog of PoW difficulty:
 //    sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
-func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
+func CalculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
 	maxU128 := uint256.NewInt(0).SetAllOne()
 	maxU128 = maxU128.Rsh(maxU128, 128)
 	res := maxU128.Add(maxU128, uint256.NewInt(parentStep))
