@@ -617,7 +617,7 @@ func (r *RootHashAggregator) genStructAccount() error {
 		data = &r.hashData
 	} else {
 		r.accData.Balance.Set(&r.a.Balance)
-		if r.a.Balance.Sign() != 0 {
+		if !r.a.Balance.IsZero() {
 			r.accData.FieldSet |= AccountFieldBalanceOnly
 		}
 		r.accData.Nonce = r.a.Nonce
