@@ -216,7 +216,6 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 		if err := recover(); err != nil {
 			log.Error("RPC method " + method + " crashed: " + fmt.Sprintf("%v\n%s", err, debug.Stack()))
 			errRes = errors.New("method handler crashed")
-			//debug.WriteStackTraceOnPanic(string(buf))
 		}
 	}()
 	// Run the callback.
