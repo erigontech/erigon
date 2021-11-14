@@ -23,56 +23,16 @@ const (
 	Transactions SnapshotType = "transactions"
 )
 
+var (
+	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
+)
+
 func CompressedFileName(from, to uint64, name SnapshotType) string {
 	return fmt.Sprintf("%06d-%06d-%s-v1.seg", from/1_000, to/1_000, name)
 }
 
 func IdxFileName(from, to uint64, name SnapshotType) string {
 	return fmt.Sprintf("%06d-%06d-%s-v1.idx", from/1_000, to/1_000, name)
-}
-
-func IsCorrectFileName(name string) bool {
-	parts := strings.Split(name, "-")
-	return len(parts) == 4 && parts[3] != "v1"
-}
-
-var (
-	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
-)
-
-func ParseCompressedFileName(name string) (from, to uint64, snapshotType SnapshotType, err error) {
-	_, fileName := filepath.Split(name)
-	ext := filepath.Ext(fileName)
-	if ext != ".seg" {
-		return 0, 0, "", fmt.Errorf("%w. Ext: %s", ErrInvalidCompressedFileName, ext)
-	}
-	onlyName := fileName[:len(fileName)-len(ext)]
-	parts := strings.Split(onlyName, "-")
-	if len(parts) != 4 {
-		return 0, 0, "", fmt.Errorf("%w. Expected format: 001500-002000-bodies-v1.seg got: %s", ErrInvalidCompressedFileName, fileName)
-	}
-	if parts[3] != "v1" {
-		return 0, 0, "", fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[3])
-	}
-	from, err = strconv.ParseUint(parts[0], 10, 64)
-	if err != nil {
-		return
-	}
-	to, err = strconv.ParseUint(parts[1], 10, 64)
-	if err != nil {
-		return
-	}
-	switch SnapshotType(parts[2]) {
-	case Headers:
-		snapshotType = Headers
-	case Bodies:
-		snapshotType = Bodies
-	case Transactions:
-		snapshotType = Transactions
-	default:
-		return 0, 0, "", fmt.Errorf("%w, unexpected snapshot suffix: %s", ErrInvalidCompressedFileName, parts[2])
-	}
-	return from * 1_000, to * 1_000, snapshotType, nil
 }
 
 type Snapshot struct {
@@ -239,4 +199,44 @@ func (s AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, foun
 		}
 	}
 	return snapshot, false
+}
+
+func IsCorrectFileName(name string) bool {
+	parts := strings.Split(name, "-")
+	return len(parts) == 4 && parts[3] != "v1"
+}
+
+func ParseCompressedFileName(name string) (from, to uint64, snapshotType SnapshotType, err error) {
+	_, fileName := filepath.Split(name)
+	ext := filepath.Ext(fileName)
+	if ext != ".seg" {
+		return 0, 0, "", fmt.Errorf("%w. Ext: %s", ErrInvalidCompressedFileName, ext)
+	}
+	onlyName := fileName[:len(fileName)-len(ext)]
+	parts := strings.Split(onlyName, "-")
+	if len(parts) != 4 {
+		return 0, 0, "", fmt.Errorf("%w. Expected format: 001500-002000-bodies-v1.seg got: %s", ErrInvalidCompressedFileName, fileName)
+	}
+	if parts[3] != "v1" {
+		return 0, 0, "", fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[3])
+	}
+	from, err = strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return
+	}
+	to, err = strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return
+	}
+	switch SnapshotType(parts[2]) {
+	case Headers:
+		snapshotType = Headers
+	case Bodies:
+		snapshotType = Bodies
+	case Transactions:
+		snapshotType = Transactions
+	default:
+		return 0, 0, "", fmt.Errorf("%w, unexpected snapshot suffix: %s", ErrInvalidCompressedFileName, parts[2])
+	}
+	return from * 1_000, to * 1_000, snapshotType, nil
 }
