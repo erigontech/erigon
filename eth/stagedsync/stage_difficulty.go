@@ -59,8 +59,10 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 		if err = s.Update(tx, headNumber); err != nil {
 			return err
 		}
-		if err = tx.Commit(); err != nil {
-			return err
+		if !useExternalTx {
+			if err = tx.Commit(); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
