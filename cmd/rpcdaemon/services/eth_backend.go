@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -29,6 +31,7 @@ type ApiBackend interface {
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
+	BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
 }
 
 type RemoteBackend struct {
@@ -39,12 +42,11 @@ type RemoteBackend struct {
 	db               kv.RoDB
 }
 
-func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB, blockReader interfaces.BlockReader) *RemoteBackend {
+func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
 		log:              log.New("remote_service", "eth_backend"),
-		blockReader:      blockReader,
 		db:               db,
 	}
 }
@@ -149,24 +151,22 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	return nil
 }
 
-func (back *RemoteBackend) Block(ctx context.Context, req *remote.BlockRequest) (*remote.BlockReply, error) {
-	tx, err := back.db.BeginRo(context.Background())
+func (back *RemoteBackend) BlockWithSenders(ctx context.Context, _ kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
+	reply, err := back.remoteEthBackend.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer tx.Rollback()
-
-	block, senders, err := back.blockReader.WithSenders(tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockHeight)
+	block = &types.Block{}
+	err = rlp.Decode(bytes.NewReader(reply.BlockRlp), block)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	blockRlp, err := rlp.EncodeToBytes(block)
-	if err != nil {
-		return nil, err
-	}
-	sendersBytes := make([]byte, 20*len(senders))
+	senders = make([]common.Address, len(reply.Senders)/20)
 	for i := range senders {
-		sendersBytes = append(sendersBytes, senders[i][:]...)
+		senders[i].SetBytes(reply.Senders[i*20 : (i+1)*20])
 	}
-	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
+	if len(senders) == block.Transactions().Len() { //it's fine if no senders provided - they can be lazy recovered
+		block.SendersToTxs(senders)
+	}
+	return block, senders, nil
 }

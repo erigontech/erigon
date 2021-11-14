@@ -233,6 +233,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
+		blockReader = snapshotsync.NewBlockReader()
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
@@ -263,13 +264,8 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
-	if cfg.SingleNodeMode {
-		blockReader = snapshotsync.NewBlockReader()
-	} else {
-		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
-	}
-
-	remoteEth := services.NewRemoteBackend(conn, db, blockReader)
+	remoteEth := services.NewRemoteBackend(conn, db)
+	blockReader = remoteEth
 
 	txpoolConn := conn
 	if cfg.TxPoolV2 {
