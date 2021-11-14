@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -123,17 +124,7 @@ func makeP2PServer(
 	case params.FermionGenesisHash:
 		urls = params.FermionBootnodes
 	}
-	p2pConfig.BootstrapNodes = make([]*enode.Node, 0, len(urls))
-	for _, url := range urls {
-		if url != "" {
-			node, err := enode.Parse(enode.ValidSchemes, url)
-			if err != nil {
-				log.Crit("Bootstrap URL invalid", "enode", url, "err", err)
-				continue
-			}
-			p2pConfig.BootstrapNodes = append(p2pConfig.BootstrapNodes, node)
-		}
-	}
+	p2pConfig.BootstrapNodes, _ = utils.GetUrlListNodes(urls, utils.BootnodesFlag.Name, log.Crit)
 	p2pConfig.BootstrapNodesV5 = p2pConfig.BootstrapNodes
 	p2pConfig.Protocols = []p2p.Protocol{protocol}
 	return &p2p.Server{Config: p2pConfig}, nil
