@@ -55,6 +55,7 @@ var DefaultFlags = []cli.Flag{
 	utils.NodeKeyHexFlag,
 	utils.DNSDiscoveryFlag,
 	utils.StaticPeersFlag,
+	utils.TrustedPeersFlag,
 	utils.MaxPeersFlag,
 	utils.ChainFlag,
 	utils.DeveloperPeriodFlag,
