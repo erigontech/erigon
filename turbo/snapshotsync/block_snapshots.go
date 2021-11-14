@@ -166,6 +166,14 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 	return all, nil
 }
 
+func (s AllSnapshots) Close() {
+	for _, s := range s.blocks {
+		s.Headers.Idx.Close()
+		s.Bodies.Idx.Close()
+		s.Transactions.Idx.Close()
+	}
+}
+
 func (s AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
 	if blockNumber > s.blocksAvailable {
 		return snapshot, false

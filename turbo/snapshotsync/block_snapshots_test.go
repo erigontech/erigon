@@ -34,21 +34,25 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s, err := OpenAll(dir)
 	require.NoError(err)
 	require.Equal(0, len(s.blocks))
+	s.Close()
 
 	createFile(500_000, 1_000_000, Bodies)
 	s = MustOpenAll(dir)
 	require.Equal(0, len(s.blocks)) //because, no headers and transactions snapshot files are created
+	s.Close()
 
 	createFile(500_000, 1_000_000, Headers)
 	createFile(500_000, 1_000_000, Transactions)
 	s = MustOpenAll(dir)
 	require.Equal(0, len(s.blocks)) //because, no gaps are allowed (expect snapshots from block 0)
+	s.Close()
 
 	createFile(0, 500_000, Bodies)
 	createFile(0, 500_000, Headers)
 	createFile(0, 500_000, Transactions)
 	s = MustOpenAll(dir)
 	require.Equal(2, len(s.blocks))
+	s.Close()
 }
 
 func TestParseCompressedFileName(t *testing.T) {
