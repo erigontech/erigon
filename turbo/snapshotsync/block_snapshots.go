@@ -28,11 +28,11 @@ var (
 )
 
 func CompressedFileName(from, to uint64, name SnapshotType) string {
-	return fmt.Sprintf("%06d-%06d-%s-v1.seg", from/1_000, to/1_000, name)
+	return fmt.Sprintf("v1-%06d-%06d-%s.seg", from/1_000, to/1_000, name)
 }
 
 func IdxFileName(from, to uint64, name SnapshotType) string {
-	return fmt.Sprintf("%06d-%06d-%s-v1.idx", from/1_000, to/1_000, name)
+	return fmt.Sprintf("v1-%06d-%06d-%s.idx", from/1_000, to/1_000, name)
 }
 
 type Snapshot struct {
