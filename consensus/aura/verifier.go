@@ -65,7 +65,7 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 // database. This is useful for concurrently verifying a batch of new headers.
 func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 	// checking if the step is correct
-	currentStep, err := headerStep(header)
+	currentStep, err := HeaderStep(header)
 
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 	// checking if multiple blocks are being put out in the same step
 	parent := chain.GetHeaderByHash(header.ParentHash)
 
-	parentStep, err := headerStep(parent)
+	parentStep, err := HeaderStep(parent)
 	if err != nil {
 		return err
 	}
