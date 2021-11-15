@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -16,10 +17,11 @@ import (
 func APIList(ctx context.Context, db kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
 	stateCache kvcache.Cache,
+	blockReader interfaces.BlockReader,
 	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
-	base := NewBaseApi(filters, stateCache, cfg.SingleNodeMode)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.SingleNodeMode)
 	if cfg.TevmEnabled {
 		base.EnableTevmExperiment()
 	}

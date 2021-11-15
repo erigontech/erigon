@@ -94,7 +94,7 @@ func TestEIP155ChainId(t *testing.T) {
 		t.Error("didn't expect tx to be protected")
 	}
 
-	if tx.GetChainID().Sign() != 0 {
+	if !tx.GetChainID().IsZero() {
 		t.Error("expected chain id to be 0 got", tx.GetChainID())
 	}
 }
