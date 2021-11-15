@@ -49,6 +49,7 @@ type txPool interface {
 	deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
+	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
 }
 
 type GrpcServer struct {
@@ -235,6 +236,16 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpool_proto.StatusRequest) (*
 		PendingCount: uint32(pending),
 		QueuedCount:  uint32(queued),
 		BaseFeeCount: uint32(baseFee),
+	}, nil
+}
+
+// returns nonce for address
+func (s *GrpcServer) Nonce(ctx context.Context, in *txpool_proto.NonceRequest) (*txpool_proto.NonceReply, error) {
+	addr := gointerfaces.ConvertH160toAddress(in.Address)
+	nonce, inPool := s.txPool.NonceFromAddress(addr)
+	return &txpool_proto.NonceReply{
+		Nonce: nonce,
+		Found: inPool,
 	}, nil
 }
 

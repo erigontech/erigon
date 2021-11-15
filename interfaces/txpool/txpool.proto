@@ -52,6 +52,14 @@ message StatusReply {
   uint32 baseFeeCount = 3;
 }
 
+message NonceRequest {
+   types.H160 address = 1;
+ }
+ message NonceReply {
+   bool found = 1;
+   uint64 nonce = 2;
+ }
+
 service Txpool {
   // Version returns the service version number
   rpc Version(google.protobuf.Empty) returns (types.VersionReply);
@@ -68,4 +76,6 @@ service Txpool {
   rpc OnAdd(OnAddRequest) returns (stream OnAddReply);
   // returns high level status
   rpc Status(StatusRequest) returns (StatusReply);
+  // returns nonce for given account
+  rpc Nonce(NonceRequest) returns (NonceReply);
 }

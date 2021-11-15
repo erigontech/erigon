@@ -35,6 +35,8 @@ type TxpoolClient interface {
 	OnAdd(ctx context.Context, in *OnAddRequest, opts ...grpc.CallOption) (Txpool_OnAddClient, error)
 	// returns high level status
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusReply, error)
+	// returns nonce for given account
+	Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceReply, error)
 }
 
 type txpoolClient struct {
@@ -131,6 +133,15 @@ func (c *txpoolClient) Status(ctx context.Context, in *StatusRequest, opts ...gr
 	return out, nil
 }
 
+func (c *txpoolClient) Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceReply, error) {
+	out := new(NonceReply)
+	err := c.cc.Invoke(ctx, "/txpool.Txpool/Nonce", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TxpoolServer is the server API for Txpool service.
 // All implementations must embed UnimplementedTxpoolServer
 // for forward compatibility
@@ -150,6 +161,8 @@ type TxpoolServer interface {
 	OnAdd(*OnAddRequest, Txpool_OnAddServer) error
 	// returns high level status
 	Status(context.Context, *StatusRequest) (*StatusReply, error)
+	// returns nonce for given account
+	Nonce(context.Context, *NonceRequest) (*NonceReply, error)
 	mustEmbedUnimplementedTxpoolServer()
 }
 
@@ -177,6 +190,9 @@ func (UnimplementedTxpoolServer) OnAdd(*OnAddRequest, Txpool_OnAddServer) error 
 }
 func (UnimplementedTxpoolServer) Status(context.Context, *StatusRequest) (*StatusReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedTxpoolServer) Nonce(context.Context, *NonceRequest) (*NonceReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Nonce not implemented")
 }
 func (UnimplementedTxpoolServer) mustEmbedUnimplementedTxpoolServer() {}
 
@@ -320,6 +336,24 @@ func _Txpool_Status_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Txpool_Nonce_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NonceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TxpoolServer).Nonce(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/txpool.Txpool/Nonce",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TxpoolServer).Nonce(ctx, req.(*NonceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Txpool_ServiceDesc is the grpc.ServiceDesc for Txpool service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -350,6 +384,10 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _Txpool_Status_Handler,
+		},
+		{
+			MethodName: "Nonce",
+			Handler:    _Txpool_Nonce_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
