@@ -279,6 +279,7 @@ func (f *TxFetcher) Enqueue(peer enode.ID, txs []types.Transaction, direct bool)
 	)
 	errs := f.addTxs(txs)
 	for i, err := range errs {
+		hash := txs[i].Hash()
 		if err != nil {
 			// Track the transaction hash if the price is too low for us.
 			// Avoid re-request this transaction when we receive another
@@ -287,7 +288,7 @@ func (f *TxFetcher) Enqueue(peer enode.ID, txs []types.Transaction, direct bool)
 				for f.underpriced.Cardinality() >= maxTxUnderpricedSetSize {
 					f.underpriced.Pop()
 				}
-				f.underpriced.Add(txs[i].Hash())
+				f.underpriced.Add(hash)
 			}
 			// Track a few interesting failure types
 			switch err {
@@ -303,7 +304,7 @@ func (f *TxFetcher) Enqueue(peer enode.ID, txs []types.Transaction, direct bool)
 				otherreject++
 			}
 		}
-		added = append(added, txs[i].Hash())
+		added = append(added, hash)
 	}
 	//if direct {
 	//	txReplyKnownMeter.Mark(duplicate)
