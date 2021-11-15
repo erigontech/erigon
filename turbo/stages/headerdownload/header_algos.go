@@ -591,7 +591,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64) error, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
@@ -635,7 +635,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			delete(hd.links, link.hash)
 			continue
 		}
-		if err := hf(link.header, link.blockHeight); err != nil {
+		if err := hf(link.header, link.hash, link.blockHeight); err != nil {
 			return false, err
 		}
 		if link.blockHeight > hd.highestInDb {
@@ -717,15 +717,14 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, blockHeight uint64) error {
-	return func(header *types.Header, blockHeight uint64) error {
-		return hi.FeedHeader(db, header, blockHeight)
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64) error {
+	return func(header *types.Header, hash common.Hash, blockHeight uint64) error {
+		return hi.FeedHeader(db, header, hash, blockHeight)
 	}
 
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, blockHeight uint64) error {
-	hash := header.Hash()
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64) error {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil

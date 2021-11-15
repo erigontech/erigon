@@ -16,7 +16,7 @@ func main() {
 	rootCtx, rootCancel := utils.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		db, backend, txPool, mining, stateCache, err := cli.RemoteServices(cmd.Context(), *cfg, logger, rootCancel)
+		db, backend, txPool, mining, stateCache, blockReader, err := cli.RemoteServices(cmd.Context(), *cfg, logger, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "error", err)
 			return nil
@@ -30,7 +30,7 @@ func main() {
 			log.Info("filters are not supported in chaindata mode")
 		}
 
-		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, txPool, mining, ff, stateCache, *cfg, nil)); err != nil {
+		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, txPool, mining, ff, stateCache, blockReader, *cfg, nil)); err != nil {
 			log.Error(err.Error())
 			return nil
 		}

@@ -268,7 +268,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			// for a call operation is the value. Transferring value from one
 			// account to the others means the state is modified and should also
 			// return with an error.
-			if operation.writes || (op == CALL && locStack.Back(2).Sign() != 0) {
+			if operation.writes || (op == CALL && !locStack.Back(2).IsZero()) {
 				return nil, ErrWriteProtection
 			}
 		}
