@@ -63,7 +63,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	require.True(ok)
 	require.Equal(int(sn.To), 1_000_000) // [from:to)
 
-	sn, ok = s.Blocks(1_000_000)
+	_, ok = s.Blocks(1_000_000)
 	require.False(ok)
 }
 
