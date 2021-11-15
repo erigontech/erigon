@@ -169,8 +169,11 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 func (s AllSnapshots) Close() {
 	for _, s := range s.blocks {
 		s.Headers.Idx.Close()
+		s.Headers.Decompressor.Close()
 		s.Bodies.Idx.Close()
+		s.Bodies.Decompressor.Close()
 		s.Transactions.Idx.Close()
+		s.Transactions.Decompressor.Close()
 	}
 }
 
