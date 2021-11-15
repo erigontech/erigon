@@ -976,3 +976,25 @@ func WritePendingEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, trans
 	copy(k[8:], blockHash[:])
 	return tx.Put(kv.PendingEpoch, k, transitionProof)
 }
+
+// Transitioned returns true if the block number comes after POS transition
+func Transitioned(db kv.Getter, blockNum uint64) (trans bool, err error) {
+	data, err := db.GetOne(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}))
+	if err != nil {
+		return false, fmt.Errorf("failed Transitioned: %w", err)
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	return blockNum >= binary.BigEndian.Uint64(data), nil
+}
+
+// MarkTransition sets transition to proof-of-stake from the block number
+func MarkTransition(db kv.Putter, blockNum uint64) error {
+	data := make([]byte, 8)
+	binary.BigEndian.PutUint64(data, blockNum)
+	if err := db.Put(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}), data); err != nil {
+		return fmt.Errorf("failed to mark transition: %w", err)
+	}
+	return nil
+}
