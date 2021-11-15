@@ -14,6 +14,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile := func(from, to uint64, name SnapshotType) {
 		c, err := compress.NewCompressor("test", path.Join(dir, CompressedFileName(from, to, name)), dir, 100)
 		require.NoError(err)
+		defer c.Close()
 		err = c.AddWord([]byte{1})
 		require.NoError(err)
 		err = c.Compress()
