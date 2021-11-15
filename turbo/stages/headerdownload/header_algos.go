@@ -635,6 +635,8 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 			delete(hd.links, link.hash)
 			continue
 		}
+
+		// Check if transition to proof-of-stake happened
 		if err := hf(link.header, link.hash, link.blockHeight); err != nil {
 			return false, err
 		}
@@ -719,15 +721,27 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 
 func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64) error {
 	return func(header *types.Header, hash common.Hash, blockHeight uint64) error {
-		return hi.FeedHeader(db, header, hash, blockHeight)
+		isTrans, err := rawdb.Transitioned(db, blockHeight)
+		if err != nil {
+			return err
+		}
+		if !isTrans {
+			return hi.FeedHeader(db, header, hash, blockHeight)
+		}
+		return nil
 	}
-
 }
 
 func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64) error {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil
+	}
+
+	config, err := rawdb.ReadChainConfig(db, rawdb.ReadHeaderByNumber(db, 0).Hash())
+
+	if err != nil {
+		return fmt.Errorf("could not read chain config: %s.", err.Error())
 	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
@@ -813,6 +827,11 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+	}
+	if config.TerminalTotalDifficulty != nil && td.Cmp(config.TerminalTotalDifficulty) >= 0 {
+		if err = rawdb.MarkTransition(db, blockHeight); err != nil {
+			return err
+		}
 	}
 	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)

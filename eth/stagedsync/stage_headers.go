@@ -122,6 +122,15 @@ func HeadersForward(
 	prevProgress := headerProgress
 Loop:
 	for !stopped {
+
+		isTrans, err := rawdb.Transitioned(tx, headerProgress)
+		if err != nil {
+			return err
+		}
+
+		if isTrans {
+			break
+		}
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
@@ -159,6 +168,7 @@ Loop:
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), logPrefix, logEvery.C); err != nil {
 			return err
 		}
+
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
@@ -210,6 +220,7 @@ Loop:
 	}
 	// We do not print the following line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
+
 	return nil
 }
 

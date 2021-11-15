@@ -981,7 +981,7 @@ func WritePendingEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, trans
 func Transitioned(db kv.Getter, blockNum uint64) (trans bool, err error) {
 	data, err := db.GetOne(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}))
 	if err != nil {
-		return false, fmt.Errorf("failed Transitioned: %w", err)
+		return false, fmt.Errorf("failed ReadTd: %w", err)
 	}
 	if len(data) == 0 {
 		return false, nil
@@ -989,12 +989,12 @@ func Transitioned(db kv.Getter, blockNum uint64) (trans bool, err error) {
 	return blockNum >= binary.BigEndian.Uint64(data), nil
 }
 
-// MarkTransition sets transition to proof-of-stake from the block number
+// MarkTreansition sets transition to proof-of-stake from the block number
 func MarkTransition(db kv.Putter, blockNum uint64) error {
 	data := make([]byte, 8)
 	binary.BigEndian.PutUint64(data, blockNum)
 	if err := db.Put(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}), data); err != nil {
-		return fmt.Errorf("failed to mark transition: %w", err)
+		return fmt.Errorf("failed to store block total difficulty: %w", err)
 	}
 	return nil
 }
