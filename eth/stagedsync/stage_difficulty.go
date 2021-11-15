@@ -82,7 +82,8 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 				return nil
 			}
 
-			canonical, err := rawdb.ReadCanonicalHash(tx, binary.BigEndian.Uint64(k))
+			blockNum := binary.BigEndian.Uint64(k)
+			canonical, err := rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
 				return err
 			}
@@ -93,9 +94,10 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 			if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
 				return err
 			}
+
 			td.Add(td, header.Difficulty)
 			if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
-				return nil
+				return rawdb.MarkTransition(tx, blockNum)
 			}
 			data, err := rlp.EncodeToBytes(td)
 			if err != nil {

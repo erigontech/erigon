@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"runtime"
 	"time"
@@ -303,6 +304,17 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		var maxTd big.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
+		// unwind the merge
+		isTrans, err := rawdb.Transitioned(tx, u.UnwindPoint)
+		if err != nil {
+			return err
+		}
+
+		if !isTrans {
+			if err := tx.Delete(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}), nil); err != nil {
+				return err
+			}
+		}
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
 			// Find header with biggest TD
 			tdCursor, cErr := tx.Cursor(kv.HeaderTD)

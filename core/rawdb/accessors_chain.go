@@ -990,9 +990,18 @@ func Transitioned(db kv.Getter, blockNum uint64) (trans bool, err error) {
 }
 
 // MarkTreansition sets transition to proof-of-stake from the block number
-func MarkTransition(db kv.Putter, blockNum uint64) error {
+func MarkTransition(db kv.StatelessRwTx, blockNum uint64) error {
 	data := make([]byte, 8)
 	binary.BigEndian.PutUint64(data, blockNum)
+	// If we already transitioned then we do not update the transition
+	marked, err := db.Has(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}))
+	if err != nil {
+		return err
+	}
+
+	if marked {
+		return nil
+	}
 	if err := db.Put(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}), data); err != nil {
 		return fmt.Errorf("failed to store block total difficulty: %w", err)
 	}
