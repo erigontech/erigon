@@ -43,9 +43,7 @@ type Snapshot struct {
 	To           uint64 // excluded
 }
 
-func (s Snapshot) Match(blockNumber uint64) bool {
-	return s.From >= blockNumber && s.To < blockNumber
-}
+func (s Snapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
 type BlocksSnapshot struct {
 	Bodies       *Snapshot
@@ -55,9 +53,7 @@ type BlocksSnapshot struct {
 	To           uint64 // excluded
 }
 
-func (s BlocksSnapshot) Match(blockNumber uint64) bool {
-	return s.From >= blockNumber && s.To < blockNumber
-}
+func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
 type AllSnapshots struct {
 	dir             string
@@ -181,10 +177,9 @@ func (s AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, foun
 	if blockNumber > s.blocksAvailable {
 		return snapshot, false
 	}
-
-	for i := range s.blocks {
-		if s.blocks[i].Match(blockNumber) {
-			return s.blocks[i], true
+	for _, blocksSnapshot := range s.blocks {
+		if blocksSnapshot.Has(blockNumber) {
+			return blocksSnapshot, true
 		}
 	}
 	return snapshot, false

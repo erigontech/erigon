@@ -52,8 +52,19 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(0, 500_000, Headers)
 	createFile(0, 500_000, Transactions)
 	s = MustOpenAll(dir)
+	defer s.Close()
 	require.Equal(2, len(s.blocks))
-	s.Close()
+
+	sn, ok := s.Blocks(10)
+	require.True(ok)
+	require.Equal(int(sn.To), 500_000)
+
+	sn, ok = s.Blocks(500_000)
+	require.True(ok)
+	require.Equal(int(sn.To), 1_000_000) // [from:to)
+
+	sn, ok = s.Blocks(1_000_000)
+	require.False(ok)
 }
 
 func TestParseCompressedFileName(t *testing.T) {
