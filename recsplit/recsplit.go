@@ -146,6 +146,18 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	return rs, nil
 }
 
+func (rs *RecSplit) Close() {
+	if rs.indexF != nil {
+		rs.indexF.Close()
+	}
+	if rs.bucketCollector != nil {
+		rs.bucketCollector.Close()
+	}
+	if rs.offsetCollector != nil {
+		rs.offsetCollector.Close()
+	}
+}
+
 func (rs *RecSplit) SetTrace(trace bool) {
 	rs.trace = trace
 }

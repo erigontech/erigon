@@ -54,14 +54,14 @@ type Index struct {
 }
 
 func MustOpen(indexFile string) *Index {
-	idx, err := NewIndex(indexFile)
+	idx, err := OpenIndex(indexFile)
 	if err != nil {
 		panic(err)
 	}
 	return idx
 }
 
-func NewIndex(indexFile string) (*Index, error) {
+func OpenIndex(indexFile string) (*Index, error) {
 	idx := &Index{
 		indexFile: indexFile,
 	}
