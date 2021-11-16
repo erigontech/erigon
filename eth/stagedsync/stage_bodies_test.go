@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/u256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -23,7 +24,7 @@ func TestBodiesUnwind(t *testing.T) {
 	require.NoError(err)
 	rlpTxn := buf.Bytes()
 
-	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn}}
+	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
 	for i := uint64(1); i <= 10; i++ {
 		err = rawdb.WriteRawBody(tx, common.Hash{}, i, b)
 		require.NoError(err)
@@ -35,4 +36,14 @@ func TestBodiesUnwind(t *testing.T) {
 	err = UnwindBodiesStage(u, tx, BodiesCfg{}, context.Background())
 	require.NoError(err)
 
+	n, err := tx.ReadSequence(kv.EthTx)
+	require.NoError(err)
+	require.Equal(15, int(n))
+
+	err = rawdb.WriteRawBody(tx, common.Hash{}, 6, b)
+	require.NoError(err)
+
+	n, err = tx.ReadSequence(kv.EthTx)
+	require.NoError(err)
+	require.Equal(18, int(n))
 }
