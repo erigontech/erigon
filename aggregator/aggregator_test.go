@@ -168,6 +168,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 	defer a.Close()
 	accountKey := int160(1)
 	var account1 = int256(1)
+	var account2 = int256(2)
 	var rwTx kv.RwTx
 	defer func() {
 		rwTx.Rollback()
@@ -190,13 +191,22 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 				t.Fatal(err)
 			}
 			for s := uint64(0); s < 100; s++ {
-				if err = w.WriteAccountStorage(accountKey, 1, int256(s), nil, uint256.NewInt(s+1)); err != nil {
+				if err = w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(s+1)); err != nil {
 					t.Fatal(err)
 				}
 			}
 		case 22:
 			if err = w.DeleteAccount(accountKey); err != nil {
 				t.Fatal(err)
+			}
+		case 45:
+			if err = w.UpdateAccountData(accountKey, account2); err != nil {
+				t.Fatal(err)
+			}
+			for s := uint64(50); s < 150; s++ {
+				if err = w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(2*s+1)); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 		if err = w.Finish(); err != nil {
@@ -220,11 +230,11 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 			}
 			for s := uint64(0); s < 100; s++ {
 				var v *uint256.Int
-				if v, err = r.ReadAccountStorage(accountKey, 1, int256(s)); err != nil {
+				if v, err = r.ReadAccountStorage(accountKey, int256(s)); err != nil {
 					t.Fatal(err)
 				}
 				if !uint256.NewInt(s + 1).Eq(v) {
-					t.Errorf("wrong storage value after block %d, expected %d, got %s", blockNum, s, v)
+					t.Errorf("wrong storage value after block %d, expected %d, got %s", blockNum, s+1, v)
 				}
 			}
 		case 22, 44:
@@ -237,11 +247,32 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 			}
 			for s := uint64(0); s < 100; s++ {
 				var v *uint256.Int
-				if v, err = r.ReadAccountStorage(accountKey, 1, int256(s)); err != nil {
+				if v, err = r.ReadAccountStorage(accountKey, int256(s)); err != nil {
 					t.Fatal(err)
 				}
 				if v != nil {
 					t.Errorf("wrong storage value after block %d, expected nil, got %s", blockNum, v)
+				}
+			}
+		case 66:
+			var acc []byte
+			if acc, err = r.ReadAccountData(accountKey); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(account2, acc) {
+				t.Errorf("wrong account after block %d, expected %x, got %x", blockNum, account1, acc)
+			}
+			for s := uint64(0); s < 150; s++ {
+				var v *uint256.Int
+				if v, err = r.ReadAccountStorage(accountKey, int256(s)); err != nil {
+					t.Fatal(err)
+				}
+				if s < 50 {
+					if v != nil {
+						t.Errorf("wrong storage value after block %d, expected nil, got %s", blockNum, v)
+					}
+				} else if v == nil || !uint256.NewInt(2*s+1).Eq(v) {
+					t.Errorf("wrong storage value after block %d, expected %d, got %s", blockNum, 2*s+1, v)
 				}
 			}
 		}

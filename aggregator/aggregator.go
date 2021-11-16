@@ -849,7 +849,7 @@ func (a *Aggregator) readCode(blockNum uint64, addr []byte) []byte {
 	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if item.codeIdx.Empty() {
-			return false
+			return true
 		}
 		offset := item.codeIdx.Lookup(addr)
 		g := item.codeD.MakeGetter() // TODO Cache in the reader
@@ -874,7 +874,7 @@ func (a *Aggregator) readStorage(blockNum uint64, filekey []byte) []byte {
 	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if item.storageIdx.Empty() {
-			return false
+			return true
 		}
 		offset := item.storageIdx.Lookup(filekey)
 		g := item.storageD.MakeGetter() // TODO Cache in the reader
@@ -924,7 +924,7 @@ func (r *Reader) ReadAccountData(addr []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (r *Reader) ReadAccountStorage(addr []byte, incarnation uint64, loc []byte) (*uint256.Int, error) {
+func (r *Reader) ReadAccountStorage(addr []byte, loc []byte) (*uint256.Int, error) {
 	// Look in the summary table first
 	dbkey := make([]byte, len(addr)+len(loc))
 	copy(dbkey[0:], addr)
@@ -1107,7 +1107,7 @@ type CursorItem struct {
 	c        kv.Cursor
 }
 
-type CursorHeap []CursorItem
+type CursorHeap []*CursorItem
 
 func (ch CursorHeap) Len() int {
 	return len(ch)
@@ -1127,7 +1127,7 @@ func (ch *CursorHeap) Swap(i, j int) {
 }
 
 func (ch *CursorHeap) Push(x interface{}) {
-	*ch = append(*ch, x.(CursorItem))
+	*ch = append(*ch, x.(*CursorItem))
 }
 
 func (ch *CursorHeap) Pop() interface{} {
@@ -1175,7 +1175,7 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 		return err
 	}
 	if k != nil && bytes.HasPrefix(k, addr) {
-		heap.Push(&cp, CursorItem{file: false, key: common.Copy(k), val: common.Copy(v), c: c, endBlock: w.blockNum})
+		heap.Push(&cp, &CursorItem{file: false, key: common.Copy(k), val: common.Copy(v), c: c, endBlock: w.blockNum})
 	}
 	w.a.byEndBlock.Ascend(func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
@@ -1193,7 +1193,7 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 			key, _ := g.Next(nil)
 			if bytes.HasPrefix(key, addr) {
 				val, _ := g.Next(nil)
-				heap.Push(&cp, CursorItem{file: true, key: key, val: val, dg: g, endBlock: item.endBlock})
+				heap.Push(&cp, &CursorItem{file: true, key: key, val: val, dg: g, endBlock: item.endBlock})
 			}
 		}
 		return true
@@ -1203,7 +1203,7 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 		lastVal := common.Copy(cp[0].val)
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := &cp[0]
+			ci1 := cp[0]
 			if ci1.file {
 				if ci1.dg.HasNext() {
 					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
@@ -1250,7 +1250,7 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(addr []byte, incarnation uint64, loc []byte, _, value *uint256.Int) error {
+func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int) error {
 	dbkey := make([]byte, len(addr)+len(loc))
 	copy(dbkey[0:], addr)
 	copy(dbkey[len(addr):], loc)
@@ -1376,7 +1376,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
-			heap.Push(&cp, CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
+			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
 		}
 	}
 	if item2.accountsD, item2.accountsIdx, err = mergeIntoStateFile(&cp, 0, "accounts", lastStart, blockTo, w.a.diffDir); err != nil {
@@ -1389,7 +1389,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
-			heap.Push(&cp, CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
+			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
 		}
 	}
 	if item2.codeD, item2.codeIdx, err = mergeIntoStateFile(&cp, 0, "code", lastStart, blockTo, w.a.diffDir); err != nil {
@@ -1398,11 +1398,13 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	cp = cp[:0]
 	heap.Init(&cp)
 	for _, ag := range toAggregate {
+		//fmt.Printf("merging [%d-%d] into [%d-%d]\n", ag.startBlock, ag.endBlock, lastStart, blockTo)
 		g := ag.storageD.MakeGetter()
 		if g.HasNext() {
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
-			heap.Push(&cp, CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
+			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
+			//fmt.Printf("starting with %x => %x\n", key, val)
 		}
 	}
 	if item2.storageD, item2.storageIdx, err = mergeIntoStateFile(&cp, 20, "storage", lastStart, blockTo, w.a.diffDir); err != nil {
@@ -1474,6 +1476,7 @@ func mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlo
 	var keyBuf, valBuf []byte
 	for cp.Len() > 0 {
 		lastKey := common.Copy((*cp)[0].key)
+		//fmt.Printf("looking at key %x to merge into [%d-%d]\n", lastKey, startBlock, endBlock)
 		lastVal := common.Copy((*cp)[0].val)
 		var first, firstDelete, firstInsert bool
 		// Advance all the items that have this key (including the top)
@@ -1516,7 +1519,7 @@ func mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlo
 				if err = comp.AddWord(keyBuf); err != nil {
 					return nil, nil, err
 				}
-				//fmt.Printf("merge key %x into %s\n", keyBuf, datPath)
+				//fmt.Printf("merge key %x into [%d-%d]\n", keyBuf, startBlock, endBlock)
 				count++ // Only counting keys, not values
 				if err = comp.AddWord(valBuf); err != nil {
 					return nil, nil, err
@@ -1524,13 +1527,15 @@ func mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlo
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
+			//} else {
+			//	fmt.Printf("skipped key %x for [%d-%d]\n", keyBuf, startBlock, endBlock)
 		}
 	}
 	if keyBuf != nil {
 		if err = comp.AddWord(keyBuf); err != nil {
 			return nil, nil, err
 		}
-		//fmt.Printf("merge key %x into %s\n", keyBuf, datPath)
+		//fmt.Printf("merge key %x into [%d-%d]\n", keyBuf, startBlock, endBlock)
 		count++ // Only counting keys, not values
 		if err = comp.AddWord(valBuf); err != nil {
 			return nil, nil, err
