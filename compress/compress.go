@@ -986,7 +986,11 @@ func (c *Compressor) optimiseCodes() error {
 				return e
 			}
 		}
-		if l > 0 {
+		if l == 0 {
+			if e = hc.flush(); e != nil {
+				return e
+			}
+		} else {
 			var pNum uint64 // Number of patterns
 			if pNum, e = binary.ReadUvarint(r); e != nil {
 				return e

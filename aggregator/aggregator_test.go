@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 )
@@ -90,6 +91,7 @@ func TestLoopAggregator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Close()
 	var account1 = int256(1)
 	var rwTx kv.RwTx
 	defer func() {
@@ -153,4 +155,96 @@ func TestLoopAggregator(t *testing.T) {
 	}
 	tx.Rollback()
 	a.Close()
+}
+
+func TestRecreateAccountWithStorage(t *testing.T) {
+	tmpDir := t.TempDir()
+	db := memdb.New()
+	defer db.Close()
+	a, err := NewAggregator(tmpDir, 16, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	accountKey := int160(1)
+	var account1 = int256(1)
+	var rwTx kv.RwTx
+	defer func() {
+		rwTx.Rollback()
+	}()
+	var tx kv.Tx
+	defer func() {
+		tx.Rollback()
+	}()
+	for blockNum := uint64(0); blockNum < 100; blockNum++ {
+		if rwTx, err = db.BeginRw(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		var w *Writer
+		if w, err = a.MakeStateWriter(rwTx, blockNum); err != nil {
+			t.Fatal(err)
+		}
+		switch blockNum {
+		case 1:
+			if err = w.UpdateAccountData(accountKey, account1); err != nil {
+				t.Fatal(err)
+			}
+			for s := uint64(0); s < 100; s++ {
+				if err = w.WriteAccountStorage(accountKey, 1, int256(s), nil, uint256.NewInt(s+1)); err != nil {
+					t.Fatal(err)
+				}
+			}
+		case 22:
+			if err = w.DeleteAccount(accountKey); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err = w.Finish(); err != nil {
+			t.Fatal(err)
+		}
+		if err = rwTx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if tx, err = db.BeginRo(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		r := a.MakeStateReader(tx, blockNum+1)
+		switch blockNum {
+		case 1:
+			var acc []byte
+			if acc, err = r.ReadAccountData(accountKey); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(account1, acc) {
+				t.Errorf("wrong account after block %d, expected %x, got %x", blockNum, account1, acc)
+			}
+			for s := uint64(0); s < 100; s++ {
+				var v *uint256.Int
+				if v, err = r.ReadAccountStorage(accountKey, 1, int256(s)); err != nil {
+					t.Fatal(err)
+				}
+				if !uint256.NewInt(s + 1).Eq(v) {
+					t.Errorf("wrong storage value after block %d, expected %d, got %s", blockNum, s, v)
+				}
+			}
+		case 22, 44:
+			var acc []byte
+			if acc, err = r.ReadAccountData(accountKey); err != nil {
+				t.Fatal(err)
+			}
+			if len(acc) > 0 {
+				t.Errorf("wrong account after block %d, expected nil, got %x", blockNum, acc)
+			}
+			for s := uint64(0); s < 100; s++ {
+				var v *uint256.Int
+				if v, err = r.ReadAccountStorage(accountKey, 1, int256(s)); err != nil {
+					t.Fatal(err)
+				}
+				if v != nil {
+					t.Errorf("wrong storage value after block %d, expected nil, got %s", blockNum, v)
+				}
+			}
+		}
+		tx.Rollback()
+	}
 }
