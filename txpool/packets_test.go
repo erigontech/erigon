@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/stretchr/testify/require"
 )
@@ -115,14 +116,22 @@ var ptp66EncodeTests = []struct {
 	txs         [][]byte
 	encoded     string
 	requestId   uint64
+	chainID     uint64
 	expectedErr bool
 }{
+	{
+		txs: [][]byte{
+			decodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
+		},
+		encoded: "f88088a4e61e8ad32f4845f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", requestId: 11882218248461043781, expectedErr: false, chainID: 5,
+	},
 	{
 		txs: [][]byte{
 			decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
 			decodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
 		},
-		encoded: "f8d7820457f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", requestId: 1111, expectedErr: false},
+		encoded: "f8d7820457f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", requestId: 1111, expectedErr: false, chainID: 1,
+	},
 }
 
 func TestPooledTransactionsPacket(t *testing.T) {
@@ -141,14 +150,15 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
-			ctx := NewTxParseContext(*u256.N1)
+			ctx := NewTxParseContext(*uint256.NewInt(tt.chainID))
 			slots := &TxSlots{}
 			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
 			require.NoError(err)
 			require.Equal(tt.requestId, requestId)
 			require.Equal(len(tt.txs), len(slots.txs))
-			require.Equal(fmt.Sprintf("%x", tt.txs[0]), fmt.Sprintf("%x", slots.txs[0].rlp))
-			require.Equal(fmt.Sprintf("%x", tt.txs[1]), fmt.Sprintf("%x", slots.txs[1].rlp))
+			for i, txn := range tt.txs {
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.txs[i].rlp))
+			}
 		})
 	}
 	for i, tt := range ptp66EncodeTests {
