@@ -457,6 +457,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err != nil {
 		return err
 	}
+	fmt.Printf("baseTxId: %d,%d\n", baseTxId, number)
 	data, err := rlp.EncodeToBytes(types.BodyForStorage{
 		BaseTxId: baseTxId,
 		TxAmount: uint32(len(body.Transactions)),
@@ -552,6 +553,7 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 
 // TruncateBlockTransactions - truncates all eth transactions with id >= from, including it's transactions
 func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
+	fmt.Printf("tr: %d\n", from)
 	if err := tx.ForEach(kv.EthTx, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
 		select {
 		case <-ctx.Done():
@@ -561,6 +563,7 @@ func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, log
 		default:
 		}
 
+		fmt.Printf("del: %d\n", binary.BigEndian.Uint64(k))
 		return tx.Delete(kv.EthTx, k, nil)
 	}); err != nil {
 		return err
