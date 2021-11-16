@@ -721,14 +721,7 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 
 func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64) error {
 	return func(header *types.Header, hash common.Hash, blockHeight uint64) error {
-		isTrans, err := rawdb.Transitioned(db, blockHeight)
-		if err != nil {
-			return err
-		}
-		if !isTrans {
-			return hi.FeedHeader(db, header, hash, blockHeight)
-		}
-		return nil
+		return hi.FeedHeader(db, header, hash, blockHeight)
 	}
 }
 
