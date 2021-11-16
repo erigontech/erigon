@@ -310,7 +310,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return err
 		}
 
-		if !isTrans {
+		if cfg.chainConfig.TerminalTotalDifficulty != nil && !isTrans {
 			if err := tx.Delete(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}), nil); err != nil {
 				return err
 			}
