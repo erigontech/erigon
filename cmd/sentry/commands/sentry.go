@@ -23,6 +23,7 @@ var (
 	natSetting   string   // NAT setting
 	port         int      // Listening port
 	staticPeers  []string // static peers
+	trustedPeers []string // trusted peers
 	discoveryDNS []string
 	nodiscover   bool // disable sentry's discovery mechanism
 	protocol     string
@@ -44,6 +45,7 @@ func init() {
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
 	rootCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth65|eth66")
 	rootCmd.Flags().StringSliceVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
+	rootCmd.Flags().StringSliceVar(&trustedPeers, "trustedpeers", []string{}, "trusted peer list [enode]")
 	rootCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)
 	rootCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
 	rootCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
@@ -76,7 +78,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		nodeConfig := node2.NewNodeConfig()
-		p2pConfig, err := utils.NewP2PConfig(nodiscover, datadir, netRestrict, natSetting, nodeConfig.NodeName(), staticPeers, uint(port), uint(p))
+		p2pConfig, err := utils.NewP2PConfig(nodiscover, datadir, netRestrict, natSetting, nodeConfig.NodeName(), staticPeers, trustedPeers, uint(port), uint(p))
 		if err != nil {
 			return err
 		}

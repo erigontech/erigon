@@ -571,26 +571,27 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	defer hd.lock.RUnlock()
 	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
-	queryRange := hd.topSeenHeight
+	nextHeight := hd.highestInDb + stride
+	maxHeight := hd.topSeenHeight + 1 // Inclusive upper bound
+	if maxHeight <= nextHeight {
+		return nil
+	}
 	// Determine the query range as the height of lowest anchor
 	for _, anchor := range hd.anchors {
-		if anchor.blockHeight > hd.highestInDb && anchor.blockHeight < queryRange {
-			queryRange = anchor.blockHeight
+		if anchor.blockHeight > nextHeight && anchor.blockHeight < maxHeight {
+			maxHeight = anchor.blockHeight // Exclusive upper bound
 		}
 	}
-	length := (queryRange - hd.highestInDb) / stride
+	length := (maxHeight - nextHeight) / stride
 	if length > 192 {
 		length = 192
 	}
-	if length == 0 {
-		return nil
-	}
-	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
+	return &HeaderRequest{Number: nextHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64) error, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
@@ -634,7 +635,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeigh
 			delete(hd.links, link.hash)
 			continue
 		}
-		if err := hf(link.header, link.blockHeight); err != nil {
+		if err := hf(link.header, link.hash, link.blockHeight); err != nil {
 			return false, err
 		}
 		if link.blockHeight > hd.highestInDb {
@@ -716,15 +717,14 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, blockHeight uint64) error {
-	return func(header *types.Header, blockHeight uint64) error {
-		return hi.FeedHeader(db, header, blockHeight)
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64) error {
+	return func(header *types.Header, hash common.Hash, blockHeight uint64) error {
+		return hi.FeedHeader(db, header, hash, blockHeight)
 	}
 
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, blockHeight uint64) error {
-	hash := header.Hash()
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64) error {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil
