@@ -260,7 +260,8 @@ const (
 
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
-
+	// TransitionBlockKey tracks the last proof-of-work block
+	TransitionBlockKey = "TransitionBlock"
 	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
@@ -342,6 +343,7 @@ var ChaindataTables = []string{
 	Log,
 	Sequence,
 	EthTx,
+	TransitionBlockKey,
 	TrieOfAccounts,
 	TrieOfStorage,
 	HashedAccounts,
