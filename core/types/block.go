@@ -96,7 +96,9 @@ type Header struct {
 	MixDigest   common.Hash    `json:"mixHash"`
 	Nonce       BlockNonce     `json:"nonce"`
 	BaseFee     *big.Int       `json:"baseFeePerGas"`
+	Random      common.Hash    `json:"random"`
 	Eip1559     bool           // to avoid relying on BaseFee != nil for that
+	Eip3675     bool           // to avoid relying on Random != nil for that
 	Seal        []rlp.RawValue // AuRa POA network field
 	WithSeal    bool           // to avoid relying on Seal != nil for that
 }
@@ -241,6 +243,10 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
 		}
 		encodingSize += baseFeeLen
+	}
+
+	if h.Eip3675 {
+		encodingSize += common.HashLength + 1
 	}
 
 	var b [33]byte
@@ -401,6 +407,15 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			}
 		}
 	}
+
+	if h.Eip3675 {
+		if _, err := w.Write([]byte{128 + common.HashLength}); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.Random.Bytes()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -529,6 +544,23 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 		h.Eip1559 = true
 		h.BaseFee = new(big.Int).SetBytes(b)
+
+		if b, err = s.Bytes(); err != nil {
+			if errors.Is(err, rlp.EOL) {
+				h.Random = common.Hash{}
+				h.Eip3675 = false
+				if err := s.ListEnd(); err != nil {
+					return fmt.Errorf("close header struct (no random): %w", err)
+				}
+				return nil
+			}
+			return fmt.Errorf("read BaseFee: %w", err)
+		}
+		if len(b) != common.HashLength {
+			return fmt.Errorf("wrong size for BaseFee: %d", len(b))
+		}
+		h.Eip3675 = true
+		h.Random = common.BytesToHash(b)
 	}
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)

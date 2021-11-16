@@ -374,7 +374,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 		gas      uint64
 		overflow bool
 	)
-	if stack.Back(2).Sign() != 0 {
+	if !stack.Back(2).IsZero() {
 		gas += params.CallValueTransferGas
 	}
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
@@ -431,7 +431,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 
 		if evm.ChainRules.IsEIP158 {
 			// if empty and transfers value
-			if evm.IntraBlockState.Empty(address) && evm.IntraBlockState.GetBalance(contract.Address()).Sign() != 0 {
+			if evm.IntraBlockState.Empty(address) && !evm.IntraBlockState.GetBalance(contract.Address()).IsZero() {
 				gas += params.CreateBySelfdestructGas
 			}
 		} else if !evm.IntraBlockState.Exist(address) {
