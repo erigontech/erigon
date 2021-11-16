@@ -96,6 +96,11 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 			}
 
 			td.Add(td, header.Difficulty)
+
+			if header.Eip3675 {
+				return nil
+			}
+
 			if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
 				return rawdb.MarkTransition(tx, blockNum)
 			}

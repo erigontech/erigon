@@ -591,7 +591,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64) error, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
@@ -637,7 +637,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 		}
 
 		// Check if transition to proof-of-stake happened
-		if err := hf(link.header, link.hash, link.blockHeight); err != nil {
+		if err := hf(link.header, link.hash, link.blockHeight, terminalTotalDifficulty); err != nil {
 			return false, err
 		}
 		if link.blockHeight > hd.highestInDb {
@@ -719,23 +719,18 @@ func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64) error {
-	return func(header *types.Header, hash common.Hash, blockHeight uint64) error {
-		return hi.FeedHeader(db, header, hash, blockHeight)
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
+	return func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
+		return hi.FeedHeader(db, header, hash, blockHeight, terminalTotalDifficulty)
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64) error {
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil
 	}
 
-	config, err := rawdb.ReadChainConfig(db, rawdb.ReadHeaderByNumber(db, 0).Hash())
-
-	if err != nil {
-		return fmt.Errorf("could not read chain config: %s.", err.Error())
-	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
 		return nil
@@ -821,13 +816,15 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	if config.TerminalTotalDifficulty != nil && td.Cmp(config.TerminalTotalDifficulty) >= 0 {
+
+	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	}
+
+	if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
 		if err = rawdb.MarkTransition(db, blockHeight); err != nil {
 			return err
 		}
-	}
-	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
-		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 	hi.prevHash = hash
 	return nil
