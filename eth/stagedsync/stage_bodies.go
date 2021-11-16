@@ -253,6 +253,13 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	if err := rawdb.TruncateBlockBodies(tx, ctx, u.UnwindPoint, u.LogPrefix(), logEvery); err != nil {
+		return err
+	}
+
 	if err = u.Done(tx); err != nil {
 		return err
 	}

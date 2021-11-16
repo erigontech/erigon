@@ -18,10 +18,12 @@ package rawdb
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"math/big"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -412,6 +414,16 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 	return
 }
 
+// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
+	newVBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(newVBytes, newValue)
+	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
+		return err
+	}
+	return nil
+}
+
 func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
@@ -500,6 +512,75 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
+}
+
+// TruncateBlockBodies - truncates all eth block bodies with number >= from, including it's transactions
+func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
+	// Firs get oldest transaction ID - to truncate them also
+	// this func doesn't depend on Canonical markers - just to make it less depend on environment
+	c, err := tx.Cursor(kv.BlockBody)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	k, v, err := c.Seek(dbutils.EncodeBlockNumber(from))
+	if len(k) == 0 {
+		return nil
+	}
+	bodyForStorage := new(types.BodyForStorage)
+	if err := rlp.DecodeBytes(v, bodyForStorage); err != nil {
+		return err
+	}
+	baseTx := bodyForStorage.BaseTxId
+
+	// Truncate from here
+	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Unwinding bodies...", logPrefix), "current block", binary.BigEndian.Uint64(k))
+		default:
+		}
+
+		return tx.Delete(kv.BlockBody, k, nil)
+	}); err != nil {
+		return err
+	}
+	return TruncateBlockTransactions(tx, ctx, baseTx, logPrefix, logEvery)
+}
+
+// TruncateBlockTransactions - truncates all eth transactions with id >= from, including it's transactions
+func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
+	if err := tx.ForEach(kv.EthTx, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Unwinding transactions...", logPrefix), "current key", fmt.Sprintf("%x", k))
+		default:
+		}
+
+		return tx.Delete(kv.EthTx, k, nil)
+	}); err != nil {
+		return err
+	}
+
+	c, err := tx.Cursor(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	k, _, err := c.Last()
+	if err != nil {
+		return err
+	}
+	lastTxID := binary.BigEndian.Uint64(k)
+
+	if err := ResetSequence(tx, kv.EthTx, lastTxID); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
