@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -558,6 +557,7 @@ func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, log
 	if err := tx.ForEach(kv.EthTx, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
 		select {
 		case <-ctx.Done():
+			panic(1)
 			return ctx.Err()
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s] Unwinding transactions...", logPrefix), "current key", fmt.Sprintf("%x", k))

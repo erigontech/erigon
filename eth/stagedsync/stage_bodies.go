@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type BodiesCfg struct {
@@ -179,10 +178,12 @@ Loop:
 		}
 		d5 += time.Since(start)
 		start = time.Now()
+		fmt.Printf("alex: %d,%d\n", bodyProgress, headerProgress)
 		if bodyProgress == headerProgress {
 			break
 		}
 		if test {
+			//panic(1)
 			stopped = true
 			break
 		}
@@ -252,6 +253,8 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
+
+	fmt.Printf("unwind: %d\n", u.UnwindPoint)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
