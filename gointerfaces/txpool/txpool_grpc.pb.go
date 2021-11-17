@@ -31,6 +31,8 @@ type TxpoolClient interface {
 	Transactions(ctx context.Context, in *TransactionsRequest, opts ...grpc.CallOption) (*TransactionsReply, error)
 	// returns all transactions from tx pool
 	All(ctx context.Context, in *AllRequest, opts ...grpc.CallOption) (*AllReply, error)
+	// Returns all pending (processable) transactions, in ready-for-mining order
+	Pending(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingReply, error)
 	// subscribe to new transactions add event
 	OnAdd(ctx context.Context, in *OnAddRequest, opts ...grpc.CallOption) (Txpool_OnAddClient, error)
 	// returns high level status
@@ -86,6 +88,15 @@ func (c *txpoolClient) Transactions(ctx context.Context, in *TransactionsRequest
 func (c *txpoolClient) All(ctx context.Context, in *AllRequest, opts ...grpc.CallOption) (*AllReply, error) {
 	out := new(AllReply)
 	err := c.cc.Invoke(ctx, "/txpool.Txpool/All", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *txpoolClient) Pending(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingReply, error) {
+	out := new(PendingReply)
+	err := c.cc.Invoke(ctx, "/txpool.Txpool/Pending", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +168,8 @@ type TxpoolServer interface {
 	Transactions(context.Context, *TransactionsRequest) (*TransactionsReply, error)
 	// returns all transactions from tx pool
 	All(context.Context, *AllRequest) (*AllReply, error)
+	// Returns all pending (processable) transactions, in ready-for-mining order
+	Pending(context.Context, *emptypb.Empty) (*PendingReply, error)
 	// subscribe to new transactions add event
 	OnAdd(*OnAddRequest, Txpool_OnAddServer) error
 	// returns high level status
@@ -184,6 +197,9 @@ func (UnimplementedTxpoolServer) Transactions(context.Context, *TransactionsRequ
 }
 func (UnimplementedTxpoolServer) All(context.Context, *AllRequest) (*AllReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method All not implemented")
+}
+func (UnimplementedTxpoolServer) Pending(context.Context, *emptypb.Empty) (*PendingReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Pending not implemented")
 }
 func (UnimplementedTxpoolServer) OnAdd(*OnAddRequest, Txpool_OnAddServer) error {
 	return status.Errorf(codes.Unimplemented, "method OnAdd not implemented")
@@ -297,6 +313,24 @@ func _Txpool_All_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Txpool_Pending_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TxpoolServer).Pending(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/txpool.Txpool/Pending",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TxpoolServer).Pending(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Txpool_OnAdd_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(OnAddRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -380,6 +414,10 @@ var Txpool_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "All",
 			Handler:    _Txpool_All_Handler,
+		},
+		{
+			MethodName: "Pending",
+			Handler:    _Txpool_Pending_Handler,
 		},
 		{
 			MethodName: "Status",

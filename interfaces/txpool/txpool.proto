@@ -45,6 +45,15 @@ message AllReply {
   repeated Tx txs = 1;
 }
 
+message PendingReply {
+  message Tx {
+    bytes sender = 1;
+    bytes rlpTx = 2;
+    bool isLocal = 3;
+  }
+  repeated Tx txs = 1;
+}
+
 message StatusRequest {}
 message StatusReply {
   uint32 pendingCount = 1;
@@ -72,6 +81,8 @@ service Txpool {
   rpc Transactions(TransactionsRequest) returns (TransactionsReply);
   // returns all transactions from tx pool
   rpc All(AllRequest) returns (AllReply);
+  // Returns all pending (processable) transactions, in ready-for-mining order
+  rpc Pending(google.protobuf.Empty) returns (PendingReply);
   // subscribe to new transactions add event
   rpc OnAdd(OnAddRequest) returns (stream OnAddReply);
   // returns high level status

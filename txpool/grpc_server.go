@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -44,6 +45,7 @@ var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
+	Best(n uint16, txs *TxsRlp, tx kv.Tx) error
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx) error
@@ -97,6 +99,28 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpool_proto.AllRequest) (*txpo
 		})
 	}, tx); err != nil {
 		return nil, err
+	}
+	return reply, nil
+}
+
+func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_proto.PendingReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	reply := &txpool_proto.PendingReply{}
+	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
+	txSlots := TxsRlp{}
+	if err := s.txPool.Best(math.MaxInt16, &txSlots, tx); err != nil {
+		return nil, err
+	}
+	for i := range txSlots.Txs {
+		reply.Txs = append(reply.Txs, &txpool_proto.PendingReply_Tx{
+			Sender:  txSlots.Senders.At(i),
+			RlpTx:   txSlots.Txs[i],
+			IsLocal: txSlots.IsLocal[i],
+		})
 	}
 	return reply, nil
 }
