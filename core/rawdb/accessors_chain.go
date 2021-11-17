@@ -319,7 +319,6 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
 	c, err := db.RwCursor(kv.EthTx)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	defer c.Close()
@@ -330,7 +329,6 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 		txId++
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := c.Append(txIdKey, tx); err != nil {
-			panic(err)
 			return err
 		}
 	}
@@ -529,7 +527,10 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 	}
 	defer c.Close()
 	k, v, err := c.Seek(dbutils.EncodeBlockNumber(from))
-	if len(k) == 0 {
+	if err != nil {
+		return err
+	}
+	if k == nil {
 		return nil
 	}
 	bodyForStorage := new(types.BodyForStorage)
