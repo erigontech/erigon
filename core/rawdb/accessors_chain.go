@@ -516,26 +516,6 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 
 // TruncateBlockBodies - truncates all eth block bodies with number >= from, including it's transactions
 func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
-	// Firs get oldest transaction ID - to truncate them also
-	// this func doesn't depend on Canonical markers - just to make it less depend on environment
-	c, err := tx.Cursor(kv.BlockBody)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	k, v, err := c.Seek(dbutils.EncodeBlockNumber(from))
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		return nil
-	}
-	bodyForStorage := new(types.BodyForStorage)
-	if err := rlp.DecodeBytes(v, bodyForStorage); err != nil {
-		return err
-	}
-	baseTx := bodyForStorage.BaseTxId
-
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -574,42 +554,14 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
 			return err
 		}
-	}
 
-	// Truncate from here
-	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Unwinding bodies...", logPrefix), "current block", binary.BigEndian.Uint64(k))
+			log.Info(fmt.Sprintf("[%s] Unwinding transactions...", logPrefix), "current block", blockNum)
 		default:
 		}
-
-		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	return TruncateBlockTransactions(tx, ctx, baseTx, logPrefix, logEvery)
-}
-
-// TruncateBlockTransactions - truncates all eth transactions with id >= from, including it's transactions
-func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
-	if err := tx.ForEach(kv.EthTx, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
-		select {
-		case <-ctx.Done():
-			panic(1)
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Unwinding transactions...", logPrefix), "current key", fmt.Sprintf("%x", k))
-		default:
-		}
-		return tx.Delete(kv.EthTx, k, nil)
-	}); err != nil {
-		return err
 	}
 
 	c, err := tx.Cursor(kv.EthTx)
@@ -628,6 +580,7 @@ func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, log
 	if err := ResetSequence(tx, kv.EthTx, nextTxID); err != nil {
 		return err
 	}
+
 	return nil
 }
 
