@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/test"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
@@ -19,20 +19,23 @@ func TestVerifyHeader(t *testing.T) {
 		auraDB    = memdb.NewTestDB(t)
 		engine, _ = aura.NewAuRa(nil, auraDB, common.Address{}, test.AuthorityRoundBlockRewardContract)
 		require   = require.New(t)
-		// signer1 = []byte("0x7d577a597b2742b498cb5cf0c26cdcd726d39e6e")
-		// signer2 = []byte("0x82a978b3f5962a5b0957d9ee9eef472ee55b42f1")
+		signer1   = []byte("0x7d577a597b2742b498cb5cf0c26cdcd726d39e6e")
+		//signer2 = []byte("0x82a978b3f5962a5b0957d9ee9eef472ee55b42f1")
 	)
 
-	genspec := &core.Genesis{
-		ExtraData: make([]byte, aura.ExtraVanity+aura.ExtraSeal),
-		Mixhash:    common.Hash{},
-		Config:     params.TestChainAuraConfig,
-	}
+	// genspec := &core.Genesis{
+	// 	ExtraData: make([]byte, aura.ExtraVanity+aura.ExtraSeal),
+	// 	Mixhash:    common.Hash{},
+	// 	Config:     params.TestChainAuraConfig,
+	// }
+	types.SetHeaderSealFlag(true)
+	genspec := core.DefaultSokolGenesisBlock()
 
 	m := stages.MockWithGenesisEngine(t, genspec, engine)
 	m.EnableLogs()
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 25, func(i int, block *core.BlockGen) {
+		block.SetCoinbase(common.BytesToAddress(signer1))
 	}, false)
 
 	require.NoError(err)
