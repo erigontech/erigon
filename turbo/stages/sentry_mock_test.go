@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,8 +61,6 @@ func TestHeaderStep(t *testing.T) {
 
 func TestMineBlockWith1Tx(t *testing.T) {
 	t.Skip("revive me")
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	require, m := require.New(t), stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
@@ -128,8 +125,6 @@ func TestMineBlockWith1Tx(t *testing.T) {
 }
 
 func TestReorg(t *testing.T) {
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
