@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"runtime"
 	"time"
@@ -312,7 +311,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		}
 
 		if cfg.chainConfig.TerminalTotalDifficulty != nil && !isTrans {
-			if err := tx.Delete(kv.HeaderTD, dbutils.HeaderKey(math.MaxUint64, common.Hash{}), nil); err != nil {
+			if err := tx.Delete(kv.TransitionBlockKey, []byte(kv.TransitionBlockKey), nil); err != nil {
 				return err
 			}
 		}
