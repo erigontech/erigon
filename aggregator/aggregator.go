@@ -948,7 +948,7 @@ func (r *Reader) ReadAccountStorage(addr []byte, loc []byte) (*uint256.Int, erro
 	return nil, nil
 }
 
-func (r *Reader) ReadAccountCode(addr []byte, incarnation uint64) ([]byte, error) {
+func (r *Reader) ReadAccountCode(addr []byte) ([]byte, error) {
 	// Look in the summary table first
 	v, err := r.tx.GetOne(kv.StateCode, addr)
 	if err != nil {
@@ -961,10 +961,6 @@ func (r *Reader) ReadAccountCode(addr []byte, incarnation uint64) ([]byte, error
 	// Look in the files
 	val := r.a.readCode(r.blockNum, addr)
 	return val, nil
-}
-
-func (r *Reader) ReadAccountIncarnation(addr []byte) uint64 {
-	return r.blockNum
 }
 
 type Writer struct {
@@ -1138,7 +1134,7 @@ func (ch *CursorHeap) Pop() interface{} {
 	return x
 }
 
-func (w *Writer) DeleteAccount(addr []byte) error {
+func (w *Writer) deleteAccount(addr []byte) error {
 	prevV, err := w.tx.GetOne(kv.StateAccounts, addr)
 	if err != nil {
 		return err
@@ -1163,14 +1159,53 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 	if err = w.a.accountChanges.delete(addr, original); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (w *Writer) deleteCode(addr []byte) error {
+	prevV, err := w.tx.GetOne(kv.StateCode, addr)
+	if err != nil {
+		return err
+	}
+	var prevNum uint32
+	var original []byte
+	if prevV == nil {
+		original = w.a.readCode(w.blockNum, addr)
+	} else {
+		prevNum = binary.BigEndian.Uint32(prevV[:4])
+	}
+	v := make([]byte, 4)
+	binary.BigEndian.PutUint32(v[:4], prevNum+1)
+	if err = w.tx.Put(kv.StateCode, addr, v); err != nil {
+		return err
+	}
+	if prevV == nil && original == nil {
+		// Nothing to do
+		return nil
+	} else if original == nil {
+		original = prevV[4:]
+	}
+	if err = w.a.codeChanges.delete(addr, original); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *Writer) DeleteAccount(addr []byte) error {
+	if err := w.deleteAccount(addr); err != nil {
+		return err
+	}
+	if err := w.deleteCode(addr); err != nil {
+		return err
+	}
 	// Find all storage items for this address
 	var cp CursorHeap
 	heap.Init(&cp)
-	var c kv.Cursor
-	if c, err = w.tx.Cursor(kv.StateStorage); err != nil {
+	c, err := w.tx.Cursor(kv.StateStorage)
+	if err != nil {
 		return err
 	}
-	var k []byte
+	var k, v []byte
 	if k, v, err = c.Seek(addr); err != nil {
 		return err
 	}
@@ -1179,6 +1214,9 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 	}
 	w.a.byEndBlock.Ascend(func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
+		if item.storageIdx.Empty() {
+			return true
+		}
 		offset := item.storageIdx.Lookup(addr)
 		g := item.storageD.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
@@ -1230,11 +1268,12 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 				}
 			}
 		}
+		var prevV []byte
 		prevV, err = w.tx.GetOne(kv.StateStorage, lastKey)
 		if err != nil {
 			return err
 		}
-		prevNum = 0
+		var prevNum uint32
 		if prevV != nil {
 			prevNum = binary.BigEndian.Uint32(prevV[:4])
 		}

@@ -279,3 +279,86 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 		tx.Rollback()
 	}
 }
+
+func TestChangeCode(t *testing.T) {
+	tmpDir := t.TempDir()
+	db := memdb.New()
+	defer db.Close()
+	a, err := NewAggregator(tmpDir, 16, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	accountKey := int160(1)
+	var account1 = int256(1)
+	var code1 = []byte("This is the code number 1")
+	//var code2 = []byte("This is the code number 2")
+	var rwTx kv.RwTx
+	defer func() {
+		rwTx.Rollback()
+	}()
+	var tx kv.Tx
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+	for blockNum := uint64(0); blockNum < 100; blockNum++ {
+		if rwTx, err = db.BeginRw(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		var w *Writer
+		if w, err = a.MakeStateWriter(rwTx, blockNum); err != nil {
+			t.Fatal(err)
+		}
+		switch blockNum {
+		case 1:
+			if err = w.UpdateAccountData(accountKey, account1); err != nil {
+				t.Fatal(err)
+			}
+			if err = w.UpdateAccountCode(accountKey, code1); err != nil {
+				t.Fatal(err)
+			}
+		case 25:
+			if err = w.DeleteAccount(accountKey); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err = w.Finish(); err != nil {
+			t.Fatal(err)
+		}
+		if err = rwTx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if tx, err = db.BeginRo(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		r := a.MakeStateReader(tx, blockNum+1)
+		switch blockNum {
+		case 22:
+			var acc []byte
+			if acc, err = r.ReadAccountData(accountKey); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(account1, acc) {
+				t.Errorf("wrong account after block %d, expected %x, got %x", blockNum, account1, acc)
+			}
+			var code []byte
+			if code, err = r.ReadAccountCode(accountKey); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(code1, code) {
+				t.Errorf("wrong code after block %d, expected %x, got %x", blockNum, code1, code)
+			}
+		case 47:
+			var code []byte
+			if code, err = r.ReadAccountCode(accountKey); err != nil {
+				t.Fatal(err)
+			}
+			if code != nil {
+				t.Errorf("wrong code after block %d, expected nil, got %x", blockNum, code)
+			}
+		}
+		tx.Rollback()
+	}
+}
