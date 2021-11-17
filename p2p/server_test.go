@@ -73,7 +73,7 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 		ListenAddr:  "127.0.0.1:0",
 		NoDiscovery: true,
 		PrivateKey:  newkey(),
-		Logger:      testlog.Logger(t, log.LvlInfo),
+		Logger:      testlog.Logger(t, log.LvlError),
 	}
 	server := &Server{
 		Config:      config,
