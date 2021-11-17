@@ -319,6 +319,7 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
 	c, err := db.RwCursor(kv.EthTx)
 	if err != nil {
+		panic(err)
 		return err
 	}
 	defer c.Close()
@@ -329,6 +330,7 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 		txId++
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := c.Append(txIdKey, tx); err != nil {
+			panic(err)
 			return err
 		}
 	}
@@ -455,20 +457,22 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
+		panic(err)
 		return err
 	}
-	fmt.Printf("baseTxId: %d,%d\n", baseTxId, number)
 	data, err := rlp.EncodeToBytes(types.BodyForStorage{
 		BaseTxId: baseTxId,
 		TxAmount: uint32(len(body.Transactions)),
 		Uncles:   body.Uncles,
 	})
 	if err != nil {
+		panic(err)
 		return fmt.Errorf("failed to RLP encode body: %w", err)
 	}
 	WriteBodyRLP(db, hash, number, data)
 	err = WriteRawTransactions(db, body.Transactions, baseTxId)
 	if err != nil {
+		panic(err)
 		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
 	}
 	return nil
@@ -553,7 +557,6 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 
 // TruncateBlockTransactions - truncates all eth transactions with id >= from, including it's transactions
 func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
-	fmt.Printf("tr: %d\n", from)
 	if err := tx.ForEach(kv.EthTx, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
 		select {
 		case <-ctx.Done():
@@ -562,8 +565,6 @@ func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, log
 			log.Info(fmt.Sprintf("[%s] Unwinding transactions...", logPrefix), "current key", fmt.Sprintf("%x", k))
 		default:
 		}
-
-		fmt.Printf("del: %d\n", binary.BigEndian.Uint64(k))
 		return tx.Delete(kv.EthTx, k, nil)
 	}); err != nil {
 		return err
@@ -580,7 +581,7 @@ func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, log
 	}
 	lastTxID := binary.BigEndian.Uint64(k)
 
-	if err := ResetSequence(tx, kv.EthTx, lastTxID); err != nil {
+	if err := ResetSequence(tx, kv.EthTx, lastTxID+1); err != nil {
 		return err
 	}
 	return nil

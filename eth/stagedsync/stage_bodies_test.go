@@ -38,12 +38,12 @@ func TestBodiesUnwind(t *testing.T) {
 
 	n, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(err)
-	require.Equal(5*3-1, int(n)) // from 0, 5 block with 3 txn in each
+	require.Equal(5*3, int(n)) // from 0, 5 block with 3 txn in each
 
 	err = rawdb.WriteRawBody(tx, common.Hash{}, 6, b)
 	require.NoError(err)
 
 	n, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(err)
-	require.Equal(6*3-1, int(n))
+	require.Equal(6*3, int(n))
 }
