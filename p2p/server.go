@@ -1094,7 +1094,7 @@ func (srv *Server) runPeer(p *Peer) {
 
 // NodeInfo represents a short summary of the information known about the host.
 type NodeInfo struct {
-	ID    string `json:"id"`    // Unique node identifier (also the encryption key)
+	ID    string `json:"id"`    // Unique node identifier
 	Name  string `json:"name"`  // Name of the node, including client type, version, OS, custom data
 	Enode string `json:"enode"` // Enode URL for adding this peer from remote peers
 	ENR   string `json:"enr"`   // Ethereum Node Record

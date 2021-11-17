@@ -130,7 +130,7 @@ func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
 	return peer
 }
 
-// ID returns the node's public key.
+// ID returns the node's unique identifier.
 func (p *Peer) ID() enode.ID {
 	return p.rw.node.ID()
 }
