@@ -577,9 +577,11 @@ func TruncateBlockTransactions(tx kv.RwTx, ctx context.Context, from uint64, log
 	if err != nil {
 		return err
 	}
-	lastTxID := binary.BigEndian.Uint64(k)
-
-	if err := ResetSequence(tx, kv.EthTx, lastTxID+1); err != nil {
+	var nextTxID uint64
+	if k != nil {
+		nextTxID = binary.BigEndian.Uint64(k) + 1
+	}
+	if err := ResetSequence(tx, kv.EthTx, nextTxID); err != nil {
 		return err
 	}
 	return nil
