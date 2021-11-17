@@ -455,7 +455,6 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
-		panic(err)
 		return err
 	}
 	data, err := rlp.EncodeToBytes(types.BodyForStorage{
@@ -464,13 +463,11 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		Uncles:   body.Uncles,
 	})
 	if err != nil {
-		panic(err)
 		return fmt.Errorf("failed to RLP encode body: %w", err)
 	}
 	WriteBodyRLP(db, hash, number, data)
 	err = WriteRawTransactions(db, body.Transactions, baseTxId)
 	if err != nil {
-		panic(err)
 		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
 	}
 	return nil
@@ -540,7 +537,7 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 	baseTx := bodyForStorage.BaseTxId
 
 	// Truncate from here
-	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
+	if err := tx.ForEacch(kv.BlockBody, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
