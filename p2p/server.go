@@ -510,7 +510,7 @@ func (srv *Server) Start() error {
 func (srv *Server) setupLocalNode() error {
 	// Create the devp2p handshake.
 	pubkey := crypto.FromECDSAPub(&srv.PrivateKey.PublicKey)
-	srv.ourHandshake = &protoHandshake{Version: baseProtocolVersion, Name: srv.Name, ID: pubkey[1:]}
+	srv.ourHandshake = &protoHandshake{Version: baseProtocolVersion, Name: srv.Name, Pubkey: pubkey[1:]}
 	for _, p := range srv.Protocols {
 		srv.ourHandshake.Caps = append(srv.ourHandshake.Caps, p.cap())
 	}
@@ -1012,8 +1012,8 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}
-	if id := c.node.ID(); !bytes.Equal(crypto.Keccak256(phs.ID), id[:]) {
-		clog.Trace("Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.ID))
+	if id := c.node.ID(); !bytes.Equal(crypto.Keccak256(phs.Pubkey), id[:]) {
+		clog.Trace("Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.Pubkey))
 		return DiscUnexpectedIdentity
 	}
 	c.caps, c.name = phs.Caps, phs.Name
