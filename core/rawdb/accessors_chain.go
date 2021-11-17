@@ -537,7 +537,7 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 	baseTx := bodyForStorage.BaseTxId
 
 	// Truncate from here
-	if err := tx.ForEacch(kv.BlockBody, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
+	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
