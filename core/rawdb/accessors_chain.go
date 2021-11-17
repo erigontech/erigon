@@ -335,11 +335,13 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	return nil
 }
 
-// WriteBodyRLP stores an RLP encoded block body into the database.
-func WriteBodyRLP(db kv.Putter, hash common.Hash, number uint64, rlp rlp.RawValue) {
-	if err := db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
-		log.Crit("Failed to store block body", "err", err)
+// WriteBodyForStorage stores an RLP encoded block body into the database.
+func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *types.BodyForStorage) error {
+	data, err := rlp.EncodeToBytes(body)
+	if err != nil {
+		return err
 	}
+	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 
 // HasBody verifies the existence of a block body corresponding to the hash.
@@ -457,15 +459,14 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err != nil {
 		return err
 	}
-	data, err := rlp.EncodeToBytes(types.BodyForStorage{
+	data := types.BodyForStorage{
 		BaseTxId: baseTxId,
 		TxAmount: uint32(len(body.Transactions)),
 		Uncles:   body.Uncles,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to RLP encode body: %w", err)
 	}
-	WriteBodyRLP(db, hash, number, data)
+	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
+		return fmt.Errorf("failed to write body: %w", err)
+	}
 	err = WriteRawTransactions(db, body.Transactions, baseTxId)
 	if err != nil {
 		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
@@ -480,15 +481,14 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) er
 	if err != nil {
 		return err
 	}
-	data, err := rlp.EncodeToBytes(types.BodyForStorage{
+	data := types.BodyForStorage{
 		BaseTxId: baseTxId,
 		TxAmount: uint32(len(body.Transactions)),
 		Uncles:   body.Uncles,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to RLP encode body: %w", err)
 	}
-	WriteBodyRLP(db, hash, number, data)
+	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
+		return fmt.Errorf("failed to write body: %w", err)
+	}
 	err = WriteTransactions(db, body.Transactions, baseTxId)
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
@@ -536,6 +536,46 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 	}
 	baseTx := bodyForStorage.BaseTxId
 
+	for blockNum := from; ; blockNum++ {
+		h, err := ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if h == (common.Hash{}) {
+			break
+		}
+		data := ReadStorageBodyRLP(tx, h, blockNum)
+		if len(data) == 0 {
+			break
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+			return err
+		}
+
+		// move txs to NonCanonical bucket, it has own sequence
+		newBaseId, err := tx.IncrementSequence(kv.NonCanonicalTxs, uint64(bodyForStorage.TxAmount))
+		if err != nil {
+			return err
+		}
+
+		id := newBaseId
+		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
+			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(newBaseId), v); err != nil {
+				return err
+			}
+			id++
+			return tx.Delete(kv.EthTx, k, nil)
+		}); err != nil {
+			return err
+		}
+
+		bodyForStorage.BaseTxId = newBaseId
+		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
+			return err
+		}
+	}
+
 	// Truncate from here
 	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(from), func(k, _ []byte) error {
 		select {
@@ -546,7 +586,10 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 		default:
 		}
 
-		return tx.Delete(kv.BlockBody, k, nil)
+		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
