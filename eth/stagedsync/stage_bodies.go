@@ -166,8 +166,6 @@ Loop:
 				return err
 			}
 			if exists {
-				//TODO: make body canonical - move txs
-			} else {
 				if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
 					return fmt.Errorf("writing block body: %w", err)
 				}
@@ -256,8 +254,6 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-
-	fmt.Printf("unwind: %d\n", u.UnwindPoint)
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()

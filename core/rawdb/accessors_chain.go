@@ -534,6 +534,47 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 	}
 }
 
+func MakeBlockCanonical(tx kv.RwTx, from uint64) error {
+	for blockNum := from; ; blockNum++ {
+		h, err := ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if h == (common.Hash{}) {
+			break
+		}
+		data := ReadStorageBodyRLP(tx, h, blockNum)
+		if len(data) == 0 {
+			return nil
+		}
+		bodyForStorage := new(types.BodyForStorage)
+		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+			return err
+		}
+		newBaseId, err := tx.IncrementSequence(kv.EthTx, uint64(bodyForStorage.TxAmount))
+		if err != nil {
+			return err
+		}
+
+		id := newBaseId
+		if err := tx.ForAmount(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
+			if err := tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(newBaseId), v); err != nil {
+				return err
+			}
+			id++
+			return tx.Delete(kv.NonCanonicalTxs, k, nil)
+		}); err != nil {
+			return err
+		}
+
+		bodyForStorage.BaseTxId = newBaseId
+		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // TruncateBlockBodies - truncates all eth block bodies with number >= from, including it's transactions
 func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
 	for blockNum := from; ; blockNum++ {
