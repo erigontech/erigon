@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - devel
+      - stable
   pull_request:
     branches:
       - devel
+      - stable
 jobs:
   tests:
     strategy:
@@ -42,7 +44,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.41
+          version: v1.42
           skip-go-installation: true
           skip-pkg-cache: true
           skip-build-cache: true
