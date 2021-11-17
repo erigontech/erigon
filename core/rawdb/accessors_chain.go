@@ -543,6 +543,8 @@ func MakeBlockCanonical(tx kv.RwTx, from uint64) error {
 		if h == (common.Hash{}) {
 			break
 		}
+		fmt.Printf("aaaaaaa\n")
+
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
 			return nil
@@ -572,11 +574,24 @@ func MakeBlockCanonical(tx kv.RwTx, from uint64) error {
 			return err
 		}
 	}
+	fmt.Printf("---- After\n")
+	tx.ForEach(kv.EthTx, nil, func(k, v []byte) error {
+		fmt.Printf("%d\n", binary.BigEndian.Uint64(k))
+		return nil
+	})
+	fmt.Printf("---- After done\n")
+
 	return nil
 }
 
 // TruncateBlockBodies - truncates all eth block bodies with number >= from, including it's transactions
 func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
+	fmt.Printf("---- Before\n")
+	tx.ForEach(kv.EthTx, nil, func(k, v []byte) error {
+		fmt.Printf("%d\n", binary.BigEndian.Uint64(k))
+		return nil
+	})
+	fmt.Printf("---- Before done\n")
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {

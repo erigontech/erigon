@@ -165,7 +165,7 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if exists {
+			if !exists {
 				if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
 					return fmt.Errorf("writing block body: %w", err)
 				}
