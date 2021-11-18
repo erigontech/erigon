@@ -81,8 +81,8 @@ func BodiesForward(
 	}
 
 	// Property of blockchain: same block in different forks will have different hashes.
-	// Means - can safely mark all canonical blocks as non-canonical on unwind, and
-	// do opposite here - without any storing any meta-info.
+	// Means - can mark all canonical blocks as non-canonical on unwind, and
+	// do opposite here - without storing any meta-info.
 	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1); err != nil {
 		return fmt.Errorf("make block canonical: %w", err)
 	}
