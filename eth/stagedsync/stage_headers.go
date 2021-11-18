@@ -222,11 +222,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 	var ch common.Hash
 	var err error
-	needBlocksRewrite := false
 	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
-		if !needBlocksRewrite && ch != (common.Hash{}) {
-			needBlocksRewrite = true
-		}
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
 			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
@@ -247,10 +243,8 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
-	if needBlocksRewrite {
-		if err := rawdb.MakeBlockCanonical(tx, ancestorHeight+1); err != nil {
-			return fmt.Errorf("make block canonical: %w", err)
-		}
+	if err := rawdb.MakeBlockCanonical(tx, ancestorHeight+1); err != nil {
+		return fmt.Errorf("make block canonical: %w", err)
 	}
 
 	return nil

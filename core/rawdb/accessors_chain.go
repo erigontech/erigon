@@ -535,6 +535,16 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 func MakeBlockCanonical(tx kv.RwTx, from uint64) error {
+	//fmt.Printf("---- MakeBlockCanonical before %d\n", from)
+	//tx.ForEach(kv.EthTx, nil, func(k, v []byte) error {
+	//	fmt.Printf("+%d\n", binary.BigEndian.Uint64(k))
+	//	return nil
+	//})
+	//tx.ForEach(kv.NonCanonicalTxs, nil, func(k, v []byte) error {
+	//	fmt.Printf("-%d\n", binary.BigEndian.Uint64(k))
+	//	return nil
+	//})
+	//fmt.Printf("---- MakeBlockCanonical before done\n")
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -543,11 +553,10 @@ func MakeBlockCanonical(tx kv.RwTx, from uint64) error {
 		if h == (common.Hash{}) {
 			break
 		}
-		fmt.Printf("aaaaaaa\n")
 
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
-			return nil
+			continue
 		}
 		bodyForStorage := new(types.BodyForStorage)
 		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
@@ -560,7 +569,7 @@ func MakeBlockCanonical(tx kv.RwTx, from uint64) error {
 
 		id := newBaseId
 		if err := tx.ForAmount(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			if err := tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(newBaseId), v); err != nil {
+			if err := tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(id), v); err != nil {
 				return err
 			}
 			id++
@@ -570,28 +579,37 @@ func MakeBlockCanonical(tx kv.RwTx, from uint64) error {
 		}
 
 		bodyForStorage.BaseTxId = newBaseId
+		//fmt.Printf("make canonical: %d\n", blockNum)
 		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
 			return err
 		}
 	}
-	fmt.Printf("---- After\n")
-	tx.ForEach(kv.EthTx, nil, func(k, v []byte) error {
-		fmt.Printf("%d\n", binary.BigEndian.Uint64(k))
-		return nil
-	})
-	fmt.Printf("---- After done\n")
+	//fmt.Printf("---- MakeBlockCanonical\n")
+	//tx.ForEach(kv.EthTx, nil, func(k, v []byte) error {
+	//	fmt.Printf("+%d\n", binary.BigEndian.Uint64(k))
+	//	return nil
+	//})
+	//tx.ForEach(kv.NonCanonicalTxs, nil, func(k, v []byte) error {
+	//	fmt.Printf("-%d\n", binary.BigEndian.Uint64(k))
+	//	return nil
+	//})
+	//fmt.Printf("---- MakeBlockCanonical done\n")
 
 	return nil
 }
 
 // TruncateBlockBodies - truncates all eth block bodies with number >= from, including it's transactions
 func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
-	fmt.Printf("---- Before\n")
-	tx.ForEach(kv.EthTx, nil, func(k, v []byte) error {
-		fmt.Printf("%d\n", binary.BigEndian.Uint64(k))
-		return nil
-	})
-	fmt.Printf("---- Before done\n")
+	//fmt.Printf("---- Before\n")
+	//tx.ForEach(kv.EthTx, nil, func(k, v []byte) error {
+	//	fmt.Printf("+%d\n", binary.BigEndian.Uint64(k))
+	//	return nil
+	//})
+	//tx.ForEach(kv.NonCanonicalTxs, nil, func(k, v []byte) error {
+	//	fmt.Printf("-%d\n", binary.BigEndian.Uint64(k))
+	//	return nil
+	//})
+	//fmt.Printf("---- Before done\n")
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -602,7 +620,7 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 		}
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
-			break
+			continue
 		}
 		bodyForStorage := new(types.BodyForStorage)
 		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
@@ -617,7 +635,7 @@ func TruncateBlockBodies(tx kv.RwTx, ctx context.Context, from uint64, logPrefix
 
 		id := newBaseId
 		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(newBaseId), v); err != nil {
+			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
 				return err
 			}
 			id++

@@ -147,6 +147,21 @@ Loop:
 		if err != nil {
 			return err
 		}
+		//for blockNum := bodyProgress; ; blockNum++ {
+		//	h, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	if h == (common.Hash{}) {
+		//		break
+		//	}
+		//
+		//	found := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
+		//	if len(found) != 0 {
+		//		fmt.Printf("found: %d\n", blockNum)
+		//	}
+		//}
+
 		d4 += time.Since(start)
 		start = time.Now()
 		cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
@@ -179,12 +194,10 @@ Loop:
 		}
 		d5 += time.Since(start)
 		start = time.Now()
-		fmt.Printf("alex: %d,%d\n", bodyProgress, headerProgress)
 		if bodyProgress == headerProgress {
 			break
 		}
 		if test {
-			//panic(1)
 			stopped = true
 			break
 		}
