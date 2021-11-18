@@ -448,25 +448,6 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 	return senders, nil
 }
 
-func MakeBodyCanonical(db kv.StatelessWriteTx, hash common.Hash, number uint64, body *types.RawBody) error {
-	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
-	if err != nil {
-		return err
-	}
-	data := types.BodyForStorage{
-		BaseTxId: baseTxId,
-		TxAmount: uint32(len(body.Transactions)),
-		Uncles:   body.Uncles,
-	}
-	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
-		return fmt.Errorf("failed to write body: %w", err)
-	}
-	if err = WriteRawTransactions(db, body.Transactions, baseTxId); err != nil {
-		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
-	}
-	return nil
-}
-
 func WriteRawBodyIfNotExists(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	exists, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
