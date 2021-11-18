@@ -43,6 +43,15 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
+
+	difficulty := new(big.Int)
+
+	if header.Eip3675 {
+		// Turn DIFFICULTY into RANDOM when the merge is done. spec: https://ethereum-magicians.org/t/eip-4399-supplant-difficulty-opcode-with-random/7368
+		difficulty.SetBytes(header.Random[:])
+	} else {
+		difficulty.Set(header.Difficulty)
+	}
 	if contractHasTEVM == nil {
 		contractHasTEVM = func(_ common.Hash) (bool, error) {
 			return false, nil
@@ -55,7 +64,7 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 		Coinbase:        beneficiary,
 		BlockNumber:     header.Number.Uint64(),
 		Time:            header.Time,
-		Difficulty:      new(big.Int).Set(header.Difficulty),
+		Difficulty:      difficulty,
 		BaseFee:         &baseFee,
 		GasLimit:        header.GasLimit,
 		ContractHasTEVM: contractHasTEVM,

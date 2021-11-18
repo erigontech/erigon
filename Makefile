@@ -110,9 +110,10 @@ tracker:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
-db-tools: libmdbx
+db-tools:
 	@echo "Building db-tools"
-	git submodule update --init --recursive
+	rm -rf libmdbx # hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+	git submodule update --init --recursive --force
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)

@@ -583,7 +583,7 @@ func (f *BlockFetcher) loop() {
 			// abort early if there's nothing explicitly requested
 			if len(f.completing) > 0 {
 				for i := 0; i < len(task.transactions) && i < len(task.uncles); i++ {
-					// Match up a body to any possible completion request
+					// Has up a body to any possible completion request
 					var (
 						matched   = false
 						uncleHash common.Hash // calculated lazily and reused
