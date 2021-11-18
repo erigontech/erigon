@@ -515,6 +515,9 @@ func (c *AuRa) GetStep() uint64 {
 	return c.step.inner.inner.Load()
 }
 
+func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+}
+
 // TODO: retrieve validators from Database
 /*func (c *AuRa) GetValidatorSet() ValidatorSet {
 	return c.cfg.Validators

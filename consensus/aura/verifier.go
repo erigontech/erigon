@@ -101,7 +101,7 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 		return err
 	}
 
-	// validatorAddress, err := stepProposer(validators, header.Hash(), step, nil)
+	//validatorAddress, err := stepProposer(validators, header.Hash(), step, nil)
 
 	if err != nil {
 		return err
@@ -119,9 +119,9 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 	copy(signer[:], signature)
 
 	// compares signer address from the header to the validator address gotten from the step
-	if validatorAddress != signer {
+	/*if validatorAddress != signer {
 		return errInvalidPrimary
-	}
+	}*/
 
 	return nil
 }
