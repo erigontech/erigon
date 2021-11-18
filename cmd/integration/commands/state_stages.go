@@ -299,7 +299,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			break
 		}
 
-		nextBlock, _, err := rawdb.ReadBlockByNumberWithSenders(tx, execAtBlock+1)
+		nextBlock, _, err := rawdb.CanonicalBlockByNumberWithSenders(tx, execAtBlock+1)
 		if err != nil {
 			panic(err)
 		}

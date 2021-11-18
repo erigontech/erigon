@@ -261,7 +261,34 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	return bodyRlp
 }
 
-func ReadTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
+	if amount == 0 {
+		return []types.Transaction{}, nil
+	}
+	txIdKey := make([]byte, 8)
+	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
+	txs := make([]types.Transaction, amount)
+	binary.BigEndian.PutUint64(txIdKey, baseTxId)
+	i := uint32(0)
+
+	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
+		var decodeErr error
+		reader.Reset(v)
+		stream.Reset(reader, 0)
+		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
+			return decodeErr
+		}
+		i++
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	txs = txs[:i] // user may request big "amount", but db can return small "amount". Return as much as we found.
+	return txs, nil
+}
+
+func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil
 	}
@@ -364,7 +391,21 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *ty
 		return nil
 	}
 	var err error
-	body.Transactions, err = ReadTransactions(db, baseTxId, txAmount)
+	body.Transactions, err = CanonicalTransactions(db, baseTxId, txAmount)
+	if err != nil {
+		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
+		return nil
+	}
+	return body
+}
+
+func NonCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	var err error
+	body.Transactions, err = NonCanonicalTransactions(db, baseTxId, txAmount)
 	if err != nil {
 		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
 		return nil
@@ -908,6 +949,27 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles)
 }
 
+func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
+	header := ReadHeader(tx, hash, number)
+	if header == nil {
+		return nil, nil, fmt.Errorf("header not found for block %d, %x", number, hash)
+	}
+	body := ReadBodyWithTransactions(tx, hash, number)
+	if body == nil {
+		return nil, nil, fmt.Errorf("body not found for block %d, %x", number, hash)
+	}
+	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles)
+	senders, err := ReadSenders(tx, hash, number)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(senders) != block.Transactions().Len() {
+		return block, senders, nil // no senders is fine - will recover them on the fly
+	}
+	block.SendersToTxs(senders)
+	return block, senders, nil
+}
+
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
 // It's is not equivalent of HasHeader because headers and bodies written by different stages
 func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
@@ -965,7 +1027,7 @@ func ReadBlockByNumber(db kv.Tx, number uint64) (*types.Block, error) {
 	return ReadBlock(db, hash, number), nil
 }
 
-func ReadBlockByNumberWithSenders(db kv.Tx, number uint64) (*types.Block, []common.Address, error) {
+func CanonicalBlockByNumberWithSenders(db kv.Tx, number uint64) (*types.Block, []common.Address, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
