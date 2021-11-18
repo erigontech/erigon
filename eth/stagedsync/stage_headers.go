@@ -255,7 +255,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 		return fmt.Errorf("reading canonical hash for %d: %w", ancestorHeight, err)
 	}
 
-	if err := rawdb.MakeBlockCanonical(tx, ancestorHeight+1); err != nil {
+	if err := rawdb.MakeBodiesCanonical(tx, ancestorHeight+1); err != nil {
 		return fmt.Errorf("make block canonical: %w", err)
 	}
 

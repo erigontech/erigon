@@ -271,7 +271,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	if err := rawdb.TruncateBlockBodies(tx, ctx, u.UnwindPoint+1, u.LogPrefix(), logEvery); err != nil {
+	if err := rawdb.MakeBodiesNonCanonical(tx, ctx, u.UnwindPoint+1, u.LogPrefix(), logEvery); err != nil {
 		return err
 	}
 
