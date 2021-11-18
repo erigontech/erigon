@@ -79,6 +79,14 @@ func BodiesForward(
 	if bodyProgress == headerProgress {
 		return nil
 	}
+
+	// Property of blockchain: same block in different forks will have different hashes.
+	// Means - can safely mark all canonical blocks as non-canonical on unwind, and
+	// do opposite here - without any storing any meta-info.
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1); err != nil {
+		return fmt.Errorf("make block canonical: %w", err)
+	}
+
 	logPrefix := s.LogPrefix()
 	if headerProgress <= bodyProgress+16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
