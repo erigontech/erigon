@@ -95,13 +95,13 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 	}
 
 	// checking if the validator is correct
-	validators, _, err := c.epochSet(chain, nil, header, nil)
+	// validators, _, err := c.epochSet(chain, nil, header, nil)
 
 	if err != nil {
 		return err
 	}
 
-	validatorAddress, err := stepProposer(validators, header.Hash(), step, nil)
+	// validatorAddress, err := stepProposer(validators, header.Hash(), step, nil)
 
 	if err != nil {
 		return err

@@ -18,12 +18,10 @@
 package aura
 
 import (
-	"sort"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 )
 
@@ -80,11 +78,11 @@ type JsonSpec struct {
 
 	// Starting step. Determined automatically if not specified.
 	// To be used for testing only.
-	StartStep               *uint64         `json:"startStep"`
-	ValidateScoreTransition *uint64         `json:"validateScoreTransition"` // Block at which score validation should start.
-	ValidateStepTransition  *uint64         `json:"validateStepTransition"`  // Block from which monotonic steps start.
-	ImmediateTransitions    *bool           `json:"immediateTransitions"`    // Whether transitions should be immediate.
-	BlockReward             *hexutil.Uint64 `json:"blockReward"`             // Reward per block in wei.
+	StartStep               *uint64  `json:"startStep"`
+	ValidateScoreTransition *uint64  `json:"validateScoreTransition"` // Block at which score validation should start.
+	ValidateStepTransition  *uint64  `json:"validateStepTransition"`  // Block from which monotonic steps start.
+	ImmediateTransitions    *bool    `json:"immediateTransitions"`    // Whether transitions should be immediate.
+	BlockReward             *big.Int `json:"blockReward"`             // Reward per block in wei.
 	// Block at which the block reward contract should start being used. This option allows one to
 	// add a single block reward contract transition and is compatible with the multiple address
 	// option `block_reward_contract_transitions` below.
@@ -153,122 +151,57 @@ func NewBlockRewardContract(address common.Address) *BlockRewardContract {
 }
 
 type AuthorityRoundParams struct {
-	// A map defining intervals of blocks with the given times (in seconds) to wait before next
-	// block or authority switching. The keys in the map are steps of starting blocks of those
-	// periods. The entry at `0` should be defined.
-	//
-	// Wait times (durations) are additionally required to be less than 65535 since larger values
-	// lead to slow block issuance.
-	StepDurations map[uint64]uint64
-	// Starting step,
-	StartStep *uint64
-	// Valid validators.
-	Validators ValidatorSet
+	// time (in seconds) to wait before next block or authority switching.
+	StepDuration uint64
 	// Chain score validation transition block.
 	ValidateScoreTransition uint64
 	// Monotonic step validation transition block.
 	ValidateStepTransition uint64
-	// Immediate transitions.
-	ImmediateTransitions bool
 	// Block reward in base units.
-	BlockReward BlockRewardList
-	// Block reward contract addresses with their associated starting block numbers.
-	BlockRewardContractTransitions BlockRewardContractList
-	// Number of accepted uncles transition block.
-	MaximumUncleCountTransition uint64
-	// Number of accepted uncles.
-	MaximumUncleCount uint
-	// Transition block to strict empty steps validation.
-	StrictEmptyStepsTransition uint64
+	BlockReward big.Int
+	// SafeContractTransition is when we switch to the safeContract (basic consensus contract)
+	SafeContractTransition map[uint64]common.Address
+	// ValidatorSetChange is the change in validators before the consensus contract come into action
+	ValidatorSetChange map[uint64][]common.Address
 	// If set, enables random number contract integration. It maps the transition block to the contract address.
-	RandomnessContractAddress map[uint64]common.Address
+
 	// The addresses of contracts that determine the block gas limit with their associated block
 	// numbers.
-	BlockGasLimitContractTransitions map[uint64]common.Address
+
+	// Other fields that we can deal with later on, for now the objective is to run Kovan
+
+	// MaximumUncleCount uint
+	// MaximumUncleCountTransition uint64
+	// StrictEmptyStepsTransition uint64
+	// RandomnessContractAddress map[uint64]common.Address
+	// BlockGasLimitContractTransitions map[uint64]common.Address
+	// BlockRewardContractTransitions BlockRewardContractList
+
 	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
 	// with POSDAO modifications.
-	PosdaoTransition *uint64
+	PosdaoTransition uint64
+	isPosdao         bool
 }
 
 func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 	params := AuthorityRoundParams{
-		Validators:                       newValidatorSetFromJson(jsonParams.Validators, jsonParams.PosdaoTransition),
-		StartStep:                        jsonParams.StartStep,
-		RandomnessContractAddress:        jsonParams.RandomnessContractAddress,
-		BlockGasLimitContractTransitions: jsonParams.BlockGasLimitContractTransitions,
-		PosdaoTransition:                 jsonParams.PosdaoTransition,
+		ValidateScoreTransition: *jsonParams.ValidateScoreTransition,
+		ValidateStepTransition:  *jsonParams.ValidateStepTransition,
+		StepDuration:            *jsonParams.StepDuration,
+		BlockReward:             *jsonParams.BlockReward,
 	}
-	params.StepDurations = map[uint64]uint64{}
-	if jsonParams.StepDuration != nil {
-		params.StepDurations[0] = *jsonParams.StepDuration
-	}
-
-	//TODO: jsonParams.BlockRewardContractTransitions
-	/*
-			   let mut br_transitions: BTreeMap<_, _> = p
-		           .block_reward_contract_transitions
-		           .unwrap_or_default()
-		           .into_iter()
-		           .map(|(block_num, address)| {
-		               (
-		                   block_num.into(),
-		                   BlockRewardContract::new_from_address(address.into()),
-		               )
-		           })
-		           .collect();
-	*/
-
-	transitionBlockNum := uint64(0)
-	if jsonParams.BlockRewardContractTransition != nil {
-		transitionBlockNum = *jsonParams.BlockRewardContractTransition
-	}
-	/*
-	   if (p.block_reward_contract_code.is_some() || p.block_reward_contract_address.is_some())
-	        && br_transitions
-	            .keys()
-	            .next()
-	            .map_or(false, |&block_num| block_num <= transition_block_num)
-	    {
-	        let s = "blockRewardContractTransition";
-	        panic!("{} should be less than any of the keys in {}s", s, s);
-	    }
-	*/
-	if jsonParams.BlockRewardContractCode != nil {
-		/* TODO: support hard-coded reward contract
-		    br_transitions.insert(
-		       transition_block_num,
-		       BlockRewardContract::new_from_code(Arc::new(code.into())),
-		   );
-		*/
-	} else if jsonParams.BlockRewardContractAddress != nil {
-		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: transitionBlockNum, address: *jsonParams.BlockRewardContractAddress})
-	}
-	sort.Sort(params.BlockRewardContractTransitions)
-
-	if jsonParams.ValidateScoreTransition != nil {
-		params.ValidateScoreTransition = *jsonParams.ValidateScoreTransition
-	}
-	if jsonParams.ValidateStepTransition != nil {
-		params.ValidateStepTransition = *jsonParams.ValidateStepTransition
-	}
-	if jsonParams.ImmediateTransitions != nil {
-		params.ImmediateTransitions = *jsonParams.ImmediateTransitions
-	}
-	if jsonParams.MaximumUncleCount != nil {
-		params.MaximumUncleCount = *jsonParams.MaximumUncleCount
-	}
-	if jsonParams.MaximumUncleCountTransition != nil {
-		params.MaximumUncleCountTransition = *jsonParams.MaximumUncleCountTransition
+	if jsonParams.PosdaoTransition != nil {
+		params.PosdaoTransition = *jsonParams.PosdaoTransition
+		params.isPosdao = true
 	}
 
-	if jsonParams.BlockReward == nil {
-		params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: u256.Num0})
-	} else {
-		if jsonParams.BlockReward != nil {
-			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(uint64(*jsonParams.BlockReward))})
+	for block_number, validatorSet := range jsonParams.Validators.Multi {
+		if validatorSet.SafeContract != nil {
+			params.SafeContractTransition[block_number] = *validatorSet.SafeContract
+			continue
 		}
+		params.ValidatorSetChange[block_number] = validatorSet.List
 	}
-	sort.Sort(params.BlockReward)
 
 	return params, nil
 }
