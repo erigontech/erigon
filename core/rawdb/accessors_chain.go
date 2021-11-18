@@ -570,7 +570,6 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 		}
 
 		bodyForStorage.BaseTxId = newBaseId
-		//fmt.Printf("make canonical: %d\n", blockNum)
 		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
 			return err
 		}
@@ -585,7 +584,6 @@ func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPre
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%d\n", blockNum)
 		if h == (common.Hash{}) {
 			break
 		}
@@ -604,7 +602,6 @@ func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPre
 		if err != nil {
 			return err
 		}
-
 		id := newBaseId
 		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
 			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
