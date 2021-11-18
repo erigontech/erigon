@@ -531,7 +531,7 @@ func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64, ctx context.Context, 
 
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
-			continue
+			break
 		}
 		bodyForStorage := new(types.BodyForStorage)
 		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
@@ -573,7 +573,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPre
 		}
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
-			continue
+			break
 		}
 
 		bodyForStorage := new(types.BodyForStorage)
