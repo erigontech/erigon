@@ -137,13 +137,13 @@ func TestSenders(t *testing.T) {
 		assert.Equal(t, 0, len(senders))
 	}
 	{
-		txs, err := rawdb.ReadTransactions(tx, 0, 2)
+		txs, err := rawdb.CanonicalTransactions(tx, 0, 2)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(txs))
-		txs, err = rawdb.ReadTransactions(tx, 2, 3)
+		txs, err = rawdb.CanonicalTransactions(tx, 2, 3)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(txs))
-		txs, err = rawdb.ReadTransactions(tx, 0, 1024)
+		txs, err = rawdb.CanonicalTransactions(tx, 0, 1024)
 		assert.NoError(t, err)
 		assert.Equal(t, 5, len(txs))
 	}

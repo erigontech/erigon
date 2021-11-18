@@ -398,7 +398,7 @@ func runDialTest(t *testing.T, config dialConfig, rounds []dialTestRound) {
 	config.clock = clock
 	config.dialer = dialer
 	config.resolver = resolver
-	config.log = testlog.Logger(t, log.LvlInfo)
+	config.log = testlog.Logger(t, log.LvlError)
 	config.rand = rand.New(rand.NewSource(0x1111))
 
 	// Set up the dialer. The setup function below runs on the dialTask

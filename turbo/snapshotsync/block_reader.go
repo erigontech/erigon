@@ -2,6 +2,7 @@ package snapshotsync
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -18,10 +19,17 @@ func NewBlockReader() *BlockReader {
 }
 
 func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
-	block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
 	}
-	//TODO: read snapshots
-	return block, senders, nil
+	if canonicalHash == hash {
+		block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+		if err != nil {
+			return nil, nil, err
+		}
+		return block, senders, nil
+	}
+
+	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 }

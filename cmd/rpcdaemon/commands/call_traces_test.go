@@ -13,14 +13,9 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/valyala/fastjson"
 )
-
-func init() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-}
 
 func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 	var err error

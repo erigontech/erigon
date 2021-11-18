@@ -496,7 +496,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 				break
 			}
 			txs := withoutSenders.Transactions()
-			_, senders, _ := rawdb.ReadBlockByNumberWithSenders(tx, i)
+			_, senders, _ := rawdb.CanonicalBlockByNumberWithSenders(tx, i)
 			if txs.Len() != len(senders) {
 				log.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
 				return nil

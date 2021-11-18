@@ -10,7 +10,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -79,6 +78,7 @@ func BodiesForward(
 	if bodyProgress == headerProgress {
 		return nil
 	}
+
 	logPrefix := s.LogPrefix()
 	if headerProgress <= bodyProgress+16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
@@ -89,6 +89,14 @@ func BodiesForward(
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+
+	// Property of blockchain: same block in different forks will have different hashes.
+	// Means - can mark all canonical blocks as non-canonical on unwind, and
+	// do opposite here - without storing any meta-info.
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery); err != nil {
+		return fmt.Errorf("make block canonical: %w", err)
+	}
+
 	var prevDeliveredCount float64 = 0
 	var prevWastedCount float64 = 0
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
@@ -161,15 +169,10 @@ Loop:
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(blockHeight, header.Hash()))
-			if err != nil {
-				return err
+			if err = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody); err != nil {
+				return fmt.Errorf("writing block body: %w", err)
 			}
-			if !exists {
-				if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
-					return fmt.Errorf("writing block body: %w", err)
-				}
-			}
+
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
 				if err = s.Update(tx, blockHeight); err != nil {
@@ -251,6 +254,13 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, ctx, u.LogPrefix(), logEvery); err != nil {
+		return err
 	}
 
 	if err = u.Done(tx); err != nil {

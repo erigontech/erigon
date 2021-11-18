@@ -106,7 +106,7 @@ var Flags = []cli.Flag{
 //var glogger *log.GlogHandler
 
 func init() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	//glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	//glogger.Verbosity(log.LvlInfo)
 	//log.Root().SetHandler(glogger)

@@ -34,9 +34,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func init() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-}
 func TestClientRequest(t *testing.T) {
 	server := newTestServer()
 	defer server.Stop()
