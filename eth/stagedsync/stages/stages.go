@@ -32,6 +32,7 @@ var (
 	Headers             SyncStage = "Headers"             // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	BlockHashes         SyncStage = "BlockHashes"         // Headers Number are written, fills blockHash => number bucket
 	Bodies              SyncStage = "Bodies"              // Block bodies are downloaded, TxHash and UncleHash are getting verified
+	TotalDifficulty     SyncStage = "TotalDifficulty"     // TotalDifficulty for each block is calculated.
 	Senders             SyncStage = "Senders"             // "From" recovered from signatures, bodies re-written
 	Execution           SyncStage = "Execution"           // Executing each block w/o buildinf a trie
 	Translation         SyncStage = "Translation"         // Translation each marked for translation contract (from EVM to TEVM)
@@ -48,10 +49,6 @@ var (
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
-
-	CreateHeadersSnapshot SyncStage = "CreateHeadersSnapshot"
-	CreateBodiesSnapshot  SyncStage = "CreateBodiesSnapshot"
-	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
 )
 
 var AllStages = []SyncStage{

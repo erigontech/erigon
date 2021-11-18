@@ -1,4 +1,4 @@
-package commands
+package main
 
 import (
 	"context"
@@ -12,10 +12,45 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/internal/debug"
 	trnt "github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
 )
+
+func init() {
+	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+}
+
+func main() {
+	ctx, cancel := utils.RootContext()
+	defer cancel()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+var rootCmd = &cobra.Command{
+	Use:   "seed",
+	Short: "seed snapshot",
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if err := debug.SetupCobra(cmd); err != nil {
+			panic(err)
+		}
+	},
+	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		debug.Exit()
+	},
+	Args:       cobra.ExactArgs(1),
+	ArgAliases: []string{"snapshots dir"},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return Seed(cmd.Context(), args[0])
+	},
+}
 
 func Seed(ctx context.Context, datadir string) error {
 	defer func() {

@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
@@ -64,14 +65,14 @@ func TestSendRawTransaction(t *testing.T) {
 	}
 
 	expectValue := uint64(1234)
-	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(err)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, false), m.DB, nil, txPool, nil, 5000000)
+	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, nil, txPool, nil, 5000000)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)

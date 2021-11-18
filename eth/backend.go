@@ -96,8 +96,6 @@ type Ethereum struct {
 
 	networkID uint64
 
-	torrentClient *snapshotsync.Client
-
 	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
 	chainConfig       *params.ChainConfig
 	genesisHash       common.Hash
@@ -148,43 +146,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	var torrentClient *snapshotsync.Client
-	config.Snapshot.Dir = stack.Config().ResolvePath("snapshots")
-	if config.Snapshot.Enabled {
-		var peerID string
-		if err = chainKv.View(context.Background(), func(tx kv.Tx) error {
-			v, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
-			if err != nil {
-				return err
-			}
-			peerID = string(v)
-			return nil
-		}); err != nil {
-			log.Error("Get bittorrent peer", "err", err)
-		}
-		torrentClient, err = snapshotsync.New(config.Snapshot.Dir, config.Snapshot.Seeding, peerID)
-		if err != nil {
-			return nil, err
-		}
-		if len(peerID) == 0 {
-			log.Info("Generate new bittorent peerID", "id", common.Bytes2Hex(torrentClient.PeerID()))
-			if err = chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-				return torrentClient.SavePeerID(tx)
-			}); err != nil {
-				log.Error("Bittorrent peerID haven't saved", "err", err)
-			}
-		}
-
-		chainKv, err = snapshotsync.WrapSnapshots(chainKv, config.Snapshot.Dir)
-		if err != nil {
-			return nil, err
-		}
-		err = snapshotsync.SnapshotSeeding(chainKv, torrentClient, "headers", config.Snapshot.Dir)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -217,7 +178,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
-		torrentClient:        torrentClient,
 		chainConfig:          chainConfig,
 		genesisHash:          genesis.Hash(),
 		waitForStageLoopStop: make(chan struct{}),
@@ -325,16 +285,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		server66 := download.NewSentryServer(backend.downloadCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
-		cfg65 := stack.Config().P2P
-		cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
-		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
-		}
-		cfg65.ListenAddr = cfg65.ListenAddr65
-		server65 := download.NewSentryServer(backend.downloadCtx, d65, readNodeInfo, &cfg65, eth.ETH65)
-		backend.sentryServers = append(backend.sentryServers, server65)
-		backend.sentries = append(backend.sentries, direct.NewSentryClientDirect(eth.ETH65, server65))
+
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()
@@ -426,7 +377,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.notifications.Events)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -515,19 +466,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(
-		backend.downloadCtx,
-		backend.logger,
-		backend.chainDB,
-		stack.Config().P2P,
-		*config,
-		backend.downloadServer,
-		tmpdir,
-		backend.txPool,
-		backend.txPoolP2PServer,
-
-		torrentClient, mg, backend.notifications.Accumulator,
-	)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.downloadCtx, backend.logger, backend.chainDB, stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty, backend.downloadServer, tmpdir, backend.txPool, backend.txPoolP2PServer, backend.notifications.Accumulator)
 	if err != nil {
 		return nil, err
 	}

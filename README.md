@@ -14,6 +14,8 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain)
+    + [Dev Chain](#dev-chain)
+
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
     + [Faster Initial Sync](#faster-initial-sync)
@@ -145,6 +147,10 @@ Once the JSON-RPC daemon is running, all you need to do is point your beacon cha
 where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
+    
+
+### Dev Chain
+<code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
 Key features
 ============ 
@@ -266,7 +272,7 @@ FAQ
 
 ### How much RAM do I need
 
-- Baseline (ext4 SSD): 16Gb RAM sync takes 5 days, 32Gb - 4 days, 64Gb - 3 days
+- Baseline (ext4 SSD): 16Gb RAM sync takes 6 days, 32Gb - 5 days, 64Gb - 4 days
 - +1 day on "zfs compression=off". +2 days on "zfs compression=on" (2x compression ratio). +3 days on btrfs.
 - -1 day on NVMe
 
@@ -279,7 +285,6 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 |  Port |  Protocol |      Purpose     |  Expose |
 |:-----:|:---------:|:----------------:|:-------:|
 | 30303 | TCP & UDP |  eth/66 peering  |  Public |
-| 30304 | TCP & UDP |  eth/65 peering  |  Public |
 |  9090 |    TCP    | gRPC Connections | Private |
 
 Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
@@ -322,6 +327,9 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
   run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
 - Get RAM profiling: add `--pprof flag`
   run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+    
+### How to run local devnet?
+<code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
 
 Getting in touch
 ================

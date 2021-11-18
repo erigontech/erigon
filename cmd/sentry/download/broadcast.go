@@ -2,14 +2,17 @@ package download
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"strings"
+	"syscall"
 
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -37,25 +40,14 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 		log.Error("propagateNewBlockHashes", "error", err)
 		return
 	}
-	var req66, req65 *proto_sentry.OutboundMessageData
+	var req66 *proto_sentry.OutboundMessageData
 	for _, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue
 		}
 
 		switch sentry.Protocol() {
-		case eth.ETH65:
-			if req65 == nil {
-				req65 = &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_65,
-					Data: data,
-				}
-			}
 
-			_, err = sentry.SendMessageToAll(ctx, req65, &grpc.EmptyCallOption{})
-			if err != nil {
-				log.Error("propagateNewBlockHashes", "error", err)
-			}
 		case eth.ETH66:
 			if req66 == nil {
 				req66 = &proto_sentry.OutboundMessageData{
@@ -84,30 +76,13 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 	if err != nil {
 		log.Error("broadcastNewBlock", "error", err)
 	}
-	var req66, req65 *proto_sentry.SendMessageToRandomPeersRequest
+	var req66 *proto_sentry.SendMessageToRandomPeersRequest
 	for _, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue
 		}
 
 		switch sentry.Protocol() {
-		case eth.ETH65:
-			if req65 == nil {
-				req65 = &proto_sentry.SendMessageToRandomPeersRequest{
-					MaxPeers: 1024,
-					Data: &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_BLOCK_65,
-						Data: data,
-					},
-				}
-			}
-
-			if _, err = sentry.SendMessageToRandomPeers(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-				if isPeerNotFoundErr(err) {
-					continue
-				}
-				log.Error("broadcastNewBlock", "error", err)
-			}
 
 		case eth.ETH66:
 			if req66 == nil {
@@ -120,7 +95,8 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 				}
 			}
 			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-				if isPeerNotFoundErr(err) {
+				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+					log.Debug("broadcastNewBlock", "error", err)
 					continue
 				}
 				log.Error("broadcastNewBlock", "error", err)
@@ -154,30 +130,13 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 		if err != nil {
 			log.Error("BroadcastLocalPooledTxs", "error", err)
 		}
-		var req66, req65 *proto_sentry.OutboundMessageData
+		var req66 *proto_sentry.OutboundMessageData
 		for _, sentry := range cs.sentries {
 			if !sentry.Ready() {
 				continue
 			}
 
 			switch sentry.Protocol() {
-			case eth.ETH65:
-				if req65 == nil {
-					req65 = &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
-						Data: data,
-					}
-				}
-
-				peers, err := sentry.SendMessageToAll(ctx, req65, &grpc.EmptyCallOption{})
-				if err != nil {
-					if isPeerNotFoundErr(err) {
-						continue
-					}
-					log.Error("BroadcastLocalPooledTxs", "error", err)
-				}
-				avgPeersPerSent65 += len(peers.GetPeers())
-
 			case eth.ETH66:
 				if req66 == nil {
 					req66 = &proto_sentry.OutboundMessageData{
@@ -187,7 +146,8 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 				}
 				peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
-					if isPeerNotFoundErr(err) {
+					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+						log.Debug("BroadcastLocalPooledTxs", "error", err)
 						continue
 					}
 					log.Error("BroadcastLocalPooledTxs", "error", err)
@@ -224,30 +184,13 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 		if err != nil {
 			log.Error("BroadcastRemotePooledTxs", "error", err)
 		}
-		var req66, req65 *proto_sentry.SendMessageToRandomPeersRequest
+		var req66 *proto_sentry.SendMessageToRandomPeersRequest
 		for _, sentry := range cs.sentries {
 			if !sentry.Ready() {
 				continue
 			}
 
 			switch sentry.Protocol() {
-			case eth.ETH65:
-				if req65 == nil {
-					req65 = &proto_sentry.SendMessageToRandomPeersRequest{
-						MaxPeers: 1024,
-						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
-							Data: data,
-						},
-					}
-				}
-
-				if _, err = sentry.SendMessageToRandomPeers(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-					if isPeerNotFoundErr(err) {
-						continue
-					}
-					log.Error("BroadcastRemotePooledTxs", "error", err)
-				}
 
 			case eth.ETH66:
 				if req66 == nil {
@@ -260,7 +203,8 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 					}
 				}
 				if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-					if isPeerNotFoundErr(err) {
+					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+						log.Debug("BroadcastRemotePooledTxs", "error", err)
 						continue
 					}
 					log.Error("BroadcastRemotePooledTxs", "error", err)
@@ -298,21 +242,6 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 
 			for _, peer := range peers {
 				switch sentry.Protocol() {
-				case eth.ETH65:
-					req65 := &proto_sentry.SendMessageByIdRequest{
-						PeerId: peer,
-						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_65,
-							Data: data,
-						},
-					}
-
-					if _, err = sentry.SendMessageById(ctx, req65, &grpc.EmptyCallOption{}); err != nil {
-						if isPeerNotFoundErr(err) {
-							continue
-						}
-						log.Error("broadcastNewBlock", "error", err)
-					}
 
 				case eth.ETH66:
 					req66 := &proto_sentry.SendMessageByIdRequest{
@@ -323,7 +252,8 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 						},
 					}
 					if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-						if isPeerNotFoundErr(err) {
+						if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+							log.Debug("PropagatePooledTxsToPeersList", "error", err)
 							continue
 						}
 						log.Error("PropagatePooledTxsToPeersList", "error", err)
@@ -334,6 +264,9 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 	}
 }
 
+func networkTemporaryErr(err error) bool {
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, p2p.ErrShuttingDown)
+}
 func isPeerNotFoundErr(err error) bool {
 	return strings.Contains(err.Error(), "peer not found")
 }

@@ -381,15 +381,9 @@ Then update your `app.json` for ethstats-client like that:
       "RPC_PORT": "8545",
       "LISTENING_PORT": "30303",
       "INSTANCE_NAME": "Erigon node",
-      "CONTACT_DETAILS": <your
-      twitter
-      handle>,
+      "CONTACT_DETAILS": <your twitter handle>,
       "WS_SERVER": "wss://ethstats.net/api",
-      "WS_SECRET": <put
-      your
-      secret
-      key
-      there>,
+      "WS_SECRET": <put your secret key here>,
       "VERBOSITY": 2
     }
   }

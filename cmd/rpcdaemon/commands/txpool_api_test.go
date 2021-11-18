@@ -2,25 +2,27 @@ package commands
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTxPoolContent(t *testing.T) {
-	m, require := stages.Mock(t), require.New(t)
+	m, require := stages.MockWithTxPool(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intemediateHashes */)
@@ -31,18 +33,22 @@ func TestTxPoolContent(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), false), m.DB, txPool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), false), m.DB, txPool)
 
 	expectValue := uint64(1234)
-	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*params.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(err)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
 
-	_, err = txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+	reply, err := txPool.Add(ctx, &txpool.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
 	require.NoError(err)
+	for _, res := range reply.Imported {
+		require.Equal(res, txPoolProto.ImportResult_SUCCESS, fmt.Sprintf("%s", reply.Errors))
+	}
+
 	content, err := api.Content(ctx)
 	require.NoError(err)
 

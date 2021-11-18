@@ -89,6 +89,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(9_200_000),
 		BerlinBlock:         big.NewInt(12_244_000),
 		LondonBlock:         big.NewInt(12_965_000),
+		ArrowGlacierBlock:   big.NewInt(13_773_000),
 		Ethash:              new(EthashConfig),
 	}
 
@@ -180,6 +181,8 @@ var (
 		IstanbulBlock:       big.NewInt(0),
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         nil,
+		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
 	}
 
@@ -243,8 +246,8 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(21050600),
 		//LondonBlock:         big.NewInt(21050600),
-		CatalystBlock: nil,
-		Aura:          &AuRaConfig{},
+		ArrowGlacierBlock: nil,
+		Aura:              &AuRaConfig{},
 	}
 
 	KovanChainConfig = &ChainConfig{
@@ -264,7 +267,7 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(24770900),
 		LondonBlock:         big.NewInt(26741100),
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Aura:                &AuRaConfig{},
 	}
 
@@ -285,7 +288,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Clique: &CliqueConfig{
 			Period: 15,
 			Epoch:  30000,
@@ -294,9 +297,6 @@ var (
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Ethash consensus.
-	//
-	// This configuration is intentionally not using keyed fields to force anyone
-	// adding flags to the config to also have to set these fields.
 	AllEthashProtocolChanges = &ChainConfig{
 		ChainID:             big.NewInt(1337),
 		Consensus:           EtHashConsensus,
@@ -314,16 +314,13 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
-	//
-	// This configuration is intentionally not using keyed fields to force anyone
-	// adding flags to the config to also have to set these fields.
 	AllCliqueProtocolChanges = &ChainConfig{
 		ChainID:             big.NewInt(1337),
 		Consensus:           CliqueConsensus,
@@ -341,7 +338,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Ethash:              nil,
 		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
 	}
@@ -390,7 +387,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Ethash:              new(EthashConfig),
 		Clique:              nil,
 	}
@@ -412,7 +409,7 @@ var (
 		MuirGlacierBlock:    big.NewInt(0),
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         nil,
-		CatalystBlock:       nil,
+		ArrowGlacierBlock:   nil,
 		Aura:                &AuRaConfig{},
 	}
 
@@ -446,11 +443,13 @@ type ChainConfig struct {
 	ConstantinopleBlock *big.Int `json:"constantinopleBlock,omitempty"` // Constantinople switch block (nil = no fork, 0 = already activated)
 	PetersburgBlock     *big.Int `json:"petersburgBlock,omitempty"`     // Petersburg switch block (nil = same as Constantinople)
 	IstanbulBlock       *big.Int `json:"istanbulBlock,omitempty"`       // Istanbul switch block (nil = no fork, 0 = already on istanbul)
-	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
+	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // EIP-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
-	CatalystBlock       *big.Int `json:"catalystBlock,omitempty"`       // Catalyst switch block (nil = no fork, 0 = already on catalyst)
+	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
+	// EIP-3675: Upgrade consensus to Proof-of-Stake
+	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
@@ -514,7 +513,7 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -529,6 +528,7 @@ func (c *ChainConfig) String() string {
 		c.MuirGlacierBlock,
 		c.BerlinBlock,
 		c.LondonBlock,
+		c.ArrowGlacierBlock,
 		engine,
 	)
 }
@@ -623,9 +623,9 @@ func (c *ChainConfig) IsLondon(num uint64) bool {
 	return isForked(c.LondonBlock, num)
 }
 
-// IsCatalyst returns whether num is either equal to the Merge fork block or greater.
-func (c *ChainConfig) IsCatalyst(num uint64) bool {
-	return isForked(c.CatalystBlock, num)
+// IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
+func (c *ChainConfig) IsArrowGlacier(num uint64) bool {
+	return isForked(c.ArrowGlacierBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -671,6 +671,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "muirGlacierBlock", block: c.MuirGlacierBlock, optional: true},
 		{name: "berlinBlock", block: c.BerlinBlock},
 		{name: "londonBlock", block: c.LondonBlock},
+		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -740,6 +741,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.LondonBlock, newcfg.LondonBlock, head) {
 		return newCompatError("London fork block", c.LondonBlock, newcfg.LondonBlock)
 	}
+	if isForkIncompatible(c.ArrowGlacierBlock, newcfg.ArrowGlacierBlock, head) {
+		return newCompatError("Arrow Glacier fork block", c.ArrowGlacierBlock, newcfg.ArrowGlacierBlock)
+	}
 	return nil
 }
 
@@ -807,7 +811,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsCatalyst                          bool
+	IsBerlin, IsLondon                                      bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -828,6 +832,5 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsIstanbul:       c.IsIstanbul(num),
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
-		IsCatalyst:       c.IsCatalyst(num),
 	}
 }

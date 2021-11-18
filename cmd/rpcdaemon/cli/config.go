@@ -19,12 +19,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -37,8 +39,6 @@ type Flags struct {
 	SingleNodeMode       bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	Datadir              string
 	Chaindata            string
-	SnapshotDir          string
-	SnapshotMode         string
 	HttpListenAddress    string
 	TLSCertfile          string
 	TLSCACert            string
@@ -56,7 +56,6 @@ type Flags struct {
 	RpcBatchConcurrency  uint
 	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	TxPoolV2             bool
-	TxPoolV1             bool
 	TxPoolApiAddr        string
 	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
@@ -74,13 +73,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
-	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotDir, "snapshot.dir", "", "path to snapshot dir(only for chaindata mode)")
-	rootCmd.PersistentFlags().StringVar(&cfg.SnapshotMode, "snapshot.mode", "", `Configures the storage mode of the app(only for chaindata mode):
-* h - use headers snapshot
-* b - use bodies snapshot
-* s - use state snapshot
-* r - use receipts snapshot
-`)
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
@@ -97,7 +89,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 2, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
-	rootCmd.PersistentFlags().BoolVar(&cfg.TxPoolV1, "txpool.v1", false, "enable v1 pool instead of v2")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
@@ -109,9 +100,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 		panic(err)
 	}
 	if err := rootCmd.MarkPersistentFlagDirname("chaindata"); err != nil {
-		panic(err)
-	}
-	if err := rootCmd.MarkPersistentFlagDirname("snapshot.dir"); err != nil {
 		panic(err)
 	}
 
@@ -128,9 +116,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 				cfg.Chaindata = path.Join(cfg.Datadir, "chaindata")
 			}
 		}
-		if !cfg.TxPoolV1 {
-			cfg.TxPoolV2 = true
-		}
+		cfg.TxPoolV2 = true
 		return nil
 	}
 	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
@@ -229,23 +215,25 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, stateCache kvcache.Cache, err error) {
+func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, stateCache kvcache.Cache, blockReader interfaces.BlockReader, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
+
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
 		var rwKv kv.RwDB
 		rwKv, err = kv2.NewMDBX(logger).Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, err
 		}
 		if compatErr := checkDbCompatibility(ctx, rwKv); compatErr != nil {
-			return nil, nil, nil, nil, nil, compatErr
+			return nil, nil, nil, nil, nil, nil, compatErr
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
+		blockReader = snapshotsync.NewBlockReader()
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
@@ -256,32 +244,34 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	}
 
 	if cfg.PrivateApiAddr == "" {
-		return db, eth, txPool, mining, stateCache, nil
+		return db, eth, txPool, mining, stateCache, blockReader, nil
 	}
 
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("open tls cert: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("open tls cert: %w", err)
 	}
 	conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 	}
 
 	kvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+		return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
-	remoteEth := services.NewRemoteBackend(conn)
+	remoteEth := services.NewRemoteBackend(conn, db)
+	blockReader = remoteEth
+
 	txpoolConn := conn
 	if cfg.TxPoolV2 {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
 	mining = services.NewMiningService(txpoolConn)
@@ -304,7 +294,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			rootCancel()
 		}
 	}()
-	return db, eth, txPool, mining, stateCache, err
+	return db, eth, txPool, mining, stateCache, blockReader, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
