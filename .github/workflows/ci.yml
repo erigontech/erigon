@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - devel
+      - stable
   pull_request:
     branches:
       - devel
+      - stable
 jobs:
   tests:
     strategy:
