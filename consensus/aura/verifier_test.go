@@ -62,9 +62,9 @@ func TestVerifyHeader(t *testing.T) {
 			header.Difficulty = diff
 		}
 
-		validatorSet = nil
+		// validatorSet := aura.getValidators(header.Number)
 
-		validator, err := aura.GetFromValidatorSet(validatorSet, header.ParentHash, uint(step), nil)
+		validator, err := aura.GetFromValidatorSet(nil, header.ParentHash, uint(step), nil)
 
 		if err != nil {
 			t.Fatal("Couldnt extract validator from the validator set", err, validator)
