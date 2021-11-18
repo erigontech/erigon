@@ -122,6 +122,15 @@ func HeadersForward(
 	prevProgress := headerProgress
 Loop:
 	for !stopped {
+
+		isTrans, err := rawdb.Transitioned(tx, headerProgress)
+		if err != nil {
+			return err
+		}
+
+		if isTrans {
+			break
+		}
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
@@ -156,9 +165,11 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), logPrefix, logEvery.C); err != nil {
+
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
 			return err
 		}
+
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
@@ -210,6 +221,7 @@ Loop:
 	}
 	// We do not print the following line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
+
 	return nil
 }
 
@@ -297,6 +309,17 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		var maxTd big.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
+		// unwind the merge
+		isTrans, err := rawdb.Transitioned(tx, u.UnwindPoint)
+		if err != nil {
+			return err
+		}
+
+		if cfg.chainConfig.TerminalTotalDifficulty != nil && !isTrans {
+			if err := tx.Delete(kv.TransitionBlockKey, []byte(kv.TransitionBlockKey), nil); err != nil {
+				return err
+			}
+		}
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
 			// Find header with biggest TD
 			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
@@ -345,6 +368,10 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return err
 		}
 		if err = s.Update(tx, maxNum); err != nil {
+			return err
+		}
+		// When we forward sync, total difficulty is updated within headers processing
+		if err = stages.SaveStageProgress(tx, stages.TotalDifficulty, maxNum); err != nil {
 			return err
 		}
 	}
