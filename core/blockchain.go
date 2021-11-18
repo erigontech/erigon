@@ -152,9 +152,7 @@ func ExecuteBlockEphemerally(
 	}
 
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		// FIX THIS
-		// receiptSha := types.DeriveSha(receipts)
-		receiptSha := block.Header().ReceiptHash
+		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
@@ -164,9 +162,7 @@ func ExecuteBlockEphemerally(
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
-		// FIX THIS
-		// bloom := types.CreateBloom(receipts)
-		bloom := header.Bloom
+		bloom := types.CreateBloom(receipts)
 		if bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
