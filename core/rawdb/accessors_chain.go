@@ -252,6 +252,14 @@ func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
 	}
 	return bodyRlp
 }
+func NonCanonicalBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
+	body := NonCanonicalBodyWithTransactions(db, hash, number)
+	bodyRlp, err := rlp.EncodeToBytes(body)
+	if err != nil {
+		log.Error("ReadBodyRLP failed", "err", err)
+	}
+	return bodyRlp
+}
 
 func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
@@ -945,7 +953,6 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	//return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles)
 }
 
