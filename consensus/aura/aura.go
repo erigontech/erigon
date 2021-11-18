@@ -543,11 +543,11 @@ func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, u
 
 // Gets the list of validators at a certain point in time
 // TODO: Add support for SafeContract
-func (c *AuRa) getValidators(number uint64) []common.Address {
+func (c *AuRa) getValidators(inputBlockNum uint64) []common.Address {
 	var currentBlockNumber uint64 = 0
 	var currentValidatorList []common.Address = c.cfg.ValidatorSetChange[0]
 	for blockNumber, validators := range c.cfg.ValidatorSetChange {
-		if blockNumber > number {
+		if blockNumber > inputBlockNum {
 			break
 		}
 		if blockNumber > currentBlockNumber {
