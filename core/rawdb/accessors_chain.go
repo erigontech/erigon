@@ -585,6 +585,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPre
 		if err != nil {
 			return err
 		}
+		fmt.Printf("%d\n", blockNum)
 		if h == (common.Hash{}) {
 			break
 		}
@@ -592,6 +593,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPre
 		if len(data) == 0 {
 			continue
 		}
+
 		bodyForStorage := new(types.BodyForStorage)
 		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
 			return err
@@ -642,6 +644,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPre
 	if k != nil {
 		nextTxID = binary.BigEndian.Uint64(k) + 1
 	}
+	fmt.Printf("nextTxID: %d\n", nextTxID)
 	if err := ResetSequence(tx, kv.EthTx, nextTxID); err != nil {
 		return err
 	}
