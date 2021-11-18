@@ -628,6 +628,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPre
 		}
 	}
 
+	// EthTx must have canonical id's - means need decrement it's sequence on unwind
 	c, err := tx.Cursor(kv.EthTx)
 	if err != nil {
 		return err
