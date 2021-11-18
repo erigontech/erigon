@@ -1,13 +1,11 @@
 package aura
 
 import (
-	"bytes"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -64,27 +62,25 @@ func (c *AuRa) verifyHeader(chain consensus.ChainHeaderReader, header *types.Hea
 // in a batch of parents (ascending order) to avoid looking those up from the
 // database. This is useful for concurrently verifying a batch of new headers.
 func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+
+	stepDuration := c.cfg.StepDuration // getting the step duration value
+	timeNow := time.Now().Unix()
+
 	// checking if the step is correct
-	currentStep, err := HeaderStep(header)
 
-	if err != nil {
-		return err
-	}
+	headerStep := int64(header.Time / stepDuration) // the blocks current step
 
-	step := c.step.inner.inner.Load() // getting the step value
+	step := timeNow / int64(stepDuration) // the current step the engine is at
 
 	// making sure our currentStep is not a future step
-	if currentStep != step {
+	if headerStep != step {
 		return errIncorrectStep
 	}
 
 	// checking if multiple blocks are being put out in the same step
 	parent := chain.GetHeaderByHash(header.ParentHash)
 
-	parentStep, err := HeaderStep(parent)
-	if err != nil {
-		return err
-	}
+	parentStep := int64(parent.Time / stepDuration) // the parent block step
 
 	if parentStep > step {
 		return errFutureStep
@@ -94,34 +90,20 @@ func (c *AuRa) verifyCascadingFields(chain consensus.ChainHeaderReader, header *
 		return errMultipleBlocksInStep
 	}
 
-	// checking if the validator is correct
-	// validators, _, err := c.epochSet(chain, nil, header, nil)
+	currentValidatorList := c.getValidators(header.Number.Uint64())
 
-	if err != nil {
-		return err
-	}
+	// gets the signer using the header step
+	indexOfBlockSigner := headerStep % int64(len(currentValidatorList))
+	blockSigner := currentValidatorList[indexOfBlockSigner]
 
-	//validatorAddress, err := stepProposer(validators, header.Hash(), step, nil)
-
-	if err != nil {
-		return err
-	}
-
-	var signature []byte
-
-	err = rlp.Decode(bytes.NewReader(header.Seal[1]), &signature)
-
-	if err != nil {
-		return err
-	}
-
-	var signer common.Address
-	copy(signer[:], signature)
+	// gets the signers using the engine step
+	indexOfSupposeSigner := step % int64(len(currentValidatorList))
+	supposeSigner := currentValidatorList[indexOfSupposeSigner]
 
 	// compares signer address from the header to the validator address gotten from the step
-	/*if validatorAddress != signer {
+	if blockSigner != supposeSigner {
 		return errInvalidPrimary
-	}*/
+	}
 
 	return nil
 }
