@@ -245,7 +245,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 		select {
 		case <-logEvery.C:
-			log.Info("write canonical markers", "ancestor", ancestorHeight, "hash", ancestorHash)
+			log.Info(fmt.Sprintf("[%s] write canonical markers", logPrefix), "ancestor", ancestorHeight, "hash", ancestorHash)
 		default:
 		}
 		ancestorHash = ancestor.ParentHash
