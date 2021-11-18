@@ -24,7 +24,8 @@ import (
 )
 
 // DBSchemaVersion
-var DBSchemaVersion = types.VersionReply{Major: 3, Minor: 0, Patch: 0}
+// 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
+var DBSchemaVersion = types.VersionReply{Major: 5, Minor: 0, Patch: 0}
 
 // ChaindataTables
 
@@ -215,10 +216,17 @@ const (
 	Headers         = "Header"                 // block_num_u64 + hash -> header (RLP)
 	HeaderTD        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
-	BlockBody = "BlockBody"        // block_num_u64 + hash -> block body
-	EthTx     = "BlockTransaction" // tbl_sequence_u64 -> rlp(tx)
-	Receipts  = "Receipt"          // block_num_u64 -> canonical block receipts (non-canonical are not stored)
-	Log       = "TransactionLog"   // block_num_u64 + txId -> logs of transaction
+	BlockBody = "BlockBody" // block_num_u64 + hash -> block body
+
+	// BlockTransaction - stores only txs of canonical blocks. As a result - id's used in this table are also
+	// canonical - same across all nodex in network - regardless reorgs. Transactions of
+	// non-canonical blocs are not removed, but moved to NonCanonicalTransaction - then during re-org don't
+	// need re-download block from network.
+	EthTx           = "BlockTransaction"        // tbl_sequence_u64 -> rlp(tx)
+	NonCanonicalTxs = "NonCanonicalTransaction" // tbl_sequence_u64 -> rlp(tx)
+
+	Receipts = "Receipt"        // block_num_u64 -> canonical block receipts (non-canonical are not stored)
+	Log      = "TransactionLog" // block_num_u64 + txId -> logs of transaction
 
 	// Stores bitmap indices - in which block numbers saw logs of given 'address' or 'topic'
 	// [addr or topic] + [2 bytes inverted shard number] -> bitmap(blockN)
@@ -343,6 +351,7 @@ var ChaindataTables = []string{
 	Log,
 	Sequence,
 	EthTx,
+	NonCanonicalTxs,
 	TransitionBlockKey,
 	TrieOfAccounts,
 	TrieOfStorage,
