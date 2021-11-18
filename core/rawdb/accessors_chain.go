@@ -315,20 +315,14 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 	return nil
 }
 
-func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
+func WriteRawTransactions(db kv.StatelessWriteTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
-	c, err := db.RwCursor(kv.EthTx)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
 	for _, tx := range txs {
 		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		txId++
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := c.Append(txIdKey, tx); err != nil {
+		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
 			return err
 		}
 	}
@@ -454,7 +448,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 	return senders, nil
 }
 
-func MakeBodyCanonical(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func MakeBodyCanonical(db kv.StatelessWriteTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
@@ -464,17 +458,27 @@ func MakeBodyCanonical(db kv.RwTx, hash common.Hash, number uint64, body *types.
 		TxAmount: uint32(len(body.Transactions)),
 		Uncles:   body.Uncles,
 	}
-	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
+	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	err = WriteRawTransactions(db, body.Transactions, baseTxId)
-	if err != nil {
+	if err = WriteRawTransactions(db, body.Transactions, baseTxId); err != nil {
 		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
 	}
 	return nil
 }
 
-func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func WriteRawBodyIfNotExists(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+	exists, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	return WriteRawBody(db, hash, number, body)
+}
+
+func WriteRawBody(db kv.StatelessWriteTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
@@ -484,11 +488,10 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		TxAmount: uint32(len(body.Transactions)),
 		Uncles:   body.Uncles,
 	}
-	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
+	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	err = WriteRawTransactions(db, body.Transactions, baseTxId)
-	if err != nil {
+	if err = WriteRawTransactions(db, body.Transactions, baseTxId); err != nil {
 		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
 	}
 	return nil
@@ -535,7 +538,7 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64) error {
+func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
