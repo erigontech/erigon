@@ -76,7 +76,7 @@ func newUDPTest(t *testing.T) *udpTest {
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	test.udp, _ = ListenV4(test.pipe, ln, Config{
 		PrivateKey: test.localkey,
-		Log:        testlog.Logger(t, log.LvlInfo),
+		Log:        testlog.Logger(t, log.LvlError),
 	})
 	test.table = test.udp.tab
 	// Wait for initial refresh so the table doesn't send unexpected findnode.
@@ -569,7 +569,7 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	// Prefix logs with node ID.
 	lprefix := fmt.Sprintf("(%s)", ln.ID().TerminalString())
 	lfmt := log.TerminalFormat()
-	cfg.Log = testlog.Logger(t, log.LvlInfo)
+	cfg.Log = testlog.Logger(t, log.LvlError)
 	cfg.Log.SetHandler(log.FuncHandler(func(r *log.Record) error {
 		t.Logf("%s %s", lprefix, lfmt.Format(r))
 		return nil
