@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
@@ -1068,7 +1069,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if err != nil {
 		panic(err)
 	}
-	fetchTx := func(peerID string, hashes []common.Hash) error {
+	fetchTx := func(peerID enode.ID, hashes []common.Hash) error {
 		txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
 		return nil
 	}

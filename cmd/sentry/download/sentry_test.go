@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/require"
 )
@@ -93,8 +94,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	defer p2pProFork.Close()
 
 	errc := make(chan error, 2)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), enode.ID{1}, p2pNoFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), enode.ID{2}, p2pProFork, protocol, protocol, nil) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -111,8 +112,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s1.statusData.MaxBlock = 1
 	s2.statusData.MaxBlock = 1
 
-	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), enode.ID{1}, p2pNoFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), enode.ID{2}, p2pProFork, protocol, protocol, nil) }()
 
 	for i := 0; i < 2; i++ {
 		select {
@@ -130,8 +131,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	s2.statusData.MaxBlock = 2
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
-	go func() { errc <- handShake(ctx, s1.GetStatus(), "1", p2pNoFork, protocol, protocol, nil) }()
-	go func() { errc <- handShake(ctx, s2.GetStatus(), "2", p2pProFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s1.GetStatus(), enode.ID{1}, p2pNoFork, protocol, protocol, nil) }()
+	go func() { errc <- handShake(ctx, s2.GetStatus(), enode.ID{2}, p2pProFork, protocol, protocol, nil) }()
 
 	var successes int
 	for i := 0; i < 2; i++ {

@@ -70,7 +70,7 @@ func BroadcastPendingTxsToNetwork(ctx context.Context, txPool *core.TxPool, rece
 
 type RecentlyConnectedPeers struct {
 	lock  sync.RWMutex
-	peers []*types.H512
+	peers []*types.H256
 }
 
 func (l *RecentlyConnectedPeers) Len() int {
@@ -78,12 +78,12 @@ func (l *RecentlyConnectedPeers) Len() int {
 	defer l.lock.RUnlock()
 	return len(l.peers)
 }
-func (l *RecentlyConnectedPeers) AddPeer(p *types.H512) {
+func (l *RecentlyConnectedPeers) AddPeer(p *types.H256) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	l.peers = append(l.peers, p)
 }
-func (l *RecentlyConnectedPeers) GetAndClean() []*types.H512 {
+func (l *RecentlyConnectedPeers) GetAndClean() []*types.H256 {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	peers := l.peers
