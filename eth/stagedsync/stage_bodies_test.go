@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -11,18 +12,20 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBodiesUnwind(t *testing.T) {
-	require := require.New(t)
+	require, ctx := require.New(t), context.Background()
 	_, tx := memdb.NewTestTx(t)
 	txn := &types.DynamicFeeTransaction{ChainID: u256.N1, Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
 	require.NoError(err)
 	rlpTxn := buf.Bytes()
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
 	for i := uint64(1); i <= 10; i++ {
@@ -32,10 +35,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 	}
 	{
-		err = stages.SaveStageProgress(tx, stages.Bodies, 10)
-		require.NoError(err)
-		u := &UnwindState{ID: stages.Bodies, UnwindPoint: 5}
-		err = UnwindBodiesStage(u, tx, BodiesCfg{}, context.Background())
+		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, ctx, "test", logEvery) // block 5 already canonical, start from next one
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)
@@ -43,7 +43,7 @@ func TestBodiesUnwind(t *testing.T) {
 		require.Equal(5*3, int(n)) // from 0, 5 block with 3 txn in each
 	}
 	{
-		err = rawdb.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one
+		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
@@ -60,17 +60,15 @@ func TestBodiesUnwind(t *testing.T) {
 	}
 
 	{
-		err = stages.SaveStageProgress(tx, stages.Bodies, 11)
-		require.NoError(err)
-		u := &UnwindState{ID: stages.Bodies, UnwindPoint: 5}
-		err = UnwindBodiesStage(u, tx, BodiesCfg{}, context.Background())
+		// unwind to block 5, means mark blocks >= 6 as non-canonical
+		err = rawdb.MakeBodiesNonCanonical(tx, 5+1, ctx, "test", logEvery)
 		require.NoError(err)
 
 		n, err := tx.ReadSequence(kv.EthTx)
 		require.NoError(err)
 		require.Equal(5*3, int(n)) // from 0, 5 block with 3 txn in each
 
-		err = rawdb.MakeBodiesCanonical(tx, 5+1) // block 5 already canonical, start from next one
+		err = rawdb.MakeBodiesCanonical(tx, 5+1, ctx, "test", logEvery) // block 5 already canonical, start from next one
 		require.NoError(err)
 		n, err = tx.ReadSequence(kv.EthTx)
 		require.NoError(err)

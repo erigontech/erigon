@@ -867,7 +867,15 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 		return nil, err
 	}
 	defer tx.Rollback()
-	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, err
+	}
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
+	if err != nil {
+		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+	}
+	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
 	if err != nil {
 		return nil, err
 	}
@@ -880,7 +888,15 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 		return nil, err
 	}
 	defer tx.Rollback()
-	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, err
+	}
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
+	if err != nil {
+		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+	}
+	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
 	if err != nil {
 		return nil, err
 	}

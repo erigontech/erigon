@@ -557,12 +557,20 @@ func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64, ctx context.Context, 
 		if err := WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
 			return err
 		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Making bodies canonical...", logPrefix), "current block", blockNum)
+		default:
+		}
 	}
 	return nil
 }
 
 // MakeBodiesNonCanonical - move all txs of canonical blocks to NonCanonicalTxs bucket
-func MakeBodiesNonCanonical(tx kv.RwTx, ctx context.Context, from uint64, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -722,7 +730,7 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 }
 
 // ReadReceipts retrieves all the transaction receipts belonging to a block, including
-// its correspoinding metadata fields. If it is unable to populate these metadata
+// its corresponding metadata fields. If it is unable to populate these metadata
 // fields then nil is returned.
 //
 // The current implementation populates these metadata fields by reading the receipts'
@@ -746,7 +754,15 @@ func ReadReceipts(db kv.Tx, block *types.Block, senders []common.Address) types.
 }
 
 func ReadReceiptsByHash(db kv.Tx, hash common.Hash) (types.Receipts, error) {
-	b, s, err := ReadBlockByHashWithSenders(db, hash)
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return nil, nil
+	}
+	canonicalHash, err := ReadCanonicalHash(db, *number)
+	if err != nil {
+		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+	}
+	b, s, err := ReadBlockWithSenders(db, hash, *number)
 	if err != nil {
 		return nil, err
 	}
@@ -967,14 +983,6 @@ func ReadBlockByHash(db kv.Tx, hash common.Hash) (*types.Block, error) {
 		return nil, nil
 	}
 	return ReadBlock(db, hash, *number), nil
-}
-
-func ReadBlockByHashWithSenders(db kv.Tx, hash common.Hash) (*types.Block, []common.Address, error) {
-	number := ReadHeaderNumber(db, hash)
-	if number == nil {
-		return nil, nil, nil
-	}
-	return ReadBlockWithSenders(db, hash, *number)
 }
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
