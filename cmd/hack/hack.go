@@ -2599,7 +2599,6 @@ func recsplitWholeChain(chaindata string) error {
 		db := mdbx.MustOpen(chaindata)
 		if err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
-			return err
 		}
 		db.Close()
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
