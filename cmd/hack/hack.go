@@ -2650,7 +2650,6 @@ func recsplitWholeChain(chaindata string) error {
 			return err
 		}
 		_ = os.Remove(fileName + ".dat")
-		return nil
 	}
 	return nil
 }
