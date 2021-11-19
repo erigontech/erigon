@@ -367,7 +367,7 @@ func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) 
 			return false, err
 		}
 		if dataRLP == nil {
-			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("v"))
+			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
 			return true, nil
 		}
 		if err := f.Append(dataRLP); err != nil {

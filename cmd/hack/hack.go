@@ -1628,7 +1628,6 @@ func compress1(chaindata string, fileName, segmentFileName string) error {
 		}
 		return nil
 	}); err != nil {
-		panic(err)
 		return err
 	}
 	if len(superstring) > 0 {
@@ -1640,7 +1639,6 @@ func compress1(chaindata string, fileName, segmentFileName string) error {
 	db, err := compress.DictionaryBuilderFromCollectors(context.Background(), CompressLogPrefix, tmpDir, collectors)
 	if err != nil {
 		panic(err)
-		return err
 	}
 	if err := compress.PersistDictrionary(fileName+".dictionary.txt", db); err != nil {
 		return err
@@ -2606,11 +2604,9 @@ func recsplitWholeChain(chaindata string) error {
 		db.Close()
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
-			return err
 		}
 		if err := snapshotsync.TransactionsIdx(*chainID, snapshotDir, fileName); err != nil {
 			panic(err)
-			return err
 		}
 		_ = os.Remove(fileName + ".dat")
 
@@ -2620,16 +2616,13 @@ func recsplitWholeChain(chaindata string) error {
 		db = mdbx.MustOpen(chaindata)
 		if err := snapshotsync.DumpHeaders(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
-			return err
 		}
 		db.Close()
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
-			return err
 		}
 		if err := snapshotsync.BodiesIdx(snapshotDir, fileName); err != nil {
 			panic(err)
-			return err
 		}
 		_ = os.Remove(fileName + ".dat")
 
@@ -2639,12 +2632,10 @@ func recsplitWholeChain(chaindata string) error {
 		db = mdbx.MustOpen(chaindata)
 		if err := snapshotsync.DumpBodies(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
-			return err
 		}
 		db.Close()
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
-			return err
 		}
 		if err := snapshotsync.BodiesIdx(snapshotDir, fileName); err != nil {
 			return err
