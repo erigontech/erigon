@@ -6,7 +6,6 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,7 +19,6 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,9 +58,11 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/wcharczuk/go-chart/v2"
+	atomic2 "go.uber.org/atomic"
 )
 
 const ASSERT = false
@@ -1594,14 +1594,10 @@ func compress1(chaindata string, name string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	var superstring []byte
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
-	f, err := os.Open(name + ".dat")
-	if err != nil {
-		return err
-	}
-	r := bufio.NewReaderSize(f, etl.BufIOSize)
+	var superstring []byte
+
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
 	ch := make(chan []byte, runtime.NumCPU())
@@ -1613,23 +1609,13 @@ func compress1(chaindata string, name string) error {
 		collectors[i] = collector
 		go processSuperstring(ch, collector, &wg)
 	}
-	var buf []byte
-	l, e := binary.ReadUvarint(r)
 	i := 0
-	for ; e == nil; l, e = binary.ReadUvarint(r) {
-		if len(buf) < int(l) {
-			buf = make([]byte, l)
-		}
-		if _, e = io.ReadFull(r, buf[:l]); e != nil {
-			return e
-		}
-		if len(superstring)+2*int(l)+2 > superstringLimit {
+	if err := compress.ReadDatFile(name+".dat", func(v []byte) error {
+		if len(superstring)+2*len(v)+2 > superstringLimit {
 			ch <- superstring
 			superstring = nil
 		}
-		//fmt.Printf("\"%x\",\n", buf[:l])
-
-		for _, a := range buf[:l] {
+		for _, a := range v {
 			superstring = append(superstring, 1, a)
 		}
 		superstring = append(superstring, 0, 0)
@@ -1639,15 +1625,11 @@ func compress1(chaindata string, name string) error {
 		case <-logEvery.C:
 			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
 		}
-
-	}
-	itemsCount := i
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	if err = f.Close(); err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
+	itemsCount := i
 	if len(superstring) > 0 {
 		ch <- superstring
 	}
@@ -1658,18 +1640,9 @@ func compress1(chaindata string, name string) error {
 	if err != nil {
 		return err
 	}
-
-	var df *os.File
-	df, err = os.Create(name + ".dictionary.txt")
-	if err != nil {
+	if err := compress.PersistDictrionary(name+".dictionary.txt", db); err != nil {
 		return err
 	}
-	w := bufio.NewWriterSize(df, etl.BufIOSize)
-	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
-	if err = w.Flush(); err != nil {
-		return err
-	}
-	df.Close()
 
 	if err := reducedict(name); err != nil {
 		return err
@@ -1680,7 +1653,6 @@ func compress1(chaindata string, name string) error {
 	return nil
 }
 
-// DynamicCell represents result of dynamic programming for certain starting position
 type DynamicCell struct {
 	optimStart  int
 	coverStart  int
@@ -1905,7 +1877,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize *uint64, outputSize *uint64, posMap map[uint64]uint64) {
+func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize atomic2.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -1924,8 +1896,8 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 				return
 			}
 		}
-		atomic.AddUint64(inputSize, 1+uint64(len(input)-8))
-		atomic.AddUint64(outputSize, uint64(len(output)))
+		inputSize.Add(1 + uint64(len(input)-8))
+		outputSize.Add(uint64(len(output)))
 		posMap[uint64(len(input)-8+1)]++
 		posMap[0]++
 	}
@@ -2173,27 +2145,13 @@ func (hf *HuffmanCoder) flush() error {
 func reducedict(name string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	// Read up the dictionary
-	df, err := os.Open(name + ".dictionary.txt")
-	if err != nil {
-		return err
-	}
-	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
+
+	// DictionaryBuilder is for sorting words by their freuency (to assign codes)
 	var pt patricia.PatriciaTree
 	code2pattern := make([]*Pattern, 0, 256)
-	ds := bufio.NewScanner(df)
-	for ds.Scan() {
-		tokens := strings.Split(ds.Text(), " ")
-		var score int64
-		if score, err = strconv.ParseInt(tokens[0], 10, 64); err != nil {
-			return err
-		}
-		var word []byte
-		if word, err = hex.DecodeString(tokens[1]); err != nil {
-			return err
-		}
+	if err := compress.ReadDictrionary(name+".dictionary.txt", func(score uint64, word []byte) error {
 		p := &Pattern{
-			score:    uint64(score),
+			score:    score,
 			uses:     0,
 			code:     uint64(len(code2pattern)),
 			codeBits: 0,
@@ -2201,44 +2159,31 @@ func reducedict(name string) error {
 		}
 		pt.Insert(word, p)
 		code2pattern = append(code2pattern, p)
-	}
-	if err = df.Close(); err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	log.Info("dictionary file parsed", "entries", len(code2pattern))
-	statefile := name + ".dat"
-	f, err := os.Open(statefile)
-	if err != nil {
-		return err
-	}
-	r := bufio.NewReader(f)
-	var buf []byte
 	tmpDir := ""
 	ch := make(chan []byte, 10000)
-	var inputSize, outputSize uint64
+	var inputSize, outputSize atomic2.Uint64
 	var wg sync.WaitGroup
+	workers := runtime.NumCPU()
 	var collectors []*etl.Collector
 	var posMaps []map[uint64]uint64
-	for i := 0; i < runtime.NumCPU(); i++ {
+	for i := 0; i < workers; i++ {
 		collector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		collectors = append(collectors, collector)
 		posMap := make(map[uint64]uint64)
 		posMaps = append(posMaps, posMap)
 		wg.Add(1)
-		go reduceDictWorker(ch, &wg, &pt, collector, &inputSize, &outputSize, posMap)
+		go reduceDictWorker(ch, &wg, &pt, collector, inputSize, outputSize, posMap)
 	}
-	l, e := binary.ReadUvarint(r)
 	i := 0
-	for ; e == nil; l, e = binary.ReadUvarint(r) {
-		if len(buf) < int(l) {
-			buf = make([]byte, l)
-		}
-		if _, e = io.ReadFull(r, buf[:l]); e != nil {
-			return e
-		}
-		input := make([]byte, 8+int(l))
+	if err := compress.ReadDatFile(name+".dat", func(v []byte) error {
+		input := make([]byte, 8+int(len(v)))
 		binary.BigEndian.PutUint64(input, uint64(i))
-		copy(input[8:], buf[:l])
+		copy(input[8:], v)
 		ch <- input
 		i++
 		select {
@@ -2246,20 +2191,17 @@ func reducedict(name string) error {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		}
-	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	if err = f.Close(); err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	close(ch)
 	wg.Wait()
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info("Done", "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	log.Info("Done", "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	posMap := make(map[uint64]uint64)
 	for _, m := range posMaps {
 		for l, c := range m {
@@ -2336,6 +2278,7 @@ func reducedict(name string) error {
 	}
 	root := heap.Pop(&codeHeap).(*PatternHuff)
 	var cf *os.File
+	var err error
 	if cf, err = os.Create(name + ".compressed.dat"); err != nil {
 		return err
 	}
@@ -2498,7 +2441,7 @@ func reducedict(name string) error {
 		}
 	}
 	log.Info("Positional dictionary", "size", offset, "position cutoff", positionCutoff)
-	df, err = os.Create("huffman_codes.txt")
+	df, err := os.Create("huffman_codes.txt")
 	if err != nil {
 		return err
 	}
@@ -2638,16 +2581,15 @@ func recsplitWholeChain(chaindata string) error {
 
 	log.Info("Last body number", "last", last)
 	for i := uint64(*block); i < last; i += blocksPerFile {
-		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
-		log.Info("Creating", "file", *name)
-
-		if err := dumpTxs(chaindata, i, *blockTotal, *name); err != nil {
+		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
+		log.Info("Creating", "file", fileName+".seg")
+		if err := dumpTxs(chaindata, i, *blockTotal, fileName); err != nil {
 			return err
 		}
-		if err := compress1(chaindata, *name); err != nil {
+		if err := compress1(chaindata, fileName); err != nil {
 			return err
 		}
-		_ = os.Remove(*name + ".dat")
+		_ = os.Remove(fileName + ".dat")
 	}
 	return nil
 }
@@ -3530,21 +3472,6 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	tx, err := db.BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var txs kv.Cursor
-	if txs, err = tx.Cursor(kv.EthTx); err != nil {
-		return err
-	}
-	defer txs.Close()
-	var bodies kv.Cursor
-	if bodies, err = tx.Cursor(kv.BlockBody); err != nil {
-		return err
-	}
-	defer bodies.Close()
 	f, err := os.Create(name + ".dat")
 	if err != nil {
 		return err
@@ -3554,56 +3481,54 @@ func dumpTxs(chaindata string, block uint64, blockTotal int, name string) error 
 	defer w.Flush()
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
-	blockEncoded := dbutils.EncodeBlockNumber(block)
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	valueBuf := make([]byte, 16*4096)
-	k, v, e := bodies.Seek(blockEncoded)
-	for ; k != nil && e == nil; k, v, e = bodies.Next() {
+	from := dbutils.EncodeBlockNumber(block)
+	if err := kv.BigChunks(db, kv.BlockBody, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		bodyNum := binary.BigEndian.Uint64(k)
 		if bodyNum >= block+uint64(blockTotal) {
-			break
+			return false, nil
 		}
+
 		var body types.BodyForStorage
-		if e = rlp.DecodeBytes(v, &body); err != nil {
-			return e
+		if e := rlp.DecodeBytes(v, &body); err != nil {
+			return false, e
 		}
-		if body.TxAmount > 0 {
-			binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
-			tk, tv, te := txs.Seek(numBuf[:8])
-			for ; tk != nil && te == nil; tk, tv, te = txs.Next() {
-				txId := binary.BigEndian.Uint64(tk)
-				if txId >= body.BaseTxId+uint64(body.TxAmount) {
-					break
-				}
-				if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
-					panic(err)
-				}
-				valueBuf = valueBuf[:0]
-				valueBuf = append(append(valueBuf, slot.IdHash[:1]...), tv...)
-				n := binary.PutUvarint(numBuf, uint64(len(valueBuf)))
-				if _, e = w.Write(numBuf[:n]); e != nil {
-					return err
-				}
-				if len(valueBuf) > 0 {
-					if _, e = w.Write(valueBuf); e != nil {
-						return e
-					}
-				}
-				i++
-				if i%1_000_000 == 0 {
-					log.Info("Wrote into file", "million txs", i/1_000_000, "block num", bodyNum)
+		if body.TxAmount == 0 {
+			return true, nil
+		}
+
+		binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
+		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
+			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
+				return err
+			}
+			valueBuf = valueBuf[:0]
+			valueBuf = append(append(valueBuf, slot.IdHash[:1]...), tv...)
+			n := binary.PutUvarint(numBuf, uint64(len(valueBuf)))
+			if _, e := w.Write(numBuf[:n]); e != nil {
+				return e
+			}
+			if len(valueBuf) > 0 {
+				if _, e := w.Write(valueBuf); e != nil {
+					return e
 				}
 			}
-			if te != nil && !errors.Is(te, io.EOF) {
-				return te
+			i++
+			if i%1_000_000 == 0 {
+				log.Info("Wrote into file", "million txs", i/1_000_000, "block num", bodyNum)
 			}
+			return nil
+		}); err != nil {
+			return false, err
 		}
+		return true, nil
+	}); err != nil {
+		return err
 	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
+
 	return nil
 }
 
