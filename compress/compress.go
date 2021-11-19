@@ -22,12 +22,15 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -1230,4 +1233,73 @@ func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir stri
 
 	sort.Sort(db)
 	return db, nil
+}
+
+func PersistDictrionary(fileName string, db *DictionaryBuilder) error {
+	df, err := os.Create(fileName)
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriterSize(df, etl.BufIOSize)
+	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
+	if err = w.Flush(); err != nil {
+		return err
+	}
+	if err := df.Sync(); err != nil {
+		return err
+	}
+	return df.Close()
+}
+
+func ReadDictrionary(fileName string, walker func(score uint64, word []byte) error) error {
+	df, err := os.Open(fileName)
+	if err != nil {
+		return err
+	}
+	defer df.Close()
+	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
+	ds := bufio.NewScanner(df)
+	for ds.Scan() {
+		tokens := strings.Split(ds.Text(), " ")
+		score, err := strconv.ParseInt(tokens[0], 10, 64)
+		if err != nil {
+			return err
+		}
+		word, err := hex.DecodeString(tokens[1])
+		if err != nil {
+			return err
+		}
+		if err := walker(uint64(score), word); err != nil {
+			return err
+		}
+	}
+	return df.Close()
+}
+
+func ReadDatFile(fileName string, walker func(v []byte) error) error {
+	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
+	// We only consider values with length > 2, because smaller values are not compressible without going into bits
+	f, err := os.Open(fileName)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, etl.BufIOSize)
+	var buf []byte
+	l, e := binary.ReadUvarint(r)
+	for ; e == nil; l, e = binary.ReadUvarint(r) {
+		if len(buf) < int(l) {
+			buf = make([]byte, l)
+		}
+		if _, e = io.ReadFull(r, buf[:l]); e != nil {
+			return e
+		}
+		if err := walker(buf[:l]); err != nil {
+			return err
+		}
+	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
+	}
+	return nil
 }
