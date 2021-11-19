@@ -27,12 +27,16 @@ var (
 	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
 )
 
+func FileName(from, to uint64, name SnapshotType) string {
+	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, name)
+}
+
 func CompressedFileName(from, to uint64, name SnapshotType) string {
-	return fmt.Sprintf("v1-%06d-%06d-%s.seg", from/1_000, to/1_000, name)
+	return FileName(from, to, name) + ".seg"
 }
 
 func IdxFileName(from, to uint64, name SnapshotType) string {
-	return fmt.Sprintf("v1-%06d-%06d-%s.idx", from/1_000, to/1_000, name)
+	return FileName(from, to, name) + ".idx"
 }
 
 type Snapshot struct {

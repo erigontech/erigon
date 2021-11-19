@@ -58,6 +58,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/wcharczuk/go-chart/v2"
@@ -1609,7 +1610,7 @@ func compress1(chaindata string, name string) error {
 		go processSuperstring(ch, collector, &wg)
 	}
 	i := 0
-	if err := compress.ReadDatFile(name, func(v []byte) error {
+	if err := compress.ReadDatFile(name+".dat", func(v []byte) error {
 		if len(superstring)+2*len(v)+2 > superstringLimit {
 			ch <- superstring
 			superstring = nil
@@ -1639,7 +1640,7 @@ func compress1(chaindata string, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := compress.PersistDictrionary(name, db); err != nil {
+	if err := compress.PersistDictrionary(name+".dictionary.txt", db); err != nil {
 		return err
 	}
 
@@ -2148,7 +2149,7 @@ func reducedict(name string) error {
 	// DictionaryBuilder is for sorting words by their freuency (to assign codes)
 	var pt patricia.PatriciaTree
 	code2pattern := make([]*Pattern, 0, 256)
-	if err := compress.ReadDictrionary(name, func(score uint64, word []byte) error {
+	if err := compress.ReadDictrionary(name+".dictionary.txt", func(score uint64, word []byte) error {
 		p := &Pattern{
 			score:    score,
 			uses:     0,
@@ -2179,7 +2180,7 @@ func reducedict(name string) error {
 		go reduceDictWorker(ch, &wg, &pt, collector, inputSize, outputSize, posMap)
 	}
 	i := 0
-	if err := compress.ReadDatFile(name, func(v []byte) error {
+	if err := compress.ReadDatFile(name+".dat", func(v []byte) error {
 		input := make([]byte, 8+int(len(v)))
 		binary.BigEndian.PutUint64(input, uint64(i))
 		copy(input[8:], v)
@@ -2580,16 +2581,15 @@ func recsplitWholeChain(chaindata string) error {
 
 	log.Info("Last body number", "last", last)
 	for i := uint64(*block); i < last; i += blocksPerFile {
-		*name = fmt.Sprintf("bodies%d-%dm", i/1_000_000, i%1_000_000/100_000)
-		log.Info("Creating", "file", *name)
-
-		if err := dumpTxs(chaindata, i, *blockTotal, *name); err != nil {
+		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
+		log.Info("Creating", "file", fileName+".seg")
+		if err := dumpTxs(chaindata, i, *blockTotal, fileName); err != nil {
 			return err
 		}
-		if err := compress1(chaindata, *name); err != nil {
+		if err := compress1(chaindata, fileName); err != nil {
 			return err
 		}
-		_ = os.Remove(*name + ".dat")
+		_ = os.Remove(fileName + ".dat")
 	}
 	return nil
 }
