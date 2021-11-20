@@ -12,6 +12,11 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -34,12 +39,14 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	ctx         context.Context
-	eth         EthBackend
-	events      *Events
-	db          kv.RwDB
-	blockReader *snapshotsync.BlockReader
-	config      *params.ChainConfig
+	ctx           context.Context
+	eth           EthBackend
+	events        *Events
+	db            kv.RwDB
+	blockReader   *snapshotsync.BlockReader
+	config        *params.ChainConfig
+	executeConfig stagedsync.ExecuteBlockCfg
+	vmConfig      vm.Config
 }
 
 type EthBackend interface {
@@ -48,8 +55,11 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, config *params.ChainConfig, events *Events) *EthBackendServer {
-	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: snapshotsync.NewBlockReader(), config: config}
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, config *params.ChainConfig, executeConfig stagedsync.ExecuteBlockCfg, vmConfig vm.Config, events *Events) *EthBackendServer {
+	return &EthBackendServer{ctx: ctx, eth: eth, events: events,
+		config: config, db: db, executeConfig: executeConfig,
+		vmConfig: vmConfig, blockReader: snapshotsync.NewBlockReader(),
+	}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -160,6 +170,16 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 // EngineExecutePayloadV1, executes payload
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+	// Check mandatory fields
+	if req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
+		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
+		s.config.TerminalTotalDifficulty == nil {
+
+		return &remote.EngineExecutePayloadReply{
+			Status: Invalid,
+		}, nil
+	}
+
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
@@ -192,20 +212,20 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
 	var extra_data common.Hash = gointerfaces.ConvertH256ToHash(req.ExtraData)
 	header := types.Header{
-		ParentHash: gointerfaces.ConvertH256ToHash(req.ParentHash),
-		Coinbase:   gointerfaces.ConvertH160toAddress(req.Coinbase),
-		Root:       gointerfaces.ConvertH256ToHash(req.StateRoot),
-		Bloom:      gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
-		Random:     gointerfaces.ConvertH256ToHash(req.Random),
-		Eip3675:    true,
-		Eip1559:    eip1559,
-		BaseFee:    baseFee,
-		Extra:      extra_data.Bytes(),
-		Number:     big.NewInt(int64(req.BlockNumber)),
-		GasUsed:    req.GasUsed,
-		GasLimit:   req.GasLimit,
-		Time:       req.Timestamp,
-		// ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
+		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
+		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
+		Root:        gointerfaces.ConvertH256ToHash(req.StateRoot),
+		Bloom:       gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
+		Random:      gointerfaces.ConvertH256ToHash(req.Random),
+		Eip3675:     true,
+		Eip1559:     eip1559,
+		BaseFee:     baseFee,
+		Extra:       extra_data.Bytes(),
+		Number:      big.NewInt(int64(req.BlockNumber)),
+		GasUsed:     req.GasUsed,
+		GasLimit:    req.GasLimit,
+		Time:        req.Timestamp,
+		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 	}
 	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
@@ -258,7 +278,42 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 			return nil, err
 		}
 	}
-	rawdb.WriteSenders(tx, blockHash, req.BlockNumber, senders)
+	if err := rawdb.WriteSenders(tx, blockHash, req.BlockNumber, senders); err != nil {
+		return nil, err
+	}
+	block := types.NewBlock(&header, transactions, []*types.Header{}, []*types.Receipt{})
+	// Create batch
+	var batch ethdb.DbWithPendingMutations
+	batch = olddb.NewBatch(tx, ctx.Done())
+	defer batch.Rollback()
+	// TEVM handler
+	var contractHasTEVM func(contractHash common.Hash) (bool, error)
 
+	if s.vmConfig.EnableTEMV {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
+	// Execute the payload
+	if err := stagedsync.ExecuteBlock(block, tx, batch, s.executeConfig, s.vmConfig, true, true, true, contractHasTEVM, false); err != nil {
+		return &remote.EngineExecutePayloadReply{
+			Status: Invalid,
+		}, nil
+	}
+
+	// Update Progress
+	if err := stages.SaveStageProgress(tx, stages.Headers, req.BlockNumber); err != nil {
+		return nil, err
+	}
+	if err := stages.SaveStageProgress(tx, stages.BlockHashes, req.BlockNumber); err != nil {
+		return nil, err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Bodies, req.BlockNumber); err != nil {
+		return nil, err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Senders, req.BlockNumber); err != nil {
+		return nil, err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Execution, req.BlockNumber); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
