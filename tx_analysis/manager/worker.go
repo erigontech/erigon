@@ -5,11 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/tx_analysis/minievm"
-	log_ "github.com/ledgerwatch/log/v3"
 )
 
 type task struct {
@@ -57,13 +55,13 @@ func (w *worker) start() {
 
 	fmt.Printf("Starting a worker with id: %d...\n", w.id)
 
-	logger := log_.New()
-	db, err := mdbx.NewMDBX(logger).Path("/mnt/mx500_0/goerli/chaindata").Readonly().Open()
-	if err != nil {
-		fmt.Println(err)
+	// logger := log_.New()
+	// db, err := mdbx.NewMDBX(logger).Path("/mnt/mx500_0/goerli/chaindata").Readonly().Open()
+	// if err != nil {
+	// 	fmt.Println(err)
 
-	}
-	defer db.Close()
+	// }
+	// defer db.Close()
 
 	active := false
 	stop := false

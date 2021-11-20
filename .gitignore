@@ -72,3 +72,4 @@ libmdbx/build/*
 tests/testdata/*
 
 /tx_analysis/scetches
+/tx_analysis/__main.go
