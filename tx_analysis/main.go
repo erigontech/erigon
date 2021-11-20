@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 
+	"log"
+
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/tx_analysis/manager"
+	"github.com/ledgerwatch/erigon/tx_analysis/utils"
 )
 
 var (
@@ -25,24 +29,13 @@ func main() {
 	http_addr := fmt.Sprintf("http://%s:%s", *IP, *PORT)
 	ws_addr := fmt.Sprintf("ws://%s:%s", *IP, *PORT)
 
-	client := new_http_client(http_addr)
+	client := utils.NewHTTPClient(http_addr)
 
 	conn, _, err := websocket.DefaultDialer.Dial(ws_addr, nil)
 	if err != nil {
 		log.Fatalln(err)
 	}
 	defer conn.Close()
-
-	// var wg sync.WaitGroup
-	// rr := new_round_robin(*WORKERS)
-	// var workers []*worker
-	// for i := 0; i < *WORKERS; i++ {
-	// 	stop := make(chan bool)
-	// 	_worker := new_worker(i, stop, &wg)
-	// 	wg.Add(1)
-	// 	go _worker.start()
-	// 	workers = append(workers, _worker)
-	// }
 
 	const template = `{"jsonrpc":"2.0","method":"eth_subscribe","params":["newHeads"],"id":%x}`
 	query := fmt.Sprintf(template, 1)
@@ -60,29 +53,43 @@ func main() {
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
+	defer signal.Stop(interrupt)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := make(chan bool)
+	ready := make(chan bool)
+
+	mng := manager.New()
+	go mng.Start(cancel, stop, ready, *WORKERS)
+
+	<-ready
 
 	is_interrupt := false
-
 	for {
 
 		select {
 		case <-interrupt:
 			is_interrupt = true
+
 			fmt.Println("Shutting down...")
-			// for i := 0; i < *WORKERS; i++ {
-			// 	workers[i].stop <- true
-			// }
-			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+			fmt.Println("Closing WebSocket connection...")
+
+			err = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
 				websocket.CloseNormalClosure, ""))
 
-			// fmt.Println("Waiting for threads to complete assigned jobs...")
-			// fmt.Printf("Total jobs received: %d\n", total_transactions_received)
+			if err != nil {
+				fmt.Println("Error closing connection: ", err)
+			}
 
-			// wg.Wait()
+			stop <- true
+		case <-ctx.Done():
+			fmt.Println("Done...")
 			return
 		default:
+
 			if !is_interrupt {
-				var resp_h json_resp_header
+
+				var resp_h utils.JsonHeaderResp
 				_, resp, err := conn.ReadMessage()
 				if err != nil {
 					log.Println("ReadJSON:", err)
@@ -95,25 +102,17 @@ func main() {
 					return
 				}
 
-				_header := resp_h.Params.Result
-				block_number := _header.Number.Uint64()
+				header := resp_h.Params.Result
+				block_number := header.Number.Uint64()
 
 				var t rpctest.EthBlockByNumber
-				err = getBlockByNumber(&client, block_number, &t)
+				err = utils.GetBlockByNumber(&client, block_number, &t)
 				if err != nil {
 					fmt.Println("error block by number: ", err)
 					continue
 				}
 
-				fmt.Printf("block %d, transactions: %d\n\n",
-					block_number, len(t.Result.Transactions))
-
-				// Analize()
-
-				for _, eth_tx := range t.Result.Transactions {
-					minievm.Analize(eth_tx)
-				}
-
+				mng.AddSupply(&header, t.Result.Transactions)
 			}
 
 		}

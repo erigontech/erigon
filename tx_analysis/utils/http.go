@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"encoding/json"
@@ -8,21 +8,21 @@ import (
 	"time"
 )
 
-type http_req struct {
+type HTTPClient struct {
 	url    string
 	reqID  int
 	client *http.Client
 }
 
-func new_http_client(url string) http_req {
+func NewHTTPClient(url string) HTTPClient {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
 
-	return http_req{url: url, client: client}
+	return HTTPClient{url: url, client: client}
 }
 
-func (h *http_req) post(body string, response interface{}) error {
+func (h *HTTPClient) post(body string, response interface{}) error {
 	r, err := h.client.Post(h.url, "application/json", strings.NewReader(body))
 	if err != nil {
 		return err
@@ -37,7 +37,7 @@ func (h *http_req) post(body string, response interface{}) error {
 	return err
 }
 
-func getBlockByNumber(client *http_req, blockNum uint64, response interface{}) error {
+func GetBlockByNumber(client *HTTPClient, blockNum uint64, response interface{}) error {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x", true],"id":%d}`
 	client.reqID++
 	body := fmt.Sprintf(template, blockNum, client.reqID)

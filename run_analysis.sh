@@ -3,6 +3,7 @@
 BASE=$(pwd) # absolute path to erigon
 BIN_DIR=$BASE/build/bin
 
+
 EXECUTABLE=tx_analysis
 ENTRY_FOLDER=$BASE/tx_analysis
 
@@ -18,7 +19,7 @@ print_help() {
     echo ""
     echo "-h | --help       print usage and available options"
     echo ""
-    echo "args: "
+    echo "args: " 
     echo "-p | --port       RPC daemon port number"
     echo "-i | --ip         RPC daemon IP address (default '127.0.0.1')"
     echo "-d | --datadir    absolute path to Erigon node folder, e.g: /home/user/my_node"
@@ -70,21 +71,10 @@ echo "---------------------------------------------------------------"
 
 
 
+
 echo "Building..."
-go build -o $BIN_DIR/$EXECUTABLE $ENTRY_FOLDER/...
+
+go build -o $BIN_DIR/$EXECUTABLE $ENTRY_FOLDER/main.go
+
 echo "Starting a programm..."
 $BIN_DIR/$EXECUTABLE -port "$RPCDAEMONPORT" -ip "$IP" -workers $WORKERS
-
-
-# GO = go
-# GOBIN = $(CURDIR)/build/bin
-# GOTEST = GODEBUG=cgocheck=0 $(GO) test ./... -p 2
-
-# GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
-# GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-# GIT_TAG    ?= $(shell git describe --tags `git rev-list --tags="v*" --max-count=1`)
-# GOBUILD = env GO111MODULE=on $(GO) build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
-# GO_DBG_BUILD = $(GO) build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
-
-# GO_MAJOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
-# GO_MINOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)

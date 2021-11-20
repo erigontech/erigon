@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"github.com/ledgerwatch/erigon/core/types"
@@ -9,7 +9,7 @@ type params_h struct {
 	Result       types.Header `json:"result"`
 }
 
-type json_resp_header struct {
+type JsonHeaderResp struct {
 	JsonRPC float32  `json:"jsonrpc,string"`
 	Method  string   `json:"method"`
 	Params  params_h `json:"params"`
