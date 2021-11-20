@@ -326,7 +326,8 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) erro
 			if len(senders) > 0 {
 				sender = senders[j][:]
 			} else {
-				panic("not implemented")
+				sender = make([]byte, 20) // TODO: return error here
+				//panic("not implemented")
 			}
 			_ = sender
 			valueBuf = valueBuf[:0]
