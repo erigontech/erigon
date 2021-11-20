@@ -1874,7 +1874,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize atomic2.Uint64, posMap map[uint64]uint64) {
+func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize *atomic2.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -2163,7 +2163,7 @@ func reducedict(name string, segmentFileName string) error {
 	log.Info("dictionary file parsed", "entries", len(code2pattern))
 	tmpDir := ""
 	ch := make(chan []byte, 10000)
-	var inputSize, outputSize atomic2.Uint64
+	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var wg sync.WaitGroup
 	workers := runtime.NumCPU() / 2
 	var collectors []*etl.Collector
