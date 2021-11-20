@@ -59,11 +59,11 @@ func IdxFileName(from, to uint64, name SnapshotType) string {
 }
 
 type Snapshot struct {
-	File         string
-	Idx          *recsplit.Index
-	Decompressor *compress.Decompressor
-	From         uint64 // included
-	To           uint64 // excluded
+	File    string
+	Idx     *recsplit.Index
+	Segment *compress.Decompressor
+	From    uint64 // included
+	To      uint64 // excluded
 }
 
 func (s Snapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
@@ -139,7 +139,7 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 				}
 				return nil, err
 			}
-			blocksSnapshot.Bodies = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Decompressor: d, Idx: idx}
+			blocksSnapshot.Bodies = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d, Idx: idx}
 		}
 		{
 			fileName := SegmentFileName(from, to, Headers)
@@ -158,7 +158,7 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 				return nil, err
 			}
 
-			blocksSnapshot.Headers = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Decompressor: d, Idx: idx}
+			blocksSnapshot.Headers = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d, Idx: idx}
 		}
 		{
 			fileName := SegmentFileName(from, to, Transactions)
@@ -176,7 +176,7 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 				}
 				return nil, err
 			}
-			blocksSnapshot.Transactions = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Decompressor: d, Idx: idx}
+			blocksSnapshot.Transactions = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d, Idx: idx}
 		}
 
 		all.blocks = append(all.blocks, blocksSnapshot)
@@ -188,11 +188,11 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 func (s AllSnapshots) Close() {
 	for _, s := range s.blocks {
 		s.Headers.Idx.Close()
-		s.Headers.Decompressor.Close()
+		s.Headers.Segment.Close()
 		s.Bodies.Idx.Close()
-		s.Bodies.Decompressor.Close()
+		s.Bodies.Segment.Close()
 		s.Transactions.Idx.Close()
-		s.Transactions.Decompressor.Close()
+		s.Transactions.Segment.Close()
 	}
 }
 
@@ -547,8 +547,9 @@ RETRY:
 	num := make([]byte, 8)
 	for g.HasNext() {
 		word, pos = g.Next(word[:0])
-		binary.BigEndian.PutUint64(num, uint64(wc))
-		if err := rs.AddKey(num, pos); err != nil {
+		n := binary.PutUvarint(num, uint64(wc))
+		//binary.BigEndian.PutUint64(num, uint64(wc))
+		if err := rs.AddKey(num[:n], pos); err != nil {
 			return err
 		}
 		wc++
