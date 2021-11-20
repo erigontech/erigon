@@ -2647,34 +2647,6 @@ func recsplitWholeChain(chaindata string) error {
 }
 
 func recsplitLookup(chaindata, name string) error {
-	idx1, err := recsplit.OpenIndex("/Users/alex.sharov/data/goerli/snapshots/v1-000000-000500-headers.idx")
-	tool.Check(err)
-
-	dd, err := compress.NewDecompressor("/Users/alex.sharov/data/goerli/snapshots/v1-000000-000500-headers.seg")
-	tool.Check(err)
-
-	a := make([]byte, binary.MaxVarintLen64)
-	nn := binary.PutUvarint(a, 123)
-
-	id := idx1.Lookup(a[:nn])
-	tool.Check(err)
-	fmt.Printf("id: %d\n", id)
-	offset := idx1.Lookup2(id)
-	tool.Check(err)
-	fmt.Printf("offset: %d\n", offset)
-
-	gg := dd.MakeGetter()
-	gg.Reset(offset)
-	buf := make([]byte, 1024)
-	buf, _ = gg.Next(buf[:0])
-
-	h := &types.Header{}
-	err = rlp.DecodeBytes(buf, h)
-	tool.Check(err)
-
-	fmt.Printf("found: %d\n", h.Number.Uint64())
-
-	panic(1)
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
 	chainConfig := tool.ChainConfigFromDB(database)
