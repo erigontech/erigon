@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -270,6 +271,8 @@ func ParseCompressedFileName(name string) (from, to uint64, snapshotType Snapsho
 	return from * 1_000, to * 1_000, snapshotType, nil
 }
 
+// DumpTxs -
+// Format: hash[0]_1byte + sender_address_2bytes + txnRlp
 func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) error {
 	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Transactions)
 	tmpFileName = path.Join(tmpdir, tmpFileName)
@@ -293,31 +296,48 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) erro
 	slot := txpool.TxSlot{}
 	valueBuf := make([]byte, 16*4096)
 	from := dbutils.EncodeBlockNumber(fromBlock)
-	if err := kv.BigChunks(db, kv.BlockBody, from, func(tx kv.Tx, k, v []byte) (bool, error) {
+	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= fromBlock+uint64(blocksAmount) {
 			return false, nil
 		}
 
+		h := common.BytesToHash(v)
+		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
 		var body types.BodyForStorage
-		if e := rlp.DecodeBytes(v, &body); e != nil {
+		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
 		}
 		if body.TxAmount == 0 {
 			return true, nil
 		}
+		senders, err := rawdb.ReadSenders(tx, h, blockNum)
+		if err != nil {
+			return false, err
+		}
 
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
+		j := 0
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
 			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
 				return err
 			}
+			var sender []byte
+			if len(senders) > 0 {
+				sender = senders[j][:]
+			} else {
+				panic("not implemented")
+			}
+			_ = sender
 			valueBuf = valueBuf[:0]
-			valueBuf = append(append(valueBuf, slot.IdHash[:1]...), tv...)
+			valueBuf = append(valueBuf, slot.IdHash[:1]...)
+			valueBuf = append(valueBuf, sender...)
+			valueBuf = append(valueBuf, tv...)
 			if err := f.Append(valueBuf); err != nil {
 				return err
 			}
 			i++
+			j++
 
 			select {
 			default:
@@ -490,7 +510,9 @@ RETRY:
 
 	for g.HasNext() {
 		word, pos = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
+		//if _, err := parseCtx.ParseTransaction(word[0:], 0, &slot, sender[:]); err != nil {
+		//	if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
+		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:]); err != nil {
 			return err
 		}
 		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {

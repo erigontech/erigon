@@ -92,10 +92,13 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	reader := bytes.NewReader(nil)
 	stream := rlp.NewStream(reader, 0)
 	txs := make([]types.Transaction, b.TxAmount)
+	senders = make([]common.Address, b.TxAmount)
 	//TODO: use gg.Current here
 	for i := uint32(0); i < b.TxAmount; i++ {
 		buf, _ = gg.Next(buf[:0])
-		reader.Reset(buf)
+		senders[i].SetBytes(buf[1 : 1+20])
+		txRlp := buf[1+20:]
+		reader.Reset(txRlp)
 		stream.Reset(reader, 0)
 		txs[i], err = types.DecodeTransaction(stream)
 		if err != nil {
@@ -104,12 +107,9 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	}
 
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles)
-	//TODO: add senders
-	/*
-		if len(senders) != block.Transactions().Len() {
-			return block, senders, nil // no senders is fine - will recover them on the fly
-		}
-		block.SendersToTxs(senders)
-	*/
-	return block, nil, nil
+	if len(senders) != block.Transactions().Len() {
+		return block, senders, nil // no senders is fine - will recover them on the fly
+	}
+	block.SendersToTxs(senders)
+	return block, senders, nil
 }
