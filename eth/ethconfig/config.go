@@ -36,8 +36,10 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -158,6 +160,7 @@ type Config struct {
 
 	Clique params.SnapshotConfig
 	Aura   params.AuRaConfig
+	Parlia   params.ParliaConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -179,7 +182,7 @@ type Config struct {
 	SyncLoopThrottle time.Duration
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, ee *ethapi.PublicBlockChainAPI, genesisHash common.Hash) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -208,6 +211,10 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 	case *params.SnapshotConfig:
 		if chainConfig.Clique != nil {
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
+		}
+	case *params.ParliaConfig:
+		if chainConfig.Parlia != nil {
+			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), ee, genesisHash)
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {

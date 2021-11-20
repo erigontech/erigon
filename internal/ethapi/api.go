@@ -32,6 +32,21 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+// Covalent change: Empty Backend interface used for PublicBlockChainAPI below
+type Backend interface {}
+
+// Covalent change: This has been uncommented to be used for Parlia
+// PublicBlockChainAPI provides an API to access the Ethereum blockchain.
+// It offers only methods that operate on public data that is freely available to anyone.
+type PublicBlockChainAPI struct {
+	b Backend
+}
+
+// NewPublicBlockChainAPI creates a new Ethereum blockchain API.
+func NewPublicBlockChainAPI(b Backend) *PublicBlockChainAPI {
+	return &PublicBlockChainAPI{b}
+}
+
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
 	From                 *common.Address   `json:"from"`

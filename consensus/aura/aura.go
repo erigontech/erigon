@@ -833,7 +833,7 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 }
 
 //word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, systemTxs *[]*types.Transaction, usedGas *uint64, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
 	// accumulateRewards retrieves rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 	beneficiaries, _, rewards, err := AccumulateRewards(config, c, header, uncles, syscall)
 	if err != nil {
@@ -977,11 +977,11 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to c
 
 // FinalizeAndAssemble implements consensus.Engine
 func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
-	c.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, []*types.Receipt, error) {
+	c.Finalize(chainConfig, header, state, txs, uncles, r, nil, nil, e, chain, syscall)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, uncles, r), nil
+	return types.NewBlock(header, txs, uncles, r), r, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks

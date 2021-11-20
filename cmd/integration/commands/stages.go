@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -1064,12 +1065,15 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	genesis, chainConfig := byChain()
 	var engine consensus.Engine
+	config := &ethconfig.Defaults
+	var consensusConfig interface{}
 	if chainConfig.Clique != nil {
 		c := params.CliqueSnapshot
 		c.DBPath = path.Join(datadir, "clique/db")
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, nil, false)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, nil, common.Hash{})
 	} else if chainConfig.Aura != nil {
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
+		consensusConfig = &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, nil, common.Hash{})
 	} else { //ethash
 		engine = ethash.NewFaker()
 	}
