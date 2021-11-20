@@ -55,6 +55,10 @@ type PeerInfo struct {
 	removed   bool
 }
 
+func (pi *PeerInfo) ID() enode.ID {
+	return pi.peer.ID()
+}
+
 // AddDeadline adds given deadline to the list of deadlines
 // Deadlines must be added in the chronological order for the function
 // ClearDeadlines to work correctly (it uses binary search)
@@ -545,14 +549,13 @@ type SentryServerImpl struct {
 	p2p                  *p2p.Config
 }
 
-func (ss *SentryServerImpl) rangePeers(f func(peerID enode.ID, peerInfo *PeerInfo) bool) {
+func (ss *SentryServerImpl) rangePeers(f func(peerInfo *PeerInfo) bool) {
 	ss.GoodPeers.Range(func(key, value interface{}) bool {
 		peerInfo, _ := value.(*PeerInfo)
 		if peerInfo == nil {
 			return true
 		}
-		peerID := key.(enode.ID)
-		return f(peerID, peerInfo)
+		return f(peerInfo)
 	})
 }
 
@@ -576,11 +579,11 @@ func (ss *SentryServerImpl) removePeer(peerID enode.ID) {
 	}
 }
 
-func (ss *SentryServerImpl) writePeer(peerID enode.ID, peerInfo *PeerInfo, msgcode uint64, data []byte) error {
+func (ss *SentryServerImpl) writePeer(peerInfo *PeerInfo, msgcode uint64, data []byte) error {
 	err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 	if err != nil {
 		peerInfo.Remove()
-		ss.GoodPeers.Delete(peerID)
+		ss.GoodPeers.Delete(peerInfo.ID())
 	}
 	return err
 }
@@ -630,13 +633,12 @@ func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.Pe
 	return &emptypb.Empty{}, nil
 }
 
-func (ss *SentryServerImpl) findPeer(minBlock uint64) (enode.ID, *PeerInfo, bool) {
+func (ss *SentryServerImpl) findPeer(minBlock uint64) (*PeerInfo, bool) {
 	// Choose a peer that we can send this request to, with maximum number of permits
-	var foundPeerID enode.ID
 	var foundPeerInfo *PeerInfo
 	var maxPermits int
 	now := time.Now()
-	ss.rangePeers(func(peerID enode.ID, peerInfo *PeerInfo) bool {
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		if peerInfo.Height() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
@@ -644,18 +646,17 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (enode.ID, *PeerInfo, bool
 				permits := maxPermitsPerPeer - deadlines
 				if permits > maxPermits {
 					maxPermits = permits
-					foundPeerID = peerID
 					foundPeerInfo = peerInfo
 				}
 			}
 		}
 		return true
 	})
-	return foundPeerID, foundPeerInfo, maxPermits > 0
+	return foundPeerInfo, maxPermits > 0
 }
 
 func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
-	peerID, peerInfo, found := ss.findPeer(inreq.MinBlock)
+	peerInfo, found := ss.findPeer(inreq.MinBlock)
 	if !found {
 		return &proto_sentry.SentPeers{}, nil
 	}
@@ -665,11 +666,11 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		msgcode != eth.GetPooledTransactionsMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
-	if err := ss.writePeer(peerID, peerInfo, msgcode, inreq.Data.Data); err != nil {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerID, err)
+	if err := ss.writePeer(peerInfo, msgcode, inreq.Data.Data); err != nil {
+		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerInfo.ID(), err)
 	}
 	peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
-	return &proto_sentry.SentPeers{Peers: []*proto_types.H256{gointerfaces.ConvertHashToH256(peerID)}}, nil
+	return &proto_sentry.SentPeers{Peers: []*proto_types.H256{gointerfaces.ConvertHashToH256(peerInfo.ID())}}, nil
 }
 
 func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
@@ -692,7 +693,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
 
-	if err := ss.writePeer(peerID, peerInfo, msgcode, inreq.Data.Data); err != nil {
+	if err := ss.writePeer(peerInfo, msgcode, inreq.Data.Data); err != nil {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %w", peerID, err)
 	}
 	return &proto_sentry.SentPeers{Peers: []*proto_types.H256{inreq.PeerId}}, nil
@@ -707,7 +708,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	}
 
 	amount := uint64(0)
-	ss.rangePeers(func(peerID enode.ID, peerInfo *PeerInfo) bool {
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		amount++
 		return true
 	})
@@ -720,12 +721,12 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	i := 0
 	var innerErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H256{}}
-	ss.rangePeers(func(peerID enode.ID, peerInfo *PeerInfo) bool {
-		if err := ss.writePeer(peerID, peerInfo, msgcode, req.Data.Data); err != nil {
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if err := ss.writePeer(peerInfo, msgcode, req.Data.Data); err != nil {
 			innerErr = err
 			return true
 		}
-		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerID))
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerInfo.ID()))
 		i++
 		return i < sendToAmount
 	})
@@ -745,12 +746,12 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 
 	var innerErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H256{}}
-	ss.rangePeers(func(peerID enode.ID, peerInfo *PeerInfo) bool {
-		if err := ss.writePeer(peerID, peerInfo, msgcode, req.Data); err != nil {
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if err := ss.writePeer(peerInfo, msgcode, req.Data); err != nil {
 			innerErr = err
 			return true
 		}
-		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerID))
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerInfo.ID()))
 		return true
 	})
 	if innerErr != nil {
@@ -811,7 +812,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 }
 
 func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
-	ss.rangePeers(func(peerID enode.ID, peerInfo *PeerInfo) bool {
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		pc++
 		return true
 	})
