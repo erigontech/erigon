@@ -374,7 +374,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, chainConfig, backend.notifications.Events)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials

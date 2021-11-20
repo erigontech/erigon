@@ -3,18 +3,27 @@ package privateapi
 import (
 	"bytes"
 	"context"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
 	"google.golang.org/protobuf/types/known/emptypb"
+)
+
+const (
+	Syncing = "SYNCING"
+	Valid   = "VALID"
+	Invalid = "INVALID"
 )
 
 // EthBackendAPIVersion
@@ -28,8 +37,9 @@ type EthBackendServer struct {
 	ctx         context.Context
 	eth         EthBackend
 	events      *Events
-	db          kv.RoDB
+	db          kv.RwDB
 	blockReader *snapshotsync.BlockReader
+	config      *params.ChainConfig
 }
 
 type EthBackend interface {
@@ -38,8 +48,8 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RoDB, events *Events) *EthBackendServer {
-	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: snapshotsync.NewBlockReader()}
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, config *params.ChainConfig, events *Events) *EthBackendServer {
+	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: snapshotsync.NewBlockReader(), config: config}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -146,4 +156,109 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 		sendersBytes = append(sendersBytes, senders[i][:]...)
 	}
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
+}
+
+// EngineExecutePayloadV1, executes payload
+func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// If another payload is already commissioned then we just reply with syncing
+	_, _, found, err := rawdb.ReadPayload(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	currentHead := rawdb.ReadHeadBlockHash(tx)
+	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
+
+	if found {
+		// We are still syncing a commisioned payload
+		return &remote.EngineExecutePayloadReply{
+			Status:          Syncing,
+			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+		}, nil
+	}
+	// Let's check if we have parent hash, if we have it we can process the payload right now.
+	// If not, we need to commission it and reverse-download the chain.
+	var baseFee *big.Int
+	eip1559 := false
+
+	if req.BaseFeePerGas != nil {
+		baseFee = gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig()
+		eip1559 = true
+	}
+	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
+	var extra_data common.Hash = gointerfaces.ConvertH256ToHash(req.ExtraData)
+	header := types.Header{
+		ParentHash: gointerfaces.ConvertH256ToHash(req.ParentHash),
+		Coinbase:   gointerfaces.ConvertH160toAddress(req.Coinbase),
+		Root:       gointerfaces.ConvertH256ToHash(req.StateRoot),
+		Bloom:      gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
+		Random:     gointerfaces.ConvertH256ToHash(req.Random),
+		Eip3675:    true,
+		Eip1559:    eip1559,
+		BaseFee:    baseFee,
+		Extra:      extra_data.Bytes(),
+		Number:     big.NewInt(int64(req.BlockNumber)),
+		GasUsed:    req.GasUsed,
+		GasLimit:   req.GasLimit,
+		Time:       req.Timestamp,
+		// ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
+	}
+	// Our execution layer has some problems so we return invalid
+	if header.Hash() != blockHash {
+		return &remote.EngineExecutePayloadReply{
+			Status:          Invalid,
+			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+		}, nil
+	}
+	// Check if current block is next for execution, if not, commission it and start
+	// Reverse-download the chain from its block number and hash.
+	if header.ParentHash != currentHead {
+		// We commissioned a payload and now we are syncing
+		return &remote.EngineExecutePayloadReply{
+			Status:          Syncing,
+			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+		}, rawdb.CommissionPayload(tx, req.BlockNumber, blockHash)
+	}
+
+	// Decode transactions
+	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
+	transactions := make([]types.Transaction, len(req.Transactions))
+
+	for i, encodedTransaction := range req.Transactions {
+		reader.Reset(encodedTransaction)
+		stream.Reset(reader, 0)
+		if transactions[i], err = types.DecodeTransaction(stream); err != nil {
+			return nil, err
+		}
+		i++
+	}
+	// Write Header(we do not need to add difficulty after "The merge")
+	rawdb.WriteHeader(tx, &header)
+	if err := rawdb.WriteCanonicalHash(tx, blockHash, req.BlockNumber); err != nil {
+		return nil, err
+	}
+	rawdb.WriteHeaderNumber(tx, blockHash, req.BlockNumber)
+	// Write Body
+	if err := rawdb.WriteRawBody(tx, blockHash, req.BlockNumber, &types.RawBody{
+		Transactions: req.Transactions,
+	}); err != nil {
+		return nil, err
+	}
+	// Senders recovery
+	signer := types.MakeSigner(s.config, req.BlockNumber)
+	senders := make([]common.Address, len(req.Transactions))
+	for i, tx := range transactions {
+		senders[i], err = signer.SenderWithContext(secp256k1.NewContext(), tx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	rawdb.WriteSenders(tx, blockHash, req.BlockNumber, senders)
+
+	return nil, nil
 }

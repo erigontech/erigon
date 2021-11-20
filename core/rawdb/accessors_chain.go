@@ -1007,3 +1007,28 @@ func MarkTransition(db kv.StatelessRwTx, blockNum uint64) error {
 	}
 	return nil
 }
+
+// CommissionPayload notifies that we need to reverse sync from the given number and hash
+// we only need number and hash to start reverse downloading the chain.
+// At the end of a sync cycle the Commisionated Payload will be deleted.
+func CommissionPayload(tx kv.Putter, blockNumber uint64, blockHash common.Hash) (err error) {
+	return tx.Put(kv.CurrentExecutionPayload, []byte(kv.CurrentExecutionPayload), dbutils.HeaderKey(blockNumber, blockHash))
+}
+
+// ReadPayload read the payload commissioned by the beacon-chain
+func ReadPayload(tx kv.Getter) (blockNumber uint64, hash common.Hash, found bool, err error) {
+	data, err := tx.GetOne(kv.CurrentExecutionPayload, []byte(kv.CurrentExecutionPayload))
+	if err != nil {
+		return 0, common.Hash{}, false, fmt.Errorf("failed ReadPayload: %w", err)
+	}
+	// Payload was not found
+	if len(data) == 0 {
+		return 0, common.Hash{}, false, nil
+	}
+	return binary.BigEndian.Uint64(data), common.BytesToHash(data[8:]), true, nil
+}
+
+// ClearPayload wipes out an already processed payload
+func ClearPayload(tx kv.Deleter) (err error) {
+	return tx.Delete(kv.CurrentExecutionPayload, []byte(kv.CurrentExecutionPayload), nil)
+}

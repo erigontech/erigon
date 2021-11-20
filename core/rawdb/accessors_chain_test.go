@@ -439,6 +439,29 @@ func TestTransition(t *testing.T) {
 	require.False(isTrans)
 }
 
+func TestPayload(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+	payloadNumber := uint64(1000)
+	payloadHash := common.HexToHash("0x1")
+
+	require.NoError(CommissionPayload(tx, payloadNumber, payloadHash))
+
+	actualNumber, actualHash, found, err := ReadPayload(tx)
+
+	require.NoError(err)
+	require.Equal(payloadNumber, actualNumber, "Wrong payload block")
+	require.Equal(actualHash, payloadHash, "Wrong payload hash")
+	require.True(found, "Payload was not found")
+
+	require.NoError(ClearPayload(tx))
+
+	actualNumber, actualHash, found, err = ReadPayload(tx)
+
+	require.NoError(err)
+	require.True(!found, "Payload was found when it should not have")
+}
+
 func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {
 		return fmt.Errorf("receipts sizes mismatch: have %d, want %d", len(have), len(want))
