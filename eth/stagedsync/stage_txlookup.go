@@ -144,6 +144,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 			return err
 		}
 		for _, txn := range txs {
+			fmt.Printf("Clean up %x, %x\n", k, txn.Hash().Bytes())
 			if err = next(k, txn.Hash().Bytes(), nil); err != nil {
 				return err
 			}
@@ -152,7 +153,9 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
 		ExtractStartKey: dbutils.EncodeBlockNumber(u.UnwindPoint + 1),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(s.BlockNumber),
+		// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
+		// the keys in BlockBody table always have hash after the block number
+		ExtractEndKey: dbutils.EncodeBlockNumber(s.BlockNumber + 1),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
