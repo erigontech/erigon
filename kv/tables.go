@@ -260,6 +260,9 @@ const (
 	CliqueSnapshot     = "CliqueSnapshot"
 	CliqueLastSnapshot = "CliqueLastSnapshot"
 
+	// Proof-of-stake
+	// Beacon chain head that is been executed at the current time
+	CurrentExecutionPayload = "CurrentExecutionPayload"
 	// this bucket stored in separated database
 	Inodes = "Inode"
 
@@ -327,6 +330,7 @@ var ChaindataTables = []string{
 	Receipts,
 	TxLookup,
 	ConfigTable,
+	CurrentExecutionPayload,
 	DatabaseInfo,
 	IncarnationMap,
 	ContractTEVMCode,
