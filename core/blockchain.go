@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -117,9 +118,28 @@ func ExecuteBlockEphemerally(
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+
+	systemcontracts.UpgradeBuildInSystemContract(chainConfig, block.Number(), ibs)
+
 	noop := state.NewNoopWriter()
+	posa, isPoSA := engine.(consensus.PoSA)
+	userTxs := make([]*types.Transaction, 0, len(block.Transactions()))
+	systemTxs := make([]*types.Transaction, 0, 2)
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
-	for i, tx := range block.Transactions() {
+	for i, initTx := range block.Transactions() {
+		// Needed for proper memory address reference in systemTxs/userTxs
+		tx := initTx
+		if isPoSA {
+			if isSystemTx, err := posa.IsSystemTransaction(&tx, block.Header()); err != nil {
+				return nil, err
+			} else if isSystemTx {
+				systemTxs = append(systemTxs, &tx)
+				continue
+			} else {
+				userTxs = append(userTxs, &tx)
+			}
+		}
+
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
@@ -151,27 +171,30 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		receiptSha := types.DeriveSha(receipts)
-		if receiptSha != block.Header().ReceiptHash {
-			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
-		}
-	}
-
-	if *usedGas != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
-	}
-	if !vmConfig.NoReceipts {
-		bloom := types.CreateBloom(receipts)
-		if bloom != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
-		}
-	}
 	if !vmConfig.ReadOnly {
-		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader); err != nil {
+		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), userTxs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, systemTxs, usedGas, epochReader, chainReader); err != nil {
 			return nil, err
 		}
 	}
+
+	// if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
+	// 	receiptSha := types.DeriveSha(receipts)
+	// 	if receiptSha != block.Header().ReceiptHash {
+	// 		return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+	// 	}
+	// }
+
+	// if *usedGas != header.GasUsed {
+	// 	return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	// }
+
+	// if !vmConfig.NoReceipts {
+	// 	bloom := types.CreateBloom(receipts)
+	// 	if bloom != header.Bloom {
+	// 		return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+	// 	}
+	// }
+
 
 	return receipts, nil
 }
@@ -205,7 +228,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 // from the null sender, with 50M gas.
 func SysCallContractTx(contract common.Address, data []byte) (tx types.Transaction, err error) {
 	//nonce := ibs.GetNonce(SystemAddress)
-	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data)
+	tx = types.NewTransaction(0, contract, u256.Num0, 50_000_000, u256.Num0, data, u256.Num148)
 	return tx.FakeSign(state.SystemAddress)
 }
 
@@ -234,15 +257,15 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockState) (tx types.Transaction, err error) {
 	from := common.Address{}
 	nonce := ibs.GetNonce(from)
-	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data)
+	tx = types.NewTransaction(nonce, contract, u256.Num0, 50_000_000, u256.Num0, data, u256.Num148)
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader) error {
+func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs []*types.Transaction, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts types.Receipts, systemTxs []*types.Transaction, usedGas *uint64, e consensus.EpochReader, headerReader consensus.ChainHeaderReader) error {
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====tx processing end====\n")
 
-	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
+	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, &systemTxs, usedGas, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	}); err != nil {
 		return err

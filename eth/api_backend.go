@@ -16,14 +16,22 @@
 
 package eth
 
-/*
+import (
+	"github.com/ledgerwatch/erigon/eth/gasprice"
+)
+
+
+// todo bk: I uncommented this, seems hacky
+
 // EthAPIBackend implements ethapi.Backend for full nodes
 type EthAPIBackend struct {
 	extRPCEnabled       bool
 	allowUnprotectedTxs bool
-	eth                 *Ethereum
+	// eth                 *Ethereum 		// todo bk: hacky
 	gpo                 *gasprice.Oracle
 }
+
+/*
 
 // ChainConfig returns the active chain configuration.
 func (b *EthAPIBackend) ChainConfig() *params.ChainConfig {

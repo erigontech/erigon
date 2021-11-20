@@ -102,7 +102,7 @@ func (tx LegacyTx) Protected() bool {
 
 // NewTransaction creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
-func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
+func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte, v *uint256.Int) *LegacyTx {
 	return &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce: nonce,
@@ -110,6 +110,7 @@ func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLim
 			Value: amount,
 			Gas:   gasLimit,
 			Data:  data,
+			V:     *v,
 		},
 		GasPrice: gasPrice,
 	}

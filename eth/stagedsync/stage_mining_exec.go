@@ -107,7 +107,12 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		}
 	}
 
-	if err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil, nil); err != nil {
+	currentTxs := make([]*types.Transaction, 0, len(current.Txs))
+	for _, tx := range current.Txs {
+		currentTxs = append(currentTxs, &tx)
+	}
+
+	if err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, currentTxs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil, nil, nil, nil); err != nil {
 		return err
 	}
 

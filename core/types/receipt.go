@@ -47,6 +47,13 @@ const (
 )
 
 // Receipt represents the results of a transaction.
+type OriginalDataAndReceipt struct {
+	Receipt Receipt     `json:"receipt"`
+	TxData  Transaction `json:"txData"`
+}
+
+
+// Receipt represents the results of a transaction.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Receipt struct {
 	// Consensus fields: These fields are defined by the Yellow Paper

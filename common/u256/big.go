@@ -30,4 +30,5 @@ var (
 	Num27 = uint256.NewInt(27)
 	Num32 = uint256.NewInt(32)
 	Num35 = uint256.NewInt(35)
+	Num148 = uint256.NewInt(148)
 )

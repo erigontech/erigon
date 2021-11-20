@@ -436,6 +436,9 @@ func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 	case params.RopstenChainName:
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
+	case params.BSCMainnetChainName:
+		encodings = bscMainnetPreverifiedHashes
+		height = bscMainnetPreverifiedHeight
 	default:
 		log.Warn("Preverified hashes not found for", "chain", chain)
 		return nil, 0

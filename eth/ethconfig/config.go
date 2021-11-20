@@ -36,8 +36,10 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -52,6 +54,7 @@ var FullNodeGPO = gasprice.Config{
 	MaxBlockHistory:  0,
 	MaxPrice:         gasprice.DefaultMaxPrice,
 	IgnorePrice:      gasprice.DefaultIgnorePrice,
+	OracleThreshold:  1000,
 }
 
 // LightClientGPO contains default gasprice oracle settings for light client.
@@ -156,10 +159,11 @@ type Config struct {
 	Miner params.MiningConfig
 
 	// Ethash options
-	Ethash ethash.Config
+	Ethash ethash.Config `toml:",omitempty"`
 
 	Clique params.SnapshotConfig
 	Aura   params.AuRaConfig
+	Parlia   params.ParliaConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -179,9 +183,12 @@ type Config struct {
 
 	// SyncLoopThrottle sets a minimum time between staged loop iterations
 	SyncLoopThrottle time.Duration
+
+	DirectBroadcast bool
+	RangeLimit      bool
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, ee *ethapi.PublicBlockChainAPI, genesisHash common.Hash) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -210,6 +217,10 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 	case *params.SnapshotConfig:
 		if chainConfig.Clique != nil {
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
+		}
+	case *params.ParliaConfig:
+		if chainConfig.Parlia != nil {
+			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), ee, genesisHash)
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {

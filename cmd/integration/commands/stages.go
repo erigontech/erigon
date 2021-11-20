@@ -1010,6 +1010,9 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.KovanChainName:
 		chainConfig = params.KovanChainConfig
 		genesis = core.DefaultKovanGenesisBlock()
+	case params.BSCMainnetChainName:
+		chainConfig = params.BSCMainnetChainConfig
+		genesis = core.DefaultBSCMainnetGenesisBlock()
 	case params.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
@@ -1040,9 +1043,23 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	genesis, chainConfig := byChain()
 	var engine consensus.Engine
 	engine = ethash.NewFaker()
+
 	switch chain {
 	case params.SokolChainName, params.KovanChainName:
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
+		config := &ethconfig.Defaults
+		var consensusConfig interface{}
+		if chainConfig.Aura != nil {
+			consensusConfig = &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}
+		}
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, nil, common.Hash{})
+
+	case params.BSCMainnetChainName:
+		config := &ethconfig.Defaults
+		var consensusConfig interface{}
+		if chainConfig.Parlia != nil {
+			consensusConfig = &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
+		}
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, nil, common.Hash{})
 	}
 
 	events := privateapi.NewEvents()
