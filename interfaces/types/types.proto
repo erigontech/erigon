@@ -58,18 +58,19 @@ message ExecutionPayload {
   types.H256 parentHash = 1;
   types.H160 coinbase = 2;
   types.H256 stateRoot = 3;
-  types.H2048 logsBloom = 4;
-  types.H256 random = 5;
-  uint64 blockNumber = 6;
-  uint64 gasLimit = 7;
-  uint64 gasUsed = 8;
-  uint64 timestamp = 9;
-  types.H256 extraData = 10;
-  types.H256 baseFeePerGas = 11;
-  types.H256 blockHash = 12;
+  types.H256 receiptRoot = 4;
+  types.H2048 logsBloom = 5;
+  types.H256 random = 6;
+  uint64 blockNumber = 7;
+  uint64 gasLimit = 8;
+  uint64 gasUsed = 9;
+  uint64 timestamp = 10;
+  types.H256 extraData = 11;
+  types.H256 baseFeePerGas = 12;
+  types.H256 blockHash = 13;
   /*
     Array of transaction objects, each object is a byte list. 
     See https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.2/src/engine/interop/specification.md
   */
-  repeated bytes transactions = 13;
+  repeated bytes transactions = 14;
 }

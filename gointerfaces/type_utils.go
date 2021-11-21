@@ -20,6 +20,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 )
 
+func ConvertH2048ToBloom(h2048 *types.H2048) [256]byte {
+	var bloom [256]byte
+	copy(bloom[:], ConvertH512ToBytes(h2048.Hi.Hi))
+	copy(bloom[64:], ConvertH512ToBytes(h2048.Hi.Lo))
+	copy(bloom[128:], ConvertH512ToBytes(h2048.Lo.Hi))
+	copy(bloom[192:], ConvertH512ToBytes(h2048.Lo.Lo))
+	return bloom
+}
+
 func ConvertH256ToHash(h256 *types.H256) [32]byte {
 	var hash [32]byte
 	binary.BigEndian.PutUint64(hash[0:], h256.Hi.Hi)
