@@ -265,11 +265,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
 	}
 	var txIndex uint64
+	var found bool
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == hash {
 			txIndex = uint64(idx)
+			found = true
 			break
 		}
+	}
+	if !found {
+		return nil, nil
 	}
 
 	cc, err := api.chainConfig(tx)
