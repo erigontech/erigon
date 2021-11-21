@@ -27,7 +27,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/holiman/uint256"
@@ -2659,7 +2658,6 @@ func recsplitLookup(chaindata, name string) error {
 	}
 	defer d.Close()
 
-	roaring.New()
 	idx := recsplit.MustOpen(name + ".idx")
 	defer idx.Close()
 
