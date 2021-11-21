@@ -276,7 +276,7 @@ func ParseCompressedFileName(name string) (from, to uint64, snapshotType Snapsho
 
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) error {
+func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (firstTxID uint64, err error) {
 	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Transactions)
 	tmpFileName = path.Join(tmpdir, tmpFileName)
 
@@ -288,7 +288,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) erro
 
 	f, err := NewSimpleFile(tmpFileName)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer f.Close()
 
@@ -298,6 +298,9 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) erro
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	valueBuf := make([]byte, 16*4096)
+
+	firstIDSaved := false
+
 	from := dbutils.EncodeBlockNumber(fromBlock)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
@@ -321,6 +324,11 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) erro
 
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
 		j := 0
+
+		if !firstIDSaved {
+			firstIDSaved = true
+			firstTxID = body.BaseTxId
+		}
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
 			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
 				return err
@@ -358,10 +366,10 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) erro
 		}
 		return true, nil
 	}); err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	return firstTxID, nil
 }
 
 func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) error {
@@ -475,12 +483,12 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 	return nil
 }
 
-func TransactionsIdx(chainID uint256.Int, segmentFileName string) error {
+func TransactionsIdx(chainID uint256.Int, firstTxID uint64, segmentFileName string) error {
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	var sender [20]byte
-	if err := Idx(segmentFileName, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(segmentFileName, firstTxID, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:]); err != nil {
 			return err
 		}
@@ -496,7 +504,7 @@ func TransactionsIdx(chainID uint256.Int, segmentFileName string) error {
 
 func HeadersIdx(segmentFileName string) error {
 	num := make([]byte, 8)
-	if err := Idx(segmentFileName, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(segmentFileName, 0, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		return idx.AddKey(num[:n], offset)
 	}); err != nil {
@@ -507,7 +515,7 @@ func HeadersIdx(segmentFileName string) error {
 
 func BodiesIdx(segmentFileName string) error {
 	num := make([]byte, 8)
-	if err := Idx(segmentFileName, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(segmentFileName, 0, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		return idx.AddKey(num[:n], offset)
 	}); err != nil {
@@ -517,7 +525,7 @@ func BodiesIdx(segmentFileName string) error {
 }
 
 // Idx - iterate over segment and building .idx file
-func Idx(segmentFileName string, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+func Idx(segmentFileName string, firstDataID uint64, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
 	var extension = filepath.Ext(segmentFileName)
 	var idxFileName = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
 
@@ -537,6 +545,7 @@ func Idx(segmentFileName string, walker func(idx *recsplit.RecSplit, i, offset u
 		LeafSize:   8,
 		TmpDir:     "",
 		IndexFile:  idxFileName,
+		BaseDataID: firstDataID,
 	})
 	if err != nil {
 		return err
