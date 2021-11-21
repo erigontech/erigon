@@ -2594,26 +2594,10 @@ func recsplitWholeChain(chaindata string) error {
 
 	log.Info("Last body number", "last", last)
 	for i := uint64(*block); i < last; i += blocksPerFile {
-		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
+		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName+".seg")
 		db := mdbx.MustOpen(chaindata)
-		if err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		db.Close()
-		if err := compress1(chaindata, fileName, segmentFile); err != nil {
-			panic(err)
-		}
-		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(fileName + ".dat")
-
-		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		log.Info("Creating", "file", fileName+".seg")
-		db = mdbx.MustOpen(chaindata)
 		if err := snapshotsync.DumpHeaders(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
@@ -2643,6 +2627,22 @@ func recsplitWholeChain(chaindata string) error {
 		}
 		_ = os.Remove(fileName + ".dat")
 
+		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
+		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		log.Info("Creating", "file", fileName+".seg")
+		db = mdbx.MustOpen(chaindata)
+		if err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile)); err != nil {
+			panic(err)
+		}
+		db.Close()
+		if err := compress1(chaindata, fileName, segmentFile); err != nil {
+			panic(err)
+		}
+		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
+			panic(err)
+		}
+		_ = os.Remove(fileName + ".dat")
+
 		//nolint
 		break // TODO: remove me - useful for tests
 	}
@@ -2650,6 +2650,50 @@ func recsplitWholeChain(chaindata string) error {
 }
 
 func recsplitLookup(chaindata, name string) error {
+	idx1, err := recsplit.OpenIndex("/Users/alex.sharov/data/goerli/snapshots/v1-000000-002000-headers.idx")
+	tool.Check(err)
+
+	dd, err := compress.NewDecompressor("/Users/alex.sharov/data/goerli/snapshots/v1-000000-002000-headers.seg")
+	tool.Check(err)
+
+	a := make([]byte, binary.MaxVarintLen64)
+	nn := binary.PutUvarint(a, 123)
+
+	id := idx1.Lookup(a[:nn])
+	tool.Check(err)
+	fmt.Printf("id: %d\n", id)
+	offset := idx1.Lookup2(id)
+	tool.Check(err)
+	fmt.Printf("offset: %d\n", offset)
+
+	gg := dd.MakeGetter()
+	gg.Reset(offset)
+	buf := make([]byte, 1024)
+	buf, _ = gg.Next(buf[:0])
+
+	h := &types.Header{}
+	err = rlp.DecodeBytes(buf, h)
+	tool.Check(err)
+
+	fmt.Printf("found: %d\n", h.Number.Uint64())
+
+	nn = binary.PutUvarint(a, 0)
+	id = idx1.Lookup(a[:nn])
+	tool.Check(err)
+	fmt.Printf("id: %d\n", id)
+	offset = idx1.Lookup2(id)
+	tool.Check(err)
+	fmt.Printf("offset: %d\n", offset)
+
+	gg.Reset(0)
+	buf, _ = gg.Next(buf[:0])
+
+	err = rlp.DecodeBytes(buf, h)
+	tool.Check(err)
+
+	fmt.Printf("found: %d\n", h.Number.Uint64())
+
+	panic(1)
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
 	chainConfig := tool.ChainConfigFromDB(database)

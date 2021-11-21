@@ -545,14 +545,15 @@ func Idx(segmentFileName string, walker func(idx *recsplit.RecSplit, i, offset u
 RETRY:
 
 	g := d.MakeGetter()
-	var wc, pos uint64
+	var wc, pos, nextPos uint64
 	word := make([]byte, 0, 4096)
 	for g.HasNext() {
-		word, pos = g.Next(word[:0])
+		word, nextPos = g.Next(word[:0])
 		if err := walker(rs, wc, pos, word); err != nil {
 			return err
 		}
 		wc++
+		pos = nextPos
 		select {
 		default:
 		case <-logEvery.C:
