@@ -42,6 +42,7 @@ type Index struct {
 	ef                 eliasfano16.DoubleEliasFano
 	enums              bool
 	offsetEf           *eliasfano32.EliasFano
+	baseDataID         uint64
 	bucketCount        uint64          // Number of buckets
 	hasher             murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
 	bucketSize         int
@@ -80,10 +81,12 @@ func OpenIndex(indexFile string) (*Index, error) {
 	}
 	idx.data = idx.mmapHandle1[:size]
 	// Read number of keys and bytes per record
-	idx.keyCount = binary.BigEndian.Uint64(idx.data[:8])
-	idx.bytesPerRec = int(idx.data[8])
+	idx.baseDataID = binary.BigEndian.Uint64(idx.data[:8])
+	idx.keyCount = binary.BigEndian.Uint64(idx.data[8:16])
+	idx.bytesPerRec = int(idx.data[16])
 	idx.recMask = (uint64(1) << (8 * idx.bytesPerRec)) - 1
-	offset := 9 + int(idx.keyCount)*idx.bytesPerRec
+	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
+
 	// Bucket count, bucketSize, leafSize
 	idx.bucketCount = binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
@@ -137,6 +140,8 @@ func OpenIndex(indexFile string) (*Index, error) {
 	idx.ef.Read(idx.data[offset:])
 	return idx, nil
 }
+
+func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
 
 func (idx *Index) Close() error {
 	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
@@ -229,7 +234,7 @@ func (idx Index) Lookup(key []byte) uint64 {
 	}
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
-	return binary.BigEndian.Uint64(idx.data[1+idx.bytesPerRec*(rec+1):]) & idx.recMask
+	return binary.BigEndian.Uint64(idx.data[1+8+idx.bytesPerRec*(rec+1):]) & idx.recMask
 }
 
 func (idx Index) Lookup2(i uint64) uint64 {

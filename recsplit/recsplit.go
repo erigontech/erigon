@@ -61,6 +61,7 @@ type RecSplit struct {
 	bucketSize        int
 	keyExpectedCount  uint64          // Number of keys in the hash table
 	keysAdded         uint64          // Number of keys actually added to the recSplit (to check the match with keyExpectedCount)
+	baseDataID        uint64          // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
 	bucketCount       uint64          // Number of buckets
 	hasher            murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
 	bucketCollector   *etl.Collector  // Collector that sorts by buckets
@@ -108,6 +109,7 @@ type RecSplitArgs struct {
 	TmpDir     string
 	StartSeed  []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
 	Enums      bool     // Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
+	BaseDataID uint64
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
@@ -126,6 +128,7 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
+	rs.baseDataID = args.BaseDataID
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	rs.enums = args.Enums
 	if args.Enums {
@@ -504,6 +507,12 @@ func (rs *RecSplit) Build() error {
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
 	defer rs.indexW.Flush()
+	// Write minimal app-specific dataID in this index file
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
+	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+
 	// Write number of keys
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
@@ -514,6 +523,7 @@ func (rs *RecSplit) Build() error {
 	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
+
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{}); err != nil {
