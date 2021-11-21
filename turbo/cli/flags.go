@@ -25,6 +25,10 @@ var (
 		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
 		Value: 2,
 	}
+	SnapshotSyncFlag = cli.BoolFlag{
+		Name:  "experimental.snapshot",
+		Usage: "Enabling experimental snapshot sync",
+	}
 	BatchSizeFlag = cli.StringFlag{
 		Name:  "batchSize",
 		Usage: "Batch size for the execution stage",
@@ -272,10 +276,11 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setPrivateApi(ctx, cfg)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
+	cfg.SnapshotSync = ctx.GlobalBool(SnapshotSyncFlag.Name)
 }
 
 // setPrivateApi populates configuration fields related to the remote
-// read-only interface to the databae
+// read-only interface to the database
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))

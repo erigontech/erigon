@@ -59,6 +59,7 @@ type Flags struct {
 	TxPoolApiAddr        string
 	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
+	SnapshotSync         bool
 }
 
 var rootCmd = &cobra.Command{
@@ -91,6 +92,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
+	rootCmd.PersistentFlags().BoolVar(&cfg.SnapshotSync, "experimental.snapshot", false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
@@ -233,7 +235,15 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
-		blockReader = snapshotsync.NewBlockReader()
+		if cfg.SnapshotSync {
+			allSnapshots, err := snapshotsync.OpenAll(path.Join(cfg.Datadir, "snapshots"))
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, err
+			}
+			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+		} else {
+			blockReader = snapshotsync.NewBlockReader()
+		}
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
 			stateCache = kvcache.New(cfg.StateCache)

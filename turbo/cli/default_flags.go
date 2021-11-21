@@ -36,6 +36,7 @@ var DefaultFlags = []cli.Flag{
 	BatchSizeFlag,
 	BlockDownloaderWindowFlag,
 	DatabaseVerbosityFlag,
+	SnapshotSyncFlag,
 	PrivateApiAddr,
 	PrivateApiRateLimit,
 	EtlBufferSizeFlag,
