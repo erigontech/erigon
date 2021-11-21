@@ -144,7 +144,6 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 			return err
 		}
 		for _, txn := range txs {
-			fmt.Printf("Clean up %x, %x\n", k, txn.Hash().Bytes())
 			if err = next(k, txn.Hash().Bytes(), nil); err != nil {
 				return err
 			}
