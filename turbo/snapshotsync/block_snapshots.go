@@ -469,78 +469,56 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 	}); err != nil {
 		return err
 	}
-
-	w.Flush()
-	s, _ := f.Stat()
-	fmt.Printf("%dKb\n", s.Size()/1024)
 	return nil
 }
 
-func TransactionsIdx(chainID uint256.Int, dir, name string) error {
-	d, err := compress.NewDecompressor(path.Join(dir, name+".seg"))
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
-		BucketSize: 2000,
-		Salt:       0,
-		LeafSize:   8,
-		TmpDir:     "",
-		IndexFile:  path.Join(dir, name+".idx"),
-	})
-	if err != nil {
-		return err
-	}
-
-RETRY:
-
-	g := d.MakeGetter()
-	wc := 0
-	var pos uint64
+func TransactionsIdx(chainID uint256.Int, segmentFileName string) error {
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	var sender [20]byte
-	word := make([]byte, 0, 4*1024)
-
-	for g.HasNext() {
-		word, pos = g.Next(word[:0])
-		//if _, err := parseCtx.ParseTransaction(word[0:], 0, &slot, sender[:]); err != nil {
-		//	if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
+	if err := Idx(segmentFileName, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:]); err != nil {
 			return err
 		}
-		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {
+		if err := idx.AddKey(slot.IdHash[:], offset); err != nil {
 			return err
 		}
-		wc++
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
-		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("TransactionsIdx: %w", err)
 	}
-
-	if err = rs.Build(); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			log.Info("Building recsplit. Collision happened. It's ok. Restarting...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
 	return nil
 }
 
-func BodiesIdx(dir, name string) error {
-	d, err := compress.NewDecompressor(path.Join(dir, name+".seg"))
+func HeadersIdx(segmentFileName string) error {
+	num := make([]byte, 8)
+	if err := Idx(segmentFileName, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		n := binary.PutUvarint(num, i)
+		return idx.AddKey(num[:n], offset)
+	}); err != nil {
+		return fmt.Errorf("HeadersIdx: %w", err)
+	}
+	return nil
+}
+
+func BodiesIdx(segmentFileName string) error {
+	num := make([]byte, 8)
+	if err := Idx(segmentFileName, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+		n := binary.PutUvarint(num, i)
+		return idx.AddKey(num[:n], offset)
+	}); err != nil {
+		return fmt.Errorf("BodiesIdx: %w", err)
+	}
+	return nil
+}
+
+// Idx - iterate over segment and building .idx file
+func Idx(segmentFileName string, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+	var extension = filepath.Ext(segmentFileName)
+	var idxFileName = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
+
+	d, err := compress.NewDecompressor(segmentFileName)
 	if err != nil {
 		return err
 	}
@@ -555,7 +533,7 @@ func BodiesIdx(dir, name string) error {
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     "",
-		IndexFile:  path.Join(dir, name+".idx"),
+		IndexFile:  idxFileName,
 	})
 	if err != nil {
 		return err
@@ -564,15 +542,11 @@ func BodiesIdx(dir, name string) error {
 RETRY:
 
 	g := d.MakeGetter()
-	wc := 0
-	var pos uint64
+	var wc, pos uint64
 	word := make([]byte, 0, 4096)
-	num := make([]byte, 8)
 	for g.HasNext() {
 		word, pos = g.Next(word[:0])
-		n := binary.PutUvarint(num, uint64(wc))
-		//binary.BigEndian.PutUint64(num, uint64(wc))
-		if err := rs.AddKey(num[:n], pos); err != nil {
+		if err := walker(rs, wc, pos, word); err != nil {
 			return err
 		}
 		wc++
