@@ -2641,7 +2641,8 @@ func recsplitWholeChain(chaindata string) error {
 			return err
 		}
 		_ = os.Remove(fileName + ".dat")
-		return nil
+
+		break // TODO: remove me - useful for tests
 	}
 	return nil
 }
