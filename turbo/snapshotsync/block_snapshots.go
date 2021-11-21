@@ -100,7 +100,7 @@ func MustOpenAll(dir string) *AllSnapshots {
 //  - segment have [from:to) semantic
 func OpenAll(dir string) (*AllSnapshots, error) {
 	all := &AllSnapshots{dir: dir}
-	files, err := onlyCompressedFilesList(dir)
+	files, err := headersSegments(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -117,9 +117,9 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 			continue
 		}
 		if from != prevTo { // no gaps
+			log.Debug("[open snapshots] snapshot missed before", "file", f)
 			break
 		}
-
 		prevTo = to
 
 		blocksSnapshot := &BlocksSnapshot{From: from, To: to}
@@ -209,7 +209,7 @@ func (s AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, foun
 	return snapshot, false
 }
 
-func onlyCompressedFilesList(dir string) ([]string, error) {
+func headersSegments(dir string) ([]string, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -223,6 +223,9 @@ func onlyCompressedFilesList(dir string) ([]string, error) {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
+			continue
+		}
+		if !strings.Contains(f.Name(), string(Headers)) {
 			continue
 		}
 		res = append(res, f.Name())
