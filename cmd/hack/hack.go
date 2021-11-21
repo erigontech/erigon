@@ -2594,10 +2594,26 @@ func recsplitWholeChain(chaindata string) error {
 
 	log.Info("Last body number", "last", last)
 	for i := uint64(*block); i < last; i += blocksPerFile {
-		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
+		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName+".seg")
 		db := mdbx.MustOpen(chaindata)
+		if err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile)); err != nil {
+			panic(err)
+		}
+		db.Close()
+		if err := compress1(chaindata, fileName, segmentFile); err != nil {
+			panic(err)
+		}
+		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
+			panic(err)
+		}
+		_ = os.Remove(fileName + ".dat")
+
+		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
+		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		log.Info("Creating", "file", fileName+".seg")
+		db = mdbx.MustOpen(chaindata)
 		if err := snapshotsync.DumpHeaders(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
@@ -2623,22 +2639,6 @@ func recsplitWholeChain(chaindata string) error {
 			panic(err)
 		}
 		if err := snapshotsync.BodiesIdx(segmentFile); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(fileName + ".dat")
-
-		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		log.Info("Creating", "file", fileName+".seg")
-		db = mdbx.MustOpen(chaindata)
-		if err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		db.Close()
-		if err := compress1(chaindata, fileName, segmentFile); err != nil {
-			panic(err)
-		}
-		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
