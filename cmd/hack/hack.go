@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/holiman/uint256"
@@ -1188,11 +1189,6 @@ func dumpState(chaindata string, block int, name string) error {
 		return err
 	}
 	defer cc.Close()
-	var hc kv.Cursor
-	if hc, err = tx.Cursor(kv.Code); err != nil {
-		return err
-	}
-	defer hc.Close()
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	k, v, e := sc.First()
@@ -1221,8 +1217,8 @@ func dumpState(chaindata string, block int, name string) error {
 				return err
 			}
 			if a.CodeHash != trie.EmptyCodeHash {
-				var code []byte
-				if _, code, err = hc.SeekExact(a.CodeHash[:]); err != nil {
+				code, err := tx.GetOne(kv.Code, a.CodeHash[:])
+				if err != nil {
 					return err
 				}
 				if len(code) != 0 {
@@ -2663,6 +2659,7 @@ func recsplitLookup(chaindata, name string) error {
 	}
 	defer d.Close()
 
+	roaring.New()
 	idx := recsplit.MustOpen(name + ".idx")
 	defer idx.Close()
 
@@ -2724,78 +2721,6 @@ func recsplitLookup(chaindata, name string) error {
 	return nil
 }
 
-func createIdx(chaindata string, name string) error {
-	database := mdbx.MustOpen(chaindata)
-	defer database.Close()
-	chainConfig := tool.ChainConfigFromDB(database)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	d, err := compress.NewDecompressor(name + ".seg")
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return _createIdx(*chainID, name, d.Count())
-}
-func _createIdx(chainID uint256.Int, name string, count int) error {
-	d, err := compress.NewDecompressor(name + ".seg")
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   int(count),
-		Enums:      true,
-		BucketSize: 2000,
-		Salt:       0,
-		LeafSize:   8,
-		TmpDir:     "",
-		IndexFile:  name + ".idx",
-	})
-	if err != nil {
-		return err
-	}
-
-RETRY:
-
-	var word = make([]byte, 0, 256)
-	g := d.MakeGetter()
-	wc := 0
-	var pos uint64
-	parseCtx := txpool.NewTxParseContext(chainID)
-	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
-	var sender [20]byte
-
-	for g.HasNext() {
-		word, pos = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
-			return err
-		}
-		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {
-			return err
-		}
-		wc++
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
-		}
-	}
-	log.Info("Building recsplit...")
-
-	if err = rs.Build(); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			log.Info("Building recsplit. Collision happened. It's ok. Restarting...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
-	return nil
-}
 func decompress(name string) error {
 	d, err := compress.NewDecompressor(name + ".seg")
 	if err != nil {
@@ -4077,8 +4002,6 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress1(*chaindata, *name, *name)
-	case "createIdx":
-		err = createIdx(*chaindata, *name)
 	case "recsplitWholeChain":
 		err = recsplitWholeChain(*chaindata)
 	case "recsplitLookup":

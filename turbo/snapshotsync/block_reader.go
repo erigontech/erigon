@@ -102,7 +102,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 
 	gg := sn.Headers.Segment.MakeGetter()
 	gg.Reset(headerOffset)
-	buf, _ = gg.Next(buf[:0]) //TODO: use gg.Current here
+	buf, _ = gg.Next(buf[:0])
 	h := &types.Header{}
 	if err = rlp.DecodeBytes(buf, h); err != nil {
 		return nil, nil, err
@@ -110,7 +110,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 
 	gg = sn.Bodies.Segment.MakeGetter()
 	gg.Reset(bodyOffset)
-	buf, _ = gg.Next(buf[:0]) //TODO: use gg.Current here
+	buf, _ = gg.Next(buf[:0])
 	b := &types.BodyForStorage{}
 	if err = rlp.DecodeBytes(buf, b); err != nil {
 		return nil, nil, err
@@ -124,7 +124,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	stream := rlp.NewStream(reader, 0)
 	txs := make([]types.Transaction, b.TxAmount)
 	senders = make([]common.Address, b.TxAmount)
-	//TODO: use gg.Current here
 	for i := uint32(0); i < b.TxAmount; i++ {
 		buf, _ = gg.Next(buf[:0])
 		senders[i].SetBytes(buf[1 : 1+20])
