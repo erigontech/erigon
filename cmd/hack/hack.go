@@ -1624,7 +1624,7 @@ func compress1(chaindata string, fileName, segmentFileName string) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
+			log.Info("Dictionary preprocessing", "processed", fmt.Sprintf("%dK", i/1_000))
 		}
 		return nil
 	}); err != nil {
@@ -1874,7 +1874,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize atomic2.Uint64, posMap map[uint64]uint64) {
+func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize *atomic2.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -2163,7 +2163,7 @@ func reducedict(name string, segmentFileName string) error {
 	log.Info("dictionary file parsed", "entries", len(code2pattern))
 	tmpDir := ""
 	ch := make(chan []byte, 10000)
-	var inputSize, outputSize atomic2.Uint64
+	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var wg sync.WaitGroup
 	workers := runtime.NumCPU() / 2
 	var collectors []*etl.Collector
@@ -2188,7 +2188,7 @@ func reducedict(name string, segmentFileName string) error {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info("Replacement preprocessing", "processed", fmt.Sprintf("%dK", i/1_000), "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		}
 		return nil
 	}); err != nil {
@@ -2564,11 +2564,12 @@ func recsplitWholeChain(chaindata string) error {
 			return 0, err
 		}
 		last := binary.BigEndian.Uint64(k)
-		if last > params.FullImmutabilityThreshold {
-			last -= params.FullImmutabilityThreshold
-		} else {
-			last = 0
-		}
+		// TODO: enable next condition (disabled for tests)
+		//if last > params.FullImmutabilityThreshold {
+		//	last -= params.FullImmutabilityThreshold
+		//} else {
+		//	last = 0
+		//}
 		last = last - last%blocksPerFile
 		return last, nil
 	}
@@ -2604,7 +2605,7 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.TransactionsIdx(*chainID, snapshotDir, fileName); err != nil {
+		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2620,7 +2621,8 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.BodiesIdx(snapshotDir, fileName); err != nil {
+
+		if err := snapshotsync.HeadersIdx(segmentFile); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2636,10 +2638,13 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.BodiesIdx(snapshotDir, fileName); err != nil {
-			return err
+		if err := snapshotsync.BodiesIdx(segmentFile); err != nil {
+			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
+
+		//nolint
+		break // TODO: remove me - useful for tests
 	}
 	return nil
 }

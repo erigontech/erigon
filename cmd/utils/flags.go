@@ -532,6 +532,11 @@ var (
 		Usage: "a path to clique db folder",
 		Value: "",
 	}
+
+	SnapshotSyncFlag = cli.BoolFlag{
+		Name:  "experimental.snapshot",
+		Usage: "Enabling experimental snapshot sync",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -939,6 +944,9 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
 	} else {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
 	}
+
+	cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
+
 }
 
 func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
@@ -1202,6 +1210,11 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
+	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
+		cfg.Snapshot.Enabled = true
+		cfg.Snapshot.Dir = path.Join(nodeConfig.DataDir, "snapshots")
+	}
+
 	CheckExclusive(ctx, MinerSigningKeyFileFlag, MinerEtherbaseFlag)
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
