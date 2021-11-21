@@ -12,7 +12,7 @@ import (
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64, name SnapshotType) {
-		c, err := compress.NewCompressor("test", path.Join(dir, CompressedFileName(from, to, name)), dir, 100)
+		c, err := compress.NewCompressor("test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100)
 		require.NoError(err)
 		defer c.Close()
 		err = c.AddWord([]byte{1})

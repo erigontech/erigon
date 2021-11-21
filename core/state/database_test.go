@@ -1593,3 +1593,70 @@ func TestRecreateAndRewind(t *testing.T) {
 	require.NoError(t, err)
 
 }
+func TestTxLookupUnwind(t *testing.T) {
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
+				ConstantinopleBlock: big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		signer = types.LatestSignerForChainID(nil)
+	)
+
+	m := stages.MockWithGenesis(t, gspec, key)
+	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
+		var tx types.Transaction
+		var e error
+		switch i {
+		case 1:
+			tx, e = types.SignTx(types.NewTransaction(block.TxNonce(address), address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			if e != nil {
+				t.Fatal(e)
+			}
+			block.AddTx(tx)
+		}
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain2, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.InsertChain(chain1); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.InsertChain(chain2); err != nil {
+		t.Fatal(err)
+	}
+	var count uint64
+	if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		c, e := tx.Cursor(kv.TxLookup)
+		if e != nil {
+			return e
+		}
+		defer c.Close()
+		if count, e = c.Count(); e != nil {
+			return e
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("txlookup record expected to be deleted, got %d", count)
+	}
+}

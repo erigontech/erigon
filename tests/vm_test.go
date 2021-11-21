@@ -26,7 +26,8 @@ import (
 )
 
 func TestVM(t *testing.T) {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	t.Parallel()
 	vmt := new(testMatcher)
 	vmt.slow("^vmPerformance")

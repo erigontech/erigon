@@ -139,7 +139,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 			return fmt.Errorf("rlp decode err: %w", err)
 		}
 
-		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, err := rawdb.CanonicalTransactions(tx, body.BaseTxId, body.TxAmount)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,9 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
 		ExtractStartKey: dbutils.EncodeBlockNumber(u.UnwindPoint + 1),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(s.BlockNumber),
+		// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
+		// the keys in BlockBody table always have hash after the block number
+		ExtractEndKey: dbutils.EncodeBlockNumber(s.BlockNumber + 1),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
@@ -202,7 +204,7 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 			return fmt.Errorf("rlp decode: %w", err)
 		}
 
-		txs, err := rawdb.ReadTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, err := rawdb.CanonicalTransactions(tx, body.BaseTxId, body.TxAmount)
 		if err != nil {
 			return err
 		}

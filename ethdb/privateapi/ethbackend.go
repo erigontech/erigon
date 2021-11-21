@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
@@ -26,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -50,7 +50,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *Events
 	db          kv.RwDB
-	blockReader *snapshotsync.BlockReader
+	blockReader interfaces.BlockReader
 	config      *params.ChainConfig
 	accumulator *shards.Accumulator
 	stateStream bool
@@ -63,11 +63,8 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, config *params.ChainConfig, vmConfig vm.Config, events *Events) *EthBackendServer {
-	return &EthBackendServer{ctx: ctx, eth: eth, events: events,
-		config: config, db: db,
-		vmConfig: vmConfig, blockReader: snapshotsync.NewBlockReader(),
-	}
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader) *EthBackendServer {
+	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {

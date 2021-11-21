@@ -39,7 +39,6 @@ func init() {
 	var r enr.Record
 	r.Set(enr.IP{0, 0, 0, 0})
 	nullNode = enode.SignNull(&r, enode.ID{})
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
 func newTestTable(t transport) (*Table, *enode.DB) {

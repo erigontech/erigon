@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,10 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
@@ -38,14 +37,16 @@ type RemoteBackend struct {
 	log              log.Logger
 	version          gointerfaces.Version
 	db               kv.RoDB
+	blockReader      interfaces.BlockReader
 }
 
-func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB) *RemoteBackend {
+func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB, blockReader interfaces.BlockReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
 		log:              log.New("remote_service", "eth_backend"),
 		db:               db,
+		blockReader:      blockReader,
 	}
 }
 
@@ -149,22 +150,6 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	return nil
 }
 
-func (back *RemoteBackend) BlockWithSenders(ctx context.Context, _ kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
-	reply, err := back.remoteEthBackend.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
-	if err != nil {
-		return nil, nil, err
-	}
-	block = &types.Block{}
-	err = rlp.Decode(bytes.NewReader(reply.BlockRlp), block)
-	if err != nil {
-		return nil, nil, err
-	}
-	senders = make([]common.Address, len(reply.Senders)/20)
-	for i := range senders {
-		senders[i].SetBytes(reply.Senders[i*20 : (i+1)*20])
-	}
-	if len(senders) == block.Transactions().Len() { //it's fine if no senders provided - they can be lazy recovered
-		block.SendersToTxs(senders)
-	}
-	return block, senders, nil
+func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
+	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
 }

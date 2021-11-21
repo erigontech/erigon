@@ -205,6 +205,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			cfg.BadBlockHash = common.BytesToHash(bytes)
 		}
 	}
+
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
@@ -275,7 +276,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 }
 
 // setPrivateApi populates configuration fields related to the remote
-// read-only interface to the databae
+// read-only interface to the database
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))

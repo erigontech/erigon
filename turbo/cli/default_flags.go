@@ -46,6 +46,7 @@ var DefaultFlags = []cli.Flag{
 	StateStreamDisableFlag,
 	SyncLoopThrottleFlag,
 	BadBlockFlag,
+	utils.SnapshotSyncFlag,
 	utils.ListenPortFlag,
 	utils.NATFlag,
 	utils.NoDiscoverFlag,

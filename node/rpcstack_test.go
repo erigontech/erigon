@@ -238,7 +238,7 @@ func Test_checkPath(t *testing.T) {
 func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
 	t.Helper()
 
-	srv := newHTTPServer(testlog.Logger(t, log.LvlInfo), rpc.DefaultHTTPTimeouts)
+	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpc.DefaultHTTPTimeouts)
 	assert.NoError(t, srv.enableRPC(nil, *conf, nil))
 	if ws {
 		assert.NoError(t, srv.enableWS(nil, *wsConf, nil))
@@ -251,7 +251,7 @@ func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsCon
 func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, wsConf wsConfig) *httpServer {
 	t.Helper()
 
-	srv := newHTTPServer(testlog.Logger(t, log.LvlInfo), rpc.DefaultHTTPTimeouts)
+	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpc.DefaultHTTPTimeouts)
 
 	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
 

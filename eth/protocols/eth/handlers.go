@@ -170,12 +170,21 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket) []rlp.RawVa
 		if number == nil {
 			continue
 		}
-		data := rawdb.ReadBodyRLP(db, hash, *number)
-		if len(data) == 0 {
+		canonicalHash, err := rawdb.ReadCanonicalHash(db, *number)
+		if err != nil {
+			break
+		}
+		var bodyRlP []byte
+		if canonicalHash == hash {
+			bodyRlP = rawdb.ReadBodyRLP(db, hash, *number)
+		} else {
+			bodyRlP = rawdb.NonCanonicalBodyRLP(db, hash, *number)
+		}
+		if len(bodyRlP) == 0 {
 			continue
 		}
-		bodies = append(bodies, data)
-		bytes += len(data)
+		bodies = append(bodies, bodyRlP)
+		bytes += len(bodyRlP)
 	}
 	return bodies
 }
