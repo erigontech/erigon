@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -96,9 +95,11 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 
 	buf := make([]byte, 16)
 
-	n := binary.PutUvarint(buf, blockHeight)
-	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
-	bodyOffset := sn.Bodies.Idx.Lookup2(sn.Bodies.Idx.Lookup(buf[:n]))
+	//n := binary.PutUvarint(buf, blockHeight)
+	//headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
+	headerOffset := sn.Headers.Idx.Lookup2(blockHeight - sn.Headers.From)
+	//bodyOffset := sn.Bodies.Idx.Lookup2(sn.Bodies.Idx.Lookup(buf[:n]))
+	bodyOffset := sn.Bodies.Idx.Lookup2(blockHeight - sn.Headers.From)
 
 	gg := sn.Headers.Segment.MakeGetter()
 	gg.Reset(headerOffset)
@@ -116,8 +117,9 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil, nil, err
 	}
 
-	n = binary.PutUvarint(buf, b.BaseTxId)
-	txnOffset := sn.Transactions.Idx.Lookup2(sn.Transactions.Idx.Lookup(buf[:n]))
+	//n = binary.PutUvarint(buf, b.BaseTxId)
+	//txnOffset := sn.Transactions.Idx.Lookup2(sn.Transactions.Idx.Lookup(buf[:n]))
+	txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
 	gg = sn.Transactions.Segment.MakeGetter()
 	gg.Reset(txnOffset)
 	reader := bytes.NewReader(nil)
