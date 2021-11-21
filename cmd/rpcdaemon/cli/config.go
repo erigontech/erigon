@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -59,7 +60,7 @@ type Flags struct {
 	TxPoolApiAddr        string
 	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
-	SnapshotSync         bool
+	Snapshot             ethconfig.Snapshot
 }
 
 var rootCmd = &cobra.Command{
@@ -92,7 +93,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
-	rootCmd.PersistentFlags().BoolVar(&cfg.SnapshotSync, "experimental.snapshot", false, "Enables Snapshot Sync")
+	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, "experimental.snapshot", false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
@@ -117,6 +118,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 			if cfg.Chaindata == "" {
 				cfg.Chaindata = path.Join(cfg.Datadir, "chaindata")
 			}
+			cfg.Snapshot.Dir = path.Join(cfg.Datadir, "snapshots")
 		}
 		cfg.TxPoolV2 = true
 		return nil
@@ -235,8 +237,8 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
-		if cfg.SnapshotSync {
-			allSnapshots, err := snapshotsync.OpenAll(path.Join(cfg.Datadir, "snapshots"))
+		if cfg.Snapshot.Enabled {
+			allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, err
 			}

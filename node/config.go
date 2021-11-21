@@ -143,7 +143,6 @@ type Config struct {
 	Logger log.Logger `toml:",omitempty"`
 
 	DatabaseVerbosity kv.DBVerbosityLvl
-	SnapshotSync      bool
 
 	// Address to listen to when launchig listener for remote database access
 	// empty string means not to start the listener
