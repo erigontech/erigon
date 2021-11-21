@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -64,7 +65,8 @@ type EngineAPI interface {
 // EngineImpl is implementation of the EngineAPI interface
 type EngineImpl struct {
 	*BaseAPI
-	db kv.RoDB
+	remoteEthBackend remote.ETHBACKENDClient
+	db               kv.RoDB
 }
 
 // PreparePayload is executed only if we running a beacon Validator so it
@@ -85,10 +87,11 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ ForkchoiceArgs, bu
 // ExecutePayloadV1 takes a block from the beacon chain and do either two of the following things
 // - Stageloop the block just received if we have the payload's parent hash already
 // - Start the reverse sync process otherwise, and return "Syncing"
-func (e *EngineImpl) ExecutePayloadV1(context.Context, ExecutionPayload) (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"status": engineSyncingCode,
-	}, nil
+func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload ExecutionPayload) (map[string]interface{}, error) {
+	res, err := e.remoteEthBackend.EngineExecutePayloadV1(ctx, payload)
+	if err != nil {
+		return nil, err
+	}
 }
 
 func (e *EngineImpl) GetPayloadV1(context.Context, hexutil.Uint64) (ExecutionPayload, error) {

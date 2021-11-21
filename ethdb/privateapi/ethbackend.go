@@ -266,14 +266,17 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		}, rawdb.CommissionPayload(tx, req.BlockNumber, blockHash)
 	}
 
+	// Create batch
+	batch := olddb.NewBatch(tx, ctx.Done())
+	defer batch.Rollback()
 	// Write Header(we do not need to add difficulty after "The merge")
-	rawdb.WriteHeader(tx, &header)
+	rawdb.WriteHeader(batch, &header)
 	if err := rawdb.WriteCanonicalHash(tx, blockHash, req.BlockNumber); err != nil {
 		return nil, err
 	}
-	rawdb.WriteHeaderNumber(tx, blockHash, req.BlockNumber)
+	rawdb.WriteHeaderNumber(batch, blockHash, req.BlockNumber)
 	// Write Body
-	if err := rawdb.WriteRawBody(tx, blockHash, req.BlockNumber, &types.RawBody{
+	if err := rawdb.WriteRawBody(batch, blockHash, req.BlockNumber, &types.RawBody{
 		Transactions: req.Transactions,
 	}); err != nil {
 		return nil, err
@@ -287,13 +290,10 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 			return nil, err
 		}
 	}
-	if err := rawdb.WriteSenders(tx, blockHash, req.BlockNumber, senders); err != nil {
+	if err := rawdb.WriteSenders(batch, blockHash, req.BlockNumber, senders); err != nil {
 		return nil, err
 	}
 	block := types.NewBlock(&header, transactions, []*types.Header{}, []*types.Receipt{})
-	// Create batch
-	batch := olddb.NewBatch(tx, ctx.Done())
-	defer batch.Rollback()
 	// TEVM handler
 	var contractHasTEVM func(contractHash common.Hash) (bool, error)
 
@@ -308,19 +308,23 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	}
 
 	// Update Progress
-	if err := stages.SaveStageProgress(tx, stages.Headers, req.BlockNumber); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.Headers, req.BlockNumber); err != nil {
 		return nil, err
 	}
-	if err := stages.SaveStageProgress(tx, stages.BlockHashes, req.BlockNumber); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.BlockHashes, req.BlockNumber); err != nil {
 		return nil, err
 	}
-	if err := stages.SaveStageProgress(tx, stages.Bodies, req.BlockNumber); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.Bodies, req.BlockNumber); err != nil {
 		return nil, err
 	}
-	if err := stages.SaveStageProgress(tx, stages.Senders, req.BlockNumber); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.Senders, req.BlockNumber); err != nil {
 		return nil, err
 	}
-	if err := stages.SaveStageProgress(tx, stages.Execution, req.BlockNumber); err != nil {
+	if err := stages.SaveStageProgress(batch, stages.Execution, req.BlockNumber); err != nil {
+		return nil, err
+	}
+
+	if err := batch.Commit(); err != nil {
 		return nil, err
 	}
 	return nil, nil

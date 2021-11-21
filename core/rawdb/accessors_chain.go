@@ -549,7 +549,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) er
 	return nil
 }
 
-func WriteSenders(db kv.RwTx, hash common.Hash, number uint64, senders []common.Address) error {
+func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []common.Address) error {
 	data := make([]byte, common.AddressLength*len(senders))
 	for i, sender := range senders {
 		copy(data[i*common.AddressLength:], sender[:])
